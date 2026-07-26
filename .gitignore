@@ -1,11 +1,61 @@
+# Gradle and generated build output
 .gradle/
-.idea/
 **/build/
+*.apk
+*.aab
+*.apks
+
+# Android Studio and local machine configuration
+.idea/
 local.properties
 *.iml
 captures/
 .DS_Store
+*.hprof
+
+# Environment files and local credentials
+.env
+.env.*
+!.env.example
+.netrc
+.npmrc
+credentials*.json
+client-secret*.json
+client_secret*.json
+oauth-client*.json
+service-account*.json
+service_account*.json
+google-services.json
+**/google-services.json
+agconnect-services.json
+secrets.properties
+signing.properties
 keystore.properties
+
+# Signing keys, private keys and provisioning material
 *.jks
 *.keystore
-*.hprof
+*.p12
+*.pfx
+*.pem
+*.key
+*.p8
+*.kdbx
+*.mobileprovision
+id_rsa
+id_ed25519
+
+# Local vaults, databases, recovery exports and user content
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.otvault
+/attachments/
+/backups/
+/exports/
+/vaults/
+
+# Local Claude configuration; shared project guidance remains tracked
+.claude/settings.local.json

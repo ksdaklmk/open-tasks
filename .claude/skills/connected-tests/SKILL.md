@@ -4,7 +4,9 @@ description: Run the Open Tasks instrumented test suites on a connected device o
 disable-model-invocation: true
 ---
 
-Instrumented tests are not run by CI and require a connected device or emulator.
+CI runs the instrumented suites on API 36 and 37. Local runs require a
+connected device or emulator and are still required for device-specific
+diagnosis and visual acceptance.
 
 **Never uninstall the app or wipe emulator data.** The emulator's workspace has already been
 migrated v1 to v2, and clearing it destroys the migration state these tests depend on.
