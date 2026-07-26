@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="database" path="." />
+    <exclude domain="file" path="vaults/" />
+    <exclude domain="file" path="attachments/" />
+    <exclude domain="file" path="keys/" />
+    <exclude domain="sharedpref" path="vault_keys.xml" />
+</full-backup-content>

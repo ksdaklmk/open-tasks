@@ -1,0 +1,60 @@
+package app.opentasks.core.model
+
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+
+data class ActiveTimerSnapshot(
+    val entryId: TimeEntryId,
+    val taskId: TaskId,
+    val taskTitle: String,
+    val projectName: String?,
+    val startedAt: Instant,
+    val elapsed: Duration,
+)
+
+data class HomeSnapshot(
+    val today: LocalDate,
+    val focusTasks: List<Task>,
+    val upcomingTasks: List<Task>,
+    val projects: List<Project>,
+    val activeTimer: ActiveTimerSnapshot?,
+    val syncState: SyncState,
+    val overdueCount: Int,
+)
+
+data class WorkspaceSnapshot(
+    val home: HomeSnapshot,
+    val tasks: List<Task>,
+    val projects: List<Project>,
+    val workflowStatuses: List<WorkflowStatus>,
+    val milestones: List<Milestone>,
+    val tags: List<Tag>,
+)
+
+data class SearchQuery(
+    val text: String,
+    val projectIds: Set<ProjectId> = emptySet(),
+    val tagIds: Set<TagId> = emptySet(),
+    val includeCompleted: Boolean = true,
+    val includeTrash: Boolean = false,
+)
+
+sealed interface SearchResult {
+    val title: String
+    val context: String
+
+    data class TaskResult(
+        val task: Task,
+        override val context: String,
+    ) : SearchResult {
+        override val title: String = task.title
+    }
+
+    data class ProjectResult(
+        val project: Project,
+        override val context: String,
+    ) : SearchResult {
+        override val title: String = project.name
+    }
+}

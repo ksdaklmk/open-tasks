@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Open Tasks</string>
+    <string name="quick_add">Quick add</string>
+    <string name="quick_add_shortcut">Capture a task</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_quick_add"
+        android:shortcutId="quick_add"
+        android:shortcutLongLabel="@string/quick_add_shortcut"
+        android:shortcutShortLabel="@string/quick_add">
+        <intent
+            android:action="app.opentasks.action.QUICK_ADD"
+            android:targetClass="app.opentasks.MainActivity"
+            android:targetPackage="app.opentasks" />
+    </shortcut>
+</shortcuts>
