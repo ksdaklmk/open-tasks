@@ -1,17 +1,30 @@
 package app.opentasks.feature.tasks
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.ChecklistItem
@@ -191,6 +204,178 @@ class TaskEditorInstrumentedTest {
             ),
             submitted.get()?.recurrence,
         )
+    }
+
+    @Test
+    fun remainingRecurrenceFrequenciesAutoSaveWithIntervals() {
+        val task = OpenTasksFixtures.tasks.first { it.due != null }
+        val submitted = AtomicReference<TaskEdit?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit -> submitted.set(edit) },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        listOf(
+            RecurrenceFrequency.DAILY,
+            RecurrenceFrequency.MONTHLY,
+            RecurrenceFrequency.YEARLY,
+        ).forEach { frequency ->
+            submitted.set(null)
+            composeRule.onNodeWithTag(
+                "recurrence-frequency-${frequency.name.lowercase()}",
+            ).performSemanticsAction(SemanticsActions.OnClick)
+            composeRule.onNodeWithTag("recurrence-interval-field")
+                .performScrollTo()
+                .performTextReplacement("2")
+            composeRule.mainClock.advanceTimeBy(700)
+            composeRule.waitForIdle()
+
+            assertEquals(
+                RecurrenceRule(
+                    frequency = frequency,
+                    interval = 2,
+                ),
+                submitted.get()?.recurrence,
+            )
+        }
+    }
+
+    @Test
+    fun recurrenceControlsRemainOperableAtTwoHundredPercentText() {
+        val task = OpenTasksFixtures.tasks.first { it.due != null }
+
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f),
+            ) {
+                OpenTasksTheme {
+                    TasksScreen(
+                        tasks = listOf(task),
+                        projectNames = emptyMap(),
+                        workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                        tags = OpenTasksFixtures.snapshot.tags,
+                        selectedTaskId = task.id,
+                        showDetailPane = false,
+                        onSelectTask = {},
+                        onCloseDetail = {},
+                        onCompleteTask = {},
+                        onChangeTaskStatus = { _, _ -> },
+                        onDeleteTask = {},
+                        activeTimerTaskId = null,
+                        onToggleTimer = {},
+                        onUpdateTask = { _, _ -> },
+                        onAddChecklistItem = { _, _ -> },
+                        onUpdateChecklistItem = { _, _ -> },
+                        onDeleteChecklistItem = { _, _ -> },
+                        onSetTaskTag = { _, _, _ -> },
+                        onCreateAndAssignTag = { _, _ -> },
+                    )
+                }
+            }
+        }
+
+        val frequencyTags = listOf(
+            "recurrence-frequency-none",
+            "recurrence-frequency-daily",
+            "recurrence-frequency-weekly",
+            "recurrence-frequency-monthly",
+            "recurrence-frequency-yearly",
+        )
+        frequencyTags.forEach { tag ->
+            composeRule.onNodeWithTag(tag)
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertHasClickAction()
+                .assertHeightIsAtLeast(48.dp)
+        }
+
+        composeRule.onNodeWithTag("recurrence-frequency-weekly").performClick()
+        composeRule.waitForIdle()
+        DayOfWeek.entries.forEach { weekday ->
+            composeRule.onNodeWithTag(
+                "recurrence-weekday-${weekday.name.lowercase()}",
+            )
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertHasClickAction()
+                .assertHeightIsAtLeast(48.dp)
+        }
+        listOf("never", "count", "date").forEach { mode ->
+            composeRule.onNodeWithTag("recurrence-end-$mode")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertHasClickAction()
+                .assertHeightIsAtLeast(48.dp)
+        }
+    }
+
+    @Test
+    fun keyboardCanFocusAndActivateRecurrenceFrequency() {
+        val task = OpenTasksFixtures.tasks.first { it.due != null }
+        val submitted = AtomicReference<TaskEdit?>()
+
+        composeRule.setContent {
+            val inputModeManager = LocalInputModeManager.current
+            LaunchedEffect(inputModeManager) {
+                inputModeManager.requestInputMode(InputMode.Keyboard)
+            }
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit -> submitted.set(edit) },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("recurrence-frequency-daily")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.RequestFocus)
+            .assertIsFocused()
+            .performKeyInput { pressKey(Key.Enter) }
+        composeRule.mainClock.advanceTimeBy(700)
+        composeRule.waitForIdle()
+
+        assertEquals(RecurrenceFrequency.DAILY, submitted.get()?.recurrence?.frequency)
     }
 
     @Test

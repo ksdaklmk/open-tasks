@@ -55,7 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Duration
@@ -84,7 +85,8 @@ class RoomVaultRepository(
     private val zoneId: () -> ZoneId = ZoneId::systemDefault,
     private val seedSnapshot: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
 ) : VaultRepository, AutoCloseable {
-    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val repositoryJob = SupervisorJob()
+    private val repositoryScope = CoroutineScope(repositoryJob + Dispatchers.IO)
     private val writeMutex = Mutex()
     private val ready = CompletableDeferred<Unit>()
     private val mutableWorkspace = MutableStateFlow(emptySnapshot())
@@ -323,7 +325,9 @@ class RoomVaultRepository(
     }
 
     override fun close() {
-        repositoryScope.cancel()
+        runBlocking {
+            repositoryJob.cancelAndJoin()
+        }
     }
 
     private suspend fun createTask(command: DomainCommand.CreateTask): CommandResult {

@@ -18,6 +18,20 @@ class HybridLogicalClockTest {
     }
 
     @Test
+    fun clockRollbackCannotMoveLocalEventsBackwards() {
+        var wallTime = 2_000L
+        val clock = HybridLogicalClock(DeviceId("phone")) { wallTime }
+        val beforeRollback = clock.tick()
+
+        wallTime = 1_000L
+        val afterRollback = clock.tick()
+
+        assertEquals(2_000, afterRollback.wallTimeMillis)
+        assertEquals(1, afterRollback.logicalCounter)
+        assertTrue(afterRollback > beforeRollback)
+    }
+
+    @Test
     fun receivingFutureEventAdvancesLogicalCounter() {
         val clock = HybridLogicalClock(DeviceId("phone")) { 1_000 }
         val remote = HlcTimestamp(2_000, 4, DeviceId("tablet"))
@@ -26,6 +40,19 @@ class HybridLogicalClockTest {
         assertEquals(2_000, local.wallTimeMillis)
         assertEquals(5, local.logicalCounter)
         assertTrue(local > remote)
+    }
+
+    @Test
+    fun receivingSameRemoteEventTwiceStillProducesMonotonicLocalEvents() {
+        val clock = HybridLogicalClock(DeviceId("phone")) { 1_000 }
+        val remote = HlcTimestamp(2_000, 4, DeviceId("tablet"))
+
+        val firstReceipt = clock.receive(remote)
+        val repeatedReceipt = clock.receive(remote)
+
+        assertEquals(5, firstReceipt.logicalCounter)
+        assertEquals(6, repeatedReceipt.logicalCounter)
+        assertTrue(repeatedReceipt > firstReceipt)
     }
 
     @Test

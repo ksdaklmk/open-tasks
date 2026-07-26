@@ -78,6 +78,10 @@ Requirements:
 ./gradlew :app:assembleDebug
 ```
 
+CI runs the unit/lint/build gate and the four instrumented suites on API 36 and
+37 emulators. Local device testing remains required for fold posture, rotation,
+split-screen, large text and assistive-technology acceptance.
+
 The app ID is `app.opentasks`, `minSdk` is 36, and both `compileSdk` and
 `targetSdk` are 37.
 
@@ -92,5 +96,7 @@ The app ID is `app.opentasks`, `minSdk` is 36, and both `compileSdk` and
 - `core/designsystem` — fixed light/dark palette, typography, shapes, and components.
 - `feature/*` — destination-specific Compose UI.
 
-See [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md), and
-[docs/architecture.md](docs/architecture.md) for the implementation contracts.
+See [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md),
+[docs/architecture.md](docs/architecture.md),
+[docs/threat-model.md](docs/threat-model.md), and [HANDOFF.md](HANDOFF.md) for
+the implementation contracts and ordered backlog.

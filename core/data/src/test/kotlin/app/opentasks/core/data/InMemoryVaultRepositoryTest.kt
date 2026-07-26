@@ -118,6 +118,63 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun repeatedRecurringCompletionIsIdempotentAndOriginalUndoStillApplies() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { it.checklist.isNotEmpty() }
+        val due = ZonedMoment(
+            instant = Instant.parse("2026-07-31T09:30:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
+        val rule = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3)
+        repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = original.id,
+                title = original.title,
+                description = original.description,
+                projectId = original.projectId,
+                priority = original.priority,
+                due = due,
+                recurrence = rule,
+                estimate = original.estimate,
+            ),
+        )
+        val firstCompletion = repository.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:00Z"),
+            ),
+        ) as CommandResult.Success
+        val afterFirst = repository.observeWorkspace().value
+        val generated = afterFirst.tasks.single {
+            it.recurrenceSeriesId == original.id && it.id != original.id
+        }
+
+        val repeated = repository.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:01Z"),
+            ),
+        )
+        val afterRepeated = repository.observeWorkspace().value
+
+        assertTrue(repeated is CommandResult.Success)
+        assertEquals(
+            afterFirst.tasks.map { it.id }.toSet(),
+            afterRepeated.tasks.map { it.id }.toSet(),
+        )
+        assertEquals(
+            1,
+            afterRepeated.tasks.count {
+                it.recurrenceSeriesId == original.id && it.id != original.id
+            },
+        )
+
+        repository.execute(checkNotNull(firstCompletion.undo))
+        val afterUndo = repository.observeWorkspace().value
+        assertFalse(afterUndo.tasks.first { it.id == original.id }.isCompleted)
+        assertFalse(afterUndo.tasks.any { it.id == generated.id })
+    }
+
+    @Test
     fun undoingRuleChangeOnGeneratedOccurrenceRestoresSeriesMetadata() = runBlocking {
         val original = OpenTasksFixtures.tasks.first { it.checklist.isNotEmpty() }
         val anchor = ZonedMoment(

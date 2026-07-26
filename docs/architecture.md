@@ -18,6 +18,11 @@ updates records and appends an outbox operation in one transaction. The current
 foundation seeds the sample workspace into SQLCipher once, then treats Room as
 the authority for task, timer, Trash, search, and outbox state.
 
+`RoomVaultRepository` owns its observation scope. Closing the repository
+cancels and joins that scope before its database owner closes SQLCipher. This
+ordering is part of the lifecycle contract: no Room flow collector may outlive
+the connection pool during process, test, vault-switch or recovery teardown.
+
 The task editor emits a complete validated core-field update after a short
 debounce. Room reads the latest committed record before assigning the next
 revision, so rapid edits cannot derive revisions or undo state from a stale UI
@@ -95,6 +100,9 @@ new-device recovery and multi-device merge proofs runnable as unit tests.
 - Android Auto Backup excludes databases, keys, vault files, and attachments.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
   attachment names, or encryption metadata.
+
+The asset inventory, trust boundaries, adversaries, residual risks and release
+gates are maintained in [Threat Model](threat-model.md).
 
 ## Sync format
 

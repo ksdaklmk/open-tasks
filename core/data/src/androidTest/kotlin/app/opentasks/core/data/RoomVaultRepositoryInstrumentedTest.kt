@@ -299,6 +299,94 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun repeatedRecurringCompletionAcrossRestartCreatesExactlyOneOccurrence() = runBlocking {
+        openRepository()
+        val original = withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
+                .filterNotNull()
+                .first()
+        }
+        val due = ZonedMoment(
+            instant = Instant.parse("2026-07-31T09:30:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
+        repository!!.execute(
+            DomainCommand.UpdateTask(
+                taskId = original.id,
+                title = original.title,
+                description = original.description,
+                projectId = original.projectId,
+                priority = original.priority,
+                due = due,
+                recurrence = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3),
+                estimate = original.estimate,
+            ),
+        )
+        val firstCompletion = repository!!.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:00Z"),
+            ),
+        ) as CommandResult.Success
+        val generated = withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .map { snapshot ->
+                    snapshot.tasks.singleOrNull {
+                        it.recurrenceSeriesId == original.id && it.id != original.id
+                    }
+                }
+                .filterNotNull()
+                .first()
+        }
+        assertEquals(3, database!!.syncOperationDao().pendingCount())
+
+        repository!!.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:01Z"),
+            ),
+        )
+        assertEquals(3, database!!.syncOperationDao().pendingCount())
+
+        repository!!.close()
+        database!!.close()
+        repository = null
+        database = null
+        openRepository()
+
+        repository!!.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:02Z"),
+            ),
+        )
+        val afterRedelivery = withTimeout(5_000) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count {
+                    it.recurrenceSeriesId == original.id && it.id != original.id
+                } == 1
+            }
+        }
+        assertEquals(
+            generated.id,
+            afterRedelivery.tasks.single {
+                it.recurrenceSeriesId == original.id && it.id != original.id
+            }.id,
+        )
+        assertEquals(3, database!!.syncOperationDao().pendingCount())
+
+        assertTrue(repository!!.execute(checkNotNull(firstCompletion.undo)) is CommandResult.Success)
+        withTimeout(5_000) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == generated.id } &&
+                    snapshot.tasks.firstOrNull { it.id == original.id }?.isCompleted == false
+            }
+        }
+        Unit
+    }
+
+    @Test
     fun ruleChangeUndoOnGeneratedOccurrenceRestoresSeriesMetadataAcrossRestart() = runBlocking {
         openRepository()
         val original = withTimeout(5_000) {

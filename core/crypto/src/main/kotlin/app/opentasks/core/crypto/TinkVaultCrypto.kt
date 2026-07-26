@@ -121,28 +121,7 @@ class TinkVaultCrypto(
     private fun deriveWrappingKey(
         passphrase: CharArray,
         metadata: Argon2Metadata,
-    ): ByteArray {
-        require(metadata.salt.size == SALT_BYTES)
-        require(metadata.memoryKiB >= 65_536)
-        require(metadata.iterations >= 3)
-        require(metadata.parallelism == 1)
-
-        val parameters = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
-            .withSalt(metadata.salt)
-            .withMemoryAsKB(metadata.memoryKiB)
-            .withIterations(metadata.iterations)
-            .withParallelism(metadata.parallelism)
-            .build()
-        val generator = Argon2BytesGenerator().apply { init(parameters) }
-        val passwordBytes = PBEParametersGenerator.PKCS5PasswordToUTF8Bytes(passphrase)
-        return ByteArray(AES_KEY_BYTES).also { output ->
-            try {
-                generator.generateBytes(passwordBytes, output)
-            } finally {
-                passwordBytes.fill(0)
-            }
-        }
-    }
+    ): ByteArray = Argon2idKdf.derive(passphrase, metadata)
 
     private fun aesGcmEncrypt(
         key: ByteArray,
@@ -179,12 +158,42 @@ class TinkVaultCrypto(
         const val SALT_BYTES = 16
         const val GCM_NONCE_BYTES = 12
         const val GCM_TAG_BITS = 128
-        const val AES_KEY_BYTES = 32
         const val AES = "AES"
         const val AES_GCM = "AES/GCM/NoPadding"
         val ENVELOPE_ASSOCIATED_DATA =
             "open-tasks:recovery-envelope:v1".toByteArray(Charsets.UTF_8)
     }
+}
+
+internal object Argon2idKdf {
+    fun derive(
+        passphrase: CharArray,
+        metadata: Argon2Metadata,
+    ): ByteArray {
+        require(metadata.salt.size == SALT_BYTES)
+        require(metadata.memoryKiB >= 65_536)
+        require(metadata.iterations >= 3)
+        require(metadata.parallelism == 1)
+
+        val parameters = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
+            .withSalt(metadata.salt)
+            .withMemoryAsKB(metadata.memoryKiB)
+            .withIterations(metadata.iterations)
+            .withParallelism(metadata.parallelism)
+            .build()
+        val generator = Argon2BytesGenerator().apply { init(parameters) }
+        val passwordBytes = PBEParametersGenerator.PKCS5PasswordToUTF8Bytes(passphrase)
+        return ByteArray(AES_KEY_BYTES).also { output ->
+            try {
+                generator.generateBytes(passwordBytes, output)
+            } finally {
+                passwordBytes.fill(0)
+            }
+        }
+    }
+
+    private const val SALT_BYTES = 16
+    private const val AES_KEY_BYTES = 32
 }
 
 class InvalidRecoveryPassphraseException(cause: Throwable) :

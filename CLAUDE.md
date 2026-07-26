@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open Tasks is an offline-first Android task workspace (Kotlin, Compose, 12 Gradle modules).
 Read `@docs/architecture.md` before changing data or command flow, `@DESIGN.md` before changing UI.
-`@docs/recurring-task-handoff.md` is the live backlog and current state of in-flight work.
+`@HANDOFF.md` is the only live backlog and current state of in-flight work.
 
 ## Build and test
 
@@ -13,7 +13,8 @@ Read `@docs/architecture.md` before changing data or command flow, `@DESIGN.md` 
 ./gradlew :core:domain:testDebugUnitTest --tests "*RecurrenceEngineTest.monthEndDoesNotDrift"
 ```
 
-Instrumented tests need a device and are **not** run in CI:
+Instrumented tests need a device. CI runs them on API 36 and 37; use the same
+command locally for device-specific diagnosis:
 
 ```bash
 ./gradlew :core:data:connectedDebugAndroidTest :feature:tasks:connectedDebugAndroidTest \
