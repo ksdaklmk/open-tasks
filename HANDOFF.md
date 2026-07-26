@@ -17,10 +17,14 @@ tasks, workflows, Trash, project workbench, search and timers persist across
 process restarts. The current P0 code hardening and acceptance slice is
 complete and verified.
 
-There is no Git remote. CI configuration exists, but cannot run remotely until
-a repository remote is chosen. Google Identity, Drive transport, cloud
-recovery and Play Console work have not started. P0 release gates which depend
-on those features remain blocked by their listed prerequisites.
+The public GitHub authority is
+[ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
+tracks `origin/main`. GitHub Actions runs the configured checks, while secret
+scanning, push protection, Dependabot alerts and security updates are enabled.
+Non-provider secret patterns and validity checks are unavailable in the
+current repository plan and remain disabled. Google Identity, Drive transport,
+cloud recovery and Play Console work have not started. P0 release gates which
+depend on those features remain blocked by their listed prerequisites.
 
 No task is intentionally left half-implemented at this pause point.
 
@@ -115,6 +119,11 @@ No task is intentionally left half-implemented at this pause point.
 - Android backup and device-transfer rules exclude vault data and keys.
 - Current source scan found no application logging calls or committed secrets.
 - Dependabot is configured weekly for Gradle and GitHub Actions.
+- Public-repository audit found no credential, private-key, OAuth-client or
+  provider-token patterns in the tracked tree or its existing history.
+- `.gitignore` excludes local properties, environment files, signing keys,
+  OAuth/service-account files, local vault databases/exports and generated
+  release artefacts.
 - A useful repository rollback point now exists:
   `806090a Establish Open Tasks baseline`.
 
@@ -122,7 +131,7 @@ No task is intentionally left half-implemented at this pause point.
 
 | ID | Result | Evidence |
 |---|---|---|
-| P0-01 | Established a real baseline commit after auditing ignored files and scanning for secrets | Commit `806090a`; no remote configured |
+| P0-01 | Established a real baseline commit after auditing ignored files and scanning for secrets | Commit `806090a` |
 | P0-02 | Re-audited the codebase and reconciled the stale recurrence handoff with the implementation | This handoff, architecture and threat-model updates |
 | P0-03 | Completed the recurrence rule matrix and edge-case acceptance | Unit tests for all cadences, intervals, weekdays, count/end date, month-end and DST; nine Tasks device tests |
 | P0-04 | Hardened duplicate completion, restart/redelivery and exact Undo | In-memory and encrypted Room regression tests |
@@ -134,6 +143,7 @@ No task is intentionally left half-implemented at this pause point.
 | P0-10 | Strengthened multi-device foundations | Second-device recovery test plus merge/HLC rollback, retry and order tests |
 | P0-11 | Fixed repository teardown ordering | All 12 encrypted Room/Keystore device tests pass without connection-pool crashes |
 | P0-12 | Verified R8/resource shrinking and installed final debug build in place | Release assembly passes; app data retained after cold restart |
+| P0-13 | Published the audited history as a public GitHub repository | `main` tracks `origin/main`; GitHub secret scanning and push protection enabled |
 
 ## Final verification record
 
@@ -184,16 +194,15 @@ even when their implementation is blocked by P1/P2 product work.
 
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
-| 1 | P0-R01 | External | Choose/create a Git remote, push `main`, run the API 36/37 CI matrix and fix any hosted-runner differences | Repository owner decision |
-| 2 | P0-R02 | External | Direct TalkBack, Switch Access, high-contrast, reduced-motion and RTL acceptance on the currently implemented surfaces | Human/physical-device session |
-| 3 | P0-R03 | Blocked | End-to-end multi-device conflict, authentication expiry, quota, pagination, corruption, retry, reinstall and new-device recovery tests | P1-D01 through P1-D06 |
-| 4 | P0-R04 | Blocked | Final full-app accessibility audit at 100/130/200% text, keyboard, TalkBack, Switch Access, high contrast, reduced motion, RTL and compact/expanded layouts | All P1/P2 UI surfaces complete |
-| 5 | P0-R05 | Blocked | Screenshot/responsive regression suite for API 36/37, Fold cover/main, tablet, rotation, split-screen and live resizing | Stable P1/P2 UI plus screenshot harness |
-| 6 | P0-R06 | Blocked | Baseline Profile and Macrobenchmark module; validate startup, scrolling and large task sets | Stable critical journeys plus large-data fixture |
-| 7 | P0-R07 | Blocked | Final R8/resource-shrinking and performance budgets against production feature set | P0-R05, P0-R06 and all release features |
-| 8 | P0-R08 | Ready before secrets | Pin GitHub Actions to reviewed commit SHAs | Git remote/hosted CI chosen |
-| 9 | P0-R09 | Blocked | Complete recovery UX for Keystore loss, reinstall and new devices | P1-D04 cloud migration/recovery |
-| 10 | P0-R10 | External | Privacy Policy, OAuth brand verification, Play Data Safety, Play App Signing and internal/closed/open/staged rollout | P1 Drive slice, all product features, owner accounts and policy decisions |
+| 1 | P0-R02 | External | Direct TalkBack, Switch Access, high-contrast, reduced-motion and RTL acceptance on the currently implemented surfaces | Human/physical-device session |
+| 2 | P0-R03 | Blocked | End-to-end multi-device conflict, authentication expiry, quota, pagination, corruption, retry, reinstall and new-device recovery tests | P1-D01 through P1-D06 |
+| 3 | P0-R04 | Blocked | Final full-app accessibility audit at 100/130/200% text, keyboard, TalkBack, Switch Access, high contrast, reduced motion, RTL and compact/expanded layouts | All P1/P2 UI surfaces complete |
+| 4 | P0-R05 | Blocked | Screenshot/responsive regression suite for API 36/37, Fold cover/main, tablet, rotation, split-screen and live resizing | Stable P1/P2 UI plus screenshot harness |
+| 5 | P0-R06 | Blocked | Baseline Profile and Macrobenchmark module; validate startup, scrolling and large task sets | Stable critical journeys plus large-data fixture |
+| 6 | P0-R07 | Blocked | Final R8/resource-shrinking and performance budgets against production feature set | P0-R05, P0-R06 and all release features |
+| 7 | P0-R08 | Ready before secrets | Pin GitHub Actions to reviewed commit SHAs | Complete before CI receives signing or OAuth secrets |
+| 8 | P0-R09 | Blocked | Complete recovery UX for Keystore loss, reinstall and new devices | P1-D04 cloud migration/recovery |
+| 9 | P0-R10 | External | Privacy Policy, OAuth brand verification, Play Data Safety, Play App Signing and internal/closed/open/staged rollout | P1 Drive slice, all product features, owner accounts and policy decisions |
 
 ### P1 — local core workspace
 
