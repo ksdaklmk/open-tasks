@@ -2,11 +2,14 @@ package app.opentasks.core.domain
 
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.ChecklistItem
+import app.opentasks.core.model.Milestone
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SyncReason
@@ -14,6 +17,12 @@ import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.Template
+import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.TimeEntryId
+import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
@@ -53,6 +62,84 @@ sealed interface DomainCommand {
         val projectId: ProjectId,
     ) : DomainCommand
 
+    data class CreateWorkflowStatus(
+        val statusId: WorkflowStatusId,
+        val projectId: ProjectId,
+        val name: String,
+        val semanticStatus: SemanticStatus,
+    ) : DomainCommand
+
+    data class RenameWorkflowStatus(
+        val statusId: WorkflowStatusId,
+        val name: String,
+    ) : DomainCommand
+
+    data class MoveWorkflowStatus(
+        val statusId: WorkflowStatusId,
+        val direction: WorkflowMoveDirection,
+    ) : DomainCommand
+
+    data class ArchiveWorkflowStatus(
+        val statusId: WorkflowStatusId,
+        val archivedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class RestoreArchivedWorkflowStatus(
+        val statusId: WorkflowStatusId,
+    ) : DomainCommand
+
+    data class RestoreWorkflowStatuses(
+        val statuses: List<WorkflowStatus>,
+    ) : DomainCommand
+
+    data class RemoveWorkflowStatus(
+        val statusId: WorkflowStatusId,
+    ) : DomainCommand
+
+    data class CreateMilestone(
+        val milestoneId: MilestoneId,
+        val projectId: ProjectId,
+        val name: String,
+        val dueDate: LocalDate?,
+    ) : DomainCommand
+
+    data class UpdateMilestone(
+        val milestoneId: MilestoneId,
+        val name: String,
+        val dueDate: LocalDate?,
+        val completedAt: Instant?,
+    ) : DomainCommand
+
+    data class DeleteMilestone(
+        val milestoneId: MilestoneId,
+    ) : DomainCommand
+
+    data class RestoreMilestone(
+        val milestone: Milestone,
+        val assignedTaskIds: Set<TaskId>? = null,
+    ) : DomainCommand
+
+    data class CaptureProjectTemplate(
+        val templateId: TemplateId,
+        val projectId: ProjectId,
+        val name: String,
+    ) : DomainCommand
+
+    data class InstantiateProjectTemplate(
+        val templateId: TemplateId,
+        val projectId: ProjectId,
+        val projectName: String,
+        val anchorDate: LocalDate,
+    ) : DomainCommand
+
+    data class DeleteTemplate(
+        val templateId: TemplateId,
+    ) : DomainCommand
+
+    data class RestoreTemplate(
+        val template: Template,
+    ) : DomainCommand
+
     data class CreateTask(
         val title: String,
         val projectId: ProjectId? = null,
@@ -73,7 +160,18 @@ sealed interface DomainCommand {
         val due: ZonedMoment?,
         val recurrence: RecurrenceRule?,
         val estimate: Duration?,
+        val milestoneId: MilestoneId? = null,
         val recurrenceMetadata: RecurrenceSeriesMetadata? = null,
+        val restoreStatusId: WorkflowStatusId? = null,
+        val reminder: Reminder? = null,
+        val restorePastReminder: Boolean = false,
+    ) : DomainCommand
+
+    data class SetTaskReminder(
+        val taskId: TaskId,
+        val triggerAt: ZonedMoment?,
+        val precise: Boolean = false,
+        val restorePastReminder: Boolean = false,
     ) : DomainCommand
 
     data class AddChecklistItem(
@@ -107,6 +205,12 @@ sealed interface DomainCommand {
     data class CreateAndAssignTag(
         val taskId: TaskId,
         val name: String,
+    ) : DomainCommand
+
+    data class SetTaskDependency(
+        val taskId: TaskId,
+        val dependsOnTaskId: TaskId,
+        val present: Boolean,
     ) : DomainCommand
 
     data class ChangeTaskStatus(
@@ -154,6 +258,38 @@ sealed interface DomainCommand {
     ) : DomainCommand
 
     data object StopTimer : DomainCommand
+
+    data class AddTimeEntry(
+        val entryId: TimeEntryId,
+        val taskId: TaskId,
+        val startedAt: Instant,
+        val stoppedAt: Instant,
+        val note: String = "",
+        val changedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class UpdateTimeEntry(
+        val entryId: TimeEntryId,
+        val startedAt: Instant,
+        val stoppedAt: Instant,
+        val note: String = "",
+        val changedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class DeleteTimeEntry(
+        val entryId: TimeEntryId,
+        val deletedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class RestoreTimeEntry(
+        val entry: TimeEntry,
+        val restoredAt: Instant = Instant.now(),
+    ) : DomainCommand
+}
+
+enum class WorkflowMoveDirection {
+    EARLIER,
+    LATER,
 }
 
 sealed interface CommandResult {
@@ -177,21 +313,42 @@ enum class RejectionReason {
     PROJECT_NAME_TOO_LONG,
     PROJECT_SUMMARY_TOO_LONG,
     DUPLICATE_PROJECT_NAME,
+    EMPTY_WORKFLOW_STATUS_NAME,
+    WORKFLOW_STATUS_NAME_TOO_LONG,
+    DUPLICATE_WORKFLOW_STATUS_NAME,
+    WORKFLOW_STATUS_LIMIT_REACHED,
+    LAST_SEMANTIC_WORKFLOW_STATUS,
+    EMPTY_MILESTONE_NAME,
+    MILESTONE_NAME_TOO_LONG,
+    DUPLICATE_MILESTONE_NAME,
+    MILESTONE_LIMIT_REACHED,
+    EMPTY_TEMPLATE_NAME,
+    TEMPLATE_NAME_TOO_LONG,
+    DUPLICATE_TEMPLATE_NAME,
+    TEMPLATE_LIMIT_REACHED,
+    TEMPLATE_TASK_LIMIT_REACHED,
+    TEMPLATE_DATE_RANGE_TOO_LARGE,
     EMPTY_CHECKLIST_ITEM,
     CHECKLIST_ITEM_TOO_LONG,
     CHECKLIST_LIMIT_REACHED,
     EMPTY_TAG_NAME,
     TAG_NAME_TOO_LONG,
     TAG_LIMIT_REACHED,
+    DEPENDENCY_LIMIT_REACHED,
     BLOCKED_TASK_WARNING_REQUIRED,
     DEPENDENCY_CYCLE,
+    INVALID_TIME_ENTRY_RANGE,
+    TIME_ENTRY_NOTE_TOO_LONG,
+    TIME_ENTRY_LIMIT_REACHED,
     INVALID_STATE,
+    REMINDER_IN_PAST,
 }
 
 interface VaultRepository {
     fun observeHome(): Flow<HomeSnapshot>
     fun observeWorkspace(): StateFlow<WorkspaceSnapshot>
     fun observeTask(id: TaskId): Flow<Task?>
+    suspend fun currentWorkspace(): WorkspaceSnapshot
     suspend fun execute(command: DomainCommand): CommandResult
     suspend fun search(query: SearchQuery): List<SearchResult>
 }

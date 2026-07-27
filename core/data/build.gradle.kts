@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -31,6 +32,7 @@ dependencies {
     api(project(":core:domain"))
     implementation(project(":core:sync"))
     implementation(libs.coroutines.core)
+    implementation(libs.serialization.json)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.sqlite)

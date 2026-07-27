@@ -6,16 +6,22 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Revision
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.Template
+import app.opentasks.core.model.TemplateId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Instant
+import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
@@ -92,4 +98,70 @@ class TrashScreenInstrumentedTest {
         composeRule.onNodeWithTag("restore-project-${project.id.value}").performClick()
         assertEquals(project.id, restored.get())
     }
+
+    @Test
+    fun templateLibraryCreatesANamedProjectFromTheSelectedAnchorDateAndDeletes() {
+        val template = Template(
+            id = TemplateId("client-delivery"),
+            workspaceId = OpenTasksFixtures.workspaceId,
+            name = "Client delivery",
+            projectName = "Client launch",
+            projectSummary = "Reusable launch structure",
+            projectDueOffsetDays = 14,
+            workflowStatuses = emptyList(),
+            milestones = emptyList(),
+            tasks = emptyList(),
+            revision = Revision(
+                deviceId = DeviceId("device-test"),
+                wallTimeMillis = 1,
+                logicalCounter = 0,
+            ),
+        )
+        val today = LocalDate.of(2026, 9, 7)
+        val used = AtomicReference<TemplateUse?>()
+        val deleted = AtomicReference<TemplateId?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = OpenTasksFixtures.snapshot.projects,
+                    templates = listOf(template),
+                    today = today,
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                    onUseTemplate = { templateId, name, anchorDate ->
+                        used.set(TemplateUse(templateId, name, anchorDate))
+                    },
+                    onDeleteTemplate = deleted::set,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("open-templates")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("templates-screen").assertIsDisplayed()
+        composeRule.onNodeWithText(template.name).assertIsDisplayed()
+        composeRule.onNodeWithTag("use-template-${template.id.value}").performClick()
+        composeRule.onNodeWithTag("use-template-sheet").assertIsDisplayed()
+        composeRule.onNodeWithTag("template-project-name")
+            .performTextReplacement("Autumn client launch")
+        composeRule.onNodeWithTag("confirm-use-template").performClick()
+
+        assertEquals(
+            TemplateUse(template.id, "Autumn client launch", today),
+            used.get(),
+        )
+
+        composeRule.onNodeWithTag("delete-template-${template.id.value}").performClick()
+        assertEquals(template.id, deleted.get())
+    }
+
+    private data class TemplateUse(
+        val templateId: TemplateId,
+        val projectName: String,
+        val anchorDate: LocalDate,
+    )
 }

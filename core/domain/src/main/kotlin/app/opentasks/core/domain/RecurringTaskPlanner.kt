@@ -104,6 +104,7 @@ object RecurringTaskPlanner {
                     completed = false,
                 )
             },
+            dependencyIds = emptySet(),
             blockedBy = emptySet(),
             completedAt = null,
             deletedAt = null,

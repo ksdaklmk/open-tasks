@@ -12,6 +12,9 @@ workspace slice:
 - Five-destination adaptive shell: Home, Tasks, Projects, Schedule, and More.
 - Compact navigation bar, medium/expanded navigation rail, and responsive
   list/detail task workbench.
+- Real date-derived Schedule views: a compact selected-day agenda and an
+  expanded Monday–Sunday timeline with reminder context and an open-only
+  unscheduled tray.
 - Adaptive task editor for title, description, Inbox/project, priority, due
   date, and estimate, with debounced auto-save, inline validation, save status,
   and Undo feedback.
@@ -20,13 +23,29 @@ workspace slice:
   wall-clock scheduling; and deterministic occurrence IDs. Completing a
   recurring task creates its next planned occurrence atomically, while Undo
   reopens the current task and removes only the generated occurrence.
+- One due-relative reminder per task with flexible or precise delivery,
+  in-context notification/special-access prompts, idle-safe exact-alarm
+  fallback, private lock-screen content, task deep links, Snooze and Complete
+  actions. Recurring occurrences inherit reminder lead time.
 - Inline checklist editing for add, rename, complete, delete, and Undo, plus
   reusable tag assignment and create-and-assign controls. Checklist text and
   tag names participate in universal search.
-- Persisted workflow status selection for Backlog, Planned, In progress,
-  Blocked, and Done. Status changes are validated against workflow records,
-  preserve blocked-task completion warnings, and support exact Undo.
-- A 30-day Trash workspace with reversible task deletion, restore, explicit
+- Independent persisted workflows for every project and Inbox. Project
+  workflows support add, rename, explicit reordering, archive and restore while
+  retaining immutable semantic reporting categories, assigned tasks, blocked
+  completion warnings and exact Undo.
+- Project milestones support create, rename, due-date editing, complete,
+  reopen and confirmed deletion with exact Undo. Tasks can join one milestone
+  from their current project; cross-project membership is rejected and project
+  moves clear or exactly restore membership.
+- Searchable dependency editing supports add/remove Undo, a 100-link bound,
+  transitive cycle rejection, completed-prerequisite resolution and named
+  blocked-completion confirmation across task entry points.
+- Reusable project templates capture active workflow stages, open milestones
+  and open task structure. Relative zoned dates shift from a chosen anchor,
+  relationships are deterministically remapped, and completed/Bin history is
+  excluded.
+- A 30-day Bin workspace with reversible task deletion, restore, explicit
   permanent-delete confirmation, startup expiry cleanup, and sync tombstones.
 - An adaptive Project Workbench with persisted name, summary, health, and due
   date editing; live progress and workflow counts; milestone context; project
@@ -38,9 +57,12 @@ workspace slice:
   search, undo-ready results, immutable `StateFlow` UI state, and a one-time
   sample-workspace seed.
 - Domain rules for workflows, recurrence, deterministic occurrences,
-  dependencies, project progress, trash retention, and time reconciliation.
+  dependencies, project progress, Bin retention, and time reconciliation.
 - Room schema and SQLCipher database factory with atomic task/outbox and
-  timer/outbox transactions.
+  timer/time-entry outbox transactions.
+- Task-scoped manual time entry with exact add/edit/delete Undo, bounded notes,
+  persisted history and explicit overlap review rather than silent duration
+  loss.
 - Random 256-bit database key wrapped by a non-exportable Android Keystore key;
   only the AES-GCM envelope is stored in app-private preferences.
 - Tink AES-256-GCM record encryption and Argon2id recovery-key envelopes.
@@ -48,16 +70,28 @@ workspace slice:
   reconciliation.
 - Hilt application wiring, Navigation 3, Material 3 Adaptive, edge-to-edge,
   predictive Back, backup exclusions, and notification permission discipline.
+- Process restoration for the top-level route, selected task/project, task
+  filters, list/editor scroll, quick-add/search and editor drafts. Active
+  timers resume from their encrypted Room time entry and original start time.
+- UK English is the fixed application locale, including UK spelling,
+  day–month dates, 24-hour times and Bin terminology.
 
-Drive authorization and transport remain behind production interfaces so a
+Development is paused at the user's request after P2-F03 manual time entry and
+before P2-F04 insights. [HANDOFF.md](HANDOFF.md) is the single authoritative
+pause record, completed implementation history and dependency-ordered backlog;
+existing uncommitted P1/P2 work must be preserved when development resumes.
+
+Drive authorisation and transport remain behind production interfaces so a
 Google OAuth client is not required for local development.
 
 The runnable app is deliberately a foundation slice, not the completed
 five-phase release. Encrypted task CRUD and core-field editing, project
-workbench editing, project creation and Archive/Restore, Trash/restore
-commands, search, timers, and the local outbox now persist across process
-restarts. Recurrence rules and series metadata persist through the encrypted
-Room v1→v2 migration. Reminders, custom per-project workflow editing, Drive
+workbench editing, project creation and Archive/Restore, Bin/restore
+commands, search, timers, manual time history, and the local outbox now persist
+across process restarts. Recurrence rules, series metadata, reminders and
+project workflows persist through the encrypted Room store. Transient route,
+selection, filter, scroll and draft context is also restored without
+overwriting unsaved editor text on the first repository emission. Drive
 transport, attachments, widgets, import/export, the remaining More subfeatures,
 and Play release operations are the next milestones.
 

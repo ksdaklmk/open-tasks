@@ -30,6 +30,16 @@ data class WorkspaceSnapshot(
     val workflowStatuses: List<WorkflowStatus>,
     val milestones: List<Milestone>,
     val tags: List<Tag>,
+    val reminders: List<Reminder> = emptyList(),
+    val templates: List<Template> = emptyList(),
+    val timeEntries: List<TimeEntry> = emptyList(),
+    val timeEntryConflicts: List<TimeEntryConflict> = emptyList(),
+)
+
+data class TimeEntryConflict(
+    val firstEntryId: TimeEntryId,
+    val secondEntryId: TimeEntryId,
+    val overlap: Duration,
 )
 
 data class SearchQuery(

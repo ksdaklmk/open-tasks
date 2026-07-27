@@ -10,12 +10,15 @@ import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkspaceId
@@ -28,6 +31,7 @@ import java.time.LocalDate
 internal fun TaskEntity.toModel(
     tagIds: Set<TagId>,
     checklist: List<ChecklistItem>,
+    dependencyIds: Set<TaskId>,
     blockedBy: Set<TaskId>,
 ): Task = Task(
     id = TaskId(id),
@@ -67,6 +71,7 @@ internal fun TaskEntity.toModel(
     milestoneId = milestoneId?.let(::MilestoneId),
     tagIds = tagIds,
     checklist = checklist,
+    dependencyIds = dependencyIds,
     blockedBy = blockedBy,
     completedAt = completedAtEpochMillis?.let(Instant::ofEpochMilli),
     deletedAt = deletedAtEpochMillis?.let(Instant::ofEpochMilli),
@@ -140,11 +145,23 @@ internal fun Project.toEntity(revision: Revision): ProjectEntity = ProjectEntity
 
 internal fun WorkflowStatusEntity.toModel(): WorkflowStatus = WorkflowStatus(
     id = WorkflowStatusId(id),
-    projectId = ProjectId(projectId),
+    projectId = projectId?.let(::ProjectId),
     name = name,
     semanticStatus = SemanticStatus.valueOf(semanticStatus),
     rank = rank,
     archivedAt = archivedAtEpochMillis?.let(Instant::ofEpochMilli),
+)
+
+internal fun WorkflowStatus.toEntity(revision: Revision): WorkflowStatusEntity = WorkflowStatusEntity(
+    id = id.value,
+    projectId = projectId?.value,
+    name = name,
+    semanticStatus = semanticStatus.name,
+    rank = rank,
+    archivedAtEpochMillis = archivedAt?.toEpochMilli(),
+    revisionWallMillis = revision.wallTimeMillis,
+    revisionLogical = revision.logicalCounter,
+    revisionDeviceId = revision.deviceId.value,
 )
 
 internal fun MilestoneEntity.toModel(): Milestone = Milestone(
@@ -155,12 +172,15 @@ internal fun MilestoneEntity.toModel(): Milestone = Milestone(
     completedAt = completedAtEpochMillis?.let(Instant::ofEpochMilli),
 )
 
-internal fun Milestone.toEntity(): MilestoneEntity = MilestoneEntity(
+internal fun Milestone.toEntity(revision: Revision): MilestoneEntity = MilestoneEntity(
     id = id.value,
     projectId = projectId.value,
     name = name,
     dueDate = dueDate?.toString(),
     completedAtEpochMillis = completedAt?.toEpochMilli(),
+    revisionWallMillis = revision.wallTimeMillis,
+    revisionLogical = revision.logicalCounter,
+    revisionDeviceId = revision.deviceId.value,
 )
 
 internal fun TagEntity.toModel(): Tag = Tag(
@@ -173,6 +193,42 @@ internal fun Tag.toEntity(): TagEntity = TagEntity(
     id = id.value,
     workspaceId = workspaceId.value,
     name = name,
+)
+
+internal fun ReminderEntity.toModel(): Reminder = Reminder(
+    id = id,
+    taskId = TaskId(taskId),
+    triggerAt = ZonedMoment(
+        instant = Instant.ofEpochMilli(triggerAtEpochMillis),
+        zoneId = zoneId,
+    ),
+    precise = precise,
+)
+
+internal fun Reminder.toEntity(): ReminderEntity = ReminderEntity(
+    id = id,
+    taskId = taskId.value,
+    triggerAtEpochMillis = triggerAt.instant.toEpochMilli(),
+    zoneId = triggerAt.zoneId,
+    precise = precise,
+)
+
+internal fun TimeEntryEntity.toModel(): TimeEntry = TimeEntry(
+    id = TimeEntryId(id),
+    taskId = TaskId(taskId),
+    deviceId = DeviceId(deviceId),
+    startedAt = Instant.ofEpochMilli(startedAtEpochMillis),
+    stoppedAt = stoppedAtEpochMillis?.let(Instant::ofEpochMilli),
+    note = noteCiphertext.toString(Charsets.UTF_8),
+)
+
+internal fun TimeEntry.toEntity(): TimeEntryEntity = TimeEntryEntity(
+    id = id.value,
+    taskId = taskId.value,
+    deviceId = deviceId.value,
+    startedAtEpochMillis = startedAt.toEpochMilli(),
+    stoppedAtEpochMillis = stoppedAt?.toEpochMilli(),
+    noteCiphertext = note.toByteArray(Charsets.UTF_8),
 )
 
 internal fun ChecklistItemEntity.toModel(): ChecklistItem = ChecklistItem(
@@ -203,7 +259,7 @@ internal fun Task.tagEntities(): List<TaskTagEntity> = tagIds.map { tagId ->
     )
 }
 
-internal fun Task.dependencyEntities(): List<TaskDependencyEntity> = blockedBy.map { dependencyId ->
+internal fun Task.dependencyEntities(): List<TaskDependencyEntity> = dependencyIds.map { dependencyId ->
     TaskDependencyEntity(
         taskId = id.value,
         dependsOnTaskId = dependencyId.value,

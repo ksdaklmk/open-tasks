@@ -71,7 +71,11 @@ value class TimeEntryId(val value: String) {
 }
 
 @JvmInline
-value class TemplateId(val value: String)
+value class TemplateId(val value: String) {
+    companion object {
+        fun new(): TemplateId = TemplateId(UUID.randomUUID().toString())
+    }
+}
 
 @JvmInline
 value class SavedViewId(val value: String)

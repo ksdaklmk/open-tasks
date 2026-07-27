@@ -6,7 +6,10 @@ plugins {
 android {
     namespace = "app.opentasks.feature.schedule"
     compileSdk = 37
-    defaultConfig { minSdk = 36 }
+    defaultConfig {
+        minSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -21,5 +24,13 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.foundation)
     implementation(libs.compose.icons)
+    implementation(libs.activity.compose)
     implementation(libs.compose.ui.tooling.preview)
+
+    debugImplementation(libs.compose.ui.test.manifest)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.espresso.core)
 }

@@ -3,16 +3,23 @@ package app.opentasks.core.data
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
+import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.core.model.WorkflowStatusId
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -57,6 +64,87 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun taskAndReminderUpdateTogetherAndUndoRestoresBoth() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { !it.isCompleted }
+        val due = ZonedMoment(
+            instant = Instant.parse("2026-08-03T10:00:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
+        val reminder = Reminder(
+            id = "caller-provided-id",
+            taskId = TaskId("caller-provided-task"),
+            triggerAt = due.copy(instant = due.instant.minus(Duration.ofHours(1))),
+            precise = true,
+        )
+
+        val result = repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = original.id,
+                title = original.title,
+                description = original.description,
+                projectId = original.projectId,
+                priority = original.priority,
+                due = due,
+                recurrence = original.recurrence,
+                estimate = original.estimate,
+                reminder = reminder,
+            ),
+        ) as CommandResult.Success
+
+        val updated = repository.observeWorkspace().value
+        assertEquals(due, updated.tasks.first { it.id == original.id }.due)
+        assertEquals(
+            reminder.copy(
+                id = Reminder.primaryId(original.id),
+                taskId = original.id,
+            ),
+            updated.reminders.single { it.taskId == original.id },
+        )
+
+        repository.execute(checkNotNull(result.undo))
+
+        val restored = repository.observeWorkspace().value
+        assertEquals(original.due, restored.tasks.first { it.id == original.id }.due)
+        assertFalse(restored.reminders.any { it.taskId == original.id })
+    }
+
+    @Test
+    fun undoRestoresAnElapsedReminderButUserCommandsCannotCreateOne() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+        val elapsedReminder = Reminder(
+            id = Reminder.primaryId(task.id),
+            taskId = task.id,
+            triggerAt = ZonedMoment(
+                instant = Instant.parse("2026-07-26T09:00:00Z"),
+                zoneId = "UTC",
+            ),
+            precise = false,
+        )
+        val localRepository = InMemoryVaultRepository(
+            initial = OpenTasksFixtures.snapshot.copy(reminders = listOf(elapsedReminder)),
+            now = { Instant.parse("2026-07-26T10:00:00Z") },
+        )
+
+        val rejected = localRepository.execute(
+            DomainCommand.SetTaskReminder(
+                taskId = task.id,
+                triggerAt = elapsedReminder.triggerAt,
+            ),
+        )
+        assertEquals(RejectionReason.REMINDER_IN_PAST, (rejected as CommandResult.Rejected).reason)
+
+        val removed = localRepository.execute(
+            DomainCommand.SetTaskReminder(taskId = task.id, triggerAt = null),
+        ) as CommandResult.Success
+        localRepository.execute(checkNotNull(removed.undo))
+
+        assertEquals(
+            elapsedReminder,
+            localRepository.observeWorkspace().value.reminders.single(),
+        )
+    }
+
+    @Test
     fun recurringCompletionCreatesNextOccurrenceAndUndoRemovesOnlyThatOccurrence() = runBlocking {
         val original = OpenTasksFixtures.tasks.first { it.checklist.isNotEmpty() }
         val due = ZonedMoment(
@@ -66,6 +154,12 @@ class InMemoryVaultRepositoryTest {
         val rule = RecurrenceRule(
             frequency = RecurrenceFrequency.MONTHLY,
             count = 3,
+        )
+        val reminder = Reminder(
+            id = Reminder.primaryId(original.id),
+            taskId = original.id,
+            triggerAt = due.copy(instant = due.instant.minus(Duration.ofHours(1))),
+            precise = true,
         )
         val updated = repository.execute(
             DomainCommand.UpdateTask(
@@ -77,6 +171,7 @@ class InMemoryVaultRepositoryTest {
                 due = due,
                 recurrence = rule,
                 estimate = original.estimate,
+                reminder = reminder,
             ),
         )
         assertTrue(updated is CommandResult.Success)
@@ -85,6 +180,7 @@ class InMemoryVaultRepositoryTest {
         assertEquals(original.id, configured.recurrenceSeriesId)
         assertEquals(due, configured.recurrenceAnchor)
         assertEquals(0, configured.recurrenceOccurrenceIndex)
+        assertEquals(reminder, repository.observeWorkspace().value.reminders.single())
 
         val completed = repository.execute(
             DomainCommand.CompleteTask(
@@ -109,12 +205,25 @@ class InMemoryVaultRepositoryTest {
             nextOccurrence.checklist.map { it.text },
         )
         assertTrue(nextOccurrence.checklist.none { it.completed })
+        assertEquals(
+            Reminder(
+                id = Reminder.primaryId(nextOccurrence.id),
+                taskId = nextOccurrence.id,
+                triggerAt = checkNotNull(nextOccurrence.due).copy(
+                    instant = checkNotNull(nextOccurrence.due).instant.minus(Duration.ofHours(1)),
+                ),
+                precise = true,
+            ),
+            afterComplete.reminders.single { it.taskId == nextOccurrence.id },
+        )
 
         repository.execute(checkNotNull(completed.undo))
 
         val afterUndo = repository.observeWorkspace().value
         assertFalse(afterUndo.tasks.first { it.id == original.id }.isCompleted)
         assertFalse(afterUndo.tasks.any { it.id == nextOccurrence.id })
+        assertEquals(reminder, afterUndo.reminders.single { it.taskId == original.id })
+        assertFalse(afterUndo.reminders.any { it.taskId == nextOccurrence.id })
     }
 
     @Test
@@ -287,6 +396,117 @@ class InMemoryVaultRepositoryTest {
         assertEquals(completed.statusId, restored.statusId)
         assertEquals(SemanticStatus.COMPLETED, restored.semanticStatus)
         assertEquals(originalCompletedAt, restored.completedAt)
+    }
+
+    @Test
+    fun projectWorkflowLifecyclePreservesSemanticCategoriesAndExactUndo() = runBlocking {
+        val project = OpenTasksFixtures.studioProject
+        val customId = WorkflowStatusId("status-ready-for-review")
+
+        val created = repository.execute(
+            DomainCommand.CreateWorkflowStatus(
+                statusId = customId,
+                projectId = project.id,
+                name = "Ready for review",
+                semanticStatus = SemanticStatus.PLANNED,
+            ),
+        ) as CommandResult.Success
+        val renamed = repository.execute(
+            DomainCommand.RenameWorkflowStatus(customId, "Review queue"),
+        ) as CommandResult.Success
+        val beforeMove = repository.observeWorkspace().value.workflowStatuses
+            .filter { it.projectId == project.id && it.archivedAt == null }
+            .sortedBy { it.rank }
+            .map { it.id }
+        val moved = repository.execute(
+            DomainCommand.MoveWorkflowStatus(customId, WorkflowMoveDirection.EARLIER),
+        ) as CommandResult.Success
+        val afterMove = repository.observeWorkspace().value.workflowStatuses
+            .filter { it.projectId == project.id && it.archivedAt == null }
+            .sortedBy { it.rank }
+            .map { it.id }
+        assertTrue(afterMove.indexOf(customId) < beforeMove.indexOf(customId))
+
+        repository.execute(checkNotNull(moved.undo))
+        assertEquals(
+            beforeMove,
+            repository.observeWorkspace().value.workflowStatuses
+                .filter { it.projectId == project.id && it.archivedAt == null }
+                .sortedBy { it.rank }
+                .map { it.id },
+        )
+
+        repository.execute(checkNotNull(renamed.undo))
+        assertEquals(
+            "Ready for review",
+            repository.observeWorkspace().value.workflowStatuses.first { it.id == customId }.name,
+        )
+
+        val archived = repository.execute(
+            DomainCommand.ArchiveWorkflowStatus(OpenTasksFixtures.planned),
+        ) as CommandResult.Success
+        val assignedTask = repository.observeWorkspace().value.tasks.first {
+            it.statusId == OpenTasksFixtures.planned
+        }
+        assertEquals(SemanticStatus.PLANNED, assignedTask.semanticStatus)
+        assertTrue(
+            repository.observeWorkspace().value.workflowStatuses
+                .first { it.id == OpenTasksFixtures.planned }
+                .archivedAt != null,
+        )
+        repository.execute(checkNotNull(archived.undo))
+        assertEquals(
+            null,
+            repository.observeWorkspace().value.workflowStatuses
+                .first { it.id == OpenTasksFixtures.planned }
+                .archivedAt,
+        )
+
+        repository.execute(checkNotNull(created.undo))
+        assertFalse(
+            repository.observeWorkspace().value.workflowStatuses.any { it.id == customId },
+        )
+    }
+
+    @Test
+    fun taskStatusAndProjectMovesStayWithinTheirProjectWorkflow() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { it.projectId == OpenTasksFixtures.studioProject.id }
+        val foreignStatus = OpenTasksFixtures.statusId(
+            OpenTasksFixtures.taxProject.id,
+            SemanticStatus.STARTED,
+        )
+        val rejected = repository.execute(
+            DomainCommand.ChangeTaskStatus(task.id, foreignStatus),
+        )
+        assertEquals(RejectionReason.NOT_FOUND, (rejected as CommandResult.Rejected).reason)
+
+        val originalStatus = task.statusId
+        val moved = repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = task.id,
+                title = task.title,
+                description = task.description,
+                projectId = OpenTasksFixtures.taxProject.id,
+                priority = task.priority,
+                due = task.due,
+                recurrence = task.recurrence,
+                estimate = task.estimate,
+            ),
+        ) as CommandResult.Success
+        val movedTask = repository.observeWorkspace().value.tasks.first { it.id == task.id }
+        assertEquals(OpenTasksFixtures.taxProject.id, movedTask.projectId)
+        assertEquals(
+            OpenTasksFixtures.statusId(
+                OpenTasksFixtures.taxProject.id,
+                task.semanticStatus,
+            ),
+            movedTask.statusId,
+        )
+
+        repository.execute(checkNotNull(moved.undo))
+        val restored = repository.observeWorkspace().value.tasks.first { it.id == task.id }
+        assertEquals(task.projectId, restored.projectId)
+        assertEquals(originalStatus, restored.statusId)
     }
 
     @Test
@@ -488,6 +708,97 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun manualTimeEntriesAreReversibleAndExposeOverlaps() = runBlocking {
+        repository.execute(DomainCommand.StopTimer)
+        val task = OpenTasksFixtures.tasks.first()
+        val firstId = TimeEntryId("manual-first")
+        val secondId = TimeEntryId("manual-second")
+        val first = repository.execute(
+            DomainCommand.AddTimeEntry(
+                entryId = firstId,
+                taskId = task.id,
+                startedAt = Instant.parse("2026-07-25T08:00:00Z"),
+                stoppedAt = Instant.parse("2026-07-25T09:00:00Z"),
+                note = "  Planning  ",
+            ),
+        ) as CommandResult.Success
+
+        assertEquals(
+            "Planning",
+            repository.observeWorkspace().value.timeEntries
+                .first { it.id == firstId }
+                .note,
+        )
+        assertTrue(repository.observeWorkspace().value.timeEntryConflicts.isEmpty())
+
+        val overlapping = repository.execute(
+            DomainCommand.AddTimeEntry(
+                entryId = secondId,
+                taskId = task.id,
+                startedAt = Instant.parse("2026-07-25T08:30:00Z"),
+                stoppedAt = Instant.parse("2026-07-25T09:30:00Z"),
+            ),
+        ) as CommandResult.Success
+        assertTrue("overlap" in overlapping.message)
+        assertEquals(
+            Duration.ofMinutes(30),
+            repository.observeWorkspace().value.timeEntryConflicts.single().overlap,
+        )
+
+        val updated = repository.execute(
+            DomainCommand.UpdateTimeEntry(
+                entryId = secondId,
+                startedAt = Instant.parse("2026-07-25T09:00:00Z"),
+                stoppedAt = Instant.parse("2026-07-25T10:00:00Z"),
+                note = "Review",
+            ),
+        ) as CommandResult.Success
+        assertTrue(repository.observeWorkspace().value.timeEntryConflicts.isEmpty())
+
+        repository.execute(checkNotNull(updated.undo))
+        assertEquals(
+            Instant.parse("2026-07-25T08:30:00Z"),
+            repository.observeWorkspace().value.timeEntries
+                .first { it.id == secondId }
+                .startedAt,
+        )
+
+        repository.execute(checkNotNull(first.undo))
+        assertFalse(repository.observeWorkspace().value.timeEntries.any { it.id == firstId })
+    }
+
+    @Test
+    fun manualTimeEntryValidationRejectsInvalidRangesAndLongNotes() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first()
+        val invalidRange = repository.execute(
+            DomainCommand.AddTimeEntry(
+                entryId = TimeEntryId("invalid-range"),
+                taskId = task.id,
+                startedAt = Instant.parse("2026-07-25T09:00:00Z"),
+                stoppedAt = Instant.parse("2026-07-25T09:00:00Z"),
+            ),
+        )
+        val longNote = repository.execute(
+            DomainCommand.AddTimeEntry(
+                entryId = TimeEntryId("long-note"),
+                taskId = task.id,
+                startedAt = Instant.parse("2026-07-25T09:00:00Z"),
+                stoppedAt = Instant.parse("2026-07-25T10:00:00Z"),
+                note = "n".repeat(501),
+            ),
+        )
+
+        assertEquals(
+            RejectionReason.INVALID_TIME_ENTRY_RANGE,
+            (invalidRange as CommandResult.Rejected).reason,
+        )
+        assertEquals(
+            RejectionReason.TIME_ENTRY_NOTE_TOO_LONG,
+            (longNote as CommandResult.Rejected).reason,
+        )
+    }
+
+    @Test
     fun taskDetailsUpdateTogetherAndUndoRestoresEveryField() = runBlocking {
         val original = OpenTasksFixtures.tasks.first { !it.isCompleted }
         val due = ZonedMoment(
@@ -628,6 +939,299 @@ class InMemoryVaultRepositoryTest {
         val afterUndo = repository.observeWorkspace().value
         assertTrue(afterUndo.tags.any { it.id == tag.id })
         assertFalse(tag.id in afterUndo.tasks.first { it.id == original.id }.tagIds)
+    }
+
+    @Test
+    fun milestoneLifecycleAndDeleteUndoPreserveTaskMembership() = runBlocking {
+        val project = OpenTasksFixtures.studioProject
+        val task = OpenTasksFixtures.tasks.first { it.projectId == project.id && !it.isCompleted }
+        val milestoneId = MilestoneId("milestone-editor-test")
+        val created = repository.execute(
+            DomainCommand.CreateMilestone(
+                milestoneId = milestoneId,
+                projectId = project.id,
+                name = "Beta ready",
+                dueDate = LocalDate.of(2026, 8, 10),
+            ),
+        )
+        assertTrue(created is CommandResult.Success)
+
+        repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = task.id,
+                title = task.title,
+                description = task.description,
+                projectId = task.projectId,
+                priority = task.priority,
+                due = task.due,
+                recurrence = task.recurrence,
+                estimate = task.estimate,
+                milestoneId = milestoneId,
+            ),
+        )
+        val completedAt = Instant.parse("2026-08-10T12:00:00Z")
+        val completed = repository.execute(
+            DomainCommand.UpdateMilestone(
+                milestoneId = milestoneId,
+                name = "Beta signed off",
+                dueDate = LocalDate.of(2026, 8, 11),
+                completedAt = completedAt,
+            ),
+        ) as CommandResult.Success
+        assertEquals(
+            completedAt,
+            repository.observeWorkspace().value.milestones
+                .single { it.id == milestoneId }
+                .completedAt,
+        )
+
+        repository.execute(checkNotNull(completed.undo))
+        assertEquals(
+            "Beta ready",
+            repository.observeWorkspace().value.milestones.single { it.id == milestoneId }.name,
+        )
+
+        val deleted = repository.execute(
+            DomainCommand.DeleteMilestone(milestoneId),
+        ) as CommandResult.Success
+        assertFalse(repository.observeWorkspace().value.milestones.any { it.id == milestoneId })
+        assertEquals(
+            null,
+            repository.observeWorkspace().value.tasks.single { it.id == task.id }.milestoneId,
+        )
+
+        repository.execute(checkNotNull(deleted.undo))
+        assertTrue(repository.observeWorkspace().value.milestones.any { it.id == milestoneId })
+        assertEquals(
+            milestoneId,
+            repository.observeWorkspace().value.tasks.single { it.id == task.id }.milestoneId,
+        )
+    }
+
+    @Test
+    fun taskMilestonesAreProjectScopedAndProjectMoveUndoRestoresMembership() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first {
+            it.projectId == OpenTasksFixtures.studioProject.id && !it.isCompleted
+        }
+        val studioMilestone = OpenTasksFixtures.milestones.first {
+            it.projectId == OpenTasksFixtures.studioProject.id
+        }
+        val foreignMilestone = OpenTasksFixtures.milestones.first {
+            it.projectId == OpenTasksFixtures.taxProject.id
+        }
+        val rejected = repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = task.id,
+                title = task.title,
+                description = task.description,
+                projectId = task.projectId,
+                priority = task.priority,
+                due = task.due,
+                recurrence = task.recurrence,
+                estimate = task.estimate,
+                milestoneId = foreignMilestone.id,
+            ),
+        )
+        assertEquals(RejectionReason.INVALID_STATE, (rejected as CommandResult.Rejected).reason)
+
+        repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = task.id,
+                title = task.title,
+                description = task.description,
+                projectId = task.projectId,
+                priority = task.priority,
+                due = task.due,
+                recurrence = task.recurrence,
+                estimate = task.estimate,
+                milestoneId = studioMilestone.id,
+            ),
+        )
+        val assigned = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        val moved = repository.execute(
+            DomainCommand.UpdateTask(
+                taskId = assigned.id,
+                title = assigned.title,
+                description = assigned.description,
+                projectId = OpenTasksFixtures.taxProject.id,
+                priority = assigned.priority,
+                due = assigned.due,
+                recurrence = assigned.recurrence,
+                estimate = assigned.estimate,
+                milestoneId = null,
+            ),
+        ) as CommandResult.Success
+        assertEquals(
+            null,
+            repository.observeWorkspace().value.tasks.single { it.id == task.id }.milestoneId,
+        )
+
+        repository.execute(checkNotNull(moved.undo))
+        val restored = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        assertEquals(task.projectId, restored.projectId)
+        assertEquals(studioMilestone.id, restored.milestoneId)
+    }
+
+    @Test
+    fun dependencyLifecycleResolvesOnCompletionAndUndoRestoresTheLink() = runBlocking {
+        val candidates = repository.observeWorkspace().value.tasks
+            .filter {
+                !it.isCompleted && !it.isBlocked &&
+                    it.deletedAt == null && it.dependencyIds.isEmpty()
+            }
+        val task = candidates[0]
+        val dependency = candidates[1]
+
+        val added = repository.execute(
+            DomainCommand.SetTaskDependency(task.id, dependency.id, present = true),
+        ) as CommandResult.Success
+        var observed = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        assertEquals(setOf(dependency.id), observed.dependencyIds)
+        assertEquals(setOf(dependency.id), observed.blockedBy)
+
+        val completion = repository.execute(
+            DomainCommand.CompleteTask(dependency.id),
+        ) as CommandResult.Success
+        observed = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        assertEquals(setOf(dependency.id), observed.dependencyIds)
+        assertTrue(observed.blockedBy.isEmpty())
+        assertFalse(observed.isBlocked)
+
+        repository.execute(checkNotNull(completion.undo))
+        observed = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        assertEquals(setOf(dependency.id), observed.blockedBy)
+
+        repository.execute(checkNotNull(added.undo))
+        observed = repository.observeWorkspace().value.tasks.single { it.id == task.id }
+        assertTrue(observed.dependencyIds.isEmpty())
+        assertTrue(observed.blockedBy.isEmpty())
+    }
+
+    @Test
+    fun dependencyEditorRejectsSelfAndTransitiveCycles() = runBlocking {
+        val candidates = repository.observeWorkspace().value.tasks
+            .filter {
+                !it.isCompleted && !it.isBlocked &&
+                    it.deletedAt == null && it.dependencyIds.isEmpty()
+            }
+            .take(3)
+        val first = candidates[0]
+        val second = candidates[1]
+        val third = candidates[2]
+
+        repository.execute(
+            DomainCommand.SetTaskDependency(first.id, second.id, present = true),
+        )
+        repository.execute(
+            DomainCommand.SetTaskDependency(second.id, third.id, present = true),
+        )
+        val transitiveCycle = repository.execute(
+            DomainCommand.SetTaskDependency(third.id, first.id, present = true),
+        )
+        val selfCycle = repository.execute(
+            DomainCommand.SetTaskDependency(first.id, first.id, present = true),
+        )
+
+        assertEquals(
+            RejectionReason.DEPENDENCY_CYCLE,
+            (transitiveCycle as CommandResult.Rejected).reason,
+        )
+        assertEquals(
+            RejectionReason.DEPENDENCY_CYCLE,
+            (selfCycle as CommandResult.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun dependencyEditorEnforcesPerTaskLimit() = runBlocking {
+        val template = OpenTasksFixtures.tasks.first { !it.isCompleted && !it.isBlocked }
+        val dependencyTasks = (1..101).map { index ->
+            template.copy(
+                id = TaskId("dependency-limit-$index"),
+                title = "Dependency $index",
+                dependencyIds = emptySet(),
+                blockedBy = emptySet(),
+            )
+        }
+        val dependencyIds = dependencyTasks.take(100).mapTo(linkedSetOf(), Task::id)
+        val target = template.copy(
+            id = TaskId("dependency-limit-target"),
+            title = "Target",
+            dependencyIds = dependencyIds,
+            blockedBy = dependencyIds,
+        )
+        val snapshot = OpenTasksFixtures.snapshot.copy(
+            tasks = listOf(target) + dependencyTasks,
+        )
+        val limitedRepository = InMemoryVaultRepository(
+            initial = snapshot,
+            now = { Instant.parse("2026-07-26T10:00:00Z") },
+        )
+
+        val result = limitedRepository.execute(
+            DomainCommand.SetTaskDependency(
+                target.id,
+                dependencyTasks.last().id,
+                present = true,
+            ),
+        )
+
+        assertEquals(
+            RejectionReason.DEPENDENCY_LIMIT_REACHED,
+            (result as CommandResult.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun projectTemplateCaptureInstantiationAndDeleteUndoPreserveReusableStructure() = runBlocking {
+        val sourceProject = OpenTasksFixtures.snapshot.projects.first()
+        val templateId = TemplateId("template-client")
+        val capture = repository.execute(
+            DomainCommand.CaptureProjectTemplate(
+                templateId = templateId,
+                projectId = sourceProject.id,
+                name = "Client delivery",
+            ),
+        ) as CommandResult.Success
+
+        val template = repository.observeWorkspace().value.templates.single {
+            it.id == templateId
+        }
+        assertTrue(template.workflowStatuses.isNotEmpty())
+        assertTrue(template.tasks.all { task ->
+            OpenTasksFixtures.tasks.single { it.id.value == task.key }.let { source ->
+                source.deletedAt == null && !source.isCompleted
+            }
+        })
+
+        val createdProjectId = ProjectId("project-from-template")
+        repository.execute(
+            DomainCommand.InstantiateProjectTemplate(
+                templateId = template.id,
+                projectId = createdProjectId,
+                projectName = "September delivery",
+                anchorDate = LocalDate.of(2026, 9, 1),
+            ),
+        )
+        val snapshot = repository.observeWorkspace().value
+        val createdTasks = snapshot.tasks.filter { it.projectId == createdProjectId }
+        assertEquals(template.tasks.size, createdTasks.size)
+        assertTrue(createdTasks.none(Task::isCompleted))
+        assertEquals(
+            template.workflowStatuses.size,
+            snapshot.workflowStatuses.count { it.projectId == createdProjectId },
+        )
+        assertEquals(
+            template.milestones.size,
+            snapshot.milestones.count { it.projectId == createdProjectId },
+        )
+
+        repository.execute(checkNotNull(capture.undo))
+        assertTrue(repository.observeWorkspace().value.templates.isEmpty())
+        repository.execute(
+            DomainCommand.RestoreTemplate(template),
+        )
+        assertEquals(template.name, repository.observeWorkspace().value.templates.single().name)
     }
 
     private fun ZonedMoment.localDateString(): String =

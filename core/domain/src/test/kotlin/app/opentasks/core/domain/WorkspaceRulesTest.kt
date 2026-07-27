@@ -22,9 +22,9 @@ class WorkspaceRulesTest {
         )
         val summary = ProgressRules.forTasks(tasks)
 
-        assertEquals(5, summary.total)
+        assertEquals(OpenTasksFixtures.tasks.size, summary.total)
         assertEquals(1, summary.completed)
-        assertEquals(0.2f, summary.ratio)
+        assertEquals(1f / OpenTasksFixtures.tasks.size, summary.ratio)
     }
 
     @Test
@@ -58,6 +58,61 @@ class WorkspaceRulesTest {
 
         assertEquals(listOf(first, second), result.entries)
         assertEquals(Duration.ofMinutes(30), result.conflicts.single().overlap)
+    }
+
+    @Test
+    fun reconciliationIsDeterministicAndIgnoresTouchingOrInvalidRanges() {
+        val first = TimeEntry(
+            TimeEntryId("first"),
+            TaskId("one"),
+            DeviceId("phone"),
+            Instant.parse("2026-07-26T08:00:00Z"),
+            Instant.parse("2026-07-26T09:00:00Z"),
+        )
+        val touching = TimeEntry(
+            TimeEntryId("touching"),
+            TaskId("two"),
+            DeviceId("phone"),
+            Instant.parse("2026-07-26T09:00:00Z"),
+            Instant.parse("2026-07-26T10:00:00Z"),
+        )
+        val invalid = TimeEntry(
+            TimeEntryId("invalid"),
+            TaskId("three"),
+            DeviceId("phone"),
+            Instant.parse("2026-07-26T11:00:00Z"),
+            Instant.parse("2026-07-26T10:00:00Z"),
+        )
+
+        val result = TimerRules.reconcile(
+            listOf(invalid, touching, first),
+            Instant.parse("2026-07-26T12:00:00Z"),
+        )
+
+        assertEquals(listOf(first, touching, invalid), result.entries)
+        assertTrue(result.conflicts.isEmpty())
+    }
+
+    @Test
+    fun reconciliationReportsDenseOverlapInLinearAdjacentPairs() {
+        val entries = (0 until 100).map { index ->
+            TimeEntry(
+                TimeEntryId("entry-$index"),
+                TaskId("task-$index"),
+                DeviceId("device"),
+                Instant.parse("2026-07-26T08:00:00Z").plusSeconds(index.toLong()),
+                Instant.parse("2026-07-26T10:00:00Z"),
+            )
+        }
+
+        val result = TimerRules.reconcile(
+            entries.reversed(),
+            Instant.parse("2026-07-26T12:00:00Z"),
+        )
+
+        assertEquals(entries, result.entries)
+        assertEquals(entries.size - 1, result.conflicts.size)
+        assertEquals(entries.first(), result.conflicts.first().first)
     }
 
     @Test

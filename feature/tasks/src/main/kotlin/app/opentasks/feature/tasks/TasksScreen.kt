@@ -1,6 +1,7 @@
 package app.opentasks.feature.tasks
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,11 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -33,11 +36,16 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
@@ -50,12 +58,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -85,15 +95,21 @@ import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.designsystem.TaskRow
 import app.opentasks.core.designsystem.readableName
 import app.opentasks.core.model.ChecklistItem
+import app.opentasks.core.model.Milestone
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.TimeEntryConflict
+import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.ZonedMoment
@@ -106,6 +122,9 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import java.time.format.ResolverStyle
+import java.util.Locale
 
 data class TaskEdit(
     val title: String,
@@ -115,6 +134,14 @@ data class TaskEdit(
     val due: ZonedMoment?,
     val recurrence: RecurrenceRule?,
     val estimate: Duration?,
+    val milestoneId: MilestoneId?,
+    val reminder: Reminder? = null,
+)
+
+data class TimeEntryEdit(
+    val startedAt: Instant,
+    val stoppedAt: Instant,
+    val note: String,
 )
 
 private enum class TaskFilter(val label: String) {
@@ -134,6 +161,7 @@ private enum class RecurrenceEndMode(val label: String) {
 @Composable
 fun TasksScreen(
     tasks: List<Task>,
+    reminders: List<Reminder> = emptyList(),
     projectNames: Map<ProjectId, String>,
     workflowStatuses: List<WorkflowStatus>,
     tags: List<Tag>,
@@ -152,8 +180,21 @@ fun TasksScreen(
     onDeleteChecklistItem: (TaskId, String) -> Unit,
     onSetTaskTag: (TaskId, TagId, Boolean) -> Unit,
     onCreateAndAssignTag: (TaskId, String) -> Unit,
+    milestones: List<Milestone> = emptyList(),
     modifier: Modifier = Modifier,
     activeProjectIds: Set<ProjectId> = projectNames.keys,
+    notificationsEnabled: Boolean = true,
+    preciseRemindersAvailable: Boolean = false,
+    onEnableNotifications: () -> Unit = {},
+    onEnablePreciseReminders: () -> Unit = {},
+    dependencyError: String? = null,
+    onSetTaskDependency: (TaskId, TaskId, Boolean) -> Unit = { _, _, _ -> },
+    onClearDependencyError: () -> Unit = {},
+    timeEntries: List<TimeEntry> = emptyList(),
+    timeEntryConflicts: List<TimeEntryConflict> = emptyList(),
+    onAddTimeEntry: (TaskId, TimeEntryEdit) -> Unit = { _, _ -> },
+    onUpdateTimeEntry: (TimeEntryId, TimeEntryEdit) -> Unit = { _, _ -> },
+    onDeleteTimeEntry: (TimeEntryId) -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
@@ -164,6 +205,13 @@ fun TasksScreen(
         TaskFilter.ALL -> tasks.filter { it.deletedAt == null }
     }
     val selectedTask = tasks.firstOrNull { it.id == selectedTaskId }
+    val selectedReminder = reminders.firstOrNull { it.taskId == selectedTaskId }
+    val selectedTimeEntries = timeEntries.filter { it.taskId == selectedTaskId }
+    val selectedTimeEntryIds = selectedTimeEntries.mapTo(hashSetOf(), TimeEntry::id)
+    val selectedTimeEntryConflicts = timeEntryConflicts.filter { conflict ->
+        conflict.firstEntryId in selectedTimeEntryIds ||
+            conflict.secondEntryId in selectedTimeEntryIds
+    }
 
     if (!showDetailPane && selectedTask != null) {
         Surface(
@@ -180,6 +228,14 @@ fun TasksScreen(
                 activeProjectIds = activeProjectIds,
                 workflowStatuses = workflowStatuses,
                 tags = tags,
+                milestones = milestones,
+                allTasks = tasks,
+                dependencyError = dependencyError,
+                reminder = selectedReminder,
+                notificationsEnabled = notificationsEnabled,
+                preciseRemindersAvailable = preciseRemindersAvailable,
+                onEnableNotifications = onEnableNotifications,
+                onEnablePreciseReminders = onEnablePreciseReminders,
                 onChangeStatus = { onChangeTaskStatus(selectedTask, it) },
                 onMoveToTrash = { onDeleteTask(selectedTask) },
                 onUpdate = { onUpdateTask(selectedTask.id, it) },
@@ -190,6 +246,15 @@ fun TasksScreen(
                     onSetTaskTag(selectedTask.id, tagId, present)
                 },
                 onCreateAndAssignTag = { onCreateAndAssignTag(selectedTask.id, it) },
+                onSetTaskDependency = { dependencyId, present ->
+                    onSetTaskDependency(selectedTask.id, dependencyId, present)
+                },
+                onClearDependencyError = onClearDependencyError,
+                timeEntries = selectedTimeEntries,
+                timeEntryConflicts = selectedTimeEntryConflicts,
+                onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
+                onUpdateTimeEntry = onUpdateTimeEntry,
+                onDeleteTimeEntry = onDeleteTimeEntry,
             )
         }
         return
@@ -242,6 +307,14 @@ fun TasksScreen(
                         activeProjectIds = activeProjectIds,
                         workflowStatuses = workflowStatuses,
                         tags = tags,
+                        milestones = milestones,
+                        allTasks = tasks,
+                        dependencyError = dependencyError,
+                        reminder = selectedReminder,
+                        notificationsEnabled = notificationsEnabled,
+                        preciseRemindersAvailable = preciseRemindersAvailable,
+                        onEnableNotifications = onEnableNotifications,
+                        onEnablePreciseReminders = onEnablePreciseReminders,
                         onChangeStatus = { onChangeTaskStatus(selectedTask, it) },
                         onMoveToTrash = { onDeleteTask(selectedTask) },
                         onUpdate = { onUpdateTask(selectedTask.id, it) },
@@ -252,6 +325,15 @@ fun TasksScreen(
                             onSetTaskTag(selectedTask.id, tagId, present)
                         },
                         onCreateAndAssignTag = { onCreateAndAssignTag(selectedTask.id, it) },
+                        onSetTaskDependency = { dependencyId, present ->
+                            onSetTaskDependency(selectedTask.id, dependencyId, present)
+                        },
+                        onClearDependencyError = onClearDependencyError,
+                        timeEntries = selectedTimeEntries,
+                        timeEntryConflicts = selectedTimeEntryConflicts,
+                        onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
+                        onUpdateTimeEntry = onUpdateTimeEntry,
+                        onDeleteTimeEntry = onDeleteTimeEntry,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -272,6 +354,8 @@ private fun TaskListPane(
     onCompleteTask: (Task) -> Unit,
     modifier: Modifier,
 ) {
+    val listState = rememberLazyListState()
+
     Column(modifier = modifier.fillMaxHeight()) {
         Column(modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             Text(
@@ -293,7 +377,9 @@ private fun TaskListPane(
                     FilterChip(
                         selected = filter == candidate,
                         onClick = { onFilterChange(candidate) },
-                        modifier = Modifier.heightIn(min = 48.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("task-filter-${candidate.name.lowercase(Locale.ROOT)}"),
                         label = { Text(candidate.label) },
                         leadingIcon = if (candidate == TaskFilter.INBOX) {
                             {
@@ -320,6 +406,8 @@ private fun TaskListPane(
             )
         } else {
             LazyColumn(
+                state = listState,
+                modifier = Modifier.testTag("task-list"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 8.dp,
                     end = 8.dp,
@@ -344,6 +432,11 @@ private fun TaskListPane(
 @Composable
 private fun TaskDetailPane(
     task: Task,
+    reminder: Reminder?,
+    notificationsEnabled: Boolean,
+    preciseRemindersAvailable: Boolean,
+    onEnableNotifications: () -> Unit,
+    onEnablePreciseReminders: () -> Unit,
     onBack: (() -> Unit)?,
     onComplete: () -> Unit,
     timerRunning: Boolean,
@@ -352,6 +445,9 @@ private fun TaskDetailPane(
     activeProjectIds: Set<ProjectId>,
     workflowStatuses: List<WorkflowStatus>,
     tags: List<Tag>,
+    milestones: List<Milestone>,
+    allTasks: List<Task>,
+    dependencyError: String?,
     onChangeStatus: (WorkflowStatusId) -> Unit,
     onMoveToTrash: () -> Unit,
     onUpdate: (TaskEdit) -> Unit,
@@ -360,6 +456,13 @@ private fun TaskDetailPane(
     onDeleteChecklistItem: (String) -> Unit,
     onSetTaskTag: (TagId, Boolean) -> Unit,
     onCreateAndAssignTag: (String) -> Unit,
+    onSetTaskDependency: (TaskId, Boolean) -> Unit,
+    onClearDependencyError: () -> Unit,
+    timeEntries: List<TimeEntry>,
+    timeEntryConflicts: List<TimeEntryConflict>,
+    onAddTimeEntry: (TimeEntryEdit) -> Unit,
+    onUpdateTimeEntry: (TimeEntryId, TimeEntryEdit) -> Unit,
+    onDeleteTimeEntry: (TimeEntryId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var title by rememberSaveable(task.id.value) { mutableStateOf(task.title) }
@@ -409,6 +512,15 @@ private fun TaskDetailPane(
     var estimateMinutes by rememberSaveable(task.id.value) {
         mutableStateOf(task.estimate?.toMinutes())
     }
+    var milestoneIdValue by rememberSaveable(task.id.value) {
+        mutableStateOf(task.milestoneId?.value)
+    }
+    var reminderLeadSeconds by rememberSaveable(task.id.value) {
+        mutableStateOf(reminderLeadSeconds(task, reminder))
+    }
+    var reminderPrecise by rememberSaveable(task.id.value) {
+        mutableStateOf(reminder?.precise ?: false)
+    }
     var newTagName by rememberSaveable(task.id.value) { mutableStateOf("") }
     var newChecklistText by rememberSaveable(task.id.value) { mutableStateOf("") }
     var showDuePicker by rememberSaveable(task.id.value) { mutableStateOf(false) }
@@ -416,10 +528,14 @@ private fun TaskDetailPane(
         mutableStateOf(false)
     }
     var showProjectMenu by rememberSaveable(task.id.value) { mutableStateOf(false) }
+    var showMilestoneMenu by rememberSaveable(task.id.value) { mutableStateOf(false) }
     var showStatusMenu by rememberSaveable(task.id.value) { mutableStateOf(false) }
+    var showDependencyEditor by rememberSaveable(task.id.value) { mutableStateOf(false) }
+    var showTimeEntries by rememberSaveable(task.id.value) { mutableStateOf(false) }
     var lastSubmitted by remember(task.id.value) { mutableStateOf<TaskEdit?>(null) }
+    var skipInitialRepositorySync by remember(task.id.value) { mutableStateOf(true) }
     val activeWorkflowStatuses = workflowStatuses
-        .filter { it.archivedAt == null }
+        .filter { it.projectId == task.projectId && it.archivedAt == null }
         .sortedBy(WorkflowStatus::rank)
     val currentStatus = workflowStatuses.firstOrNull { it.id == task.statusId }
     val currentStatusName = currentStatus?.name ?: task.semanticStatus.readableName()
@@ -479,6 +595,19 @@ private fun TaskDetailPane(
     } else {
         null
     }
+    val editorReminder = if (editorDue != null && reminderLeadSeconds != null) {
+        Reminder(
+            id = Reminder.primaryId(task.id),
+            taskId = task.id,
+            triggerAt = ZonedMoment(
+                instant = editorDue.instant.minusSeconds(checkNotNull(reminderLeadSeconds)),
+                zoneId = editorDue.zoneId,
+            ),
+            precise = reminderPrecise,
+        )
+    } else {
+        null
+    }
     val editorValue = TaskEdit(
         title = title.trim(),
         description = description,
@@ -487,8 +616,10 @@ private fun TaskDetailPane(
         due = editorDue,
         recurrence = editorRecurrence,
         estimate = estimateMinutes?.let(Duration::ofMinutes),
+        milestoneId = milestoneIdValue?.let(::MilestoneId),
+        reminder = editorReminder,
     )
-    val persistedValue = task.toTaskEdit()
+    val persistedValue = task.toTaskEdit(reminder)
     val titleError = when {
         title.isBlank() -> "A task needs a title"
         title.trim().length > MAX_TASK_TITLE_LENGTH ->
@@ -499,8 +630,10 @@ private fun TaskDetailPane(
     val valid = titleError == null && !descriptionError && recurrenceError == null
     val dirty = editorValue != persistedValue
 
-    LaunchedEffect(task.revision) {
-        if (lastSubmitted == persistedValue) {
+    LaunchedEffect(persistedValue) {
+        if (skipInitialRepositorySync) {
+            skipInitialRepositorySync = false
+        } else if (lastSubmitted == persistedValue) {
             lastSubmitted = null
         } else {
             title = task.title
@@ -524,6 +657,9 @@ private fun TaskDetailPane(
             recurrenceCountText = task.recurrence?.count?.toString() ?: "10"
             recurrenceEndDateEpochDay = task.recurrence?.endDate?.toEpochDay()
             estimateMinutes = task.estimate?.toMinutes()
+            milestoneIdValue = task.milestoneId?.value
+            reminderLeadSeconds = reminderLeadSeconds(task, reminder)
+            reminderPrecise = reminder?.precise ?: false
         }
     }
 
@@ -535,7 +671,7 @@ private fun TaskDetailPane(
     }
 
     val latestEditor by rememberUpdatedState(editorValue)
-    val latestTask by rememberUpdatedState(task)
+    val latestPersisted by rememberUpdatedState(persistedValue)
     val latestValid by rememberUpdatedState(valid)
     val latestSubmitted by rememberUpdatedState(lastSubmitted)
     val latestOnUpdate by rememberUpdatedState(onUpdate)
@@ -543,7 +679,7 @@ private fun TaskDetailPane(
         onDispose {
             if (
                 latestValid &&
-                latestEditor != latestTask.toTaskEdit() &&
+                latestEditor != latestPersisted &&
                 latestEditor != latestSubmitted
             ) {
                 latestOnUpdate(latestEditor)
@@ -555,6 +691,7 @@ private fun TaskDetailPane(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .testTag("task-detail-scroll")
             .padding(24.dp),
     ) {
         Row(
@@ -643,7 +780,9 @@ private fun TaskDetailPane(
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = title,
-            onValueChange = { title = it },
+            onValueChange = {
+                title = it.take(MAX_TASK_TITLE_LENGTH + 1)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("task-title-field"),
@@ -660,7 +799,9 @@ private fun TaskDetailPane(
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = description,
-            onValueChange = { description = it },
+            onValueChange = {
+                description = it.take(MAX_TASK_DESCRIPTION_LENGTH + 1)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("task-description-field"),
@@ -681,7 +822,7 @@ private fun TaskDetailPane(
         )
 
         Spacer(Modifier.height(28.dp))
-        SectionHeader("Organization")
+        SectionHeader("Organisation")
         Spacer(Modifier.height(12.dp))
         Text(
             "Project",
@@ -717,6 +858,7 @@ private fun TaskDetailPane(
                     text = { Text("Inbox") },
                     leadingIcon = { Icon(Icons.Rounded.Inbox, contentDescription = null) },
                     onClick = {
+                        if (projectIdValue != null) milestoneIdValue = null
                         projectIdValue = null
                         showProjectMenu = false
                     },
@@ -732,9 +874,173 @@ private fun TaskDetailPane(
                             Icon(Icons.Rounded.FolderOpen, contentDescription = null)
                         },
                         onClick = {
+                            if (projectIdValue != id.value) milestoneIdValue = null
                             projectIdValue = id.value
                             showProjectMenu = false
                         },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        val dependencyTasks = task.dependencyIds.mapNotNull { dependencyId ->
+            allTasks.firstOrNull { it.id == dependencyId }
+        }
+        SectionHeader(
+            title = "Dependencies",
+            supportingText = if (dependencyTasks.isEmpty()) {
+                "No prerequisites"
+            } else {
+                "${task.blockedBy.size} unfinished • ${dependencyTasks.size} total"
+            },
+            action = {
+                TextButton(
+                    onClick = {
+                        onClearDependencyError()
+                        showDependencyEditor = true
+                    },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("manage-task-dependencies"),
+                ) {
+                    Text("Manage")
+                }
+            },
+        )
+        if (dependencyTasks.isEmpty()) {
+            Text(
+                "Link work that must finish before this task.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Spacer(Modifier.height(8.dp))
+            dependencyTasks.take(3).forEach { dependency ->
+                val unfinished = dependency.id in task.blockedBy
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (unfinished) Icons.Rounded.Block else Icons.Rounded.CheckCircle,
+                        contentDescription = if (unfinished) "Unfinished" else "Complete",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (unfinished) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.tertiary
+                        },
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            dependency.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 2,
+                        )
+                        Text(
+                            projectNames[dependency.projectId] ?: "Inbox",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            if (dependencyTasks.size > 3) {
+                Text(
+                    "+${dependencyTasks.size - 3} more",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Milestone",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        val availableMilestones = milestones
+            .filter {
+                it.projectId.value == projectIdValue &&
+                    (it.completedAt == null || it.id.value == milestoneIdValue)
+            }
+            .sortedWith(
+                compareBy<Milestone> { it.completedAt != null }
+                    .thenBy { it.dueDate == null }
+                    .thenBy(Milestone::dueDate),
+            )
+        Box {
+            OutlinedButton(
+                onClick = { showMilestoneMenu = true },
+                enabled = projectIdValue != null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("task-milestone-button"),
+            ) {
+                Icon(Icons.Rounded.Flag, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    availableMilestones
+                        .firstOrNull { it.id.value == milestoneIdValue }
+                        ?.name
+                        ?: if (projectIdValue == null) {
+                            "Move to a project first"
+                        } else {
+                            "No milestone"
+                        },
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = showMilestoneMenu,
+                onDismissRequest = { showMilestoneMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("No milestone") },
+                    onClick = {
+                        milestoneIdValue = null
+                        showMilestoneMenu = false
+                    },
+                    trailingIcon = if (milestoneIdValue == null) {
+                        { Icon(Icons.Rounded.Check, contentDescription = "Selected") }
+                    } else {
+                        null
+                    },
+                )
+                availableMilestones.forEach { milestone ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(milestone.name)
+                                milestone.dueDate?.let { dueDate ->
+                                    Text(
+                                        dueDate.format(MILESTONE_DATE_FORMAT),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            milestoneIdValue = milestone.id.value
+                            showMilestoneMenu = false
+                        },
+                        trailingIcon = if (milestone.id.value == milestoneIdValue) {
+                            { Icon(Icons.Rounded.Check, contentDescription = "Selected") }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.testTag(
+                            "task-milestone-option-${milestone.id.value}",
+                        ),
                     )
                 }
             }
@@ -797,7 +1103,9 @@ private fun TaskDetailPane(
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = newTagName,
-            onValueChange = { newTagName = it },
+            onValueChange = {
+                newTagName = it.take(MAX_TAG_NAME_LENGTH + 1)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("new-tag-field"),
@@ -875,6 +1183,7 @@ private fun TaskDetailPane(
                         dueEpochMillis = null
                         dueZoneId = null
                         recurrenceFrequencyName = null
+                        reminderLeadSeconds = null
                     },
                     modifier = Modifier.size(48.dp),
                 ) {
@@ -887,6 +1196,158 @@ private fun TaskDetailPane(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Reminder",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("reminder-options"),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            REMINDER_PRESETS.forEach { preset ->
+                val triggerAt = preset.leadSeconds?.let { lead ->
+                    editorDue?.instant?.minusSeconds(lead)
+                }
+                FilterChip(
+                    selected = reminderLeadSeconds == preset.leadSeconds,
+                    onClick = {
+                        reminderLeadSeconds = preset.leadSeconds
+                        if (preset.leadSeconds != null && !notificationsEnabled) {
+                            onEnableNotifications()
+                        }
+                    },
+                    enabled = preset.leadSeconds == null ||
+                        triggerAt?.isAfter(Instant.now()) == true,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("reminder-${preset.testTag}"),
+                    label = { Text(preset.label) },
+                    leadingIcon = if (reminderLeadSeconds == preset.leadSeconds) {
+                        {
+                            Icon(
+                                if (preset.leadSeconds == null) {
+                                    Icons.Rounded.NotificationsOff
+                                } else {
+                                    Icons.Rounded.Notifications
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+        when {
+            editorDue == null -> {
+                Text(
+                    "Choose a due date to set a reminder.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            editorReminder != null -> {
+                val reminderPassed = !editorReminder.triggerAt.instant.isAfter(Instant.now())
+                val reminderTime = REMINDER_DATE_TIME_FORMAT.format(
+                    editorReminder.triggerAt.instant.atZone(
+                        ZoneId.of(editorReminder.triggerAt.zoneId),
+                    ),
+                )
+                Text(
+                    text = if (reminderPassed) {
+                        "That reminder time has passed. Choose another option."
+                    } else {
+                        "Scheduled for $reminderTime."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (reminderPassed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Delivery",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = !reminderPrecise,
+                        onClick = { reminderPrecise = false },
+                        enabled = !reminderPassed,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("reminder-delivery-flexible"),
+                        label = { Text("Flexible") },
+                    )
+                    FilterChip(
+                        selected = reminderPrecise,
+                        onClick = { reminderPrecise = true },
+                        enabled = !reminderPassed,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("reminder-delivery-precise"),
+                        label = { Text("Precise") },
+                    )
+                }
+
+                if (!notificationsEnabled) {
+                    Text(
+                        "Notifications are off. The reminder is saved, but Android cannot show it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    OutlinedButton(
+                        onClick = onEnableNotifications,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("enable-notifications"),
+                    ) {
+                        Text("Allow notifications")
+                    }
+                }
+
+                if (reminderPrecise && !preciseRemindersAvailable) {
+                    Text(
+                        "Precise timing is off. Android will deliver this after the chosen time, " +
+                            "usually within an hour.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = onEnablePreciseReminders,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("enable-precise-reminders"),
+                    ) {
+                        Text("Allow precise timing")
+                    }
+                } else if (!reminderPrecise) {
+                    Text(
+                        "Flexible timing uses less battery and may arrive after the chosen time.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
         Text(
@@ -928,7 +1389,9 @@ private fun TaskDetailPane(
                     enabled = editorDue != null,
                     modifier = Modifier
                         .heightIn(min = 48.dp)
-                        .testTag("recurrence-frequency-${frequency.name.lowercase()}"),
+                        .testTag(
+                            "recurrence-frequency-${frequency.name.lowercase(Locale.ROOT)}",
+                        ),
                     label = { Text(frequency.readableName()) },
                     leadingIcon = if (recurrenceFrequency == frequency) {
                         {
@@ -949,7 +1412,9 @@ private fun TaskDetailPane(
             OutlinedTextField(
                 value = recurrenceIntervalText,
                 onValueChange = { value ->
-                    recurrenceIntervalText = value.filter(Char::isDigit)
+                    recurrenceIntervalText = value
+                        .filter(Char::isDigit)
+                        .take(MAX_RECURRENCE_INTERVAL.toString().length + 1)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1006,7 +1471,7 @@ private fun TaskDetailPane(
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .testTag(
-                                    "recurrence-weekday-${weekday.name.lowercase()}",
+                                    "recurrence-weekday-${weekday.name.lowercase(Locale.ROOT)}",
                                 ),
                             label = { Text(weekday.shortName()) },
                         )
@@ -1042,7 +1507,7 @@ private fun TaskDetailPane(
                         },
                         modifier = Modifier
                             .heightIn(min = 48.dp)
-                            .testTag("recurrence-end-${mode.name.lowercase()}"),
+                            .testTag("recurrence-end-${mode.name.lowercase(Locale.ROOT)}"),
                         label = { Text(mode.label) },
                     )
                 }
@@ -1055,7 +1520,9 @@ private fun TaskDetailPane(
                     OutlinedTextField(
                         value = recurrenceCountText,
                         onValueChange = { value ->
-                            recurrenceCountText = value.filter(Char::isDigit)
+                            recurrenceCountText = value
+                                .filter(Char::isDigit)
+                                .take(MAX_RECURRENCE_COUNT.toString().length + 1)
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1140,6 +1607,77 @@ private fun TaskDetailPane(
         }
 
         Spacer(Modifier.height(28.dp))
+        val completedTime = timeEntries
+            .mapNotNull { entry ->
+                entry.stoppedAt?.let { stoppedAt ->
+                    Duration.between(entry.startedAt, stoppedAt).takeUnless(Duration::isNegative)
+                }
+            }
+            .fold(Duration.ZERO, Duration::plus)
+        SectionHeader(
+            title = "Time",
+            supportingText = buildString {
+                append(formatLoggedDuration(completedTime))
+                append(" logged")
+                if (timeEntries.any { it.stoppedAt == null }) append(" • timer running")
+            },
+            action = {
+                TextButton(
+                    onClick = { showTimeEntries = true },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("manage-time-entries"),
+                ) {
+                    Text(if (timeEntries.isEmpty()) "Add entry" else "Review")
+                }
+            },
+        )
+        if (timeEntryConflicts.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("time-overlap-warning")
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Warning, contentDescription = null)
+                    Text(
+                        if (timeEntryConflicts.size == 1) {
+                            "Two entries overlap. Review their times to avoid double-counting."
+                        } else {
+                            "${timeEntryConflicts.size} overlaps need review to avoid " +
+                                "double-counting."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        } else if (timeEntries.isEmpty()) {
+            Text(
+                "Track work with the timer or add time after the fact.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            val latest = timeEntries.maxByOrNull(TimeEntry::startedAt)
+            latest?.let { entry ->
+                Text(
+                    "Latest: ${formatTimeEntryRange(entry)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
         SectionHeader(
             title = "Checklist",
             supportingText = "${task.checklist.count { it.completed }}/${task.checklist.size} complete",
@@ -1147,7 +1685,9 @@ private fun TaskDetailPane(
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = newChecklistText,
-            onValueChange = { newChecklistText = it },
+            onValueChange = {
+                newChecklistText = it.take(MAX_CHECKLIST_ITEM_LENGTH + 1)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("new-checklist-item-field"),
@@ -1216,7 +1756,14 @@ private fun TaskDetailPane(
                 ) {
                     Icon(Icons.Rounded.Block, contentDescription = null)
                     Text(
-                        "This task has unfinished dependencies. You can still complete it after confirming the warning.",
+                        if (task.blockedBy.isEmpty()) {
+                            "This task is in a blocked workflow state. You can still complete it " +
+                                "after confirming the warning."
+                        } else {
+                            "This task has ${task.blockedBy.size} unfinished " +
+                                "${if (task.blockedBy.size == 1) "dependency" else "dependencies"}. " +
+                                "You can still complete it after confirming the warning."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -1259,10 +1806,37 @@ private fun TaskDetailPane(
                     tint = MaterialTheme.colorScheme.error,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Move to Trash", color = MaterialTheme.colorScheme.error)
+                Text("Move to Bin", color = MaterialTheme.colorScheme.error)
             }
         }
         Spacer(Modifier.height(80.dp))
+    }
+
+    if (showDependencyEditor) {
+        DependencyEditorSheet(
+            task = task,
+            tasks = allTasks,
+            projectNames = projectNames,
+            error = dependencyError,
+            onDismiss = {
+                showDependencyEditor = false
+                onClearDependencyError()
+            },
+            onToggle = onSetTaskDependency,
+            onClearError = onClearDependencyError,
+        )
+    }
+
+    if (showTimeEntries) {
+        TimeEntriesSheet(
+            taskTitle = task.title,
+            entries = timeEntries,
+            conflicts = timeEntryConflicts,
+            onDismiss = { showTimeEntries = false },
+            onAdd = onAddTimeEntry,
+            onUpdate = onUpdateTimeEntry,
+            onDelete = onDeleteTimeEntry,
+        )
     }
 
     if (showDuePicker) {
@@ -1354,6 +1928,606 @@ private fun TaskDetailPane(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DependencyEditorSheet(
+    task: Task,
+    tasks: List<Task>,
+    projectNames: Map<ProjectId, String>,
+    error: String?,
+    onDismiss: () -> Unit,
+    onToggle: (TaskId, Boolean) -> Unit,
+    onClearError: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by rememberSaveable(task.id.value) { mutableStateOf("") }
+    val candidates = tasks
+        .filter { candidate ->
+            candidate.id != task.id &&
+                (candidate.deletedAt == null || candidate.id in task.dependencyIds) &&
+                (
+                    query.isBlank() ||
+                        candidate.title.contains(query.trim(), ignoreCase = true) ||
+                        (projectNames[candidate.projectId] ?: "Inbox")
+                            .contains(query.trim(), ignoreCase = true)
+                )
+        }
+        .sortedWith(
+            compareByDescending<Task> { it.id in task.dependencyIds }
+                .thenBy(Task::isCompleted)
+                .thenBy { projectNames[it.projectId] ?: "Inbox" }
+                .thenBy(Task::title),
+        )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("dependency-editor"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+        ) {
+            Text(
+                "Dependencies",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                "Choose tasks that must finish before “${task.title}”. " +
+                    "Completed links stay visible but no longer block completion.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            if (error != null) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dependency-error")
+                        .semantics { liveRegion = LiveRegionMode.Assertive },
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Block, contentDescription = null)
+                        Text(error, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = {
+                    query = it.take(MAX_DEPENDENCY_QUERY_LENGTH)
+                    onClearError()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("dependency-search"),
+                label = { Text("Find a task") },
+                placeholder = { Text("Search title or project") },
+                singleLine = true,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "${task.dependencyIds.size}/$MAX_TASK_DEPENDENCIES selected",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (candidates.isEmpty()) {
+                Text(
+                    if (query.isBlank()) {
+                        "No other active tasks are available."
+                    } else {
+                        "No tasks match that search."
+                    },
+                    modifier = Modifier.padding(vertical = 24.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp),
+                ) {
+                    items(candidates, key = { it.id.value }) { candidate ->
+                        val selected = candidate.id in task.dependencyIds
+                        val unfinished = candidate.id in task.blockedBy
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .clickable {
+                                    onClearError()
+                                    onToggle(candidate.id, !selected)
+                                }
+                                .testTag("dependency-option-${candidate.id.value}")
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = selected,
+                                onCheckedChange = null,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(candidate.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    buildString {
+                                        append(
+                                            when {
+                                                candidate.deletedAt != null -> "In Bin"
+                                                candidate.isCompleted -> "Complete"
+                                                unfinished -> "Unfinished"
+                                                else -> "Open"
+                                            },
+                                        )
+                                        append(" • ")
+                                        append(projectNames[candidate.projectId] ?: "Inbox")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (unfinished) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+            ) {
+                Text("Done")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeEntriesSheet(
+    taskTitle: String,
+    entries: List<TimeEntry>,
+    conflicts: List<TimeEntryConflict>,
+    onDismiss: () -> Unit,
+    onAdd: (TimeEntryEdit) -> Unit,
+    onUpdate: (TimeEntryId, TimeEntryEdit) -> Unit,
+    onDelete: (TimeEntryId) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showEditor by rememberSaveable(taskTitle) { mutableStateOf(false) }
+    var editingEntryId by rememberSaveable(taskTitle) { mutableStateOf<String?>(null) }
+    val editingEntry = editingEntryId?.let { id ->
+        entries.firstOrNull { it.id.value == id }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("time-entries-sheet"),
+    ) {
+        if (showEditor) {
+            TimeEntryEditor(
+                entry = editingEntry,
+                onCancel = {
+                    showEditor = false
+                    editingEntryId = null
+                },
+                onSave = { edit ->
+                    if (editingEntry == null) {
+                        onAdd(edit)
+                    } else {
+                        onUpdate(editingEntry.id, edit)
+                    }
+                    showEditor = false
+                    editingEntryId = null
+                },
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+            ) {
+                Text(
+                    "Time entries",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    taskTitle,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        editingEntryId = null
+                        showEditor = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("add-time-entry"),
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add time entry")
+                }
+                if (conflicts.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("time-sheet-overlap-warning"),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Warning, contentDescription = null)
+                            Text(
+                                if (conflicts.size == 1) {
+                                    "1 overlap needs review"
+                                } else {
+                                    "${conflicts.size} overlaps need review"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (entries.isEmpty()) {
+                    Text(
+                        "No time has been logged yet. Add an entry for work completed " +
+                            "without the timer.",
+                        modifier = Modifier.padding(vertical = 24.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp),
+                    ) {
+                        items(
+                            entries.sortedByDescending(TimeEntry::startedAt),
+                            key = { it.id.value },
+                        ) { entry ->
+                            val entryConflicts = conflicts.filter { conflict ->
+                                conflict.firstEntryId == entry.id ||
+                                    conflict.secondEntryId == entry.id
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 72.dp)
+                                    .testTag("time-entry-${entry.id.value}")
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        formatTimeEntryRange(entry),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Text(
+                                        buildString {
+                                            append(
+                                                entry.stoppedAt?.let { stoppedAt ->
+                                                    formatLoggedDuration(
+                                                        Duration.between(
+                                                            entry.startedAt,
+                                                            stoppedAt,
+                                                        ),
+                                                    )
+                                                } ?: "Running",
+                                            )
+                                            entry.note.takeIf(String::isNotBlank)?.let { note ->
+                                                append(" • ")
+                                                append(note)
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                    )
+                                    if (entryConflicts.isNotEmpty()) {
+                                        Text(
+                                            if (entryConflicts.size == 1) {
+                                                "Overlaps another entry"
+                                            } else {
+                                                "Overlaps ${entryConflicts.size} entries"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                                if (entry.stoppedAt != null) {
+                                    IconButton(
+                                        onClick = {
+                                            editingEntryId = entry.id.value
+                                            showEditor = true
+                                        },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("edit-time-entry-${entry.id.value}"),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Edit,
+                                            contentDescription = "Edit time entry",
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onDelete(entry.id) },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("delete-time-entry-${entry.id.value}"),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Delete,
+                                            contentDescription = "Delete time entry",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                ) {
+                    Text("Done")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeEntryEditor(
+    entry: TimeEntry?,
+    onCancel: () -> Unit,
+    onSave: (TimeEntryEdit) -> Unit,
+) {
+    val zone = remember { ZoneId.systemDefault() }
+    val initialStart = remember(entry?.id?.value) {
+        entry
+            ?.startedAt
+            ?.atZone(zone)
+            ?: java.time.ZonedDateTime.now(zone)
+                .withSecond(0)
+                .withNano(0)
+                .minusHours(1)
+    }
+    val initialDurationMinutes = remember(entry?.id?.value) {
+        entry
+            ?.stoppedAt
+            ?.let { Duration.between(entry.startedAt, it).toMinutes() }
+            ?.coerceAtLeast(1)
+            ?: 60
+    }
+    var dateEpochDay by rememberSaveable(entry?.id?.value) {
+        mutableStateOf(initialStart.toLocalDate().toEpochDay())
+    }
+    var startTimeText by rememberSaveable(entry?.id?.value) {
+        mutableStateOf(initialStart.toLocalTime().format(TIME_ENTRY_TIME_FORMAT))
+    }
+    var durationText by rememberSaveable(entry?.id?.value) {
+        mutableStateOf(initialDurationMinutes.toString())
+    }
+    var note by rememberSaveable(entry?.id?.value) {
+        mutableStateOf(entry?.note.orEmpty())
+    }
+    var showDatePicker by rememberSaveable(entry?.id?.value) { mutableStateOf(false) }
+
+    val date = LocalDate.ofEpochDay(dateEpochDay)
+    val startTime = runCatching {
+        LocalTime.parse(startTimeText, STRICT_TIME_ENTRY_TIME_FORMAT)
+    }.getOrNull()
+    val durationMinutes = durationText.toLongOrNull()
+    val validationMessage = when {
+        startTime == null -> "Use a 24-hour start time such as 09:30"
+        durationMinutes == null || durationMinutes !in 1..MAX_MANUAL_DURATION_MINUTES ->
+            "Use a duration from 1 to $MAX_MANUAL_DURATION_MINUTES minutes"
+        note.length > MAX_TIME_ENTRY_NOTE_LENGTH ->
+            "Keep the note under $MAX_TIME_ENTRY_NOTE_LENGTH characters"
+        else -> null
+    }
+    val edit = if (validationMessage == null) {
+        val startedAt = date
+            .atTime(checkNotNull(startTime))
+            .atZone(zone)
+            .toInstant()
+        TimeEntryEdit(
+            startedAt = startedAt,
+            stoppedAt = startedAt.plus(Duration.ofMinutes(checkNotNull(durationMinutes))),
+            note = note.trim(),
+        )
+    } else {
+        null
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+    ) {
+        Text(
+            if (entry == null) "Add time entry" else "Edit time entry",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(
+            "Times use ${zone.id}. Overlaps are kept visible until you correct them.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(
+            onClick = { showDatePicker = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("time-entry-date"),
+        ) {
+            Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(date.format(TIME_ENTRY_DATE_FORMAT))
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedTextField(
+                value = startTimeText,
+                onValueChange = { startTimeText = it.take(5) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("time-entry-start"),
+                label = { Text("Start (24-hour)") },
+                placeholder = { Text("09:30") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = durationText,
+                onValueChange = {
+                    durationText = it.filter(Char::isDigit).take(5)
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("time-entry-duration"),
+                label = { Text("Minutes") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it.take(MAX_TIME_ENTRY_NOTE_LENGTH + 1) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("time-entry-note"),
+            label = { Text("Note (optional)") },
+            supportingText = {
+                Text(
+                    validationMessage.takeIf {
+                        note.length > MAX_TIME_ENTRY_NOTE_LENGTH
+                    } ?: "${note.length}/$MAX_TIME_ENTRY_NOTE_LENGTH",
+                )
+            },
+            isError = note.length > MAX_TIME_ENTRY_NOTE_LENGTH,
+            minLines = 2,
+            maxLines = 4,
+        )
+        validationMessage
+            ?.takeUnless { note.length > MAX_TIME_ENTRY_NOTE_LENGTH }
+            ?.let { message ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                        .testTag("time-entry-error"),
+                )
+            }
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = { edit?.let(onSave) },
+            enabled = edit != null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("save-time-entry"),
+        ) {
+            Text(if (entry == null) "Add entry" else "Save entry")
+        }
+        TextButton(
+            onClick = onCancel,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+        ) {
+            Text("Cancel")
+        }
+    }
+
+    if (showDatePicker) {
+        val selectedDateMillis = date
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDateMillis,
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selected ->
+                            dateEpochDay = Instant.ofEpochMilli(selected)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                                .toEpochDay()
+                        }
+                        showDatePicker = false
+                    },
+                ) {
+                    Text("Use date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
 @Composable
 private fun TaskChecklistRow(
     taskId: TaskId,
@@ -1425,7 +2599,9 @@ private fun TaskChecklistRow(
         }
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = {
+                text = it.take(MAX_CHECKLIST_ITEM_LENGTH + 1)
+            },
             modifier = Modifier
                 .weight(1f)
                 .testTag("checklist-item-${item.id}"),
@@ -1489,7 +2665,7 @@ private fun SaveStatus(
     }
 }
 
-private fun Task.toTaskEdit(): TaskEdit = TaskEdit(
+private fun Task.toTaskEdit(reminder: Reminder?): TaskEdit = TaskEdit(
     title = title,
     description = description,
     projectId = projectId,
@@ -1497,14 +2673,28 @@ private fun Task.toTaskEdit(): TaskEdit = TaskEdit(
     due = due,
     recurrence = recurrence,
     estimate = estimate,
+    milestoneId = milestoneId,
+    reminder = reminder,
+)
+
+private fun reminderLeadSeconds(task: Task, reminder: Reminder?): Long? {
+    val due = task.due ?: return null
+    val triggerAt = reminder?.triggerAt ?: return null
+    return Duration.between(triggerAt.instant, due.instant).seconds
+}
+
+private data class ReminderPreset(
+    val leadSeconds: Long?,
+    val label: String,
+    val testTag: String,
 )
 
 private fun Priority.readableName(): String = name
-    .lowercase()
+    .lowercase(Locale.UK)
     .replaceFirstChar(Char::uppercase)
 
 private fun RecurrenceFrequency.readableName(): String = name
-    .lowercase()
+    .lowercase(Locale.UK)
     .replaceFirstChar(Char::uppercase)
 
 private fun RecurrenceFrequency.intervalUnit(interval: Int): String {
@@ -1518,7 +2708,7 @@ private fun RecurrenceFrequency.intervalUnit(interval: Int): String {
 }
 
 private fun DayOfWeek.shortName(): String =
-    name.lowercase().take(3).replaceFirstChar(Char::uppercase)
+    name.lowercase(Locale.UK).take(3).replaceFirstChar(Char::uppercase)
 
 private fun formatRecurrence(rule: RecurrenceRule): String {
     val cadence = if (rule.interval == 1) {
@@ -1561,12 +2751,67 @@ private fun formatEstimate(minutes: Long): String = when {
     else -> "${minutes / 60} hr ${minutes % 60} min"
 }
 
+private fun formatLoggedDuration(duration: Duration): String {
+    val safe = duration.coerceAtLeast(Duration.ZERO)
+    val hours = safe.toHours()
+    val minutes = safe.toMinutesPart()
+    return when {
+        hours == 0L -> "$minutes min"
+        minutes == 0 -> "$hours hr"
+        else -> "$hours hr $minutes min"
+    }
+}
+
+private fun formatTimeEntryRange(entry: TimeEntry): String {
+    val zone = ZoneId.systemDefault()
+    val start = entry.startedAt.atZone(zone)
+    val stoppedAt = entry.stoppedAt
+    if (stoppedAt == null) {
+        return "${start.format(TIME_ENTRY_DATE_FORMAT)} • " +
+            "${start.format(TIME_ENTRY_TIME_FORMAT)}–running"
+    }
+    val end = stoppedAt.atZone(zone)
+    return if (start.toLocalDate() == end.toLocalDate()) {
+        "${start.format(TIME_ENTRY_DATE_FORMAT)} • " +
+            "${start.format(TIME_ENTRY_TIME_FORMAT)}–${end.format(TIME_ENTRY_TIME_FORMAT)}"
+    } else {
+        "${start.format(TIME_ENTRY_DATE_TIME_FORMAT)}–" +
+            end.format(TIME_ENTRY_DATE_TIME_FORMAT)
+    }
+}
+
 private const val MAX_TASK_TITLE_LENGTH = 240
 private const val MAX_TASK_DESCRIPTION_LENGTH = 20_000
 private const val MAX_CHECKLIST_ITEM_LENGTH = 500
 private const val MAX_TAG_NAME_LENGTH = 64
+private const val MAX_TASK_DEPENDENCIES = 100
+private const val MAX_DEPENDENCY_QUERY_LENGTH = 500
+private const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
+private const val MAX_MANUAL_DURATION_MINUTES = 10_080L
+private val MILESTONE_DATE_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEE, d MMM", Locale.UK)
 private const val MAX_RECURRENCE_INTERVAL = 999
 private const val MAX_RECURRENCE_COUNT = 9_999
 private const val AUTO_SAVE_DELAY_MILLIS = 650L
-private val DUE_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM yyyy")
+private val DUE_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.UK)
+private val REMINDER_DATE_TIME_FORMAT =
+    DateTimeFormatter.ofPattern("EEE, d MMM, HH:mm", Locale.UK)
+private val TIME_ENTRY_DATE_FORMAT =
+    DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.UK)
+private val TIME_ENTRY_DATE_TIME_FORMAT =
+    DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.UK)
+private val TIME_ENTRY_TIME_FORMAT =
+    DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
+private val STRICT_TIME_ENTRY_TIME_FORMAT =
+    DateTimeFormatterBuilder()
+        .appendPattern("HH:mm")
+        .toFormatter(Locale.UK)
+        .withResolverStyle(ResolverStyle.STRICT)
 private val ESTIMATE_OPTIONS = listOf<Long?>(null, 15, 30, 45, 60, 120, 180, 240)
+private val REMINDER_PRESETS = listOf(
+    ReminderPreset(null, "None", "none"),
+    ReminderPreset(0, "At time", "at-time"),
+    ReminderPreset(Duration.ofMinutes(15).seconds, "15 min before", "15-minutes"),
+    ReminderPreset(Duration.ofHours(1).seconds, "1 hr before", "1-hour"),
+    ReminderPreset(Duration.ofDays(1).seconds, "1 day before", "1-day"),
+)

@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 
 enum class StorageMode {
     LOCAL,
@@ -95,12 +96,39 @@ data class Member(
 
 data class WorkflowStatus(
     val id: WorkflowStatusId,
-    val projectId: ProjectId,
+    val projectId: ProjectId?,
     val name: String,
     val semanticStatus: SemanticStatus,
     val rank: String,
     val archivedAt: Instant? = null,
-)
+) {
+    companion object {
+        fun defaultId(
+            projectId: ProjectId?,
+            semanticStatus: SemanticStatus,
+        ): WorkflowStatusId = WorkflowStatusId(
+            "workflow:${projectId?.value ?: "inbox"}:" +
+                semanticStatus.name.lowercase(Locale.ROOT),
+        )
+
+        fun defaults(projectId: ProjectId?): List<WorkflowStatus> =
+            listOf(
+                SemanticStatus.BACKLOG to "Backlog",
+                SemanticStatus.PLANNED to "Planned",
+                SemanticStatus.STARTED to "In progress",
+                SemanticStatus.BLOCKED to "Blocked",
+                SemanticStatus.COMPLETED to "Done",
+            ).mapIndexed { index, (semanticStatus, name) ->
+                WorkflowStatus(
+                    id = defaultId(projectId, semanticStatus),
+                    projectId = projectId,
+                    name = name,
+                    semanticStatus = semanticStatus,
+                    rank = "a$index",
+                )
+            }
+    }
+}
 
 data class Project(
     val id: ProjectId,
@@ -159,6 +187,7 @@ data class Task(
     val milestoneId: MilestoneId? = null,
     val tagIds: Set<TagId> = emptySet(),
     val checklist: List<ChecklistItem> = emptyList(),
+    val dependencyIds: Set<TaskId> = emptySet(),
     val blockedBy: Set<TaskId> = emptySet(),
     val completedAt: Instant? = null,
     val deletedAt: Instant? = null,
@@ -188,7 +217,11 @@ data class Reminder(
     val taskId: TaskId,
     val triggerAt: ZonedMoment,
     val precise: Boolean,
-)
+) {
+    companion object {
+        fun primaryId(taskId: TaskId): String = "reminder:${taskId.value}"
+    }
+}
 
 data class Attachment(
     val id: AttachmentId,
@@ -225,9 +258,63 @@ data class Template(
     val id: TemplateId,
     val workspaceId: WorkspaceId,
     val name: String,
-    val project: Project,
-    val tasks: List<Task>,
-    val milestones: List<Milestone>,
+    val projectName: String,
+    val projectSummary: String,
+    val projectDueOffsetDays: Long?,
+    val workflowStatuses: List<TemplateWorkflowStatus>,
+    val milestones: List<TemplateMilestone>,
+    val tasks: List<TemplateTask>,
+    val revision: Revision,
+)
+
+data class TemplateWorkflowStatus(
+    val key: String,
+    val name: String,
+    val semanticStatus: SemanticStatus,
+    val rank: String,
+)
+
+data class TemplateMilestone(
+    val key: String,
+    val name: String,
+    val dueOffsetDays: Long?,
+)
+
+data class RelativeZonedMoment(
+    val dayOffset: Long,
+    val secondOfDay: Int,
+    val zoneId: String,
+)
+
+data class TemplateRecurrence(
+    val frequency: RecurrenceFrequency,
+    val interval: Int,
+    val weekdays: Set<java.time.DayOfWeek>,
+    val count: Int?,
+    val endOffsetDays: Long?,
+)
+
+data class TemplateChecklistItem(
+    val key: String,
+    val text: String,
+    val rank: String,
+)
+
+data class TemplateTask(
+    val key: String,
+    val parentKey: String?,
+    val statusKey: String,
+    val title: String,
+    val description: String,
+    val priority: Priority,
+    val start: RelativeZonedMoment?,
+    val due: RelativeZonedMoment?,
+    val recurrence: TemplateRecurrence?,
+    val estimateSeconds: Long?,
+    val milestoneKey: String?,
+    val tagNames: Set<String>,
+    val checklist: List<TemplateChecklistItem>,
+    val dependencyKeys: Set<String>,
 )
 
 data class SavedView(

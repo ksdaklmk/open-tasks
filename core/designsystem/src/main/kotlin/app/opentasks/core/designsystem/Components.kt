@@ -49,6 +49,7 @@ import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.Task
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun SectionHeader(
@@ -93,7 +94,8 @@ fun SyncHealthChip(
         SyncState.LocalOnly -> Triple("On this device", Icons.Rounded.CloudOff, false)
         SyncState.Synced -> Triple("Up to date", Icons.Rounded.CloudDone, false)
         is SyncState.Pending -> Triple("${state.operations} changes pending", Icons.Rounded.Schedule, true)
-        is SyncState.Running -> Triple("Syncing ${state.phase.name.lowercase()}", Icons.Rounded.Schedule, true)
+        is SyncState.Running ->
+            Triple("Syncing ${state.phase.name.lowercase(Locale.UK)}", Icons.Rounded.Schedule, true)
         is SyncState.Blocked -> Triple("Sync needs attention", Icons.Rounded.CloudOff, true)
     }
     Surface(
@@ -385,4 +387,4 @@ fun SemanticStatus.readableName(): String = when (this) {
     SemanticStatus.COMPLETED -> "Done"
 }
 
-private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM")
+private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.UK)

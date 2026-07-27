@@ -111,12 +111,34 @@ adb shell monkey -p app.opentasks 1
 
 Expected: the app opens with the pre-existing workspace intact.
 
-- [ ] Run all currently affected suites:
+- [ ] Save a named recovery snapshot of the verified workspace, stop the
+normal emulator, and start the AVD as the sole ADB-connected disposable
+instance:
+
+```bash
+adb emu avd snapshot save train0_task02_recovered
+adb emu kill
+emulator -avd Pixel_10_Pro_Fold \
+  -read-only -no-snapshot-save -no-snapshot-load -no-window
+```
+
+Run the application suite only on that disposable instance:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest --stacktrace
+```
+
+Expected: exit `0`. AGP may uninstall `app.opentasks` only from the disposable
+instance. Stop it, restart the normal emulator from the named recovery
+snapshot, and first confirm that the packaged Data, Tasks, Projects, Schedule,
+and More instrumentation manifests target their isolated module test packages
+rather than `app.opentasks`.
+
+- [ ] Run the remaining affected suites on the restored normal emulator:
 
 ```bash
 ./gradlew \
   :core:data:connectedDebugAndroidTest \
-  :app:connectedDebugAndroidTest \
   :feature:tasks:connectedDebugAndroidTest \
   :feature:projects:connectedDebugAndroidTest \
   :feature:schedule:connectedDebugAndroidTest \
@@ -124,7 +146,8 @@ Expected: the app opens with the pre-existing workspace intact.
   --stacktrace
 ```
 
-Expected: exit `0`; no test clears the installed user workspace.
+Expected: exit `0`; the installed `app.opentasks` package, encrypted database,
+and user workspace retain their pre-suite identities.
 
 - [ ] Cold-stop, relaunch, and manually verify Home, Tasks, Projects, Schedule,
 More, Quick Add, a project template, and a manual time entry. Record emulator

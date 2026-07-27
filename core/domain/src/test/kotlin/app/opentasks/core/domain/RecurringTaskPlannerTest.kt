@@ -76,6 +76,7 @@ class RecurringTaskPlannerTest {
         assertEquals(listOf(false), firstResult.checklist.map { it.completed })
         assertNotEquals(first.checklist.single().id, firstResult.checklist.single().id)
         assertEquals(firstResult.checklist.single().id, redelivered.checklist.single().id)
+        assertEquals(emptySet<TaskId>(), firstResult.dependencyIds)
         assertEquals(emptySet<TaskId>(), firstResult.blockedBy)
         assertNull(firstResult.completedAt)
         assertFalse(firstResult.isCompleted)
@@ -133,6 +134,7 @@ class RecurringTaskPlannerTest {
                 rank = "a0",
             ),
         ),
+        dependencyIds = setOf(TaskId("blocking-task")),
         blockedBy = setOf(TaskId("blocking-task")),
         completedAt = Instant.parse("2026-07-26T03:30:00Z"),
         revision = revision,

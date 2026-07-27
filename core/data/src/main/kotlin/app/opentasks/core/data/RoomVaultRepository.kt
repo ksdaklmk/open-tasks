@@ -4,11 +4,13 @@ import androidx.room.withTransaction
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.ProjectEntity
+import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SyncOperationEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskEntity
 import app.opentasks.core.data.db.TaskTagEntity
+import app.opentasks.core.data.db.TemplateEntity
 import app.opentasks.core.data.db.TimeEntryEntity
 import app.opentasks.core.data.db.TombstoneEntity
 import app.opentasks.core.data.db.VaultDatabase
@@ -22,22 +24,29 @@ import app.opentasks.core.data.db.tagEntities
 import app.opentasks.core.data.db.toEntity
 import app.opentasks.core.data.db.toModel
 import app.opentasks.core.domain.CommandResult
+import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
+import app.opentasks.core.domain.ProjectTemplatePlanner
 import app.opentasks.core.domain.SearchNormalizer
 import app.opentasks.core.domain.TrashPolicy
+import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.ActiveTimerSnapshot
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
+import app.opentasks.core.model.Milestone
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
@@ -46,10 +55,18 @@ import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskDependency
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.Template
+import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.TimeEntryConflict
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.WorkflowStatus
+import app.opentasks.core.model.WorkflowStatusId
+import app.opentasks.core.model.ZonedMoment
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +93,8 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
+import java.util.Base64
 import java.util.UUID
 
 class RoomVaultRepository(
@@ -100,6 +119,11 @@ class RoomVaultRepository(
         mutableWorkspace
             .map { snapshot -> snapshot.tasks.firstOrNull { it.id == id } }
             .distinctUntilChanged()
+
+    override suspend fun currentWorkspace(): WorkspaceSnapshot {
+        ready.await()
+        return mutableWorkspace.value
+    }
 
     init {
         repositoryScope.launch {
@@ -126,6 +150,23 @@ class RoomVaultRepository(
                 is DomainCommand.RestoreProject -> restoreProject(command)
                 is DomainCommand.ArchiveProject -> archiveProject(command)
                 is DomainCommand.RestoreArchivedProject -> restoreArchivedProject(command)
+                is DomainCommand.CreateWorkflowStatus -> createWorkflowStatus(command)
+                is DomainCommand.RenameWorkflowStatus -> renameWorkflowStatus(command)
+                is DomainCommand.MoveWorkflowStatus -> moveWorkflowStatus(command)
+                is DomainCommand.ArchiveWorkflowStatus -> archiveWorkflowStatus(command)
+                is DomainCommand.RestoreArchivedWorkflowStatus ->
+                    restoreArchivedWorkflowStatus(command)
+                is DomainCommand.RestoreWorkflowStatuses -> restoreWorkflowStatuses(command)
+                is DomainCommand.RemoveWorkflowStatus -> removeWorkflowStatus(command)
+                is DomainCommand.CreateMilestone -> createMilestone(command)
+                is DomainCommand.UpdateMilestone -> updateMilestone(command)
+                is DomainCommand.DeleteMilestone -> deleteMilestone(command)
+                is DomainCommand.RestoreMilestone -> restoreMilestone(command)
+                is DomainCommand.CaptureProjectTemplate -> captureProjectTemplate(command)
+                is DomainCommand.InstantiateProjectTemplate ->
+                    instantiateProjectTemplate(command)
+                is DomainCommand.DeleteTemplate -> deleteTemplate(command)
+                is DomainCommand.RestoreTemplate -> restoreTemplate(command)
                 is DomainCommand.CreateTask -> createTask(command)
                 is DomainCommand.RenameTask -> updateTask(command.taskId) { task ->
                     val title = command.title.trim()
@@ -133,29 +174,28 @@ class RoomVaultRepository(
                     task.copy(title = title, revision = nextRevision(task))
                 }
                 is DomainCommand.UpdateTask -> updateTaskDetails(command)
+                is DomainCommand.SetTaskReminder -> setTaskReminder(command)
                 is DomainCommand.AddChecklistItem -> addChecklistItem(command)
                 is DomainCommand.UpdateChecklistItem -> updateChecklistItem(command)
                 is DomainCommand.DeleteChecklistItem -> deleteChecklistItem(command)
                 is DomainCommand.RestoreChecklistItem -> restoreChecklistItem(command)
                 is DomainCommand.SetTaskTag -> setTaskTag(command)
                 is DomainCommand.CreateAndAssignTag -> createAndAssignTag(command)
+                is DomainCommand.SetTaskDependency -> setTaskDependency(command)
                 is DomainCommand.ChangeTaskStatus -> changeTaskStatus(command)
                 is DomainCommand.RestoreTaskStatus -> restoreTaskStatus(command)
                 is DomainCommand.CompleteTask -> completeTask(command)
-                is DomainCommand.ReopenTask -> updateTask(command.taskId) { task ->
-                    task.copy(
-                        semanticStatus = SemanticStatus.PLANNED,
-                        statusId = OpenTasksFixtures.planned,
-                        completedAt = null,
-                        revision = nextRevision(task),
-                    )
-                }
+                is DomainCommand.ReopenTask -> reopenTask(command.taskId)
                 is DomainCommand.DeleteTask -> deleteTask(command)
                 is DomainCommand.RestoreTask -> restoreTask(command)
                 is DomainCommand.PermanentlyDeleteTask -> permanentlyDeleteTask(command)
                 is DomainCommand.PurgeExpiredTrash -> purgeExpiredTrash(command)
                 is DomainCommand.StartTimer -> startTimer(command)
                 DomainCommand.StopTimer -> stopTimer()
+                is DomainCommand.AddTimeEntry -> addTimeEntry(command)
+                is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
+                is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
+                is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
             }
         }
     }
@@ -224,12 +264,649 @@ class RoomVaultRepository(
             completedTasks = 0,
             totalTasks = 0,
         )
-        persistProject(
-            project = project,
-            revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
-            operationKind = "create",
-        )
+        val revision = Revision(deviceId, createdAt.toEpochMilli(), 0)
+        val statuses = WorkflowStatus.defaults(project.id)
+        database.withTransaction {
+            database.workspaceDao().upsertProject(project.toEntity(revision))
+            database.syncOperationDao().append(projectOperation(project, revision, "create"))
+            statuses.forEach { status ->
+                database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
+                database.syncOperationDao().append(
+                    workflowStatusOperation(status, revision, deleted = false),
+                )
+            }
+        }
         return CommandResult.Success("Project created")
+    }
+
+    private suspend fun captureProjectTemplate(
+        command: DomainCommand.CaptureProjectTemplate,
+    ): CommandResult {
+        val projectEntity = database.workspaceDao().getProjectById(command.projectId.value)
+        val project = projectEntity
+            ?.takeIf { it.archivedAtEpochMillis == null }
+            ?.toModel()
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Restore that project before saving it as a template.",
+            )
+        val name = command.name.trim()
+        validateTemplateName(name)?.let { return it }
+        if (database.workspaceDao().getTemplate(command.templateId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That template identifier is already in use.",
+            )
+        }
+        if (
+            database.workspaceDao().templateCount(OpenTasksFixtures.workspaceId.value) >=
+            MAX_TEMPLATES
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.TEMPLATE_LIMIT_REACHED,
+                "A workspace can contain up to $MAX_TEMPLATES templates.",
+            )
+        }
+        val snapshot = mutableWorkspace.value
+        val projectTasks = snapshot.tasks.filter {
+            it.projectId == project.id && it.deletedAt == null && !it.isCompleted
+        }
+        if (projectTasks.size > ProjectTemplatePlanner.MAX_TEMPLATE_TASKS) {
+            return CommandResult.Rejected(
+                RejectionReason.TEMPLATE_TASK_LIMIT_REACHED,
+                "A template can contain up to ${ProjectTemplatePlanner.MAX_TEMPLATE_TASKS} tasks.",
+            )
+        }
+        val revision = Revision(deviceId, now().toEpochMilli(), 0)
+        val template = try {
+            ProjectTemplatePlanner.capture(
+                templateId = command.templateId,
+                templateName = name,
+                project = project,
+                workflowStatuses = snapshot.workflowStatuses,
+                milestones = snapshot.milestones,
+                tasks = snapshot.tasks,
+                tags = snapshot.tags,
+                revision = revision,
+                fallbackAnchor = LocalDate.ofInstant(now(), zoneId()),
+            )
+        } catch (_: IllegalArgumentException) {
+            return CommandResult.Rejected(
+                RejectionReason.TEMPLATE_DATE_RANGE_TOO_LARGE,
+                "Template dates must fit within 100 years.",
+            )
+        }
+        val entity = try {
+            template.toTemplateEntity()
+        } catch (_: IllegalArgumentException) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This project contains too much template content to save safely.",
+            )
+        }
+        database.withTransaction {
+            database.workspaceDao().upsertTemplate(entity)
+            database.syncOperationDao().append(
+                templateOperation(template, revision),
+            )
+        }
+        return CommandResult.Success(
+            message = "Template saved",
+            undo = DomainCommand.DeleteTemplate(template.id),
+        )
+    }
+
+    private suspend fun instantiateProjectTemplate(
+        command: DomainCommand.InstantiateProjectTemplate,
+    ): CommandResult {
+        val templateEntity = database.workspaceDao().getTemplate(command.templateId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Template no longer exists.",
+            )
+        val template = runCatching { TemplatePayloadCodec.decode(templateEntity) }
+            .getOrElse {
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "This template is damaged and cannot be used.",
+                )
+            }
+        val projectName = command.projectName.trim()
+        validateProject(projectName, template.projectSummary)?.let { return it }
+        validateUniqueActiveProjectName(projectName)?.let { return it }
+        if (database.workspaceDao().getProjectById(command.projectId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That project identifier is already in use.",
+            )
+        }
+
+        val revision = Revision(deviceId, now().toEpochMilli(), 0)
+        val created = runCatching {
+            ProjectTemplatePlanner.instantiate(
+                template = template,
+                projectId = command.projectId,
+                projectName = projectName,
+                anchorDate = command.anchorDate,
+                revision = revision,
+            )
+        }.getOrElse {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This template contains an invalid relative date.",
+            )
+        }
+        val requestedTagNames = created.tagNamesByTaskId.values.flatten()
+            .distinctBy { it.lowercase(Locale.ROOT) }
+        val tagsByName = linkedMapOf<String, Tag>()
+        val newTags = mutableListOf<Tag>()
+        requestedTagNames.forEach { tagName ->
+            val existing = database.workspaceDao().findTagByName(
+                OpenTasksFixtures.workspaceId.value,
+                tagName,
+            )?.toModel()
+            val tag = existing ?: Tag(
+                id = TagId(UUID.randomUUID().toString()),
+                workspaceId = template.workspaceId,
+                name = tagName,
+            ).also(newTags::add)
+            tagsByName[tagName.lowercase(Locale.ROOT)] = tag
+        }
+        val tasks = created.tasks.map { task ->
+            task.copy(
+                tagIds = created.tagNamesByTaskId[task.id].orEmpty()
+                    .mapTo(linkedSetOf()) { tagName ->
+                        tagsByName.getValue(tagName.lowercase(Locale.ROOT)).id
+                    },
+            )
+        }
+
+        database.withTransaction {
+            database.workspaceDao().upsertProject(created.project.toEntity(revision))
+            database.syncOperationDao().append(
+                projectOperation(created.project, revision, "template_create"),
+            )
+            created.workflowStatuses.forEach { status ->
+                database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
+                database.syncOperationDao().append(
+                    workflowStatusOperation(status, revision, deleted = false),
+                )
+            }
+            created.milestones.forEach { milestone ->
+                database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
+                database.syncOperationDao().append(
+                    milestoneOperation(milestone, revision, deleted = false),
+                )
+            }
+            newTags.forEach { tag ->
+                database.workspaceDao().upsertTag(tag.toEntity())
+                database.syncOperationDao().append(tagOperation(tag, revision))
+            }
+            tasks.forEach { task ->
+                database.taskDao().upsert(task.toEntity())
+                database.workspaceDao().insertChecklistItems(task.checklistEntities())
+                task.tagEntities().forEach { database.workspaceDao().upsertTaskTag(it) }
+                task.dependencyEntities().forEach {
+                    database.workspaceDao().upsertDependency(it)
+                }
+                database.syncOperationDao().append(
+                    taskOperation(task, "template_create"),
+                )
+            }
+        }
+        return CommandResult.Success("Project created from template")
+    }
+
+    private suspend fun deleteTemplate(
+        command: DomainCommand.DeleteTemplate,
+    ): CommandResult {
+        val entity = database.workspaceDao().getTemplate(command.templateId.value)
+            ?: return CommandResult.Success("Template is already deleted")
+        val template = runCatching { TemplatePayloadCodec.decode(entity) }.getOrNull()
+        val revision = nextTemplateRevision(entity)
+        database.withTransaction {
+            database.workspaceDao().deleteTemplate(entity.id)
+            database.syncOperationDao().append(
+                templateDeleteOperation(command.templateId, revision),
+            )
+        }
+        return CommandResult.Success(
+            message = if (template == null) {
+                "Damaged template deleted"
+            } else {
+                "Template deleted"
+            },
+            undo = template?.let {
+                DomainCommand.RestoreTemplate(it.copy(revision = revision))
+            },
+        )
+    }
+
+    private suspend fun restoreTemplate(
+        command: DomainCommand.RestoreTemplate,
+    ): CommandResult {
+        if (database.workspaceDao().getTemplate(command.template.id.value) != null) {
+            return CommandResult.Success("Template restored")
+        }
+        val name = command.template.name.trim()
+        validateTemplateName(name)?.let { return it }
+        if (command.template.workspaceId != OpenTasksFixtures.workspaceId) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That template belongs to a different workspace.",
+            )
+        }
+        if (
+            database.workspaceDao().templateCount(OpenTasksFixtures.workspaceId.value) >=
+            MAX_TEMPLATES
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.TEMPLATE_LIMIT_REACHED,
+                "A workspace can contain up to $MAX_TEMPLATES templates.",
+            )
+        }
+        val revision = Revision(
+            deviceId = deviceId,
+            wallTimeMillis = maxOf(
+                command.template.revision.wallTimeMillis + 1,
+                now().toEpochMilli(),
+            ),
+            logicalCounter = command.template.revision.logicalCounter + 1,
+        )
+        val restored = command.template.copy(name = name, revision = revision)
+        val entity = runCatching { restored.toTemplateEntity() }.getOrElse {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This template contains invalid or oversized content.",
+            )
+        }
+        database.withTransaction {
+            database.workspaceDao().upsertTemplate(entity)
+            database.syncOperationDao().append(
+                templateOperation(restored, revision),
+            )
+        }
+        return CommandResult.Success(
+            message = "Template restored",
+            undo = DomainCommand.DeleteTemplate(restored.id),
+        )
+    }
+
+    private suspend fun createWorkflowStatus(
+        command: DomainCommand.CreateWorkflowStatus,
+    ): CommandResult {
+        val project = database.workspaceDao().getProjectById(command.projectId.value)
+        if (project == null || project.archivedAtEpochMillis != null) {
+            return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Restore that project before editing its workflow.",
+            )
+        }
+        if (database.workspaceDao().getWorkflowStatus(command.statusId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That workflow status identifier is already in use.",
+            )
+        }
+        val name = command.name.trim()
+        validateWorkflowStatusName(name, command.projectId)?.let { return it }
+        val projectStatuses = database.workspaceDao()
+            .getWorkflowStatuses(command.projectId.value)
+            .map(WorkflowStatusEntity::toModel)
+        if (projectStatuses.count { it.archivedAt == null } >= MAX_WORKFLOW_STATUSES) {
+            return CommandResult.Rejected(
+                RejectionReason.WORKFLOW_STATUS_LIMIT_REACHED,
+                "A project can have up to $MAX_WORKFLOW_STATUSES active workflow statuses.",
+            )
+        }
+        val status = WorkflowStatus(
+            id = command.statusId,
+            projectId = command.projectId,
+            name = name,
+            semanticStatus = command.semanticStatus,
+            rank = rankAfter(projectStatuses.maxByOrNull(WorkflowStatus::rank)?.rank),
+        )
+        val revision = workflowRevision()
+        database.withTransaction {
+            database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
+            database.syncOperationDao().append(
+                workflowStatusOperation(status, revision, deleted = false),
+            )
+        }
+        return CommandResult.Success(
+            message = "$name added",
+            undo = DomainCommand.RemoveWorkflowStatus(status.id),
+        )
+    }
+
+    private suspend fun renameWorkflowStatus(
+        command: DomainCommand.RenameWorkflowStatus,
+    ): CommandResult {
+        val entity = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Workflow status no longer exists.",
+            )
+        val original = entity.toModel()
+        if (original.archivedAt != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Restore that workflow status before renaming it.",
+            )
+        }
+        val name = command.name.trim()
+        validateWorkflowStatusName(name, original.projectId, original.id)?.let { return it }
+        if (name == original.name) return CommandResult.Success("Workflow status is up to date")
+        persistWorkflowStatuses(listOf(original.copy(name = name)), listOf(entity))
+        return CommandResult.Success(
+            message = "Workflow status renamed",
+            undo = DomainCommand.RestoreWorkflowStatuses(listOf(original)),
+        )
+    }
+
+    private suspend fun moveWorkflowStatus(
+        command: DomainCommand.MoveWorkflowStatus,
+    ): CommandResult {
+        val entity = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Workflow status no longer exists.",
+            )
+        val original = entity.toModel()
+        if (original.archivedAt != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Restore that workflow status before reordering it.",
+            )
+        }
+        val activeEntities = database.workspaceDao()
+            .getWorkflowStatuses(entity.projectId)
+            .filter { it.archivedAtEpochMillis == null }
+            .sortedBy(WorkflowStatusEntity::rank)
+        val index = activeEntities.indexOfFirst { it.id == entity.id }
+        val otherIndex = when (command.direction) {
+            WorkflowMoveDirection.EARLIER -> index - 1
+            WorkflowMoveDirection.LATER -> index + 1
+        }
+        val otherEntity = activeEntities.getOrNull(otherIndex)
+            ?: return CommandResult.Success("Workflow order is unchanged")
+        val other = otherEntity.toModel()
+        persistWorkflowStatuses(
+            statuses = listOf(
+                original.copy(rank = other.rank),
+                other.copy(rank = original.rank),
+            ),
+            previousEntities = listOf(entity, otherEntity),
+        )
+        return CommandResult.Success(
+            message = "Workflow reordered",
+            undo = DomainCommand.RestoreWorkflowStatuses(listOf(original, other)),
+        )
+    }
+
+    private suspend fun archiveWorkflowStatus(
+        command: DomainCommand.ArchiveWorkflowStatus,
+    ): CommandResult {
+        val entity = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Workflow status no longer exists.",
+            )
+        val original = entity.toModel()
+        if (original.archivedAt != null) {
+            return CommandResult.Success("Workflow status is already archived")
+        }
+        val alternatives = database.workspaceDao()
+            .getWorkflowStatuses(entity.projectId)
+            .count {
+                it.archivedAtEpochMillis == null &&
+                    it.semanticStatus == original.semanticStatus.name
+            }
+        if (alternatives <= 1) {
+            return CommandResult.Rejected(
+                RejectionReason.LAST_SEMANTIC_WORKFLOW_STATUS,
+                "Add another ${original.semanticStatus.readableCategory()} status before archiving this one.",
+            )
+        }
+        persistWorkflowStatuses(
+            statuses = listOf(original.copy(archivedAt = command.archivedAt)),
+            previousEntities = listOf(entity),
+        )
+        return CommandResult.Success(
+            message = "${original.name} archived",
+            undo = DomainCommand.RestoreWorkflowStatuses(listOf(original)),
+        )
+    }
+
+    private suspend fun restoreWorkflowStatuses(
+        command: DomainCommand.RestoreWorkflowStatuses,
+    ): CommandResult {
+        val currentEntities = command.statuses.map { restored ->
+            database.workspaceDao().getWorkflowStatus(restored.id.value)
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "A previous workflow status no longer exists.",
+                )
+        }
+        command.statuses.filter { it.archivedAt == null }.forEach { restored ->
+            validateWorkflowStatusName(
+                restored.name,
+                restored.projectId,
+                restored.id,
+            )?.let { return it }
+        }
+        persistWorkflowStatuses(command.statuses, currentEntities)
+        return CommandResult.Success("Workflow change undone")
+    }
+
+    private suspend fun restoreArchivedWorkflowStatus(
+        command: DomainCommand.RestoreArchivedWorkflowStatus,
+    ): CommandResult {
+        val entity = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Workflow status no longer exists.",
+            )
+        val original = entity.toModel()
+        val archivedAt =
+            original.archivedAt ?: return CommandResult.Success("Workflow status is already active")
+        validateWorkflowStatusName(original.name, original.projectId, original.id)?.let {
+            return it
+        }
+        persistWorkflowStatuses(
+            statuses = listOf(original.copy(archivedAt = null)),
+            previousEntities = listOf(entity),
+        )
+        return CommandResult.Success(
+            message = "${original.name} restored",
+            undo = DomainCommand.ArchiveWorkflowStatus(original.id, archivedAt),
+        )
+    }
+
+    private suspend fun removeWorkflowStatus(
+        command: DomainCommand.RemoveWorkflowStatus,
+    ): CommandResult {
+        val entity = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?: return CommandResult.Success("Workflow status is already removed")
+        if (database.workspaceDao().taskCountForStatus(entity.id) > 0) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Move tasks out of this status before removing it.",
+            )
+        }
+        val status = entity.toModel()
+        if (
+            status.archivedAt == null &&
+            database.workspaceDao().getWorkflowStatuses(entity.projectId).count {
+                it.semanticStatus == entity.semanticStatus &&
+                    it.archivedAtEpochMillis == null
+            } <= 1
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.LAST_SEMANTIC_WORKFLOW_STATUS,
+                "Keep at least one active ${status.semanticStatus.readableCategory()} status.",
+            )
+        }
+        val revision = nextWorkflowRevision(entity)
+        database.withTransaction {
+            database.workspaceDao().deleteWorkflowStatus(entity.id)
+            database.syncOperationDao().append(
+                workflowStatusOperation(status, revision, deleted = true),
+            )
+        }
+        return CommandResult.Success("Workflow status removed")
+    }
+
+    private suspend fun createMilestone(
+        command: DomainCommand.CreateMilestone,
+    ): CommandResult {
+        val project = database.workspaceDao().getProjectById(command.projectId.value)
+        if (project == null || project.archivedAtEpochMillis != null) {
+            return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Restore that project before adding milestones.",
+            )
+        }
+        if (database.workspaceDao().getMilestone(command.milestoneId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That milestone identifier is already in use.",
+            )
+        }
+        val name = command.name.trim()
+        validateMilestoneName(name, command.projectId)?.let { return it }
+        if (database.workspaceDao().getMilestones(project.id).size >= MAX_MILESTONES) {
+            return CommandResult.Rejected(
+                RejectionReason.MILESTONE_LIMIT_REACHED,
+                "A project can have up to $MAX_MILESTONES milestones.",
+            )
+        }
+        val milestone = Milestone(
+            id = command.milestoneId,
+            projectId = command.projectId,
+            name = name,
+            dueDate = command.dueDate,
+        )
+        val revision = milestoneRevision()
+        database.withTransaction {
+            database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
+            database.syncOperationDao().append(
+                milestoneOperation(milestone, revision, deleted = false),
+            )
+        }
+        return CommandResult.Success(
+            message = "$name added",
+            undo = DomainCommand.DeleteMilestone(milestone.id),
+        )
+    }
+
+    private suspend fun updateMilestone(
+        command: DomainCommand.UpdateMilestone,
+    ): CommandResult {
+        val entity = database.workspaceDao().getMilestone(command.milestoneId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Milestone no longer exists.",
+            )
+        val original = entity.toModel()
+        val name = command.name.trim()
+        validateMilestoneName(name, original.projectId, original.id)?.let { return it }
+        val updated = original.copy(
+            name = name,
+            dueDate = command.dueDate,
+            completedAt = command.completedAt,
+        )
+        if (updated == original) return CommandResult.Success("Milestone is up to date")
+        persistMilestone(updated, nextMilestoneRevision(entity), deleted = false)
+        return CommandResult.Success(
+            message = if (updated.completedAt != null && original.completedAt == null) {
+                "Milestone completed"
+            } else if (updated.completedAt == null && original.completedAt != null) {
+                "Milestone reopened"
+            } else {
+                "Milestone saved"
+            },
+            undo = DomainCommand.RestoreMilestone(original),
+        )
+    }
+
+    private suspend fun deleteMilestone(
+        command: DomainCommand.DeleteMilestone,
+    ): CommandResult {
+        val entity = database.workspaceDao().getMilestone(command.milestoneId.value)
+            ?: return CommandResult.Success("Milestone is already deleted")
+        val milestone = entity.toModel()
+        val assignedTasks = database.taskDao().getByMilestoneId(entity.id)
+            .mapNotNull { currentTask(TaskId(it.id)) }
+        val changedAt = now()
+        val updatedTasks = assignedTasks.map { task ->
+            task.copy(
+                milestoneId = null,
+                revision = nextRevision(task, changedAt),
+            )
+        }
+        val revision = nextMilestoneRevision(entity, changedAt)
+        database.withTransaction {
+            updatedTasks.forEach { task ->
+                database.taskDao().upsert(task.toEntity())
+                database.syncOperationDao().append(taskOperation(task, "milestone.clear"))
+            }
+            database.workspaceDao().deleteMilestone(entity.id)
+            database.syncOperationDao().append(
+                milestoneOperation(milestone, revision, deleted = true),
+            )
+        }
+        return CommandResult.Success(
+            message = "Milestone deleted",
+            undo = DomainCommand.RestoreMilestone(
+                milestone = milestone,
+                assignedTaskIds = assignedTasks.mapTo(linkedSetOf(), Task::id),
+            ),
+        )
+    }
+
+    private suspend fun restoreMilestone(
+        command: DomainCommand.RestoreMilestone,
+    ): CommandResult {
+        val project = database.workspaceDao()
+            .getProjectById(command.milestone.projectId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "The milestone project no longer exists.",
+            )
+        val existing = database.workspaceDao().getMilestone(command.milestone.id.value)
+        validateMilestoneName(
+            command.milestone.name,
+            command.milestone.projectId,
+            command.milestone.id,
+        )?.let { return it }
+        val revision = existing?.let(::nextMilestoneRevision) ?: milestoneRevision()
+        val changedAt = now()
+        val updatedTasks = buildList {
+            command.assignedTaskIds.orEmpty().forEach { taskId ->
+                currentTask(taskId)
+                    ?.takeIf { it.projectId?.value == project.id }
+                    ?.let { task ->
+                        add(
+                            task.copy(
+                                milestoneId = command.milestone.id,
+                                revision = nextRevision(task, changedAt),
+                            ),
+                        )
+                    }
+            }
+        }
+        database.withTransaction {
+            database.workspaceDao().upsertMilestone(command.milestone.toEntity(revision))
+            database.syncOperationDao().append(
+                milestoneOperation(command.milestone, revision, deleted = false),
+            )
+            updatedTasks.forEach { task ->
+                database.taskDao().upsert(task.toEntity())
+                database.syncOperationDao().append(taskOperation(task, "milestone.restore"))
+            }
+        }
+        return CommandResult.Success("Milestone restored")
     }
 
     private suspend fun updateProject(command: DomainCommand.UpdateProject): CommandResult {
@@ -345,12 +1022,22 @@ class RoomVaultRepository(
             }
         }
         val createdAt = now()
+        val initialStatus = database.workspaceDao()
+            .getWorkflowStatuses(command.projectId?.value)
+            .firstOrNull {
+                it.semanticStatus == SemanticStatus.BACKLOG.name &&
+                    it.archivedAtEpochMillis == null
+            }
+            ?.toModel() ?: return CommandResult.Rejected(
+            RejectionReason.INVALID_STATE,
+            "This project has no active Backlog status.",
+        )
         val task = Task(
             id = TaskId.new(),
             workspaceId = OpenTasksFixtures.workspaceId,
             projectId = command.projectId,
-            statusId = OpenTasksFixtures.backlog,
-            semanticStatus = SemanticStatus.BACKLOG,
+            statusId = initialStatus.id,
+            semanticStatus = initialStatus.semanticStatus,
             title = title,
             priority = command.priority,
             revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
@@ -363,8 +1050,15 @@ class RoomVaultRepository(
     }
 
     private suspend fun completeTask(command: DomainCommand.CompleteTask): CommandResult {
-        val completedStatus = mutableWorkspace.value.workflowStatuses
-            .firstOrNull { it.semanticStatus == SemanticStatus.COMPLETED && it.archivedAt == null }
+        val task = currentTask(command.taskId)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val completedStatus = database.workspaceDao()
+            .getWorkflowStatuses(task.projectId?.value)
+            .firstOrNull {
+                it.semanticStatus == SemanticStatus.COMPLETED.name &&
+                    it.archivedAtEpochMillis == null
+            }
+            ?.toModel()
             ?: return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "This workspace has no active completion status.",
@@ -397,9 +1091,11 @@ class RoomVaultRepository(
     ): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
-        val status = mutableWorkspace.value.workflowStatuses.firstOrNull {
-            it.id == command.statusId && it.archivedAt == null
-        } ?: return CommandResult.Rejected(
+        val status = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?.takeIf {
+                it.projectId == task.projectId?.value && it.archivedAtEpochMillis == null
+            }
+            ?.toModel() ?: return CommandResult.Rejected(
             RejectionReason.NOT_FOUND,
             "That workflow status is no longer available.",
         )
@@ -428,11 +1124,14 @@ class RoomVaultRepository(
             status.semanticStatus == SemanticStatus.COMPLETED &&
             task.semanticStatus != SemanticStatus.COMPLETED
         ) {
-            val nextStatus = mutableWorkspace.value.workflowStatuses.firstOrNull {
-                it.archivedAt == null && it.semanticStatus == SemanticStatus.PLANNED
-            } ?: mutableWorkspace.value.workflowStatuses.firstOrNull {
-                it.archivedAt == null && it.semanticStatus == SemanticStatus.BACKLOG
-            }
+            val workflow = database.workspaceDao()
+                .getWorkflowStatuses(task.projectId?.value)
+                .filter { it.archivedAtEpochMillis == null }
+            val nextStatus = workflow.firstOrNull {
+                it.semanticStatus == SemanticStatus.PLANNED.name
+            }?.toModel() ?: workflow.firstOrNull {
+                it.semanticStatus == SemanticStatus.BACKLOG.name
+            }?.toModel()
             nextStatus?.let {
                 RecurringTaskPlanner.next(
                     current = task,
@@ -451,6 +1150,12 @@ class RoomVaultRepository(
         val generated = generatedCandidate?.takeIf {
             database.taskDao().getById(it.id.value) == null
         }
+        val currentReminder = database.workspaceDao()
+            .getReminderForTask(task.id.value)
+            ?.toModel()
+        val generatedReminder = generated?.let { next ->
+            nextOccurrenceReminder(task, next, currentReminder)
+        }
         val operationKind =
             if (status.semanticStatus == SemanticStatus.COMPLETED) "complete" else "status"
         if (generated == null) {
@@ -465,6 +1170,16 @@ class RoomVaultRepository(
                 database.syncOperationDao().append(
                     taskOperation(generated, "recurrence.create"),
                 )
+                generatedReminder?.let { reminder ->
+                    database.workspaceDao().upsertReminder(reminder.toEntity())
+                    database.syncOperationDao().append(
+                        reminderOperation(
+                            reminder = reminder,
+                            revision = generated.revision,
+                            deleted = false,
+                        ),
+                    )
+                }
             }
         }
         return CommandResult.Success(
@@ -483,9 +1198,8 @@ class RoomVaultRepository(
     ): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
-        val status = mutableWorkspace.value.workflowStatuses.firstOrNull {
-            it.id == command.statusId
-        } ?: return CommandResult.Rejected(
+        val status = database.workspaceDao().getWorkflowStatus(command.statusId.value)
+            ?.toModel() ?: return CommandResult.Rejected(
             RejectionReason.NOT_FOUND,
             "The previous workflow status no longer exists.",
         )
@@ -497,6 +1211,9 @@ class RoomVaultRepository(
         )
         val generatedEntity = command.generatedOccurrenceId?.let { generatedId ->
             database.taskDao().getById(generatedId.value)
+        }
+        val generatedReminder = generatedEntity?.let { generated ->
+            database.workspaceDao().getReminderForTask(generated.id)?.toModel()
         }
         if (generatedEntity == null) {
             persistTask(restored, "status.restore")
@@ -536,16 +1253,47 @@ class RoomVaultRepository(
                 database.taskDao().deleteById(generatedId)
                 database.workspaceDao().upsertTombstone(tombstone)
                 database.syncOperationDao().append(tombstoneOperation(tombstone))
+                generatedReminder?.let { reminder ->
+                    database.syncOperationDao().append(
+                        reminderOperation(reminder, tombstoneRevision, deleted = true),
+                    )
+                }
             }
         }
         return CommandResult.Success("Status restored")
+    }
+
+    private suspend fun reopenTask(taskId: TaskId): CommandResult {
+        val task = currentTask(taskId)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val workflow = database.workspaceDao()
+            .getWorkflowStatuses(task.projectId?.value)
+            .filter { it.archivedAtEpochMillis == null }
+        val status = workflow.firstOrNull {
+            it.semanticStatus == SemanticStatus.PLANNED.name
+        }?.toModel() ?: workflow.firstOrNull {
+            it.semanticStatus == SemanticStatus.BACKLOG.name
+        }?.toModel() ?: return CommandResult.Rejected(
+            RejectionReason.INVALID_STATE,
+            "This workflow has no active status for reopened tasks.",
+        )
+        persistTask(
+            task.copy(
+                statusId = status.id,
+                semanticStatus = status.semanticStatus,
+                completedAt = null,
+                revision = nextRevision(task),
+            ),
+            "reopen",
+        )
+        return CommandResult.Success("Task reopened")
     }
 
     private suspend fun deleteTask(command: DomainCommand.DeleteTask): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
         if (task.deletedAt != null) {
-            return CommandResult.Success("Task is already in Trash")
+            return CommandResult.Success("Task is already in the Bin")
         }
         val updated = task.copy(
             deletedAt = command.deletedAt,
@@ -568,7 +1316,7 @@ class RoomVaultRepository(
                 }
         }
         return CommandResult.Success(
-            message = "Task moved to Trash",
+            message = "Task moved to the Bin",
             undo = DomainCommand.RestoreTask(task.id),
         )
     }
@@ -598,7 +1346,7 @@ class RoomVaultRepository(
         if (entity.deletedAtEpochMillis == null) {
             return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
-                "Move the task to Trash before deleting it permanently.",
+                "Move the task to the Bin before deleting it permanently.",
             )
         }
         purgeTaskEntity(entity, command.purgedAt)
@@ -610,7 +1358,7 @@ class RoomVaultRepository(
     ): CommandResult {
         val count = purgeExpiredTrashRecords(command.now)
         return CommandResult.Success(
-            if (count == 0) "No expired Trash items" else "$count expired Trash items deleted",
+            if (count == 0) "No expired Bin items" else "$count expired Bin items deleted",
         )
     }
 
@@ -641,18 +1389,34 @@ class RoomVaultRepository(
             revisionLogical = revision.logicalCounter,
             revisionDeviceId = revision.deviceId.value,
         )
+        val reminder = database.workspaceDao()
+            .getReminderForTask(entity.id)
+            ?.toModel()
         database.purgeTaskAndAppendOperation(
             taskId = entity.id,
             tombstone = tombstone,
             operation = tombstoneOperation(tombstone),
+            reminderOperation = reminder?.let {
+                reminderOperation(it, revision, deleted = true)
+            },
         )
     }
 
     private suspend fun updateTaskDetails(command: DomainCommand.UpdateTask): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val existingReminder = database.workspaceDao()
+            .getReminderForTask(task.id.value)
+            ?.toModel()
+        val requestedReminder = command.reminder?.copy(
+            id = Reminder.primaryId(task.id),
+            taskId = task.id,
+        )
         val requestedProject = command.projectId?.let { projectId ->
             database.workspaceDao().getProjectById(projectId.value)
+        }
+        val requestedMilestone = command.milestoneId?.let { milestoneId ->
+            database.workspaceDao().getMilestone(milestoneId.value)
         }
         val recurrence = command.recurrence
         val title = command.title.trim()
@@ -681,6 +1445,17 @@ class RoomVaultRepository(
                     RejectionReason.INVALID_STATE,
                     "Restore that project before assigning new tasks to it.",
                 )
+            command.milestoneId != null && requestedMilestone == null ->
+                return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "That milestone no longer exists.",
+                )
+            requestedMilestone != null &&
+                requestedMilestone.projectId != command.projectId?.value ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Choose a milestone from the task's project.",
+                )
             recurrence != null && command.due == null && task.start == null ->
                 return CommandResult.Rejected(
                     RejectionReason.INVALID_STATE,
@@ -707,6 +1482,18 @@ class RoomVaultRepository(
                     RejectionReason.INVALID_STATE,
                     "Estimate must be greater than zero.",
                 )
+            requestedReminder != null && command.due == null ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Add a due date before setting a reminder.",
+                )
+            requestedReminder != existingReminder &&
+                !command.restorePastReminder &&
+                requestedReminder?.triggerAt?.instant?.isAfter(now()) == false ->
+                return CommandResult.Rejected(
+                    RejectionReason.REMINDER_IN_PAST,
+                    "Choose a reminder time in the future.",
+                )
         }
         val recurrenceMetadata = if (recurrence == null) {
             null
@@ -717,17 +1504,38 @@ class RoomVaultRepository(
                 rule = recurrence,
             )
         }
+        val restoreStatusId = command.restoreStatusId
+        val targetStatus = when {
+            restoreStatusId != null ->
+                database.workspaceDao().getWorkflowStatus(restoreStatusId.value)
+                    ?.takeIf { it.projectId == command.projectId?.value }
+                    ?.toModel()
+            task.projectId != command.projectId ->
+                database.workspaceDao().getWorkflowStatuses(command.projectId?.value)
+                    .firstOrNull {
+                        it.semanticStatus == task.semanticStatus.name &&
+                            it.archivedAtEpochMillis == null
+                    }
+                    ?.toModel()
+            else -> database.workspaceDao().getWorkflowStatus(task.statusId.value)?.toModel()
+        } ?: return CommandResult.Rejected(
+            RejectionReason.INVALID_STATE,
+            "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
+        )
         if (
             task.title == title &&
             task.description == command.description &&
             task.projectId == command.projectId &&
+            task.statusId == targetStatus.id &&
             task.priority == command.priority &&
             task.due == command.due &&
             task.recurrence == command.recurrence &&
             task.recurrenceSeriesId == recurrenceMetadata?.seriesId &&
             task.recurrenceAnchor == recurrenceMetadata?.anchor &&
             task.recurrenceOccurrenceIndex == recurrenceMetadata?.occurrenceIndex &&
-            task.estimate == command.estimate
+            task.estimate == command.estimate &&
+            task.milestoneId == command.milestoneId &&
+            existingReminder == requestedReminder
         ) {
             return CommandResult.Success("Changes saved")
         }
@@ -735,6 +1543,8 @@ class RoomVaultRepository(
             title = title,
             description = command.description,
             projectId = command.projectId,
+            statusId = targetStatus.id,
+            semanticStatus = targetStatus.semanticStatus,
             priority = command.priority,
             due = command.due,
             recurrence = recurrence,
@@ -742,12 +1552,82 @@ class RoomVaultRepository(
             recurrenceAnchor = recurrenceMetadata?.anchor,
             recurrenceOccurrenceIndex = recurrenceMetadata?.occurrenceIndex,
             estimate = command.estimate,
+            milestoneId = command.milestoneId,
             revision = nextRevision(task),
         )
-        persistTask(updated, "update")
+        if (existingReminder == requestedReminder) {
+            persistTask(updated, "update")
+        } else {
+            database.withTransaction {
+                database.taskDao().upsert(updated.toEntity())
+                database.syncOperationDao().append(taskOperation(updated, "update"))
+                persistReminderChange(
+                    previous = existingReminder,
+                    requested = requestedReminder,
+                    revision = updated.revision,
+                )
+            }
+        }
         return CommandResult.Success(
             message = "Changes saved",
-            undo = task.toUpdateCommand(),
+            undo = task.toUpdateCommand(existingReminder),
+        )
+    }
+
+    private suspend fun setTaskReminder(
+        command: DomainCommand.SetTaskReminder,
+    ): CommandResult {
+        val task = currentTask(command.taskId)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val existing = database.workspaceDao()
+            .getReminderForTask(task.id.value)
+            ?.toModel()
+        val triggerAt = command.triggerAt
+        if (triggerAt != null) {
+            if (task.deletedAt != null || task.isCompleted) {
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Restore or reopen the task before setting a reminder.",
+                )
+            }
+            if (!command.restorePastReminder && !triggerAt.instant.isAfter(now())) {
+                return CommandResult.Rejected(
+                    RejectionReason.REMINDER_IN_PAST,
+                    "Choose a reminder time in the future.",
+                )
+            }
+        }
+        val requested = triggerAt?.let {
+            Reminder(
+                id = Reminder.primaryId(task.id),
+                taskId = task.id,
+                triggerAt = it,
+                precise = command.precise,
+            )
+        }
+        if (existing == requested) {
+            return CommandResult.Success(
+                if (requested == null) "Reminder is already off" else "Reminder is up to date",
+            )
+        }
+        val updated = task.copy(revision = nextRevision(task))
+        database.withTransaction {
+            database.taskDao().upsert(updated.toEntity())
+            database.syncOperationDao().append(taskOperation(updated, "reminder"))
+            persistReminderChange(
+                previous = existing,
+                requested = requested,
+                revision = updated.revision,
+            )
+        }
+        return CommandResult.Success(
+            message = if (requested == null) "Reminder removed" else "Reminder scheduled",
+            undo = DomainCommand.SetTaskReminder(
+                taskId = task.id,
+                triggerAt = existing?.triggerAt,
+                precise = existing?.precise ?: false,
+                restorePastReminder = true,
+            ),
         )
     }
 
@@ -976,6 +1856,105 @@ class RoomVaultRepository(
         )
     }
 
+    private suspend fun setTaskDependency(
+        command: DomainCommand.SetTaskDependency,
+    ): CommandResult {
+        val task = currentTask(command.taskId)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Task no longer exists.",
+            )
+        val dependency = currentTask(command.dependsOnTaskId)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "That dependency no longer exists.",
+            )
+        val alreadyPresent = dependency.id in task.dependencyIds
+        if (alreadyPresent == command.present) {
+            return CommandResult.Success(
+                if (command.present) "Dependency already added" else "Dependency already removed",
+            )
+        }
+        if (command.present) {
+            if (task.deletedAt != null || dependency.deletedAt != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Restore both tasks before linking them.",
+                )
+            }
+            if (task.dependencyIds.size >= MAX_TASK_DEPENDENCIES) {
+                return CommandResult.Rejected(
+                    RejectionReason.DEPENDENCY_LIMIT_REACHED,
+                    "A task can have up to $MAX_TASK_DEPENDENCIES dependencies.",
+                )
+            }
+            val existing = database.workspaceDao().getDependencies().map { entity ->
+                TaskDependency(
+                    taskId = TaskId(entity.taskId),
+                    dependsOnTaskId = TaskId(entity.dependsOnTaskId),
+                    revision = Revision(
+                        deviceId = DeviceId(entity.revisionDeviceId),
+                        wallTimeMillis = entity.revisionWallMillis,
+                        logicalCounter = entity.revisionLogical,
+                    ),
+                )
+            }
+            if (
+                DependencyRules.wouldCreateCycle(
+                    existing = existing,
+                    taskId = task.id,
+                    dependsOn = dependency.id,
+                )
+            ) {
+                return CommandResult.Rejected(
+                    RejectionReason.DEPENDENCY_CYCLE,
+                    "That link would create a dependency cycle.",
+                )
+            }
+        }
+        val revision = nextRevision(task)
+        val updatedDependencyIds = if (command.present) {
+            task.dependencyIds + dependency.id
+        } else {
+            task.dependencyIds - dependency.id
+        }
+        val completedDependencyIds = database.taskDao()
+            .getByIds(updatedDependencyIds.map(TaskId::value))
+            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+            .mapTo(hashSetOf()) { TaskId(it.id) }
+        val updated = task.copy(
+            dependencyIds = updatedDependencyIds,
+            blockedBy = updatedDependencyIds - completedDependencyIds,
+            revision = revision,
+        )
+        database.withTransaction {
+            database.taskDao().upsert(updated.toEntity())
+            if (command.present) {
+                database.workspaceDao().upsertDependency(
+                    TaskDependencyEntity(
+                        taskId = task.id.value,
+                        dependsOnTaskId = dependency.id.value,
+                        revisionWallMillis = revision.wallTimeMillis,
+                        revisionLogical = revision.logicalCounter,
+                        revisionDeviceId = revision.deviceId.value,
+                    ),
+                )
+            } else {
+                database.workspaceDao().deleteDependency(
+                    taskId = task.id.value,
+                    dependsOnTaskId = dependency.id.value,
+                )
+            }
+            database.syncOperationDao().append(
+                taskOperation(updated, "dependencies.update"),
+            )
+        }
+        return CommandResult.Success(
+            message = if (command.present) "Dependency added" else "Dependency removed",
+            undo = command.copy(present = !command.present),
+        )
+    }
+
     private suspend fun updateTask(
         taskId: TaskId,
         transform: (Task) -> Task?,
@@ -989,14 +1968,23 @@ class RoomVaultRepository(
     }
 
     private suspend fun currentTask(taskId: TaskId): Task? {
-        val observed = mutableWorkspace.value.tasks.firstOrNull { it.id == taskId }
         val workspaceDao = database.workspaceDao()
+        val storedDependencyIds = workspaceDao.getDependencyIds(taskId.value)
+            .mapTo(linkedSetOf(), ::TaskId)
+        val dependencyEntities = database.taskDao()
+            .getByIds(storedDependencyIds.map(TaskId::value))
+        val dependencyIds = dependencyEntities
+            .mapTo(linkedSetOf()) { TaskId(it.id) }
+        val completedDependencyIds = dependencyEntities
+            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+            .mapTo(hashSetOf()) { TaskId(it.id) }
         return database.taskDao().getById(taskId.value)?.toModel(
             tagIds = workspaceDao.getTaskTags(taskId.value)
                 .mapTo(linkedSetOf()) { TagId(it.tagId) },
             checklist = workspaceDao.getChecklistItems(taskId.value)
                 .map(ChecklistItemEntity::toModel),
-            blockedBy = observed?.blockedBy.orEmpty(),
+            dependencyIds = dependencyIds,
+            blockedBy = dependencyIds - completedDependencyIds,
         )
     }
 
@@ -1014,6 +2002,34 @@ class RoomVaultRepository(
             project = project.toEntity(revision),
             operation = projectOperation(project, revision, operationKind),
         )
+    }
+
+    private suspend fun persistWorkflowStatuses(
+        statuses: List<WorkflowStatus>,
+        previousEntities: List<WorkflowStatusEntity>,
+    ) {
+        require(statuses.size == previousEntities.size)
+        val revisions = previousEntities.map(::nextWorkflowRevision)
+        database.withTransaction {
+            previousEntities.forEachIndexed { index, entity ->
+                val revision = revisions[index]
+                database.workspaceDao().upsertWorkflowStatus(
+                    entity.copy(
+                        rank = "__workflow_tmp__:${entity.id}:$index",
+                        revisionWallMillis = revision.wallTimeMillis,
+                        revisionLogical = revision.logicalCounter,
+                        revisionDeviceId = revision.deviceId.value,
+                    ),
+                )
+            }
+            statuses.forEachIndexed { index, status ->
+                val revision = revisions[index]
+                database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
+                database.syncOperationDao().append(
+                    workflowStatusOperation(status, revision, deleted = false),
+                )
+            }
+        }
     }
 
     private suspend fun startTimer(command: DomainCommand.StartTimer): CommandResult =
@@ -1050,12 +2066,246 @@ class RoomVaultRepository(
                 RejectionReason.INVALID_STATE,
                 "No timer is running.",
             )
-        val stoppedAt = now().toEpochMilli()
+        val stoppedAt = maxOf(now().toEpochMilli(), active.startedAtEpochMillis)
         database.timeEntryDao().stop(active.id, stoppedAt)
         database.syncOperationDao().append(
-            timeOperation(active.copy(stoppedAtEpochMillis = stoppedAt), "stop"),
+            timeOperation(
+                active.copy(stoppedAtEpochMillis = stoppedAt),
+                kind = "stop",
+                revisionWallMillis = stoppedAt,
+            ),
         )
         CommandResult.Success("Timer stopped")
+    }
+
+    private suspend fun addTimeEntry(
+        command: DomainCommand.AddTimeEntry,
+    ): CommandResult {
+        val note = command.note.trim()
+        validateTimeEntry(
+            taskId = command.taskId,
+            startedAt = command.startedAt,
+            stoppedAt = command.stoppedAt,
+            note = note,
+        )?.let { return it }
+        if (database.timeEntryDao().getById(command.entryId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That time-entry identifier is already in use.",
+            )
+        }
+        if (database.timeEntryDao().countForTask(command.taskId.value) >= MAX_TIME_ENTRIES_PER_TASK) {
+            return CommandResult.Rejected(
+                RejectionReason.TIME_ENTRY_LIMIT_REACHED,
+                "A task can contain up to $MAX_TIME_ENTRIES_PER_TASK time entries.",
+            )
+        }
+        val entry = TimeEntryEntity(
+            id = command.entryId.value,
+            taskId = command.taskId.value,
+            deviceId = deviceId.value,
+            startedAtEpochMillis = command.startedAt.toEpochMilli(),
+            stoppedAtEpochMillis = command.stoppedAt.toEpochMilli(),
+            noteCiphertext = note.toByteArray(Charsets.UTF_8),
+        )
+        val overlaps = wouldOverlap(entry, excluding = null, at = command.changedAt)
+        database.withTransaction {
+            database.timeEntryDao().insert(entry)
+            database.syncOperationDao().append(
+                timeOperation(
+                    entry,
+                    kind = "upsert",
+                    revisionWallMillis = maxOf(
+                        command.changedAt.toEpochMilli(),
+                        requireNotNull(entry.stoppedAtEpochMillis),
+                    ),
+                ),
+            )
+        }
+        return CommandResult.Success(
+            message = if (overlaps) {
+                "Time entry added; review the overlap"
+            } else {
+                "Time entry added"
+            },
+            undo = DomainCommand.DeleteTimeEntry(entryId = command.entryId),
+        )
+    }
+
+    private suspend fun updateTimeEntry(
+        command: DomainCommand.UpdateTimeEntry,
+    ): CommandResult {
+        val existing = database.timeEntryDao().getById(command.entryId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Time entry no longer exists.",
+            )
+        if (existing.stoppedAtEpochMillis == null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Stop the timer before editing its time entry.",
+            )
+        }
+        val taskId = TaskId(existing.taskId)
+        val note = command.note.trim()
+        validateTimeEntry(
+            taskId = taskId,
+            startedAt = command.startedAt,
+            stoppedAt = command.stoppedAt,
+            note = note,
+        )?.let { return it }
+        val updated = existing.copy(
+            startedAtEpochMillis = command.startedAt.toEpochMilli(),
+            stoppedAtEpochMillis = command.stoppedAt.toEpochMilli(),
+            noteCiphertext = note.toByteArray(Charsets.UTF_8),
+        )
+        if (
+            updated.startedAtEpochMillis == existing.startedAtEpochMillis &&
+            updated.stoppedAtEpochMillis == existing.stoppedAtEpochMillis &&
+            updated.noteCiphertext.contentEquals(existing.noteCiphertext)
+        ) {
+            return CommandResult.Success("Time entry is up to date")
+        }
+        val overlaps = wouldOverlap(updated, excluding = existing.id, at = command.changedAt)
+        database.withTransaction {
+            database.timeEntryDao().update(updated)
+            database.syncOperationDao().append(
+                timeOperation(
+                    updated,
+                    kind = "upsert",
+                    revisionWallMillis = maxOf(
+                        command.changedAt.toEpochMilli(),
+                        requireNotNull(updated.stoppedAtEpochMillis),
+                    ),
+                ),
+            )
+        }
+        return CommandResult.Success(
+            message = if (overlaps) {
+                "Time entry saved; review the overlap"
+            } else {
+                "Time entry saved"
+            },
+            undo = DomainCommand.RestoreTimeEntry(existing.toModel()),
+        )
+    }
+
+    private suspend fun deleteTimeEntry(
+        command: DomainCommand.DeleteTimeEntry,
+    ): CommandResult {
+        val existing = database.timeEntryDao().getById(command.entryId.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Time entry no longer exists.",
+            )
+        if (existing.stoppedAtEpochMillis == null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Stop the timer before deleting its time entry.",
+            )
+        }
+        database.withTransaction {
+            database.timeEntryDao().delete(existing.id)
+            database.syncOperationDao().append(
+                timeOperation(
+                    existing,
+                    kind = "delete",
+                    revisionWallMillis = command.deletedAt.toEpochMilli(),
+                ),
+            )
+        }
+        return CommandResult.Success(
+            message = "Time entry deleted",
+            undo = DomainCommand.RestoreTimeEntry(existing.toModel()),
+        )
+    }
+
+    private suspend fun restoreTimeEntry(
+        command: DomainCommand.RestoreTimeEntry,
+    ): CommandResult {
+        val existing = database.timeEntryDao().getById(command.entry.id.value)
+        if (existing != null && existing.taskId != command.entry.taskId.value) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That time-entry identifier belongs to another task.",
+            )
+        }
+        val stoppedAt = command.entry.stoppedAt
+            ?: return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Running timers cannot be restored as manual entries.",
+            )
+        val note = command.entry.note.trim()
+        validateTimeEntry(
+            taskId = command.entry.taskId,
+            startedAt = command.entry.startedAt,
+            stoppedAt = stoppedAt,
+            note = note,
+        )?.let { return it }
+        val restored = command.entry.copy(note = note).toEntity()
+        database.withTransaction {
+            if (existing == null) {
+                database.timeEntryDao().insert(restored)
+            } else {
+                database.timeEntryDao().update(restored)
+            }
+            database.syncOperationDao().append(
+                timeOperation(
+                    restored,
+                    kind = "upsert",
+                    revisionWallMillis = maxOf(
+                        command.restoredAt.toEpochMilli(),
+                        stoppedAt.toEpochMilli(),
+                    ),
+                ),
+            )
+        }
+        return CommandResult.Success(
+            message = "Time entry restored",
+            undo = existing
+                ?.toModel()
+                ?.let { DomainCommand.RestoreTimeEntry(it) }
+                ?: DomainCommand.DeleteTimeEntry(command.entry.id),
+        )
+    }
+
+    private suspend fun validateTimeEntry(
+        taskId: TaskId,
+        startedAt: Instant,
+        stoppedAt: Instant,
+        note: String,
+    ): CommandResult.Rejected? {
+        val task = database.taskDao().getById(taskId.value)
+        return when {
+            task == null || task.deletedAtEpochMillis != null ->
+            CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Restore the task before logging time.",
+            )
+        !stoppedAt.isAfter(startedAt) -> CommandResult.Rejected(
+            RejectionReason.INVALID_TIME_ENTRY_RANGE,
+            "The end time must be after the start time.",
+        )
+        note.length > MAX_TIME_ENTRY_NOTE_LENGTH -> CommandResult.Rejected(
+            RejectionReason.TIME_ENTRY_NOTE_TOO_LONG,
+            "Keep time-entry notes under $MAX_TIME_ENTRY_NOTE_LENGTH characters.",
+        )
+        else -> null
+        }
+    }
+
+    private suspend fun wouldOverlap(
+        candidate: TimeEntryEntity,
+        excluding: String?,
+        at: Instant,
+    ): Boolean {
+        val entries = database.timeEntryDao()
+            .getAll()
+            .filterNot { it.id == excluding }
+            .map(TimeEntryEntity::toModel) + candidate.toModel()
+        return TimerRules.reconcile(entries, at).conflicts.any { conflict ->
+            conflict.first.id.value == candidate.id || conflict.second.id.value == candidate.id
+        }
     }
 
     private fun nextRevision(
@@ -1079,6 +2329,39 @@ class RoomVaultRepository(
         logicalCounter = project.revisionLogical + 1,
     )
 
+    private fun workflowRevision(at: Instant = now()): Revision =
+        Revision(deviceId, at.toEpochMilli(), 0)
+
+    private fun nextWorkflowRevision(
+        status: WorkflowStatusEntity,
+        at: Instant = now(),
+    ): Revision = Revision(
+        deviceId = deviceId,
+        wallTimeMillis = maxOf(status.revisionWallMillis + 1, at.toEpochMilli()),
+        logicalCounter = status.revisionLogical + 1,
+    )
+
+    private fun milestoneRevision(at: Instant = now()): Revision =
+        Revision(deviceId, at.toEpochMilli(), 0)
+
+    private fun nextMilestoneRevision(
+        milestone: MilestoneEntity,
+        at: Instant = now(),
+    ): Revision = Revision(
+        deviceId = deviceId,
+        wallTimeMillis = maxOf(milestone.revisionWallMillis + 1, at.toEpochMilli()),
+        logicalCounter = milestone.revisionLogical + 1,
+    )
+
+    private fun nextTemplateRevision(
+        template: TemplateEntity,
+        at: Instant = now(),
+    ): Revision = Revision(
+        deviceId = deviceId,
+        wallTimeMillis = maxOf(template.revisionWallMillis + 1, at.toEpochMilli()),
+        logicalCounter = template.revisionLogical + 1,
+    )
+
     private fun taskOperation(task: Task, kind: String): SyncOperationEntity =
         SyncOperationEntity(
             id = UUID.randomUUID().toString(),
@@ -1086,7 +2369,7 @@ class RoomVaultRepository(
             objectId = task.id.value,
             objectType = "task.$kind",
             encryptedPayload = buildString {
-                append("v2")
+                append("v5")
                 append('\u0000')
                 append(task.id.value)
                 append('\u0000')
@@ -1103,6 +2386,10 @@ class RoomVaultRepository(
                 append(task.projectId?.value.orEmpty())
                 append('\u0000')
                 append(task.priority.name)
+                append('\u0000')
+                append(task.start?.instant?.toEpochMilli() ?: -1)
+                append('\u0000')
+                append(task.start?.zoneId.orEmpty())
                 append('\u0000')
                 append(task.due?.instant?.toEpochMilli() ?: -1)
                 append('\u0000')
@@ -1134,9 +2421,17 @@ class RoomVaultRepository(
                 append('\u0000')
                 append(task.estimate?.seconds ?: -1)
                 append('\u0000')
+                append(task.milestoneId?.value.orEmpty())
+                append('\u0000')
                 append(task.deletedAt?.toEpochMilli() ?: -1)
                 append('\u0000')
                 append(task.tagIds.sortedBy(TagId::value).joinToString(",") { it.value })
+                append('\u0000')
+                append(
+                    task.dependencyIds
+                        .sortedBy(TaskId::value)
+                        .joinToString(",") { it.value },
+                )
                 task.checklist.sortedBy(ChecklistItem::rank).forEach { item ->
                     append('\u0000')
                     append(item.id.length)
@@ -1176,6 +2471,44 @@ class RoomVaultRepository(
             uploadedAtEpochMillis = null,
         )
 
+    private fun Template.toTemplateEntity(): TemplateEntity = TemplateEntity(
+        id = id.value,
+        workspaceId = workspaceId.value,
+        name = name,
+        encryptedPayload = TemplatePayloadCodec.encode(this),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        revisionDeviceId = revision.deviceId.value,
+    )
+
+    private fun templateOperation(
+        template: Template,
+        revision: Revision,
+    ): SyncOperationEntity = SyncOperationEntity(
+        id = UUID.randomUUID().toString(),
+        deviceId = deviceId.value,
+        objectId = template.id.value,
+        objectType = "template.upsert",
+        encryptedPayload = TemplatePayloadCodec.encode(template),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        uploadedAtEpochMillis = null,
+    )
+
+    private fun templateDeleteOperation(
+        templateId: TemplateId,
+        revision: Revision,
+    ): SyncOperationEntity = SyncOperationEntity(
+        id = UUID.randomUUID().toString(),
+        deviceId = deviceId.value,
+        objectId = templateId.value,
+        objectType = "template.delete",
+        encryptedPayload = "v1\u0000${templateId.value}".toByteArray(Charsets.UTF_8),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        uploadedAtEpochMillis = null,
+    )
+
     private fun projectOperation(
         project: Project,
         revision: Revision,
@@ -1207,29 +2540,156 @@ class RoomVaultRepository(
         uploadedAtEpochMillis = null,
     )
 
-    private fun timeOperation(entry: TimeEntryEntity, kind: String): SyncOperationEntity {
-        val revisionWallTime = entry.stoppedAtEpochMillis ?: entry.startedAtEpochMillis
+    private fun workflowStatusOperation(
+        status: WorkflowStatus,
+        revision: Revision,
+        deleted: Boolean,
+    ): SyncOperationEntity = SyncOperationEntity(
+        id = UUID.randomUUID().toString(),
+        deviceId = deviceId.value,
+        objectId = status.id.value,
+        objectType = if (deleted) "workflow_status.delete" else "workflow_status.upsert",
+        encryptedPayload = buildString {
+            append("v1")
+            append('\u0000')
+            append(status.id.value)
+            append('\u0000')
+            append(status.projectId?.value.orEmpty())
+            append('\u0000')
+            append(if (deleted) "" else status.name)
+            append('\u0000')
+            append(if (deleted) "" else status.semanticStatus.name)
+            append('\u0000')
+            append(if (deleted) "" else status.rank)
+            append('\u0000')
+            append(if (deleted) -1 else status.archivedAt?.toEpochMilli() ?: -1)
+        }.toByteArray(Charsets.UTF_8),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        uploadedAtEpochMillis = null,
+    )
+
+    private suspend fun persistMilestone(
+        milestone: Milestone,
+        revision: Revision,
+        deleted: Boolean,
+    ) {
+        database.withTransaction {
+            if (deleted) {
+                database.workspaceDao().deleteMilestone(milestone.id.value)
+            } else {
+                database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
+            }
+            database.syncOperationDao().append(
+                milestoneOperation(milestone, revision, deleted),
+            )
+        }
+    }
+
+    private fun milestoneOperation(
+        milestone: Milestone,
+        revision: Revision,
+        deleted: Boolean,
+    ): SyncOperationEntity = SyncOperationEntity(
+        id = UUID.randomUUID().toString(),
+        deviceId = deviceId.value,
+        objectId = milestone.id.value,
+        objectType = if (deleted) "milestone.delete" else "milestone.upsert",
+        encryptedPayload = buildString {
+            append("v1")
+            append('\u0000')
+            append(milestone.id.value)
+            append('\u0000')
+            append(milestone.projectId.value)
+            append('\u0000')
+            append(if (deleted) "" else milestone.name)
+            append('\u0000')
+            append(if (deleted) "" else milestone.dueDate?.toString().orEmpty())
+            append('\u0000')
+            append(if (deleted) -1 else milestone.completedAt?.toEpochMilli() ?: -1)
+        }.toByteArray(Charsets.UTF_8),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        uploadedAtEpochMillis = null,
+    )
+
+    private fun timeOperation(
+        entry: TimeEntryEntity,
+        kind: String,
+        revisionWallMillis: Long = entry.stoppedAtEpochMillis ?: entry.startedAtEpochMillis,
+    ): SyncOperationEntity {
         return SyncOperationEntity(
             id = UUID.randomUUID().toString(),
             deviceId = deviceId.value,
             objectId = entry.id,
             objectType = "time_entry.$kind",
             encryptedPayload = buildString {
-                append("v1")
+                append("v2")
                 append('\u0000')
                 append(entry.id)
                 append('\u0000')
                 append(entry.taskId)
                 append('\u0000')
+                append(entry.deviceId)
+                append('\u0000')
                 append(entry.startedAtEpochMillis)
                 append('\u0000')
                 append(entry.stoppedAtEpochMillis ?: -1)
+                append('\u0000')
+                append(Base64.getEncoder().encodeToString(entry.noteCiphertext))
             }.toByteArray(Charsets.UTF_8),
-            revisionWallMillis = revisionWallTime,
+            revisionWallMillis = revisionWallMillis,
             revisionLogical = 0,
             uploadedAtEpochMillis = null,
         )
     }
+
+    private suspend fun persistReminderChange(
+        previous: Reminder?,
+        requested: Reminder?,
+        revision: Revision,
+    ) {
+        if (requested == null) {
+            previous?.let { reminder ->
+                database.workspaceDao().deleteReminder(reminder.id)
+                database.syncOperationDao().append(
+                    reminderOperation(reminder, revision, deleted = true),
+                )
+            }
+        } else {
+            database.workspaceDao().upsertReminder(requested.toEntity())
+            database.syncOperationDao().append(
+                reminderOperation(requested, revision, deleted = false),
+            )
+        }
+    }
+
+    private fun reminderOperation(
+        reminder: Reminder,
+        revision: Revision,
+        deleted: Boolean,
+    ): SyncOperationEntity = SyncOperationEntity(
+        id = UUID.randomUUID().toString(),
+        deviceId = deviceId.value,
+        objectId = reminder.id,
+        objectType = if (deleted) "reminder.delete" else "reminder.upsert",
+        encryptedPayload = buildString {
+            append("v1")
+            append('\u0000')
+            append(reminder.id)
+            append('\u0000')
+            append(reminder.taskId.value)
+            append('\u0000')
+            append(if (deleted) -1 else reminder.triggerAt.instant.toEpochMilli())
+            append('\u0000')
+            append(if (deleted) "" else reminder.triggerAt.zoneId)
+            append('\u0000')
+            append(if (!deleted && reminder.precise) '1' else '0')
+        }.toByteArray(Charsets.UTF_8),
+        revisionWallMillis = revision.wallTimeMillis,
+        revisionLogical = revision.logicalCounter,
+        uploadedAtEpochMillis = null,
+    )
 
     private fun tombstoneOperation(tombstone: TombstoneEntity): SyncOperationEntity =
         SyncOperationEntity(
@@ -1251,7 +2711,9 @@ class RoomVaultRepository(
             uploadedAtEpochMillis = null,
         )
 
-    private fun Task.toUpdateCommand(): DomainCommand.UpdateTask = DomainCommand.UpdateTask(
+    private fun Task.toUpdateCommand(
+        reminder: Reminder? = null,
+    ): DomainCommand.UpdateTask = DomainCommand.UpdateTask(
         taskId = id,
         title = title,
         description = description,
@@ -1260,6 +2722,10 @@ class RoomVaultRepository(
         due = due,
         recurrence = recurrence,
         estimate = estimate,
+        milestoneId = milestoneId,
+        restoreStatusId = statusId,
+        reminder = reminder,
+        restorePastReminder = true,
         recurrenceMetadata = recurrence?.let {
             val seriesId = recurrenceSeriesId
             val anchor = recurrenceAnchor
@@ -1271,6 +2737,26 @@ class RoomVaultRepository(
             }
         },
     )
+
+    private fun nextOccurrenceReminder(
+        currentTask: Task,
+        nextTask: Task,
+        reminder: Reminder?,
+    ): Reminder? {
+        reminder ?: return null
+        val currentDue = currentTask.due ?: return null
+        val nextDue = nextTask.due ?: return null
+        val leadTime = Duration.between(reminder.triggerAt.instant, currentDue.instant)
+        return Reminder(
+            id = Reminder.primaryId(nextTask.id),
+            taskId = nextTask.id,
+            triggerAt = ZonedMoment(
+                instant = nextDue.instant.minus(leadTime),
+                zoneId = nextDue.zoneId,
+            ),
+            precise = reminder.precise,
+        )
+    }
 
     private fun ChecklistItem.toEntity(taskId: TaskId): ChecklistItemEntity =
         ChecklistItemEntity(
@@ -1324,6 +2810,55 @@ class RoomVaultRepository(
         else -> null
     }
 
+    private suspend fun validateWorkflowStatusName(
+        name: String,
+        projectId: ProjectId?,
+        excluding: WorkflowStatusId? = null,
+    ): CommandResult.Rejected? = when {
+        name.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_WORKFLOW_STATUS_NAME,
+            "A workflow status needs a name.",
+        )
+        name.length > MAX_WORKFLOW_STATUS_NAME_LENGTH -> CommandResult.Rejected(
+            RejectionReason.WORKFLOW_STATUS_NAME_TOO_LONG,
+            "Keep workflow status names under $MAX_WORKFLOW_STATUS_NAME_LENGTH characters.",
+        )
+        database.workspaceDao().getWorkflowStatuses(projectId?.value).any { status ->
+            status.id != excluding?.value &&
+                status.archivedAtEpochMillis == null &&
+                status.name.equals(name, ignoreCase = true)
+        } -> CommandResult.Rejected(
+            RejectionReason.DUPLICATE_WORKFLOW_STATUS_NAME,
+            "This workflow already has a status with that name.",
+        )
+        else -> null
+    }
+
+    private suspend fun validateMilestoneName(
+        name: String,
+        projectId: ProjectId,
+        excluding: MilestoneId? = null,
+    ): CommandResult.Rejected? = when {
+        name.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_MILESTONE_NAME,
+            "A milestone needs a name.",
+        )
+        name.length > MAX_MILESTONE_NAME_LENGTH -> CommandResult.Rejected(
+            RejectionReason.MILESTONE_NAME_TOO_LONG,
+            "Keep milestone names under $MAX_MILESTONE_NAME_LENGTH characters.",
+        )
+        database.workspaceDao().getMilestones(projectId.value).any { milestone ->
+            milestone.id != excluding?.value &&
+                milestone.name.equals(name, ignoreCase = true)
+        } -> CommandResult.Rejected(
+            RejectionReason.DUPLICATE_MILESTONE_NAME,
+            "This project already has a milestone with that name.",
+        )
+        else -> null
+    }
+    private fun SemanticStatus.readableCategory(): String =
+        name.lowercase(Locale.ROOT).replace('_', ' ')
+
     private suspend fun validateUniqueActiveProjectName(
         name: String,
         excluding: ProjectId? = null,
@@ -1336,6 +2871,36 @@ class RoomVaultRepository(
             CommandResult.Rejected(
                 RejectionReason.DUPLICATE_PROJECT_NAME,
                 "An active project already uses that name.",
+            )
+        } else {
+            null
+        }
+    }
+
+    private suspend fun validateTemplateName(
+        name: String,
+        excluding: TemplateId? = null,
+    ): CommandResult.Rejected? {
+        if (name.isEmpty()) {
+            return CommandResult.Rejected(
+                RejectionReason.EMPTY_TEMPLATE_NAME,
+                "A template needs a name.",
+            )
+        }
+        if (name.length > MAX_TEMPLATE_NAME_LENGTH) {
+            return CommandResult.Rejected(
+                RejectionReason.TEMPLATE_NAME_TOO_LONG,
+                "Keep template names under $MAX_TEMPLATE_NAME_LENGTH characters.",
+            )
+        }
+        val existing = database.workspaceDao().findTemplateByName(
+            OpenTasksFixtures.workspaceId.value,
+            name,
+        )
+        return if (existing != null && existing.id != excluding?.value) {
+            CommandResult.Rejected(
+                RejectionReason.DUPLICATE_TEMPLATE_NAME,
+                "This workspace already has a template with that name.",
             )
         } else {
             null
@@ -1357,7 +2922,16 @@ class RoomVaultRepository(
             BaseRows(tasks, projects, milestones, tags, dependencies)
         }
         val baseWithWorkflow = combine(
-            base,
+            combine(
+                base,
+                workspaceDao.observeTemplates(OpenTasksFixtures.workspaceId.value),
+            ) { rows, templates ->
+                rows.copy(
+                    templates = templates.mapNotNull { entity ->
+                        runCatching { TemplatePayloadCodec.decode(entity) }.getOrNull()
+                    },
+                )
+            },
             workspaceDao.observeWorkflowStatuses(),
         ) { rows, workflowStatuses ->
             rows.copy(workflowStatuses = workflowStatuses)
@@ -1365,22 +2939,23 @@ class RoomVaultRepository(
         val relations = combine(
             workspaceDao.observeTaskTags(),
             workspaceDao.observeChecklistItems(),
-            observeActiveTimerWithClock(),
-        ) { taskTags, checklist, activeTimer ->
-            RelationRows(taskTags, checklist, activeTimer)
+            workspaceDao.observeReminders(),
+            observeTimeEntriesWithClock(),
+        ) { taskTags, checklist, reminders, timeEntries ->
+            RelationRows(taskTags, checklist, reminders, timeEntries)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun observeActiveTimerWithClock(): Flow<TimedActiveEntry?> =
-        database.timeEntryDao().observeActive().flatMapLatest { active ->
-            if (active == null) {
-                flowOf(null)
+    private fun observeTimeEntriesWithClock(): Flow<TimedTimeEntries> =
+        database.timeEntryDao().observeAll().flatMapLatest { entries ->
+            if (entries.none { it.stoppedAtEpochMillis == null }) {
+                flowOf(TimedTimeEntries(entries, now()))
             } else {
                 flow {
                     while (currentCoroutineContext().isActive) {
-                        emit(TimedActiveEntry(active, now()))
+                        emit(TimedTimeEntries(entries, now()))
                         delay(TIMER_TICK_MILLIS)
                     }
                 }
@@ -1400,32 +2975,45 @@ class RoomVaultRepository(
         val dependencies = base.dependencies
             .groupBy(TaskDependencyEntity::taskId)
             .mapValues { (_, values) -> values.mapTo(linkedSetOf()) { TaskId(it.dependsOnTaskId) } }
+        val taskIds = base.tasks.mapTo(hashSetOf()) { TaskId(it.id) }
+        val completedTaskIds = base.tasks
+            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+            .mapTo(hashSetOf()) { TaskId(it.id) }
         val tasks = base.tasks.map { entity ->
+            val dependencyIds = dependencies[entity.id].orEmpty().filterTo(linkedSetOf()) {
+                it in taskIds
+            }
             entity.toModel(
                 tagIds = tagIds[entity.id].orEmpty(),
                 checklist = checklist[entity.id].orEmpty(),
-                blockedBy = dependencies[entity.id].orEmpty(),
+                dependencyIds = dependencyIds,
+                blockedBy = dependencyIds - completedTaskIds,
             )
         }
         val projects = base.projects.map(ProjectEntity::toModel)
         val projectNames = projects.associateBy(Project::id)
-        val activeTimer = relations.activeTimer?.let { timed ->
-            val task = tasks.firstOrNull { it.id.value == timed.entry.taskId }
+        val timeEntries = relations.timeEntries.entries.map(TimeEntryEntity::toModel)
+        val activeEntry = timeEntries
+            .filter { it.stoppedAt == null }
+            .maxWithOrNull(compareBy(TimeEntry::startedAt).thenBy { it.id.value })
+        val activeTimer = activeEntry?.let { entry ->
+            val task = tasks.firstOrNull { it.id == entry.taskId }
             task?.let {
                 ActiveTimerSnapshot(
-                    entryId = TimeEntryId(timed.entry.id),
+                    entryId = entry.id,
                     taskId = it.id,
                     taskTitle = it.title,
                     projectName = it.projectId?.let(projectNames::get)?.name,
-                    startedAt = Instant.ofEpochMilli(timed.entry.startedAtEpochMillis),
+                    startedAt = entry.startedAt,
                     elapsed = Duration.between(
-                        Instant.ofEpochMilli(timed.entry.startedAtEpochMillis),
-                        timed.at,
+                        entry.startedAt,
+                        relations.timeEntries.at,
                     ).coerceAtLeast(Duration.ZERO),
                 )
             }
         }
-        val currentTime = relations.activeTimer?.at ?: now()
+        val currentTime = relations.timeEntries.at
+        val reconciliation = TimerRules.reconcile(timeEntries, currentTime)
         val activeTasks = tasks.filter { it.deletedAt == null }
         val openTasks = activeTasks.filterNot(Task::isCompleted)
         val home = HomeSnapshot(
@@ -1451,6 +3039,16 @@ class RoomVaultRepository(
             workflowStatuses = base.workflowStatuses.map(WorkflowStatusEntity::toModel),
             milestones = base.milestones.map(MilestoneEntity::toModel),
             tags = base.tags.map(TagEntity::toModel),
+            reminders = relations.reminders.map(ReminderEntity::toModel),
+            templates = base.templates,
+            timeEntries = reconciliation.entries,
+            timeEntryConflicts = reconciliation.conflicts.map { conflict ->
+                TimeEntryConflict(
+                    firstEntryId = conflict.first.id,
+                    secondEntryId = conflict.second.id,
+                    overlap = conflict.overlap,
+                )
+            },
         )
     }
 
@@ -1466,7 +3064,7 @@ class RoomVaultRepository(
                     id = VAULT_ID.value,
                     storageMode = "LOCAL",
                     createdAtEpochMillis = now().toEpochMilli(),
-                    schemaVersion = 2,
+                    schemaVersion = 5,
                     cryptoVersion = 1,
                     minimumReaderVersion = 1,
                 ),
@@ -1481,14 +3079,28 @@ class RoomVaultRepository(
                 ),
             )
             workspaceDao.insertProjects(seedSnapshot.projects.map { it.toEntity(seedRevision) })
-            workspaceDao.insertWorkflowStatuses(defaultWorkflowStatuses())
-            workspaceDao.insertMilestones(seedSnapshot.milestones.map { it.toEntity() })
+            workspaceDao.insertWorkflowStatuses(
+                seedSnapshot.workflowStatuses.map { it.toEntity(seedRevision) },
+            )
+            workspaceDao.insertMilestones(
+                seedSnapshot.milestones.map { it.toEntity(seedRevision) },
+            )
             workspaceDao.insertTags(seedSnapshot.tags.map { it.toEntity() })
             workspaceDao.insertTasks(seedSnapshot.tasks.map(Task::toEntity))
             workspaceDao.insertDependencies(seedSnapshot.tasks.flatMap(Task::dependencyEntities))
             workspaceDao.insertTaskTags(seedSnapshot.tasks.flatMap(Task::tagEntities))
             workspaceDao.insertChecklistItems(seedSnapshot.tasks.flatMap(Task::checklistEntities))
-            seedSnapshot.home.activeTimer?.let { timer ->
+            seedSnapshot.reminders.forEach { reminder ->
+                workspaceDao.upsertReminder(reminder.toEntity())
+            }
+            seedSnapshot.timeEntries.forEach { entry ->
+                workspaceDao.insertTimeEntry(entry.toEntity())
+            }
+            seedSnapshot.home.activeTimer
+                ?.takeUnless { timer ->
+                    seedSnapshot.timeEntries.any { it.id == timer.entryId }
+                }
+                ?.let { timer ->
                 workspaceDao.insertTimeEntry(
                     TimeEntryEntity(
                         id = timer.entryId.value,
@@ -1501,52 +3113,6 @@ class RoomVaultRepository(
                 )
             }
         }
-    }
-
-    private fun defaultWorkflowStatuses(): List<WorkflowStatusEntity> {
-        val projectId = seedSnapshot.projects.firstOrNull()?.id?.value ?: "workspace-default"
-        return listOf(
-            WorkflowStatusEntity(
-                OpenTasksFixtures.backlog.value,
-                projectId,
-                "Backlog",
-                SemanticStatus.BACKLOG.name,
-                "a0",
-                null,
-            ),
-            WorkflowStatusEntity(
-                OpenTasksFixtures.planned.value,
-                projectId,
-                "Planned",
-                SemanticStatus.PLANNED.name,
-                "a1",
-                null,
-            ),
-            WorkflowStatusEntity(
-                OpenTasksFixtures.started.value,
-                projectId,
-                "In progress",
-                SemanticStatus.STARTED.name,
-                "a2",
-                null,
-            ),
-            WorkflowStatusEntity(
-                OpenTasksFixtures.blocked.value,
-                projectId,
-                "Blocked",
-                SemanticStatus.BLOCKED.name,
-                "a3",
-                null,
-            ),
-            WorkflowStatusEntity(
-                OpenTasksFixtures.done.value,
-                projectId,
-                "Done",
-                SemanticStatus.COMPLETED.name,
-                "a4",
-                null,
-            ),
-        )
     }
 
     private fun emptySnapshot(): WorkspaceSnapshot = WorkspaceSnapshot(
@@ -1573,16 +3139,18 @@ class RoomVaultRepository(
         val tags: List<TagEntity>,
         val dependencies: List<TaskDependencyEntity>,
         val workflowStatuses: List<WorkflowStatusEntity> = emptyList(),
+        val templates: List<Template> = emptyList(),
     )
 
     private data class RelationRows(
         val taskTags: List<TaskTagEntity>,
         val checklist: List<ChecklistItemEntity>,
-        val activeTimer: TimedActiveEntry?,
+        val reminders: List<ReminderEntity>,
+        val timeEntries: TimedTimeEntries,
     )
 
-    private data class TimedActiveEntry(
-        val entry: TimeEntryEntity,
+    private data class TimedTimeEntries(
+        val entries: List<TimeEntryEntity>,
         val at: Instant,
     )
 
@@ -1594,10 +3162,19 @@ class RoomVaultRepository(
         const val MAX_TASK_DESCRIPTION_LENGTH = 20_000
         const val MAX_PROJECT_NAME_LENGTH = 120
         const val MAX_PROJECT_SUMMARY_LENGTH = 1_000
+        const val MAX_WORKFLOW_STATUS_NAME_LENGTH = 64
+        const val MAX_WORKFLOW_STATUSES = 20
+        const val MAX_MILESTONE_NAME_LENGTH = 120
+        const val MAX_MILESTONES = 100
+        const val MAX_TEMPLATE_NAME_LENGTH = 120
+        const val MAX_TEMPLATES = 100
         const val MAX_CHECKLIST_ITEM_LENGTH = 500
         const val MAX_CHECKLIST_ITEMS = 200
         const val MAX_TAG_NAME_LENGTH = 64
         const val MAX_TASK_TAGS = 50
+        const val MAX_TASK_DEPENDENCIES = 100
+        const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
+        const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         val VAULT_ID = VaultId("vault-primary")

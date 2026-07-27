@@ -39,7 +39,7 @@ without becoming playful or decorative.
 Do not resemble an iOS task app transplanted onto Android, a floating bottom
 pill, a collaboration-first project manager, or a card-grid SaaS dashboard.
 Avoid collaborator avatars, status side-stripes, decorative gradients,
-glassmorphism, cream-colored AI-product styling, and color-only status
+glassmorphism, cream-coloured AI-product styling, and colour-only status
 communication.
 
 ## Design Principles
@@ -51,12 +51,14 @@ communication.
    navigation, and timer state should survive.
 5. Make every irreversible or risky state explicit, while ordinary edits remain
    immediate and undoable.
+6. Never hide double-counted work: preserve overlapping time records, explain
+   the conflict and let the user correct either entry explicitly.
 
 ## Accessibility & Inclusion
 
 Meet an enhanced WCAG 2.2 AA-equivalent target with 48 dp touch targets,
 TalkBack names and custom actions, logical focus order, keyboard and switch
-access, visible focus, high-contrast validation, non-color status cues, reduced
-motion, and layouts that remain usable at 200% font scaling. English ships
-first, but strings, dates, plurals, sorting, and layouts must remain ready for
-localization and RTL.
+access, visible focus, high-contrast validation, non-colour status cues, reduced
+motion, and layouts that remain usable at 200% font scaling. UK English ships
+first, with UK spelling, day–month dates and 24-hour time; strings, dates,
+plurals, sorting, and layouts must remain ready for localisation and RTL.

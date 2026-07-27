@@ -4,18 +4,18 @@
 
 Open Tasks feels like a well-kept charcoal desk in changing light: task-dense
 and precise on the inside, with a controlled ember signal only where time,
-progress, selection, or data needs attention. The color strategy is restrained.
-Orange never becomes decorative background color and charcoal remains the
-filled-action color.
+progress, selection, or data needs attention. The colour strategy is restrained.
+Orange never becomes decorative background colour and charcoal remains the
+filled-action colour.
 
 The primary usage scene is a solo professional moving between a foldable cover
 screen in daylight, the unfolded workbench at a desk, and a tablet in lower
 evening light. Both light and dark schemes are first-class.
 
-## Color
+## Colour
 
-Color tokens are authored as OKLCH values and converted to sRGB in Compose.
-This preserves the design contract without scattering raw hexadecimal colors.
+Colour tokens are authored as OKLCH values and converted to sRGB in Compose.
+This preserves the design contract without scattering raw hexadecimal colours.
 
 ### Light
 
@@ -44,7 +44,7 @@ This preserves the design contract without scattering raw hexadecimal colors.
 - Success: `oklch(0.720 0.100 150)`.
 
 Text on a saturated ember fill is white. Status also uses icon, label, and
-container shape; color never carries meaning alone. Dynamic Color is disabled.
+container shape; colour never carries meaning alone. Dynamic Colour is disabled.
 
 ## Typography
 
@@ -89,7 +89,7 @@ Material 3 Expressive shapes are restrained:
 - FAB and high-emphasis containers: Material expressive large shape.
 - Selected list rows use a full tonal container, leading icon, and label.
 
-Do not use colored side-stripes. Prefer spacing and section rules to wrapping
+Do not use coloured side-stripes. Prefer spacing and section rules to wrapping
 everything in cards. Tonal elevation communicates layers; shadows are reserved
 for floating controls and temporary surfaces.
 
@@ -100,15 +100,85 @@ for floating controls and temporary surfaces.
 - Task row: completion control, title, project, due context, priority, and
   blocking state with accessible custom actions.
 - Sync health: text and icon with a tonal attention state; never a decorative
-  dot or color-only signal.
+  dot or colour-only signal.
 - Timer: charcoal focus surface with ember numerals and explicit pause/stop.
+- Time tracking: task detail shows completed logged duration and a plain
+  Review/Add action. A single scrollable Material sheet lists entries with UK
+  dates, 24-hour ranges, duration, optional note and 48 dp edit/delete actions.
+  Its inline editor uses date, start and duration rather than ambiguous
+  start/end text. Overlaps use warning iconography, explicit double-counting
+  copy and repository-derived conflict state; recorded work is never silently
+  trimmed. Running entries remain labelled and read-only until stopped.
 - Filters: Material chips with selected state and accessible names.
+- Reminder editor: due-relative preset chips followed by Flexible/Precise
+  delivery choices. Ask for notification or precise-alarm access only beside
+  the choice that needs it, preserve the saved reminder when access is denied,
+  and explain the active fallback inline.
+- Reminder notification: show task context only in the private notification
+  version; use generic copy on the lock screen. Content opens the task, Snooze
+  is always available, and Complete appears only when the task is not blocked.
 - Workbench: list and persistent detail panes with visible selection.
+- Workflow editor: a project-scoped modal sheet with editable status names,
+  explicit up/down actions as an accessible alternative to drag gestures,
+  immutable reporting-category labels, assigned-task counts and explained
+  archive confirmation. New-status categories wrap at narrow widths and large
+  text sizes; every action is at least 48 dp.
+- Milestone editor: a project-scoped modal sheet for name, optional due date,
+  completion/reopen and deletion. Show assigned-task impact before deletion,
+  distinguish open and complete milestones with text and iconography, and keep
+  all controls at least 48 dp.
+- Task milestone selector: appears beside project organisation, lists only
+  open milestones from the selected project plus an already-assigned completed
+  milestone, and clears its draft selection when the project changes.
+- Project template capture: an anchored modal sheet summarises the exact open
+  workflow, milestone and task counts before saving. It explicitly explains
+  that completed/Bin content is excluded and dates shift from the earliest
+  saved date.
+- Template library: a plain More destination lists reusable structures with
+  task, milestone and stage counts. Use opens one focused sheet for the new
+  project name and anchor date; delete remains an immediate reversible command.
+- Dependency editor: a searchable task-scoped modal sheet with checked
+  selections, project and open/complete/Bin context, a 100-link count and
+  inline live-region feedback when a link would create a cycle. The main task
+  editor summarises unfinished versus total prerequisites.
+- Blocked completion: every in-app completion control and Completed-status
+  selection opens the same confirmation dialog, naming up to three unfinished
+  prerequisites. A blocked workflow state receives distinct copy. Reminder
+  notifications omit Complete while the task is blocked.
+- Schedule: compact windows show one selected-day agenda with previous, Today,
+  next and horizontally scrollable weekday controls. Expanded windows show the
+  ISO Monday–Sunday week as date-grouped timeline columns beside an open-only
+  unscheduled tray. Start time takes precedence over due time for placement;
+  due-only work is labelled explicitly, and completion, blocking and reminders
+  never rely on colour alone.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
 
 All interactive components cover default, pressed, focused, selected, disabled,
 loading, error, and empty states where relevant.
+
+## Language and locale
+
+The application language is UK English (`en-GB`). User-facing copy uses UK
+spelling, the deletion surface is called Bin, dates use day–month order and
+times use the 24-hour clock. Android's per-app locale declaration and startup
+configuration keep system date pickers and formatted notifications aligned.
+Stable internal command/type names may retain historical terminology and are
+not user-facing. A future additional locale requires extracting remaining
+Compose literals into resources before it can be advertised as supported.
+
+## Continuity
+
+Rotation, fold changes and process recreation preserve the current
+destination, selected record, filters, meaningful scroll position and open
+drafts. A restored unsaved editor draft takes precedence over the first
+repository emission so the interface never appears to recover text and then
+replace it. Running timers resume from their persisted start instant rather
+than restarting or freezing at the last rendered elapsed value.
+
+Transient recovery must remain unobtrusive: do not add success banners for
+ordinary restoration. Existing validation and save-status copy should describe
+the restored draft accurately, and search should re-run its restored query.
 
 ## Motion
 

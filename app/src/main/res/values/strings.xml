@@ -2,4 +2,11 @@
     <string name="app_name">Open Tasks</string>
     <string name="quick_add">Quick add</string>
     <string name="quick_add_shortcut">Capture a task</string>
+    <string name="reminder_channel_name">Task reminders</string>
+    <string name="reminder_channel_description">Due-time reminders chosen in task planning</string>
+    <string name="reminder_public_title">Task reminder</string>
+    <string name="reminder_public_text">Open Open Tasks to view it</string>
+    <string name="reminder_notification_fallback">Task reminder</string>
+    <string name="reminder_action_snooze">Snooze 15 min</string>
+    <string name="reminder_action_complete">Complete</string>
 </resources>

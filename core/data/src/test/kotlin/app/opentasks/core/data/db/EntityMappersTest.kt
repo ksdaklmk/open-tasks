@@ -41,6 +41,7 @@ class EntityMappersTest {
             estimate = Duration.ofMinutes(75),
             tagIds = setOf(TagId("deep-work")),
             checklist = listOf(ChecklistItem("step", "First step", true, "a0")),
+            dependencyIds = setOf(TaskId("dependency")),
             blockedBy = setOf(TaskId("dependency")),
             revision = Revision(DeviceId("device"), 1234, 2),
         )
@@ -48,6 +49,7 @@ class EntityMappersTest {
         val restored = task.toEntity().toModel(
             tagIds = task.tagIds,
             checklist = task.checklist,
+            dependencyIds = task.dependencyIds,
             blockedBy = task.blockedBy,
         )
 

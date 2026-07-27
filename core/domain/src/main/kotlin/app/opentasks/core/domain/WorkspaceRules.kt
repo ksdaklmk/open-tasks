@@ -54,23 +54,36 @@ data class TimerReconciliation(
 
 object TimerRules {
     fun reconcile(entries: Collection<TimeEntry>, now: Instant): TimerReconciliation {
-        val sorted = entries.sortedBy(TimeEntry::startedAt)
+        val sorted = entries.sortedWith(
+            compareBy(TimeEntry::startedAt).thenBy { it.id.value },
+        )
         val conflicts = buildList {
-            sorted.forEachIndexed { index, first ->
-                val firstEnd = first.stoppedAt ?: now
-                sorted.drop(index + 1).forEach { second ->
-                    if (!second.startedAt.isBefore(firstEnd)) return@forEach
-                    val secondEnd = second.stoppedAt ?: now
-                    val overlapEnd = minOf(firstEnd, secondEnd)
-                    if (overlapEnd.isAfter(second.startedAt)) {
-                        add(
-                            TimerConflict(
-                                first,
-                                second,
-                                Duration.between(second.startedAt, overlapEnd),
+            var anchor: TimeEntry? = null
+            var anchorEnd: Instant? = null
+            sorted.forEach { entry ->
+                val entryEnd = entry.stoppedAt ?: now
+                if (!entryEnd.isAfter(entry.startedAt)) return@forEach
+                val previous = anchor
+                val previousEnd = anchorEnd
+                if (
+                    previous != null &&
+                    previousEnd != null &&
+                    entry.startedAt.isBefore(previousEnd)
+                ) {
+                    add(
+                        TimerConflict(
+                            previous,
+                            entry,
+                            Duration.between(
+                                entry.startedAt,
+                                minOf(previousEnd, entryEnd),
                             ),
-                        )
-                    }
+                        ),
+                    )
+                }
+                if (previousEnd == null || entryEnd.isAfter(previousEnd)) {
+                    anchor = entry
+                    anchorEnd = entryEnd
                 }
             }
         }

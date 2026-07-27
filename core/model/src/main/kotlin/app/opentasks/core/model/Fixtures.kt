@@ -11,12 +11,6 @@ object OpenTasksFixtures {
     private val deviceId = DeviceId("fixture-device")
     private val revision = Revision(deviceId, 1_722_000_000_000, 0)
 
-    val backlog = WorkflowStatusId("status-backlog")
-    val planned = WorkflowStatusId("status-planned")
-    val started = WorkflowStatusId("status-started")
-    val blocked = WorkflowStatusId("status-blocked")
-    val done = WorkflowStatusId("status-done")
-
     val studioProject = Project(
         id = ProjectId("project-studio"),
         workspaceId = workspaceId,
@@ -50,43 +44,22 @@ object OpenTasksFixtures {
         totalTasks = 10,
     )
 
-    val workflowStatuses = listOf(
-        WorkflowStatus(
-            id = backlog,
-            projectId = studioProject.id,
-            name = "Backlog",
-            semanticStatus = SemanticStatus.BACKLOG,
-            rank = "a0",
-        ),
-        WorkflowStatus(
-            id = planned,
-            projectId = studioProject.id,
-            name = "Planned",
-            semanticStatus = SemanticStatus.PLANNED,
-            rank = "a1",
-        ),
-        WorkflowStatus(
-            id = started,
-            projectId = studioProject.id,
-            name = "In progress",
-            semanticStatus = SemanticStatus.STARTED,
-            rank = "a2",
-        ),
-        WorkflowStatus(
-            id = blocked,
-            projectId = studioProject.id,
-            name = "Blocked",
-            semanticStatus = SemanticStatus.BLOCKED,
-            rank = "a3",
-        ),
-        WorkflowStatus(
-            id = done,
-            projectId = studioProject.id,
-            name = "Done",
-            semanticStatus = SemanticStatus.COMPLETED,
-            rank = "a4",
-        ),
-    )
+    val backlog = WorkflowStatus.defaultId(studioProject.id, SemanticStatus.BACKLOG)
+    val planned = WorkflowStatus.defaultId(studioProject.id, SemanticStatus.PLANNED)
+    val started = WorkflowStatus.defaultId(studioProject.id, SemanticStatus.STARTED)
+    val blocked = WorkflowStatus.defaultId(studioProject.id, SemanticStatus.BLOCKED)
+    val done = WorkflowStatus.defaultId(studioProject.id, SemanticStatus.COMPLETED)
+
+    val workflowStatuses =
+        WorkflowStatus.defaults(null) +
+            WorkflowStatus.defaults(studioProject.id) +
+            WorkflowStatus.defaults(taxProject.id) +
+            WorkflowStatus.defaults(researchProject.id)
+
+    fun statusId(
+        projectId: ProjectId?,
+        semanticStatus: SemanticStatus,
+    ): WorkflowStatusId = WorkflowStatus.defaultId(projectId, semanticStatus)
 
     private fun moment(
         year: Int,
@@ -124,7 +97,7 @@ object OpenTasksFixtures {
             id = TaskId("task-invoices"),
             workspaceId = workspaceId,
             projectId = taxProject.id,
-            statusId = planned,
+            statusId = statusId(taxProject.id, SemanticStatus.PLANNED),
             semanticStatus = SemanticStatus.PLANNED,
             title = "Reconcile July invoices",
             priority = Priority.URGENT,
@@ -137,14 +110,28 @@ object OpenTasksFixtures {
             id = TaskId("task-interviews"),
             workspaceId = workspaceId,
             projectId = researchProject.id,
-            statusId = blocked,
+            statusId = statusId(researchProject.id, SemanticStatus.BLOCKED),
             semanticStatus = SemanticStatus.BLOCKED,
             title = "Synthesize interview notes",
             description = "Group evidence by decision and preserve source links.",
             priority = Priority.MEDIUM,
             due = moment(2026, 7, 27, 11),
             estimate = Duration.ofHours(3),
+            dependencyIds = setOf(TaskId("task-transcript")),
             blockedBy = setOf(TaskId("task-transcript")),
+            revision = revision,
+        ),
+        Task(
+            id = TaskId("task-transcript"),
+            workspaceId = workspaceId,
+            projectId = researchProject.id,
+            statusId = statusId(researchProject.id, SemanticStatus.PLANNED),
+            semanticStatus = SemanticStatus.PLANNED,
+            title = "Transcribe research interviews",
+            description = "Prepare the source material before synthesis begins.",
+            priority = Priority.MEDIUM,
+            due = moment(2026, 7, 27, 9),
+            estimate = Duration.ofHours(2),
             revision = revision,
         ),
         Task(

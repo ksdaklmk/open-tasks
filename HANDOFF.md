@@ -59,6 +59,40 @@ features remain blocked by their listed prerequisites.
 
 No task is intentionally left half-implemented at this pause point.
 
+## Train 0 baseline checkpoint verification
+
+Train 0 Task 0.2 completed on 27 July 2026 against the API 37
+`Pixel_10_Pro_Fold` AVD (Android 17, emulator 36.6.11). The debug APK installed
+in place and the original workspace survived the cold process restart. The
+first combined connected-test attempt exposed an AGP cleanup collision:
+`:app:connectedDebugAndroidTest` targets and uninstalls `app.opentasks`.
+The pre-run `default_boot` snapshot restored the exact original package and
+data identity (UID `10331`, first install `10:08:16`, CE inode `573462`,
+database/WAL/SHM inodes `573474`/`573476`/`573478`). That verified recovery was
+saved as `train0_task02_recovered`.
+
+The checked-in delivery plan now isolates the application suite on a sole
+ADB-connected read-only emulator started with `-read-only`,
+`-no-snapshot-save`, and `-no-snapshot-load`. It passed 3/3 there. The normal
+emulator was then restored from `train0_task02_recovered`; packaged manifests
+confirmed that Data, Tasks, Projects, Schedule, and More target isolated module
+packages rather than `app.opentasks`. Their rerun passed 54/54:
+Data 22, Tasks 18, Projects 9, Schedule 2, and More 3.
+
+The first 54-test run found one transient recurrence-test failure: the task
+table emission could arrive before the copied tag/checklist relation emission,
+although the relations were written in the same Room transaction. The failure
+did not reproduce in two isolated reruns. The test now waits for the complete
+relation state before asserting; its isolated rerun and the full 54-test suite
+both pass.
+
+Post-suite force-stop/relaunch and ADB UI inspection passed Home, Tasks,
+Projects, Schedule, More, Quick Add, the project `Save as template` journey,
+and the manual `Add time entry` journey. Both sheets were cancelled without
+creating records. The existing projects, overdue tasks, and running
+`Finish launch proposal` timer remained visible, and the package/database
+identity above was unchanged after the module suites.
+
 ## Status vocabulary
 
 | Status | Meaning |

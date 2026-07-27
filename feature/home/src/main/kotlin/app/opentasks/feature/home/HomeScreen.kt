@@ -41,6 +41,7 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun HomeScreen(
@@ -151,7 +152,7 @@ private fun HomeHeader(
         ) {
             Column {
                 Text(
-                    text = snapshot.today.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+                    text = snapshot.today.format(HOME_DATE_FORMAT),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                 )
@@ -260,7 +261,7 @@ private fun UpcomingRow(
         }
         Text(
             task.due?.let {
-                DateTimeFormatter.ofPattern("d MMM").format(
+                UPCOMING_DATE_FORMAT.format(
                     it.instant.atZone(java.time.ZoneId.of(it.zoneId)),
                 )
             } ?: "Unscheduled",
@@ -269,3 +270,6 @@ private fun UpcomingRow(
         )
     }
 }
+
+private val HOME_DATE_FORMAT = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.UK)
+private val UPCOMING_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM", Locale.UK)

@@ -50,11 +50,14 @@ data class ProjectEntity(
 )
 data class WorkflowStatusEntity(
     val id: String,
-    val projectId: String,
+    val projectId: String?,
     val name: String,
     val semanticStatus: String,
     val rank: String,
     val archivedAtEpochMillis: Long?,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
 )
 
 @Entity(tableName = "milestones", primaryKeys = ["id"])
@@ -64,6 +67,9 @@ data class MilestoneEntity(
     val name: String,
     val dueDate: String?,
     val completedAtEpochMillis: Long?,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
 )
 
 @Entity(
@@ -197,6 +203,9 @@ data class TemplateEntity(
     val workspaceId: String,
     val name: String,
     val encryptedPayload: ByteArray,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
 )
 
 @Entity(tableName = "saved_views", primaryKeys = ["id"])

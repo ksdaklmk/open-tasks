@@ -11,13 +11,18 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
@@ -28,18 +33,29 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.ChecklistItem
+import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.TimeEntryConflict
+import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
+import app.opentasks.core.model.ZonedMoment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.DayOfWeek
+import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
@@ -52,7 +68,6 @@ class TaskEditorInstrumentedTest {
         val task = OpenTasksFixtures.tasks.first()
         val submitted = AtomicReference<TaskEdit?>()
         composeRule.mainClock.autoAdvance = false
-
         composeRule.setContent {
             OpenTasksTheme {
                 TasksScreen(
@@ -129,6 +144,75 @@ class TaskEditorInstrumentedTest {
         composeRule.onNodeWithText("A task needs a title").assertIsDisplayed()
         composeRule.onNodeWithText("Fix fields to save").assertIsDisplayed()
         assertNull(submitted.get())
+    }
+
+    @Test
+    fun reminderRequestsPermissionInContextAndAutoSavesFallbackChoice() {
+        val dueInstant = Instant.ofEpochMilli(
+            Instant.now().plus(Duration.ofDays(2)).toEpochMilli(),
+        )
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(
+            due = ZonedMoment(dueInstant, "UTC"),
+        )
+        val submitted = AtomicReference<TaskEdit?>()
+        val notificationRequests = AtomicInteger()
+        val preciseRequests = AtomicInteger()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit -> submitted.set(edit) },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    notificationsEnabled = false,
+                    preciseRemindersAvailable = false,
+                    onEnableNotifications = { notificationRequests.incrementAndGet() },
+                    onEnablePreciseReminders = { preciseRequests.incrementAndGet() },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("reminder-1-hour")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("reminder-delivery-precise")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("enable-notifications")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.onNodeWithTag("enable-precise-reminders")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            submitted.get()?.reminder?.precise == true
+        }
+
+        assertTrue(notificationRequests.get() >= 2)
+        assertEquals(1, preciseRequests.get())
+        assertEquals(
+            dueInstant.minus(Duration.ofHours(1)),
+            submitted.get()?.reminder?.triggerAt?.instant,
+        )
+        assertEquals(true, submitted.get()?.reminder?.precise)
     }
 
     @Test
@@ -477,10 +561,178 @@ class TaskEditorInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("task-status-button").performClick()
+        assertEquals(
+            0,
+            composeRule.onAllNodesWithTag(
+            "task-status-option-${
+                OpenTasksFixtures.statusId(
+                    OpenTasksFixtures.taxProject.id,
+                    SemanticStatus.BACKLOG,
+                ).value
+            }",
+            ).fetchSemanticsNodes().size,
+        )
         composeRule.onNodeWithTag("task-status-option-${OpenTasksFixtures.backlog.value}")
             .performClick()
 
         assertEquals(task to OpenTasksFixtures.backlog, requested.get())
+    }
+
+    @Test
+    fun milestoneSelectorIsProjectScopedAndAutoSavesMembership() {
+        val task = OpenTasksFixtures.tasks.first {
+            it.projectId == OpenTasksFixtures.studioProject.id && !it.isCompleted
+        }
+        val localMilestone = OpenTasksFixtures.milestones.first {
+            it.projectId == task.projectId
+        }
+        val foreignMilestone = OpenTasksFixtures.milestones.first {
+            it.projectId != task.projectId
+        }
+        val submitted = AtomicReference<TaskEdit?>()
+        composeRule.mainClock.autoAdvance = true
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    milestones = OpenTasksFixtures.snapshot.milestones,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit -> submitted.set(edit) },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("task-milestone-button")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+        assertEquals(
+            0,
+            composeRule.onAllNodesWithTag(
+                "task-milestone-option-${foreignMilestone.id.value}",
+            ).fetchSemanticsNodes().size,
+        )
+        composeRule.onNodeWithTag("task-milestone-option-${localMilestone.id.value}")
+            .performClick()
+        composeRule.waitUntil(2_000) { submitted.get()?.milestoneId == localMilestone.id }
+
+        assertEquals(localMilestone.id, submitted.get()?.milestoneId)
+    }
+
+    @Test
+    fun dependencyEditorShowsCandidatesAndEmitsSelection() {
+        val task = OpenTasksFixtures.tasks.first {
+            !it.isCompleted && it.deletedAt == null && it.dependencyIds.isEmpty()
+        }
+        val dependency = OpenTasksFixtures.tasks.first {
+            it.id != task.id && it.deletedAt == null
+        }
+        val requested = AtomicReference<Triple<TaskId, TaskId, Boolean>?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task, dependency),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    onSetTaskDependency = { taskId, dependencyId, present ->
+                        requested.set(Triple(taskId, dependencyId, present))
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("manage-task-dependencies")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("dependency-editor").assertIsDisplayed()
+        composeRule.onNodeWithTag("dependency-option-${dependency.id.value}")
+            .performClick()
+
+        assertEquals(Triple(task.id, dependency.id, true), requested.get())
+    }
+
+    @Test
+    fun dependencyCycleFeedbackIsVisibleInsideEditor() {
+        val task = OpenTasksFixtures.tasks.first {
+            !it.isCompleted && it.deletedAt == null && it.dependencyIds.isEmpty()
+        }
+        val dependency = OpenTasksFixtures.tasks.first {
+            it.id != task.id && it.deletedAt == null
+        }
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task, dependency),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    dependencyError = "That link would create a dependency cycle.",
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("manage-task-dependencies")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("dependency-error").assertIsDisplayed()
+        composeRule.onNodeWithText("That link would create a dependency cycle.")
+            .assertIsDisplayed()
     }
 
     @Test
@@ -521,5 +773,263 @@ class TaskEditorInstrumentedTest {
             .performClick()
 
         assertEquals(task, deleted.get())
+    }
+
+    @Test
+    fun taskFilterRestoresAfterSavedInstanceStateRecreation() {
+        val restorationTester = StateRestorationTester(composeRule)
+        val inboxTask = OpenTasksFixtures.tasks.first().copy(
+            id = TaskId("restoration-inbox"),
+            title = "Restoration inbox task",
+            projectId = null,
+            deletedAt = null,
+        )
+        val projectTask = OpenTasksFixtures.tasks.last().copy(
+            id = TaskId("restoration-project"),
+            title = "Restoration project task",
+            projectId = OpenTasksFixtures.studioProject.id,
+            deletedAt = null,
+        )
+
+        restorationTester.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(inboxTask, projectTask),
+                    projectNames = mapOf(
+                        OpenTasksFixtures.studioProject.id to
+                            OpenTasksFixtures.studioProject.name,
+                    ),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = null,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("task-filter-inbox").performClick()
+        composeRule.onNodeWithText(inboxTask.title).assertIsDisplayed()
+        composeRule.onNodeWithText(projectTask.title).assertDoesNotExist()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithTag("task-filter-inbox").assertIsSelected()
+        composeRule.onNodeWithText(inboxTask.title).assertIsDisplayed()
+        composeRule.onNodeWithText(projectTask.title).assertDoesNotExist()
+    }
+
+    @Test
+    fun taskListScrollRestoresAfterSavedInstanceStateRecreation() {
+        val restorationTester = StateRestorationTester(composeRule)
+        val tasks = List(30) { index ->
+            OpenTasksFixtures.tasks.first().copy(
+                id = TaskId("restoration-list-$index"),
+                title = "Restoration task $index",
+                deletedAt = null,
+            )
+        }
+
+        restorationTester.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = tasks,
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = null,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("task-list").performScrollToIndex(20)
+        composeRule.onNodeWithText("Restoration task 20").assertIsDisplayed()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithText("Restoration task 20").assertIsDisplayed()
+    }
+
+    @Test
+    fun taskDraftAndEditorScrollRestoreAfterSavedInstanceStateRecreation() {
+        val restorationTester = StateRestorationTester(composeRule)
+        val task = OpenTasksFixtures.tasks.first()
+        val draft = "x".repeat(241)
+
+        restorationTester.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("task-title-field")
+            .performTextReplacement(draft)
+        composeRule.onNodeWithTag("move-task-to-trash")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithTag("task-title-field")
+            .assertTextContains(draft, substring = true)
+        composeRule.onNodeWithTag("move-task-to-trash").assertIsDisplayed()
+    }
+
+    @Test
+    fun manualTimeEntryCanBeAddedFromTaskDetails() {
+        val task = OpenTasksFixtures.tasks.first()
+        val submitted = AtomicReference<TimeEntryEdit?>()
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = emptyList(),
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    onAddTimeEntry = { _, edit -> submitted.set(edit) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("manage-time-entries")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("add-time-entry").performClick()
+        composeRule.onNodeWithTag("time-entry-start").performTextReplacement("09:30")
+        composeRule.onNodeWithTag("time-entry-duration").performTextReplacement("45")
+        composeRule.onNodeWithTag("time-entry-note").performTextReplacement("Client review")
+        composeRule.onNodeWithTag("save-time-entry").performClick()
+
+        assertEquals(Duration.ofMinutes(45), submitted.get()?.let {
+            Duration.between(it.startedAt, it.stoppedAt)
+        })
+        assertEquals("Client review", submitted.get()?.note)
+    }
+
+    @Test
+    fun overlapWarningLinksToReversibleTimeEntryActions() {
+        val task = OpenTasksFixtures.tasks.first()
+        val first = TimeEntry(
+            id = TimeEntryId("compose-time-first"),
+            taskId = task.id,
+            deviceId = DeviceId("phone"),
+            startedAt = Instant.parse("2026-07-26T08:00:00Z"),
+            stoppedAt = Instant.parse("2026-07-26T09:00:00Z"),
+            note = "Planning",
+        )
+        val second = TimeEntry(
+            id = TimeEntryId("compose-time-second"),
+            taskId = task.id,
+            deviceId = DeviceId("tablet"),
+            startedAt = Instant.parse("2026-07-26T08:30:00Z"),
+            stoppedAt = Instant.parse("2026-07-26T09:30:00Z"),
+        )
+        val deleted = AtomicReference<TimeEntryId?>()
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = emptyList(),
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    timeEntries = listOf(first, second),
+                    timeEntryConflicts = listOf(
+                        TimeEntryConflict(
+                            firstEntryId = first.id,
+                            secondEntryId = second.id,
+                            overlap = Duration.ofMinutes(30),
+                        ),
+                    ),
+                    onDeleteTimeEntry = deleted::set,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("time-overlap-warning")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("manage-time-entries").performClick()
+        composeRule.onNodeWithTag("time-sheet-overlap-warning").assertIsDisplayed()
+        composeRule.onNodeWithTag("delete-time-entry-${first.id.value}").performClick()
+
+        assertEquals(first.id, deleted.get())
     }
 }

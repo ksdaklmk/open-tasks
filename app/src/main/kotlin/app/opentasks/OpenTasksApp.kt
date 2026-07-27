@@ -1,7 +1,14 @@
 package app.opentasks
 
+import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -42,10 +49,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,8 +70,12 @@ import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
@@ -70,18 +83,27 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.TimeEntryId
+import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.feature.home.HomeScreen
 import app.opentasks.feature.more.MoreScreen
 import app.opentasks.feature.projects.NewProjectSheet
 import app.opentasks.feature.projects.ProjectEdit
 import app.opentasks.feature.projects.ProjectsScreen
+import app.opentasks.feature.projects.WorkflowMove
 import app.opentasks.feature.schedule.ScheduleScreen
 import app.opentasks.feature.tasks.TaskEdit
 import app.opentasks.feature.tasks.TasksScreen
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import app.opentasks.reminders.ReminderNotifications
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -136,9 +158,15 @@ internal fun snackbarPresentation(hasUndo: Boolean): SnackbarPresentation =
     )
 
 @Composable
+internal fun rememberWorkspaceBackStack(): NavBackStack<NavKey> =
+    rememberNavBackStack(HomeRoute)
+
+@Composable
 fun OpenTasksApp(
     activity: Activity,
     quickAddSignal: Int,
+    openTaskSignal: Int = 0,
+    openTaskId: String? = null,
     viewModel: WorkspaceViewModel = viewModel(),
 ) {
     OpenTasksTheme {
@@ -146,6 +174,7 @@ fun OpenTasksApp(
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
+        val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
         val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
         val snackbarHostState = remember { SnackbarHostState() }
         val accessibilityManager = LocalAccessibilityManager.current
@@ -155,11 +184,32 @@ fun OpenTasksApp(
         var showNewProject by rememberSaveable { mutableStateOf(false) }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var hasSeparatingFold by remember { mutableStateOf(false) }
+        var permissionStateVersion by remember { mutableIntStateOf(0) }
+        var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val notificationPermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) {
+            notificationPermissionRequested = true
+            permissionStateVersion++
+        }
+        val notificationsPermissionGranted = remember(permissionStateVersion) {
+            ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        val notificationsEnabled = remember(permissionStateVersion) {
+            ReminderNotifications.areEnabled(activity)
+        }
+        val preciseRemindersAvailable = remember(permissionStateVersion) {
+            activity.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        }
 
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
         val selectedProjectId = selectedProjectValue?.let(::ProjectId)
         val projectNames = snapshot.projects.associate { it.id to it.name }
-        val backStack = rememberNavBackStack(HomeRoute)
+        val backStack = rememberWorkspaceBackStack()
         val currentRoute = backStack.lastOrNull() ?: HomeRoute
 
         fun navigate(route: WorkspaceRoute) {
@@ -168,6 +218,45 @@ fun OpenTasksApp(
             backStack.add(route)
             if (route != TasksRoute) viewModel.closeTask()
             if (route != ProjectsRoute) viewModel.closeProject()
+        }
+
+        fun openNotificationSettings() {
+            activity.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName),
+            )
+        }
+
+        fun enableNotifications() {
+            when {
+                notificationsPermissionGranted -> openNotificationSettings()
+                !notificationPermissionRequested -> {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                activity.shouldShowRequestPermissionRationale(
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) -> {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                else -> openNotificationSettings()
+            }
+        }
+
+        fun enablePreciseReminders() {
+            activity.startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    "package:${activity.packageName}".toUri(),
+                ),
+            )
+        }
+
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) permissionStateVersion++
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
         LaunchedEffect(activity) {
@@ -182,6 +271,14 @@ fun OpenTasksApp(
 
         LaunchedEffect(quickAddSignal) {
             if (quickAddSignal > 0) showQuickAdd = true
+        }
+
+        LaunchedEffect(openTaskSignal) {
+            val taskId = openTaskId?.let(::TaskId)
+            if (openTaskSignal > 0 && taskId != null) {
+                viewModel.selectTask(taskId)
+                navigate(TasksRoute)
+            }
         }
 
         LaunchedEffect(viewModel, accessibilityManager) {
@@ -364,12 +461,14 @@ fun OpenTasksApp(
                             entry<TasksRoute> {
                                 TasksScreen(
                                     tasks = snapshot.tasks,
+                                    reminders = snapshot.reminders,
                                     projectNames = projectNames,
                                     activeProjectIds = snapshot.projects
                                         .filter { it.archivedAt == null }
                                         .mapTo(hashSetOf()) { it.id },
                                     workflowStatuses = snapshot.workflowStatuses,
                                     tags = snapshot.tags,
+                                    milestones = snapshot.milestones,
                                     selectedTaskId = selectedTaskId,
                                     showDetailPane = showDetailPane,
                                     onSelectTask = viewModel::selectTask,
@@ -412,6 +511,43 @@ fun OpenTasksApp(
                                             DomainCommand.CreateAndAssignTag(taskId, name),
                                         )
                                     },
+                                    dependencyError = dependencyFeedback
+                                        ?.takeIf { it.taskId == selectedTaskId }
+                                        ?.message,
+                                    onSetTaskDependency = viewModel::setTaskDependency,
+                                    onClearDependencyError = viewModel::clearDependencyFeedback,
+                                    timeEntries = snapshot.timeEntries,
+                                    timeEntryConflicts = snapshot.timeEntryConflicts,
+                                    onAddTimeEntry = { taskId, edit ->
+                                        viewModel.execute(
+                                            DomainCommand.AddTimeEntry(
+                                                entryId = TimeEntryId.new(),
+                                                taskId = taskId,
+                                                startedAt = edit.startedAt,
+                                                stoppedAt = edit.stoppedAt,
+                                                note = edit.note,
+                                            ),
+                                        )
+                                    },
+                                    onUpdateTimeEntry = { entryId, edit ->
+                                        viewModel.execute(
+                                            DomainCommand.UpdateTimeEntry(
+                                                entryId = entryId,
+                                                startedAt = edit.startedAt,
+                                                stoppedAt = edit.stoppedAt,
+                                                note = edit.note,
+                                            ),
+                                        )
+                                    },
+                                    onDeleteTimeEntry = { entryId ->
+                                        viewModel.execute(
+                                            DomainCommand.DeleteTimeEntry(entryId),
+                                        )
+                                    },
+                                    notificationsEnabled = notificationsEnabled,
+                                    preciseRemindersAvailable = preciseRemindersAvailable,
+                                    onEnableNotifications = ::enableNotifications,
+                                    onEnablePreciseReminders = ::enablePreciseReminders,
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -428,6 +564,78 @@ fun OpenTasksApp(
                                         viewModel.execute(edit.toCommand(projectId))
                                     },
                                     onArchiveProject = viewModel::archiveProject,
+                                    onCreateWorkflowStatus = { projectId, name, semantic ->
+                                        viewModel.execute(
+                                            DomainCommand.CreateWorkflowStatus(
+                                                statusId = WorkflowStatusId.new(),
+                                                projectId = projectId,
+                                                name = name,
+                                                semanticStatus = semantic,
+                                            ),
+                                        )
+                                    },
+                                    onRenameWorkflowStatus = { statusId, name ->
+                                        viewModel.execute(
+                                            DomainCommand.RenameWorkflowStatus(statusId, name),
+                                        )
+                                    },
+                                    onMoveWorkflowStatus = { statusId, direction ->
+                                        viewModel.execute(
+                                            DomainCommand.MoveWorkflowStatus(
+                                                statusId = statusId,
+                                                direction = when (direction) {
+                                                    WorkflowMove.EARLIER ->
+                                                        WorkflowMoveDirection.EARLIER
+                                                    WorkflowMove.LATER ->
+                                                        WorkflowMoveDirection.LATER
+                                                },
+                                            ),
+                                        )
+                                    },
+                                    onArchiveWorkflowStatus = { statusId ->
+                                        viewModel.execute(
+                                            DomainCommand.ArchiveWorkflowStatus(statusId),
+                                        )
+                                    },
+                                    onRestoreWorkflowStatus = { statusId ->
+                                        viewModel.execute(
+                                            DomainCommand.RestoreArchivedWorkflowStatus(statusId),
+                                        )
+                                    },
+                                    onCreateMilestone = { projectId, name, dueDate ->
+                                        viewModel.execute(
+                                            DomainCommand.CreateMilestone(
+                                                milestoneId = MilestoneId.new(),
+                                                projectId = projectId,
+                                                name = name,
+                                                dueDate = dueDate,
+                                            ),
+                                        )
+                                    },
+                                    onUpdateMilestone = { milestoneId, name, dueDate, completedAt ->
+                                        viewModel.execute(
+                                            DomainCommand.UpdateMilestone(
+                                                milestoneId = milestoneId,
+                                                name = name,
+                                                dueDate = dueDate,
+                                                completedAt = completedAt,
+                                            ),
+                                        )
+                                    },
+                                    onDeleteMilestone = { milestoneId ->
+                                        viewModel.execute(
+                                            DomainCommand.DeleteMilestone(milestoneId),
+                                        )
+                                    },
+                                    onCaptureTemplate = { projectId, name ->
+                                        viewModel.execute(
+                                            DomainCommand.CaptureProjectTemplate(
+                                                templateId = TemplateId.new(),
+                                                projectId = projectId,
+                                                name = name,
+                                            ),
+                                        )
+                                    },
                                     onOpenTask = { taskId ->
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
@@ -439,6 +647,8 @@ fun OpenTasksApp(
                                     tasks = snapshot.tasks,
                                     projectNames = projectNames,
                                     expanded = expanded,
+                                    reminders = snapshot.reminders,
+                                    today = snapshot.home.today,
                                     onOpenTask = { taskId ->
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
@@ -449,6 +659,8 @@ fun OpenTasksApp(
                                 MoreScreen(
                                     tasks = snapshot.tasks,
                                     projects = snapshot.projects,
+                                    templates = snapshot.templates,
+                                    today = snapshot.home.today,
                                     onRestoreProject = { projectId ->
                                         viewModel.execute(
                                             DomainCommand.RestoreArchivedProject(projectId),
@@ -460,6 +672,19 @@ fun OpenTasksApp(
                                     onPermanentlyDeleteTask = { taskId ->
                                         viewModel.execute(
                                             DomainCommand.PermanentlyDeleteTask(taskId),
+                                        )
+                                    },
+                                    onUseTemplate = { templateId, name, anchorDate ->
+                                        viewModel.addProjectFromTemplate(
+                                            templateId = templateId,
+                                            name = name,
+                                            anchorDate = anchorDate,
+                                            onCreated = { navigate(ProjectsRoute) },
+                                        )
+                                    },
+                                    onDeleteTemplate = { templateId ->
+                                        viewModel.execute(
+                                            DomainCommand.DeleteTemplate(templateId),
                                         )
                                     },
                                 )
@@ -526,14 +751,25 @@ fun OpenTasksApp(
         }
 
         if (pendingBlocked != null) {
+            val blockerNames = pendingBlocked?.task?.blockedBy
+                .orEmpty()
+                .mapNotNull { blockerId ->
+                    snapshot.tasks.firstOrNull { it.id == blockerId }?.title
+                }
             AlertDialog(
                 onDismissRequest = viewModel::dismissBlockedCompletion,
                 icon = { Icon(Icons.Rounded.CheckCircle, contentDescription = null) },
                 title = { Text("Complete blocked task?") },
                 text = {
                     Text(
-                        "“${pendingBlocked?.task?.title}” still has unfinished dependencies. " +
-                            "Completing it will preserve those links for review.",
+                        if (blockerNames.isEmpty()) {
+                            "“${pendingBlocked?.task?.title}” is in a blocked workflow state. " +
+                                "Complete it only if that state no longer reflects the work."
+                        } else {
+                            "“${pendingBlocked?.task?.title}” is still waiting for " +
+                                blockerNames.joinToString(limit = 3) { "“$it”" } +
+                                ". Completing it will preserve those links for review."
+                        },
                     )
                 },
                 confirmButton = {
@@ -561,6 +797,8 @@ private fun TaskEdit.toCommand(taskId: TaskId): DomainCommand.UpdateTask =
         due = due,
         recurrence = recurrence,
         estimate = estimate,
+        milestoneId = milestoneId,
+        reminder = reminder,
     )
 
 private fun ProjectEdit.toCommand(projectId: ProjectId): DomainCommand.UpdateProject =

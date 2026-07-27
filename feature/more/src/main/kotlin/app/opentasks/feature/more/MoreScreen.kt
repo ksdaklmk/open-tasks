@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
@@ -27,14 +30,22 @@ import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,19 +66,28 @@ import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.Template
+import app.opentasks.core.model.TemplateId
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 @Composable
 fun MoreScreen(
     tasks: List<Task>,
     projects: List<Project>,
+    templates: List<Template> = emptyList(),
     onRestoreProject: (ProjectId) -> Unit,
     onRestoreTask: (TaskId) -> Unit,
     onPermanentlyDeleteTask: (TaskId) -> Unit,
+    onUseTemplate: (TemplateId, String, LocalDate) -> Unit = { _, _, _ -> },
+    onDeleteTemplate: (TemplateId) -> Unit = {},
     modifier: Modifier = Modifier,
+    today: LocalDate = LocalDate.now(),
 ) {
     var destination by rememberSaveable { mutableStateOf(MoreDestination.OVERVIEW) }
 
@@ -91,6 +111,21 @@ fun MoreScreen(
                 onBack = { destination = MoreDestination.OVERVIEW },
                 onRestoreTask = onRestoreTask,
                 onPermanentlyDeleteTask = onPermanentlyDeleteTask,
+                modifier = modifier,
+            )
+            return
+        }
+        MoreDestination.TEMPLATES -> {
+            BackHandler { destination = MoreDestination.OVERVIEW }
+            TemplatesScreen(
+                templates = templates,
+                existingProjectNames = projects
+                    .filter { it.archivedAt == null }
+                    .mapTo(linkedSetOf(), Project::name),
+                today = today,
+                onBack = { destination = MoreDestination.OVERVIEW },
+                onUseTemplate = onUseTemplate,
+                onDeleteTemplate = onDeleteTemplate,
                 modifier = modifier,
             )
             return
@@ -131,8 +166,15 @@ fun MoreScreen(
                 "Insights",
             )
             DestinationRow(
-                Icons.Rounded.Description,
-                "Templates",
+                icon = Icons.Rounded.Description,
+                title = "Templates",
+                supportingText = if (templates.size == 1) {
+                    "1 reusable project structure"
+                } else {
+                    "${templates.size} reusable project structures"
+                },
+                onClick = { destination = MoreDestination.TEMPLATES },
+                modifier = Modifier.testTag("open-templates"),
             )
             DestinationRow(
                 icon = Icons.Rounded.Archive,
@@ -147,7 +189,7 @@ fun MoreScreen(
             )
             DestinationRow(
                 icon = Icons.Rounded.DeleteOutline,
-                title = "Trash",
+                title = "Bin",
                 supportingText = "${tasks.count { it.deletedAt != null }} deleted • kept for 30 days",
                 onClick = { destination = MoreDestination.TRASH },
                 modifier = Modifier.testTag("open-trash"),
@@ -161,6 +203,280 @@ fun MoreScreen(
                 Icons.Rounded.Lock,
                 "Privacy & recovery",
             )
+        }
+    }
+}
+
+@Composable
+private fun TemplatesScreen(
+    templates: List<Template>,
+    existingProjectNames: Set<String>,
+    today: LocalDate,
+    onBack: () -> Unit,
+    onUseTemplate: (TemplateId, String, LocalDate) -> Unit,
+    onDeleteTemplate: (TemplateId) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var selectedTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedTemplate = templates.firstOrNull { it.id.value == selectedTemplateId }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("templates-screen"),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = 8.dp,
+            end = 16.dp,
+            bottom = 112.dp,
+        ),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                }
+                Text(
+                    "Templates",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Create a fresh project while keeping relative dates, workflow stages, " +
+                    "open milestones and open task structure.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
+
+        if (templates.isEmpty()) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    EmptyState(
+                        icon = Icons.Rounded.Description,
+                        title = "No templates yet",
+                        modifier = Modifier.padding(top = 32.dp),
+                    )
+                    Text(
+                        "Open a project and choose Save as template.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            items(templates, key = { it.id.value }) { template ->
+                TemplateRow(
+                    template = template,
+                    onUse = { selectedTemplateId = template.id.value },
+                    onDelete = { onDeleteTemplate(template.id) },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+
+    selectedTemplate?.let { template ->
+        UseTemplateSheet(
+            template = template,
+            existingProjectNames = existingProjectNames,
+            today = today,
+            onDismiss = { selectedTemplateId = null },
+            onUse = { name, anchorDate ->
+                onUseTemplate(template.id, name, anchorDate)
+                selectedTemplateId = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun TemplateRow(
+    template: Template,
+    onUse: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.Description,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        ) {
+            Text(template.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "${countLabel(template.tasks.size, "task")} • " +
+                    "${countLabel(template.milestones.size, "milestone")} • " +
+                    countLabel(template.workflowStatuses.size, "stage"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(
+            onClick = onUse,
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("use-template-${template.id.value}"),
+        ) {
+            Text("Use")
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("delete-template-${template.id.value}"),
+        ) {
+            Icon(Icons.Rounded.Delete, contentDescription = "Delete ${template.name}")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UseTemplateSheet(
+    template: Template,
+    existingProjectNames: Set<String>,
+    today: LocalDate,
+    onDismiss: () -> Unit,
+    onUse: (String, LocalDate) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var name by rememberSaveable(template.id.value) {
+        mutableStateOf(template.projectName.take(MAX_PROJECT_NAME_LENGTH))
+    }
+    var anchorEpochDay by rememberSaveable(template.id.value) {
+        mutableStateOf(today.toEpochDay())
+    }
+    var showDatePicker by rememberSaveable(template.id.value) { mutableStateOf(false) }
+    val anchorDate = LocalDate.ofEpochDay(anchorEpochDay)
+    val trimmedName = name.trim()
+    val duplicateName = existingProjectNames.any { it.equals(trimmedName, ignoreCase = true) }
+    val nameError = when {
+        trimmedName.isEmpty() -> "Enter a project name"
+        name.length > MAX_PROJECT_NAME_LENGTH ->
+            "Keep project names under $MAX_PROJECT_NAME_LENGTH characters"
+        duplicateName -> "An active project already uses that name"
+        else -> null
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("use-template-sheet"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
+            Text(
+                "Use ${template.name}",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "The earliest saved date becomes the project start below; every other " +
+                    "date keeps its relative offset.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(20.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = {
+                    name = it.take(MAX_PROJECT_NAME_LENGTH + 1)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("template-project-name"),
+                label = { Text("New project name") },
+                supportingText = nameError?.let { { Text(it) } },
+                isError = nameError != null,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { showDatePicker = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("template-start-date"),
+            ) {
+                Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Start ${anchorDate.format(TEMPLATE_DATE_FORMAT)}")
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = { onUse(trimmedName, anchorDate) },
+                    enabled = nameError == null,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("confirm-use-template"),
+                ) {
+                    Text("Create project")
+                }
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = anchorDate
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selected ->
+                            anchorEpochDay = Instant.ofEpochMilli(selected)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                                .toEpochDay()
+                        }
+                        showDatePicker = false
+                    },
+                    enabled = datePickerState.selectedDateMillis != null,
+                ) {
+                    Text("Set date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            },
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }
@@ -350,7 +666,7 @@ fun TrashScreen(
                     )
                 }
                 Text(
-                    "Trash",
+                    "Bin",
                     modifier = Modifier
                         .padding(start = 8.dp)
                         .semantics { heading() },
@@ -364,7 +680,7 @@ fun TrashScreen(
             item {
                 EmptyState(
                     icon = Icons.Rounded.RestoreFromTrash,
-                    title = "Trash is empty",
+                    title = "Bin is empty",
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 64.dp),
@@ -612,11 +928,18 @@ private fun DestinationRow(
     }
 }
 
-private val TRASH_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM")
-private val ARCHIVE_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy")
+private val TRASH_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM", Locale.UK)
+private val ARCHIVE_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK)
+private val TEMPLATE_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.UK)
+
+private fun countLabel(count: Int, singular: String): String =
+    "$count $singular${if (count == 1) "" else "s"}"
+
+private const val MAX_PROJECT_NAME_LENGTH = 120
 
 private enum class MoreDestination {
     OVERVIEW,
     ARCHIVE,
     TRASH,
+    TEMPLATES,
 }

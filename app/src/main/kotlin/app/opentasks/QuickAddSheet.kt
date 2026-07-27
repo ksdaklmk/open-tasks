@@ -24,10 +24,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
@@ -40,13 +42,13 @@ fun QuickAddSheet(
     onDismiss: () -> Unit,
     onAdd: (String) -> Unit,
 ) {
-    var title by remember { mutableStateOf("") }
+    var title by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun submit() {
-        if (title.isNotBlank()) onAdd(title)
+        if (title.isNotBlank() && title.length <= MAX_QUICK_ADD_TITLE_LENGTH) onAdd(title)
     }
 
     ModalBottomSheet(
@@ -63,12 +65,24 @@ fun QuickAddSheet(
             Spacer(Modifier.height(20.dp))
             OutlinedTextField(
                 value = title,
-                onValueChange = { title = it },
+                onValueChange = {
+                    title = it.take(MAX_QUICK_ADD_TITLE_LENGTH + 1)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .testTag("quick-add-title"),
                 label = { Text("Task title") },
-                supportingText = { Text("${title.length}/240") },
+                supportingText = {
+                    Text(
+                        if (title.length > MAX_QUICK_ADD_TITLE_LENGTH) {
+                            "Keep task titles under $MAX_QUICK_ADD_TITLE_LENGTH characters"
+                        } else {
+                            "${title.length}/$MAX_QUICK_ADD_TITLE_LENGTH"
+                        },
+                    )
+                },
+                isError = title.length > MAX_QUICK_ADD_TITLE_LENGTH,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { submit() }),
@@ -81,7 +95,7 @@ fun QuickAddSheet(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Button(
                     onClick = ::submit,
-                    enabled = title.isNotBlank() && title.length <= 240,
+                    enabled = title.isNotBlank() && title.length <= MAX_QUICK_ADD_TITLE_LENGTH,
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null)
                     Text("Add task")
@@ -96,3 +110,5 @@ fun QuickAddSheet(
         keyboard?.show()
     }
 }
+
+private const val MAX_QUICK_ADD_TITLE_LENGTH = 240

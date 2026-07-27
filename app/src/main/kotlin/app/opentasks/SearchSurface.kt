@@ -31,11 +31,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -53,7 +55,7 @@ fun SearchSurface(
     onOpenTask: (TaskId) -> Unit,
     onOpenProject: (ProjectId) -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
 
     Dialog(
@@ -80,10 +82,13 @@ fun SearchSurface(
                     ) {
                         OutlinedTextField(
                             value = query,
-                            onValueChange = { query = it },
+                            onValueChange = {
+                                query = it.take(MAX_SEARCH_QUERY_LENGTH)
+                            },
                             modifier = Modifier
                                 .weight(1f)
-                                .focusRequester(focusRequester),
+                                .focusRequester(focusRequester)
+                                .testTag("workspace-search-query"),
                             placeholder = { Text("Search tasks, projects, notes, and tags") },
                             leadingIcon = {
                                 Icon(Icons.Rounded.Search, contentDescription = null)
@@ -150,6 +155,8 @@ fun SearchSurface(
         focusRequester.requestFocus()
     }
 }
+
+private const val MAX_SEARCH_QUERY_LENGTH = 500
 
 @Composable
 private fun SearchHint() {

@@ -13,16 +13,21 @@ import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.reminders.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import java.time.LocalDate
 
 data class WorkspaceUiState(
     val snapshot: WorkspaceSnapshot,
@@ -35,6 +40,11 @@ data class PendingBlockedCompletion(
     val requestedStatusId: WorkflowStatusId?,
 )
 
+data class DependencyFeedback(
+    val taskId: TaskId,
+    val message: String,
+)
+
 sealed interface WorkspaceEvent {
     data class Message(
         val text: String,
@@ -45,9 +55,12 @@ sealed interface WorkspaceEvent {
 @HiltViewModel
 class WorkspaceViewModel @Inject constructor(
     private val repository: VaultRepository,
-    private val savedStateHandle: SavedStateHandle,
+    private val reminderScheduler: ReminderScheduler,
+    savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
+    private val selectionState = WorkspaceSelectionState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
+    private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
     private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
 
@@ -55,28 +68,52 @@ class WorkspaceViewModel @Inject constructor(
     val searchResults: StateFlow<List<SearchResult>> = mutableSearchResults.asStateFlow()
     val events = eventChannel.receiveAsFlow()
 
-    val selectedTaskId: StateFlow<String?> =
-        savedStateHandle.getStateFlow(SELECTED_TASK_ID, null)
+    val selectedTaskId: StateFlow<String?> = selectionState.selectedTaskId
 
-    val selectedProjectId: StateFlow<String?> =
-        savedStateHandle.getStateFlow(SELECTED_PROJECT_ID, null)
+    val selectedProjectId: StateFlow<String?> = selectionState.selectedProjectId
 
     val pendingBlockedCompletion: StateFlow<PendingBlockedCompletion?> = pendingBlocked.asStateFlow()
+    val dependencyFeedback: StateFlow<DependencyFeedback?> =
+        mutableDependencyFeedback.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.observeWorkspace()
+                .map { snapshot ->
+                    ReminderReconciliationKey(
+                        reminders = snapshot.reminders,
+                        taskStates = snapshot.tasks.map { task ->
+                            ReminderTaskState(
+                                id = task.id,
+                                completed = task.isCompleted,
+                                deleted = task.deletedAt != null,
+                            )
+                        },
+                    )
+                }
+                .distinctUntilChanged()
+                .collect {
+                    reminderScheduler.reconcile(repository.observeWorkspace().value)
+                }
+        }
+    }
 
     fun selectTask(id: TaskId) {
-        savedStateHandle[SELECTED_TASK_ID] = id.value
+        if (selectedTaskId.value != id.value) mutableDependencyFeedback.value = null
+        selectionState.selectTask(id)
     }
 
     fun closeTask() {
-        savedStateHandle[SELECTED_TASK_ID] = null
+        mutableDependencyFeedback.value = null
+        selectionState.closeTask()
     }
 
     fun selectProject(id: ProjectId) {
-        savedStateHandle[SELECTED_PROJECT_ID] = id.value
+        selectionState.selectProject(id)
     }
 
     fun closeProject() {
-        savedStateHandle[SELECTED_PROJECT_ID] = null
+        selectionState.closeProject()
     }
 
     fun addTask(title: String) {
@@ -98,6 +135,35 @@ class WorkspaceViewModel @Inject constructor(
                 is CommandResult.Success -> {
                     selectProject(projectId)
                     send(result)
+                }
+                is CommandResult.Rejected ->
+                    eventChannel.send(WorkspaceEvent.Message(result.message))
+            }
+        }
+    }
+
+    fun addProjectFromTemplate(
+        templateId: TemplateId,
+        name: String,
+        anchorDate: LocalDate,
+        onCreated: () -> Unit,
+    ) {
+        val projectId = ProjectId.new()
+        viewModelScope.launch {
+            when (
+                val result = repository.execute(
+                    DomainCommand.InstantiateProjectTemplate(
+                        templateId = templateId,
+                        projectId = projectId,
+                        projectName = name,
+                        anchorDate = anchorDate,
+                    ),
+                )
+            ) {
+                is CommandResult.Success -> {
+                    selectProject(projectId)
+                    send(result)
+                    onCreated()
                 }
                 is CommandResult.Rejected ->
                     eventChannel.send(WorkspaceEvent.Message(result.message))
@@ -134,6 +200,10 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     fun completeTask(task: Task) {
+        if (task.isCompleted) {
+            execute(DomainCommand.ReopenTask(task.id))
+            return
+        }
         viewModelScope.launch {
             when (val result = repository.execute(DomainCommand.CompleteTask(task.id))) {
                 is CommandResult.Success -> send(result)
@@ -146,6 +216,35 @@ class WorkspaceViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun setTaskDependency(
+        taskId: TaskId,
+        dependsOnTaskId: TaskId,
+        present: Boolean,
+    ) {
+        viewModelScope.launch {
+            when (
+                val result = repository.execute(
+                    DomainCommand.SetTaskDependency(taskId, dependsOnTaskId, present),
+                )
+            ) {
+                is CommandResult.Success -> {
+                    mutableDependencyFeedback.value = null
+                    send(result)
+                }
+                is CommandResult.Rejected -> {
+                    mutableDependencyFeedback.value = DependencyFeedback(
+                        taskId = taskId,
+                        message = result.message,
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearDependencyFeedback() {
+        mutableDependencyFeedback.value = null
     }
 
     fun changeTaskStatus(task: Task, statusId: WorkflowStatusId) {
@@ -229,8 +328,46 @@ class WorkspaceViewModel @Inject constructor(
         eventChannel.send(WorkspaceEvent.Message(result.message, result.undo))
     }
 
-    private companion object {
+}
+
+internal class WorkspaceSelectionState(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    val selectedTaskId: StateFlow<String?> =
+        savedStateHandle.getStateFlow(SELECTED_TASK_ID, null)
+
+    val selectedProjectId: StateFlow<String?> =
+        savedStateHandle.getStateFlow(SELECTED_PROJECT_ID, null)
+
+    fun selectTask(id: TaskId) {
+        savedStateHandle[SELECTED_TASK_ID] = id.value
+    }
+
+    fun closeTask() {
+        savedStateHandle[SELECTED_TASK_ID] = null
+    }
+
+    fun selectProject(id: ProjectId) {
+        savedStateHandle[SELECTED_PROJECT_ID] = id.value
+    }
+
+    fun closeProject() {
+        savedStateHandle[SELECTED_PROJECT_ID] = null
+    }
+
+    internal companion object {
         const val SELECTED_TASK_ID = "selectedTaskId"
         const val SELECTED_PROJECT_ID = "selectedProjectId"
     }
 }
+
+private data class ReminderReconciliationKey(
+    val reminders: List<app.opentasks.core.model.Reminder>,
+    val taskStates: List<ReminderTaskState>,
+)
+
+private data class ReminderTaskState(
+    val id: TaskId,
+    val completed: Boolean,
+    val deleted: Boolean,
+)
