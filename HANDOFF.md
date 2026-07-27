@@ -9,8 +9,9 @@
   pass. P1-L01 through P1-L04 plus P1-L06 and P1-L07 remain complete. P2-F02
   is blocked by the attachment/cloud design, making P2-F04 insights the next
   ready P2 task. P1-L08 remains deliberately deferred until local schemas
-  settle. Train 0 repaired the credential-free Android CI matrix and release
-  gate; GitHub maintenance remains paused.
+  settle. Train 0 repaired the credential-free Android CI matrix, release gate
+  and blocking raw-colour hook, and closed the baseline tooling decisions;
+  GitHub maintenance remains paused.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -53,11 +54,13 @@ API 36/stable/Pixel 6 and expanded API 37/canary/Pixel Tablet instrumented
 matrix entries, passes the matching channel and profile to the emulator runner,
 and runs a separate release-assembly job after verification. Its local
 structural verifier prevents mutable Action references. Queued dependency PR
-checks and resolution remain paused. Non-provider secret patterns and validity
-checks are unavailable in the current repository plan and remain disabled.
-Google Identity, Drive transport, cloud recovery and Play Console work have not
-started. P0 release gates which depend on those features remain blocked by their
-listed prerequisites.
+checks and resolution remain paused. A blocking `PreToolUse` guard rejects raw
+Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
+protocol verifier covers both Write and Edit payloads. Non-provider secret
+patterns and validity checks are unavailable in the current repository plan
+and remain disabled. Google Identity, Drive transport, cloud recovery and Play
+Console work have not started. P0 release gates which depend on those features
+remain blocked by their listed prerequisites.
 
 No task is intentionally left half-implemented at this pause point.
 
@@ -527,8 +530,9 @@ Drive task only if the user changes the focus back to P1.
 4. If confirmed, derive insights from `WorkspaceSnapshot` without introducing
    another data authority. Treat time affected by overlap conflicts as
    explicitly qualified data rather than silently trustworthy actuals.
-5. Keep `P2-F02`, `P1-L05`, the blocked cloud/release gates and P3-T00 paused
-   unless their listed prerequisites or the user's direction change.
+5. Keep `P2-F02`, `P1-L05` and the blocked cloud/release gates paused unless
+   their listed prerequisites or the user's direction change. The P3 baseline
+   developer-experience tasks are closed.
 6. Before recording the next pause or completion, run the repository gate from
    `CLAUDE.md`, affected device suites, release assembly when production code
    changed, and `git diff --check`; update this hand-off and every affected
@@ -597,9 +601,9 @@ even when their implementation is blocked by P1/P2 product work.
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
 | 1 | P3-T00 | Done | Repaired the GitHub Actions instrumented matrix with API 36 stable/Pixel 6 and API 37 canary/Pixel Tablet entries, a structural verifier and a separate release gate | Queued dependency PR checks and resolution remain paused |
-| 2 | P3-T01 | Ready | Restart Claude Code or open `/hooks` once to load `.claude/settings.json`; confirm the raw-colour hook fires through the harness | Local developer action |
-| 3 | P3-T02 | Ready | Decide whether ktlint or Spotless is worth the maintenance cost; current authority is official Kotlin IDE formatting | Team preference |
-| 4 | P3-T03 | Optional | Evaluate optional Compose/frontend and skill-authoring plugins only if a concrete workflow needs them | None |
+| 2 | P3-T01 | Done | Replaced the warning-only post-write colour check with a blocking `PreToolUse` guard and deterministic Write/Edit protocol verifier | None |
+| 3 | P3-T02 | Done | Retained the official Kotlin IDE formatter without adding ktlint or Spotless | None |
+| 4 | P3-T03 | Done | Closed optional plugin evaluation without installation; reconsider only for a concrete workflow need | None |
 
 ## Architecture and security rules for the next agent
 

@@ -297,29 +297,43 @@ git commit -m "ci: repair Android device and release gates"
 ### Task 0.5: Verify the colour hook and close tooling decisions
 
 **Files:**
-- Verify: `.claude/settings.json`
+- Modify: `.claude/settings.json`
+- Create: `.claude/hooks/reject-raw-colour.sh`
+- Create: `scripts/verify-colour-hook.sh`
 - Modify: `HANDOFF.md`
 - Modify: `README.md`
 
-**Interfaces:** Verifies the existing developer guard. Produces explicit
+**Interfaces:** Repairs and verifies the developer guard. Produces explicit
 decisions for P3-T01 through P3-T03.
 
-- [ ] Through the supported Claude/Codex hook harness, present a temporary
-sample containing `Color(0xFF112233)` outside existing grandfathered code.
+- [ ] Replace the warning-only `PostToolUse` hook with a `PreToolUse`
+`Write|Edit` hook. The hook must inspect the proposed `content` or
+`new_string`, exempt `core/designsystem`, and exit `2` with an actionable
+stderr message when Kotlin content introduces `Color(0x...)`.
 
-Expected: the raw-colour hook rejects the sample.
+- [ ] Through a deterministic hook-protocol harness, present synthetic
+`PreToolUse` payloads for `Write` and `Edit` containing
+`Color(0xFF112233)` outside existing grandfathered code.
 
-- [ ] Present an OKLCH token sample through the same harness.
+Expected: both raw-colour payloads exit `2` without writing a file.
 
-Expected: the hook permits it.
+- [ ] Present clean Kotlin content, non-Kotlin content, and a design-system
+raw-colour token through the same harness.
 
-- [ ] Remove the temporary samples and verify:
+Expected: each allowed payload exits `0`.
+
+- [ ] Verify shell syntax, JSON syntax, and the deterministic protocol suite:
 
 ```bash
-git status --short
+bash -n .claude/hooks/reject-raw-colour.sh
+bash -n scripts/verify-colour-hook.sh
+jq empty .claude/settings.json
+./scripts/verify-colour-hook.sh
 ```
 
-Expected: no temporary hook-test file remains.
+Expected: every command exits `0`; the protocol suite proves blocking and
+allowed behaviour without requiring a remote model or Claude authentication.
+An authenticated Claude Code smoke is supplemental evidence only.
 
 - [ ] Record in `HANDOFF.md`: P3-T01 passed; P3-T02 retains the Kotlin IDE
 formatter; P3-T03 is closed without plugin installation. Add the formatter
@@ -328,6 +342,14 @@ decision to `README.md`.
 - [ ] Run the train exit gates from the master plan and commit:
 
 ```bash
-git add HANDOFF.md README.md
+git add .claude/settings.json .claude/hooks/reject-raw-colour.sh \
+  scripts/verify-colour-hook.sh HANDOFF.md README.md \
+  docs/superpowers/plans/2026-07-27-train-0-baseline-delivery-plan.md
 git commit -m "docs: close baseline developer tooling decisions"
 ```
+
+**Approved exception (2026-07-27):** The initial verification found that the
+existing hook ran after the write and always exited successfully, so it could
+not enforce the documented rejection. The user approved the smallest repair
+and accepted deterministic hook-protocol verification in place of an
+authenticated Claude model turn.

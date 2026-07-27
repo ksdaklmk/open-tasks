@@ -119,6 +119,9 @@ split-screen, large text and assistive-technology acceptance.
 The app ID is `app.opentasks`, `minSdk` is 36, and both `compileSdk` and
 `targetSdk` are 37.
 
+Format Kotlin with the official Kotlin IDE formatter built into Android
+Studio. The baseline intentionally adds neither ktlint nor Spotless.
+
 ## Project map
 
 - `app` — startup, Navigation 3 host, Hilt wiring, quick add, and search.
