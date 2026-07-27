@@ -9,7 +9,8 @@
   pass. P1-L01 through P1-L04 plus P1-L06 and P1-L07 remain complete. P2-F02
   is blocked by the attachment/cloud design, making P2-F04 insights the next
   ready P2 task. P1-L08 remains deliberately deferred until local schemas
-  settle; GitHub merge/CI repair is deliberately deferred.
+  settle. Train 0 repaired the credential-free Android CI matrix and release
+  gate; GitHub maintenance remains paused.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -47,15 +48,16 @@ terminology.
 The public GitHub authority is
 [ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
 tracks `origin/main`. Secret scanning, push protection, Dependabot alerts and
-security updates are enabled. The current instrumented GitHub Actions matrix
-does not pass: its API 37 job requests a system image unavailable on the
-default channel, and the expanded UI suite is configured with a compact
-emulator profile. Repairing those checks and resolving the queued dependency
-PRs is explicitly deferred under P3-T00 at the user's request. Non-provider
-secret patterns and validity checks are unavailable in the current repository
-plan and remain disabled. Google Identity, Drive transport, cloud recovery and
-Play Console work have not started. P0 release gates which depend on those
-features remain blocked by their listed prerequisites.
+security updates are enabled. The Android workflow now uses explicit compact
+API 36/stable/Pixel 6 and expanded API 37/canary/Pixel Tablet instrumented
+matrix entries, passes the matching channel and profile to the emulator runner,
+and runs a separate release-assembly job after verification. Its local
+structural verifier prevents mutable Action references. Queued dependency PR
+checks and resolution remain paused. Non-provider secret patterns and validity
+checks are unavailable in the current repository plan and remain disabled.
+Google Identity, Drive transport, cloud recovery and Play Console work have not
+started. P0 release gates which depend on those features remain blocked by their
+listed prerequisites.
 
 No task is intentionally left half-implemented at this pause point.
 
@@ -264,7 +266,7 @@ identity above was unchanged after the module suites.
 | P0-03 | Completed the recurrence rule matrix and edge-case acceptance | Unit tests for all cadences, intervals, weekdays, count/end date, month-end and DST; nine Tasks device tests |
 | P0-04 | Hardened duplicate completion, restart/redelivery and exact Undo | In-memory and encrypted Room regression tests |
 | P0-05 | Added current-slice accessibility acceptance | 200% text, 48 dp/click semantics and keyboard focus/Enter activation on-device; narrow/fold visual checks |
-| P0-06 | Added API 36/37 instrumented CI jobs | `.github/workflows/android.yml`; YAML parsed locally |
+| P0-06 | Added API 36/37 instrumented CI jobs, repaired to explicit compact/expanded runner profiles and a separate release gate | `.github/workflows/android.yml`; `scripts/verify-actions-workflow.sh`; YAML parsed locally |
 | P0-07 | Completed threat and direct-dependency review | `docs/threat-model.md`; weekly Dependabot configuration |
 | P0-08 | Added crypto golden, tamper, wrong-passphrase and key-loss coverage | Core crypto unit suite and Android Keystore device suite |
 | P0-09 | Rehearsed every migration released at the P0 gate | The then-current v1→v2 encrypted migration device test passed; later P1 migrations are recorded below |
@@ -507,11 +509,11 @@ working tree is intentionally dirty and contains the accumulated completed
 P1/P2 implementation, tests, schemas and documentation; do not reset, clean,
 discard or overwrite those changes.
 
-GitHub merge/CI repair remains deliberately deferred. P2-F02 cannot complete
-until its attachment/cloud prerequisites exist; P2-F04 is the next ready P2
-task when the user resumes the P2 plan. P1-D02 remains the next
-credential-independent Drive task only if the user changes the focus back to
-P1.
+The credential-free GitHub Actions matrix and release gate are repaired; queued
+dependency PR checks and resolution remain paused. P2-F02 cannot complete until
+its attachment/cloud prerequisites exist; P2-F04 is the next ready P2 task when
+the user resumes the P2 plan. P1-D02 remains the next credential-independent
+Drive task only if the user changes the focus back to P1.
 
 ## Resume instructions
 
@@ -594,7 +596,7 @@ even when their implementation is blocked by P1/P2 product work.
 
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
-| 1 | P3-T00 | Deferred | Repair the GitHub Actions instrumented matrix (available API 37 SDK channel and genuinely expanded emulator profile), re-run queued PR checks and resume dependency-PR resolution | User chooses to resume GitHub maintenance |
+| 1 | P3-T00 | Done | Repaired the GitHub Actions instrumented matrix with API 36 stable/Pixel 6 and API 37 canary/Pixel Tablet entries, a structural verifier and a separate release gate | Queued dependency PR checks and resolution remain paused |
 | 2 | P3-T01 | Ready | Restart Claude Code or open `/hooks` once to load `.claude/settings.json`; confirm the raw-colour hook fires through the harness | Local developer action |
 | 3 | P3-T02 | Ready | Decide whether ktlint or Spotless is worth the maintenance cost; current authority is official Kotlin IDE formatting | Team preference |
 | 4 | P3-T03 | Optional | Evaluate optional Compose/frontend and skill-authoring plugins only if a concrete workflow needs them | None |
@@ -679,7 +681,7 @@ presented as trustworthy actuals.
 
 `P2-F02` and therefore `P1-L05` remain blocked until the attachment/cloud
 design and `P1-D07` exist; do not weaken encrypted attachment requirements to
-start them early. Keep P3-T00 paused unless the user explicitly resumes GitHub
-maintenance. If the focus returns to Drive, `P1-D02` remains the next
-credential-independent P1 task. Do not attempt blocked P0 cloud/release gates
-before their product dependencies exist.
+start them early. Keep queued dependency PR checks and resolution paused unless
+the user explicitly resumes GitHub maintenance. If the focus returns to Drive,
+`P1-D02` remains the next credential-independent P1 task. Do not attempt
+blocked P0 cloud/release gates before their product dependencies exist.

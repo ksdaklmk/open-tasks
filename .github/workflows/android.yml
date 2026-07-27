@@ -24,15 +24,30 @@ jobs:
         run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
       - name: Unit tests, lint, and debug assembly
         run: ./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+      - name: Upload lint reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lint-reports
+          path: "**/build/reports/lint-results-*.html"
+          if-no-files-found: warn
 
   instrumented:
-    name: Instrumented tests (API ${{ matrix.api-level }})
+    name: Instrumented tests (${{ matrix.form-factor }}, API ${{ matrix.api-level }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        api-level: [36, 37]
+        include:
+          - api-level: 36
+            channel: stable
+            profile: pixel_6
+            form-factor: compact
+          - api-level: 37
+            channel: canary
+            profile: pixel_tablet
+            form-factor: expanded
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
@@ -50,14 +65,41 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
         with:
           api-level: ${{ matrix.api-level }}
+          channel: ${{ matrix.channel }}
           arch: x86_64
           target: google_apis
-          profile: pixel_6
+          profile: ${{ matrix.profile }}
           disable-animations: true
           script: >-
             ./gradlew
             :core:data:connectedDebugAndroidTest
+            :app:connectedDebugAndroidTest
             :feature:tasks:connectedDebugAndroidTest
             :feature:projects:connectedDebugAndroidTest
+            :feature:schedule:connectedDebugAndroidTest
             :feature:more:connectedDebugAndroidTest
             --stacktrace
+      - name: Upload instrumented-test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instrumented-test-reports-api-${{ matrix.api-level }}
+          path: "**/build/outputs/androidTest-results/connected/**/*.xml"
+          if-no-files-found: warn
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Install Android 37 SDK
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+      - name: Release assembly
+        run: ./gradlew :app:assembleRelease --stacktrace
