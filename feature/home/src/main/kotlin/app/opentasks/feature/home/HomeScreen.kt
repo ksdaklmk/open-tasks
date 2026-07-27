@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +28,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -37,10 +40,12 @@ import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.designsystem.SyncHealthChip
 import app.opentasks.core.designsystem.TaskRow
 import app.opentasks.core.model.HomeSnapshot
+import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import java.time.format.DateTimeFormatter
+import java.time.Duration
 import java.util.Locale
 
 @Composable
@@ -52,6 +57,8 @@ fun HomeScreen(
     onOpenTask: (TaskId) -> Unit,
     onCompleteTask: (Task) -> Unit,
     onOpenProject: (ProjectId) -> Unit,
+    insightsSummary: InsightsSnapshot,
+    onOpenInsights: () -> Unit,
     onToggleTimer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -128,6 +135,14 @@ fun HomeScreen(
 
         item {
             Spacer(Modifier.height(20.dp))
+            HomeInsightsSummary(
+                snapshot = insightsSummary,
+                onOpenInsights = onOpenInsights,
+            )
+        }
+
+        item {
+            Spacer(Modifier.height(20.dp))
             SectionHeader(title = "Coming up")
         }
 
@@ -136,6 +151,54 @@ fun HomeScreen(
                 onOpenTask(task.id)
             }
         }
+    }
+}
+
+@Composable
+private fun HomeInsightsSummary(
+    snapshot: InsightsSnapshot,
+    onOpenInsights: () -> Unit,
+) {
+    Column {
+        SectionHeader(
+            title = stringResource(R.string.home_insights_heading),
+            action = {
+                TextButton(
+                    onClick = onOpenInsights,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("home-open-insights"),
+                ) {
+                    Text(stringResource(R.string.home_insights_open))
+                }
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(
+                R.string.home_insights_summary,
+                snapshot.completed.current,
+                homeDurationText(snapshot.quality.recordedTime.included),
+            ),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun homeDurationText(duration: Duration): String {
+    val minutes = duration.toMinutes().coerceAtLeast(0)
+    val hours = minutes / 60
+    val remainingMinutes = minutes % 60
+    return when {
+        hours == 0L -> stringResource(R.string.home_insights_minutes, remainingMinutes)
+        remainingMinutes == 0L -> stringResource(R.string.home_insights_hours, hours)
+        else -> stringResource(
+            R.string.home_insights_hours_minutes,
+            hours,
+            remainingMinutes,
+        )
     }
 }
 

@@ -193,9 +193,13 @@ git commit -m "feat: complete qualified insights metrics"
   `feature/more/src/main/kotlin/app/opentasks/feature/more/MoreScreen.kt`
 - Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
 - Modify: `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt`
-- Modify: `app/src/main/res/values/strings.xml`
+- Modify: `app/src/main/kotlin/app/opentasks/di/AppModule.kt`
+- Create: `feature/more/src/main/res/values/strings.xml`
+- Create: `feature/home/src/main/res/values/strings.xml`
 - Modify:
   `feature/home/src/main/kotlin/app/opentasks/feature/home/HomeScreen.kt`
+- Modify:
+  `docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md`
 
 **Interfaces:**
 
@@ -204,9 +208,14 @@ data class InsightsUiState(
     val snapshot: InsightsSnapshot,
     val selection: InsightsSelection,
     val presentation: InsightsPresentation,
+    val projectOptions: List<InsightsProjectOption>,
+    val tagOptions: List<InsightsTagOption>,
 )
 
 enum class InsightsPresentation { CHART, TABLE }
+
+data class InsightsProjectOption(val id: ProjectId, val displayName: String)
+data class InsightsTagOption(val id: TagId, val displayName: String)
 ```
 
 `InsightsScreen` receives only state and callbacks:
@@ -232,6 +241,13 @@ Templates, Archive, or Bin yet. Add `MoreDestination.INSIGHTS`.
 `InsightsUiState` from the current snapshot plus selection, and keep selection
 in `SavedStateHandle` using enum names and record IDs only.
 
+Bind `InsightsEngine` to `DefaultInsightsEngine` in the existing app Hilt
+module. Feature-owned user-facing copy lives in each feature module's string
+resources; Android library modules must not depend on app resources.
+Derive the option lists from the unfiltered workspace, sort them by display
+name with `Locale.ROOT`, and keep them stable while active filters change so a
+user can add, switch, or clear filters even when the filtered result is empty.
+
 - [ ] Implement restrained bars plus an equivalent ordered table. Each bar
 has a text value and content description; red/green is never the sole signal.
 Add explicit copy for no data, no estimates, no time, and all-conflicted data.
@@ -242,18 +258,35 @@ add a Home dashboard grid.
 - [ ] Re-run the More device suite and:
 
 ```bash
-./gradlew :app:testDebugUnitTest :feature:more:connectedDebugAndroidTest \
-  :app:connectedDebugAndroidTest --stacktrace
+./gradlew :app:testDebugUnitTest \
+  :feature:more:connectedDebugAndroidTest --stacktrace
 ```
 
-Expected: exit `0`.
+Expected: exit `0` on the preserved normal emulator. Run
+`:app:connectedDebugAndroidTest` separately on a sole disposable, read-only,
+no-snapshot-save/no-snapshot-load emulator because AGP uninstalls
+`app.opentasks` after that suite. Never run the App suite against the preserved
+workspace.
 
 - [ ] Commit:
 
 ```bash
-git add feature/more app/src/main feature/home/src/main
+git add feature/more app/src/main feature/home/src/main \
+  docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md
 git commit -m "feat: add accessible workspace insights"
 ```
+
+**Approved execution correction (2026-07-27):** Train 0 proved that the App
+connected suite uninstalls its target package. This task therefore preserves
+the verified workspace through the safe split above. The plan's original
+app-resource path was also corrected to feature-owned resources plus the
+existing Hilt module, which is required by Android module boundaries and the
+specified interface injection.
+
+The original three-field `InsightsUiState` also lacked the complete option
+lists required by its own project/tag multi-filter controls. The immutable
+option fields above close that testability and interaction gap without
+changing the engine or stateless-screen boundary.
 
 ### Task 1.4: Separate and locally wrap the vault-content key
 

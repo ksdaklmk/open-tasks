@@ -171,6 +171,8 @@ fun OpenTasksApp(
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+        val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
+        val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
@@ -183,6 +185,7 @@ fun OpenTasksApp(
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
         var showSearch by rememberSaveable { mutableStateOf(false) }
+        var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
         var hasSeparatingFold by remember { mutableStateOf(false) }
         var permissionStateVersion by remember { mutableIntStateOf(0) }
         var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -214,10 +217,16 @@ fun OpenTasksApp(
 
         fun navigate(route: WorkspaceRoute) {
             if (backStack.lastOrNull() == route) return
+            if (route != MoreRoute) openInsightsOnMore = false
             backStack.clear()
             backStack.add(route)
             if (route != TasksRoute) viewModel.closeTask()
             if (route != ProjectsRoute) viewModel.closeProject()
+        }
+
+        fun navigateFromPrimaryNavigation(route: WorkspaceRoute) {
+            if (route == MoreRoute) openInsightsOnMore = false
+            navigate(route)
         }
 
         fun openNotificationSettings() {
@@ -353,7 +362,9 @@ fun OpenTasksApp(
                             destinations.forEach { destination ->
                                 NavigationBarItem(
                                     selected = currentRoute == destination.route,
-                                    onClick = { navigate(destination.route) },
+                                    onClick = {
+                                        navigateFromPrimaryNavigation(destination.route)
+                                    },
                                     icon = {
                                         Icon(
                                             destination.icon,
@@ -412,7 +423,9 @@ fun OpenTasksApp(
                             destinations.forEach { destination ->
                                 NavigationRailItem(
                                     selected = currentRoute == destination.route,
-                                    onClick = { navigate(destination.route) },
+                                    onClick = {
+                                        navigateFromPrimaryNavigation(destination.route)
+                                    },
                                     icon = {
                                         Icon(
                                             destination.icon,
@@ -454,6 +467,11 @@ fun OpenTasksApp(
                                     onOpenProject = { projectId ->
                                         viewModel.selectProject(projectId)
                                         navigate(ProjectsRoute)
+                                    },
+                                    insightsSummary = insightsSummary,
+                                    onOpenInsights = {
+                                        openInsightsOnMore = true
+                                        navigate(MoreRoute)
                                     },
                                     onToggleTimer = viewModel::stopActiveTimer,
                                 )
@@ -660,6 +678,20 @@ fun OpenTasksApp(
                                     tasks = snapshot.tasks,
                                     projects = snapshot.projects,
                                     templates = snapshot.templates,
+                                    insightsState = insightsUiState,
+                                    insightsSummary = insightsSummary,
+                                    openInsights = openInsightsOnMore,
+                                    onInsightsClosed = {
+                                        openInsightsOnMore = false
+                                    },
+                                    onInsightsRangeChange = viewModel::setInsightsRange,
+                                    onInsightsProjectFilter =
+                                        viewModel::setInsightsProjectFilter,
+                                    onInsightsTagFilter = viewModel::setInsightsTagFilter,
+                                    onInsightsIncludeConflictedTimeChange =
+                                        viewModel::setInsightsIncludeConflictedTime,
+                                    onInsightsPresentationChange =
+                                        viewModel::setInsightsPresentation,
                                     today = snapshot.home.today,
                                     onRestoreProject = { projectId ->
                                         viewModel.execute(

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="insights_title">Insights</string>
+    <string name="insights_back">Back</string>
+    <string name="insights_last_days">Last %1$d days</string>
+    <string name="insights_summary">%1$d completed • %2$s recorded</string>
+    <string name="insights_open">Open Insights</string>
+
+    <string name="insights_range_heading">Range</string>
+    <string name="insights_range_7">7 days</string>
+    <string name="insights_range_30">30 days</string>
+    <string name="insights_range_90">90 days</string>
+    <string name="insights_project_filter_heading">Projects</string>
+    <string name="insights_tag_filter_heading">Tags</string>
+    <string name="insights_no_project_options">No projects available</string>
+    <string name="insights_no_tag_options">No tags available</string>
+    <string name="insights_include_conflicted">Include conflicted time</string>
+    <string name="insights_include_conflicted_supporting">Conflicted entries can double-count recorded work.</string>
+
+    <string name="insights_view_heading">View</string>
+    <string name="insights_chart">Chart</string>
+    <string name="insights_table">Table</string>
+    <string name="insights_no_data">No insight data for these %1$d days.</string>
+    <string name="insights_completed_heading">Completed work</string>
+    <string name="insights_completed_current">Current range</string>
+    <string name="insights_completed_previous">Previous range</string>
+    <string name="insights_task_count">%1$d completed</string>
+    <string name="insights_overdue_count">%1$d overdue</string>
+
+    <string name="insights_estimate_heading">Estimate and actual</string>
+    <string name="insights_estimated">Estimated</string>
+    <string name="insights_actual">Actual included</string>
+    <plurals name="insights_no_estimates">
+        <item quantity="one">No estimates for %1$d completed task.</item>
+        <item quantity="other">No estimates for %1$d completed tasks.</item>
+    </plurals>
+    <string name="insights_unestimated_count">%1$d completed without an estimate</string>
+    <string name="insights_estimate_denominator">%1$d estimated • %2$d with included actual time</string>
+
+    <string name="insights_recorded_time_heading">Recorded time</string>
+    <string name="insights_trusted_time">Trusted time %1$s</string>
+    <string name="insights_conflicted_excluded">Conflicted time %1$s, excluded</string>
+    <string name="insights_conflicted_included">Conflicted time %1$s, included</string>
+    <string name="insights_included_total">Included total %1$s</string>
+    <string name="insights_no_time">No recorded time in this range.</string>
+    <string name="insights_all_conflicted">All %1$s of recorded time is conflicted and excluded.</string>
+
+    <string name="insights_project_time_heading">Time by project</string>
+    <string name="insights_tag_time_heading">Time by tag</string>
+    <string name="insights_no_project_time">No project time in this range.</string>
+    <string name="insights_no_tag_time">No tagged time in this range.</string>
+    <string name="insights_milestone_heading">Open milestones</string>
+    <string name="insights_milestone_progress">%1$d of %2$d tasks complete • %3$d overdue</string>
+
+    <string name="insights_minutes">%1$d min</string>
+    <string name="insights_hours">%1$d h</string>
+    <string name="insights_hours_minutes">%1$d h %2$d min</string>
+</resources>

@@ -47,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -64,6 +66,9 @@ import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.InsightsRange
+import app.opentasks.core.model.InsightsSnapshot
+import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.Template
@@ -81,6 +86,15 @@ fun MoreScreen(
     tasks: List<Task>,
     projects: List<Project>,
     templates: List<Template> = emptyList(),
+    insightsState: InsightsUiState = emptyInsightsUiState(),
+    insightsSummary: InsightsSnapshot = insightsState.snapshot,
+    openInsights: Boolean = false,
+    onInsightsClosed: () -> Unit = {},
+    onInsightsRangeChange: (InsightsRange) -> Unit = {},
+    onInsightsProjectFilter: (ProjectId, Boolean) -> Unit = { _, _ -> },
+    onInsightsTagFilter: (TagId, Boolean) -> Unit = { _, _ -> },
+    onInsightsIncludeConflictedTimeChange: (Boolean) -> Unit = {},
+    onInsightsPresentationChange: (InsightsPresentation) -> Unit = {},
     onRestoreProject: (ProjectId) -> Unit,
     onRestoreTask: (TaskId) -> Unit,
     onPermanentlyDeleteTask: (TaskId) -> Unit,
@@ -90,8 +104,29 @@ fun MoreScreen(
     today: LocalDate = LocalDate.now(),
 ) {
     var destination by rememberSaveable { mutableStateOf(MoreDestination.OVERVIEW) }
+    LaunchedEffect(openInsights) {
+        if (openInsights) destination = MoreDestination.INSIGHTS
+    }
+    val closeInsights = {
+        destination = MoreDestination.OVERVIEW
+        onInsightsClosed()
+    }
 
     when (destination) {
+        MoreDestination.INSIGHTS -> {
+            BackHandler(onBack = closeInsights)
+            InsightsScreen(
+                state = insightsState,
+                onRangeChange = onInsightsRangeChange,
+                onProjectFilter = onInsightsProjectFilter,
+                onTagFilter = onInsightsTagFilter,
+                onIncludeConflictedTimeChange = onInsightsIncludeConflictedTimeChange,
+                onPresentationChange = onInsightsPresentationChange,
+                onBack = closeInsights,
+                modifier = modifier,
+            )
+            return
+        }
         MoreDestination.ARCHIVE -> {
             BackHandler { destination = MoreDestination.OVERVIEW }
             ArchiveScreen(
@@ -133,11 +168,12 @@ fun MoreScreen(
         MoreDestination.OVERVIEW -> Unit
     }
 
-    val activeTasks = tasks.filter { it.deletedAt == null }
     val activeProjects = projects.filter { it.archivedAt == null }
     val archivedProjectCount = projects.size - activeProjects.size
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("more-overview"),
         contentPadding = PaddingValues(
             start = 16.dp,
             top = 16.dp,
@@ -152,9 +188,7 @@ fun MoreScreen(
                 modifier = Modifier.semantics { heading() },
             )
             Spacer(Modifier.height(28.dp))
-            SectionHeader("This week")
-            Spacer(Modifier.height(12.dp))
-            InsightSummary(activeTasks, activeProjects)
+            InsightSummary(insightsSummary)
             Spacer(Modifier.height(32.dp))
             SectionHeader("Workspace")
             Spacer(Modifier.height(8.dp))
@@ -162,8 +196,11 @@ fun MoreScreen(
 
         item {
             DestinationRow(
-                Icons.Rounded.BarChart,
-                "Insights",
+                icon = Icons.Rounded.BarChart,
+                title = stringResource(R.string.insights_title),
+                supportingText = stringResource(R.string.insights_open),
+                onClick = { destination = MoreDestination.INSIGHTS },
+                modifier = Modifier.testTag("open-insights"),
             )
             DestinationRow(
                 icon = Icons.Rounded.Description,
@@ -821,51 +858,28 @@ private fun TrashTaskRow(
 }
 
 @Composable
-private fun InsightSummary(tasks: List<Task>, projects: List<Project>) {
-    val complete = tasks.count(Task::isCompleted)
-    val atRiskProjects = projects.count { it.status.name == "AT_RISK" }
+private fun InsightSummary(snapshot: InsightsSnapshot) {
     Surface(
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(20.dp)) {
             Text(
-                "$complete of ${tasks.size} tasks complete",
-                style = MaterialTheme.typography.titleLarge,
+                stringResource(
+                    R.string.insights_last_days,
+                    InsightsRange.SEVEN_DAYS.dayCount,
+                ),
+                style = MaterialTheme.typography.labelLarge,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "${tasks.count(Task::isBlocked)} blocked • " +
-                    if (atRiskProjects == 1) {
-                        "1 project at risk"
-                    } else {
-                        "$atRiskProjects projects at risk"
-                    },
+                stringResource(
+                    R.string.insights_summary,
+                    snapshot.completed.current,
+                    durationText(snapshot.quality.recordedTime.included),
+                ),
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.76f),
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                listOf(0.35f, 0.58f, 0.42f, 0.78f, 0.62f, 0.88f, 0.72f).forEach { value ->
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height((20 + value * 44).dp),
-                        color = MaterialTheme.colorScheme.secondary,
-                        shape = MaterialTheme.shapes.extraSmall,
-                    ) {}
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Daily completions: 2, 4, 3, 6, 5, 7, 5",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.76f),
             )
         }
     }
@@ -939,6 +953,7 @@ private const val MAX_PROJECT_NAME_LENGTH = 120
 
 private enum class MoreDestination {
     OVERVIEW,
+    INSIGHTS,
     ARCHIVE,
     TRASH,
     TEMPLATES,
