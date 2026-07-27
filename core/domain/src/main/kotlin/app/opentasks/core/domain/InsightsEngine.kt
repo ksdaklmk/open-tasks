@@ -45,7 +45,6 @@ class DefaultInsightsEngine : InsightsEngine {
 
         val selectedTaskIds = workspace.tasks
             .asSequence()
-            .filter { it.deletedAt == null }
             .filter { task ->
                 selection.projectIds.isEmpty() || task.projectId in selection.projectIds
             }
@@ -59,6 +58,7 @@ class DefaultInsightsEngine : InsightsEngine {
         val overdue = workspace.tasks
             .asSequence()
             .filter { it.id in selectedTaskIds }
+            .filter { it.deletedAt == null }
             .filter { it.semanticStatus != SemanticStatus.COMPLETED }
             .mapNotNull { task ->
                 val dueAt = task.due?.instant ?: return@mapNotNull null
