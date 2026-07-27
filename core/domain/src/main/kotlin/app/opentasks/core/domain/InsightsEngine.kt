@@ -109,23 +109,34 @@ class DefaultInsightsEngine : InsightsEngine {
                 conflicted = entry.id in conflictedEntryIds,
             )
         }
-        val recordedTime = durationQuality(qualifiedTime)
+        val recordedTime = durationQuality(
+            entries = qualifiedTime,
+            includeConflictedTime = selection.includeConflictedTime,
+        )
 
         val projectTime = qualifiedTime
+            .filter { entry ->
+                entry.task.projectId == null || entry.task.projectId in projectNames
+            }
             .groupBy { it.task.projectId }
             .map { (projectId, entries) ->
                 ProjectTimeRow(
                     projectId = projectId,
-                    displayName = projectId?.let(projectNames::get) ?: "Inbox",
-                    duration = durationQuality(entries),
+                    displayName = projectId?.let(projectNames::getValue) ?: "Inbox",
+                    duration = durationQuality(
+                        entries = entries,
+                        includeConflictedTime = selection.includeConflictedTime,
+                    ),
                 )
             }
-            .let { sortProjectTime(it, selection.includeConflictedTime) }
+            .let(::sortProjectTime)
 
         val tagNames = workspace.tags.associate { it.id to it.name }
         val tagTime = qualifiedTime
             .flatMap { entry ->
-                entry.task.tagIds.map { tagId -> tagId to entry }
+                entry.task.tagIds.mapNotNull { tagId ->
+                    if (tagId in tagNames) tagId to entry else null
+                }
             }
             .groupBy(
                 keySelector = { it.first },
@@ -135,10 +146,13 @@ class DefaultInsightsEngine : InsightsEngine {
                 TagTimeRow(
                     tagId = tagId,
                     displayName = tagNames.getValue(tagId),
-                    duration = durationQuality(entries),
+                    duration = durationQuality(
+                        entries = entries,
+                        includeConflictedTime = selection.includeConflictedTime,
+                    ),
                 )
             }
-            .let { sortTagTime(it, selection.includeConflictedTime) }
+            .let(::sortTagTime)
 
         val currentCompletedTasks = selectedTasks.filter { task ->
             task.completedAt?.let(interval::contains) == true
@@ -153,11 +167,15 @@ class DefaultInsightsEngine : InsightsEngine {
             estimated = estimatedTasks.fold(Duration.ZERO) { total, task ->
                 total.plus(task.estimate)
             },
-            actual = durationQuality(actualTime),
+            actual = durationQuality(
+                entries = actualTime,
+                includeConflictedTime = selection.includeConflictedTime,
+            ),
             estimatedTaskCount = estimatedTasks.size.toLong(),
             unestimatedTaskCount = currentCompletedTasks.count { it.estimate == null }.toLong(),
             actualTaskCount = actualTime
                 .asSequence()
+                .filter { selection.includeConflictedTime || !it.conflicted }
                 .map { it.task.id }
                 .distinct()
                 .count()
@@ -212,44 +230,44 @@ class DefaultInsightsEngine : InsightsEngine {
         )
     }
 
-    private fun durationQuality(entries: List<QualifiedTime>): DurationQuality =
-        DurationQuality(
-            trusted = entries
-                .asSequence()
-                .filterNot(QualifiedTime::conflicted)
-                .fold(Duration.ZERO) { total, entry -> total.plus(entry.duration) },
-            conflicted = entries
-                .asSequence()
-                .filter(QualifiedTime::conflicted)
-                .fold(Duration.ZERO) { total, entry -> total.plus(entry.duration) },
+    private fun durationQuality(
+        entries: List<QualifiedTime>,
+        includeConflictedTime: Boolean,
+    ): DurationQuality {
+        val trusted = entries
+            .asSequence()
+            .filterNot(QualifiedTime::conflicted)
+            .fold(Duration.ZERO) { total, entry -> total.plus(entry.duration) }
+        val conflicted = entries
+            .asSequence()
+            .filter(QualifiedTime::conflicted)
+            .fold(Duration.ZERO) { total, entry -> total.plus(entry.duration) }
+        return DurationQuality(
+            trusted = trusted,
+            conflicted = conflicted,
+            included = if (includeConflictedTime) trusted.plus(conflicted) else trusted,
+        )
+    }
+
+    private fun sortProjectTime(rows: List<ProjectTimeRow>): List<ProjectTimeRow> =
+        rows.sortedWith(
+            compareByDescending<ProjectTimeRow> {
+                it.duration.included
+            }.thenBy { it.displayName.lowercase(Locale.ROOT) },
         )
 
-    private fun sortProjectTime(
-        rows: List<ProjectTimeRow>,
-        includeConflictedTime: Boolean,
-    ): List<ProjectTimeRow> = rows.sortedWith(
-        compareByDescending<ProjectTimeRow> {
-            it.duration.included(includeConflictedTime)
-        }.thenBy { it.displayName.lowercase(Locale.ROOT) },
-    )
-
-    private fun sortTagTime(
-        rows: List<TagTimeRow>,
-        includeConflictedTime: Boolean,
-    ): List<TagTimeRow> = rows.sortedWith(
-        compareByDescending<TagTimeRow> {
-            it.duration.included(includeConflictedTime)
-        }.thenBy { it.displayName.lowercase(Locale.ROOT) },
-    )
+    private fun sortTagTime(rows: List<TagTimeRow>): List<TagTimeRow> =
+        rows.sortedWith(
+            compareByDescending<TagTimeRow> {
+                it.duration.included
+            }.thenBy { it.displayName.lowercase(Locale.ROOT) },
+        )
 
     private fun sortMilestones(rows: List<MilestoneHealthRow>): List<MilestoneHealthRow> =
         rows.sortedWith(
             compareBy<MilestoneHealthRow> { it.dueAt ?: Instant.MAX }
                 .thenBy { it.displayName.lowercase(Locale.ROOT) },
         )
-
-    private fun DurationQuality.included(includeConflictedTime: Boolean): Duration =
-        if (includeConflictedTime) trusted.plus(conflicted) else trusted
 
     private data class QualifiedTime(
         val task: Task,

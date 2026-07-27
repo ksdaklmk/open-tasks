@@ -555,6 +555,126 @@ class InsightsEngineTest {
     }
 
     @Test
+    fun includedDisplayTotalsAndActualTaskCountFollowConflictSelection() {
+        val project = OpenTasksFixtures.studioProject
+        val tag = OpenTasksFixtures.tags.first { it.id == TagId("tag-deep-work") }
+        val trustedTask = completedTask(
+            id = "trusted-task",
+            completedAt = Instant.parse("2026-07-25T12:00:00Z"),
+        ).copy(projectId = project.id, tagIds = setOf(tag.id))
+        val conflictOnlyTask = completedTask(
+            id = "conflict-only-task",
+            completedAt = Instant.parse("2026-07-26T12:00:00Z"),
+        ).copy(projectId = project.id, tagIds = setOf(tag.id))
+        val trusted = timeEntry(
+            id = "trusted",
+            taskId = trustedTask.id,
+            start = Instant.parse("2026-07-25T10:00:00Z"),
+            end = Instant.parse("2026-07-25T10:30:00Z"),
+        )
+        val conflictFirst = timeEntry(
+            id = "conflict-first",
+            taskId = conflictOnlyTask.id,
+            start = Instant.parse("2026-07-26T10:00:00Z"),
+            end = Instant.parse("2026-07-26T10:20:00Z"),
+        )
+        val conflictSecond = timeEntry(
+            id = "conflict-second",
+            taskId = conflictOnlyTask.id,
+            start = Instant.parse("2026-07-26T10:10:00Z"),
+            end = Instant.parse("2026-07-26T10:50:00Z"),
+        )
+        val workspace = OpenTasksFixtures.snapshot.copy(
+            tasks = listOf(trustedTask, conflictOnlyTask),
+            projects = listOf(project),
+            tags = listOf(tag),
+            timeEntries = listOf(trusted, conflictFirst, conflictSecond),
+            timeEntryConflicts = listOf(
+                TimeEntryConflict(
+                    firstEntryId = conflictFirst.id,
+                    secondEntryId = conflictSecond.id,
+                    overlap = Duration.ofMinutes(10),
+                ),
+            ),
+        )
+
+        val trustedOnly = calculate(workspace)
+        val withConflicts = calculate(
+            workspace,
+            selection = InsightsSelection(includeConflictedTime = true),
+        )
+        val trustedOnlyDisplayTotals = listOf(
+            trustedOnly.quality.recordedTime,
+            trustedOnly.projectTime.single().duration,
+            trustedOnly.tagTime.single().duration,
+            trustedOnly.estimateActual.actual,
+        )
+        val withConflictDisplayTotals = listOf(
+            withConflicts.quality.recordedTime,
+            withConflicts.projectTime.single().duration,
+            withConflicts.tagTime.single().duration,
+            withConflicts.estimateActual.actual,
+        )
+
+        trustedOnlyDisplayTotals.forEach { duration ->
+            assertEquals(Duration.ofMinutes(30), duration.trusted)
+            assertEquals(Duration.ofHours(1), duration.conflicted)
+            assertEquals(Duration.ofMinutes(30), duration.included)
+        }
+        withConflictDisplayTotals.forEach { duration ->
+            assertEquals(Duration.ofMinutes(30), duration.trusted)
+            assertEquals(Duration.ofHours(1), duration.conflicted)
+            assertEquals(Duration.ofMinutes(90), duration.included)
+        }
+        assertEquals(1L, trustedOnly.estimateActual.actualTaskCount)
+        assertEquals(2L, withConflicts.estimateActual.actualTaskCount)
+    }
+
+    @Test
+    fun unresolvedProjectAndTagDimensionsAreOmittedWithoutLosingQualifiedTime() {
+        val knownProject = OpenTasksFixtures.studioProject
+        val knownTag = OpenTasksFixtures.tags.first { it.id == TagId("tag-deep-work") }
+        val missingProjectTask = OpenTasksFixtures.tasks.first().copy(
+            id = TaskId("missing-project-task"),
+            projectId = ProjectId("missing-project"),
+            tagIds = setOf(knownTag.id),
+        )
+        val missingTagTask = OpenTasksFixtures.tasks.first().copy(
+            id = TaskId("missing-tag-task"),
+            projectId = knownProject.id,
+            tagIds = setOf(TagId("missing-tag")),
+        )
+        val workspace = OpenTasksFixtures.snapshot.copy(
+            tasks = listOf(missingProjectTask, missingTagTask),
+            projects = listOf(knownProject),
+            tags = listOf(knownTag),
+            timeEntries = listOf(
+                timeEntry(
+                    id = "missing-project-time",
+                    taskId = missingProjectTask.id,
+                    start = Instant.parse("2026-07-25T10:00:00Z"),
+                    end = Instant.parse("2026-07-25T11:00:00Z"),
+                ),
+                timeEntry(
+                    id = "missing-tag-time",
+                    taskId = missingTagTask.id,
+                    start = Instant.parse("2026-07-26T10:00:00Z"),
+                    end = Instant.parse("2026-07-26T10:30:00Z"),
+                ),
+            ),
+        )
+
+        val result = calculate(workspace)
+
+        assertEquals(Duration.ofMinutes(90), result.quality.recordedTime.trusted)
+        assertEquals(listOf(knownProject.id), result.projectTime.map { it.projectId })
+        assertEquals(Duration.ofMinutes(30), result.projectTime.single().duration.trusted)
+        assertEquals(listOf(knownTag.id), result.tagTime.map { it.tagId })
+        assertEquals(Duration.ofHours(1), result.tagTime.single().duration.trusted)
+        assertFalse(result.projectTime.any { it.projectId == null })
+    }
+
+    @Test
     fun projectAndTagFiltersCombineAndDriveEveryMetricFromTheSameTaskSelection() {
         val projectOne = OpenTasksFixtures.studioProject.copy(id = ProjectId("project-one"))
         val projectTwo = OpenTasksFixtures.taxProject.copy(id = ProjectId("project-two"))

@@ -32,6 +32,7 @@ data class MetricComparison(
 data class DurationQuality(
     val trusted: Duration,
     val conflicted: Duration,
+    val included: Duration = trusted,
 )
 
 enum class OverdueBand {
