@@ -34,20 +34,30 @@ data class DurationQuality(
     val conflicted: Duration,
 )
 
+enum class OverdueBand {
+    ONE_TO_SEVEN_DAYS,
+    EIGHT_TO_THIRTY_DAYS,
+    THIRTY_ONE_DAYS_OR_MORE,
+}
+
 data class OverdueRow(
     val taskId: TaskId,
     val title: String,
     val projectName: String?,
     val dueAt: Instant,
+    val band: OverdueBand = OverdueBand.ONE_TO_SEVEN_DAYS,
 )
 
 data class EstimateActual(
     val estimated: Duration,
     val actual: DurationQuality,
+    val estimatedTaskCount: Long = 0,
+    val unestimatedTaskCount: Long = 0,
+    val actualTaskCount: Long = 0,
 )
 
 data class ProjectTimeRow(
-    val projectId: ProjectId,
+    val projectId: ProjectId?,
     val displayName: String,
     val duration: DurationQuality,
 )
@@ -63,6 +73,7 @@ data class MilestoneHealthRow(
     val displayName: String,
     val projectName: String,
     val dueAt: Instant?,
+    val projectHealth: ProjectHealth,
     val completedTasks: Long,
     val totalTasks: Long,
     val overdueTasks: Long,
