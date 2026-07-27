@@ -47,6 +47,43 @@ expect_blocked() {
   fi
 }
 
+expect_final_symlink_blocked() {
+  local name="$1"
+  local payload="$2"
+  local target="$3"
+  local expected_destination="$4"
+  local expected_content="$5"
+  local project_dir="$6"
+  local stdout_file="$test_root/$name.stdout"
+  local stderr_file="$test_root/$name.stderr"
+  local status
+  local actual_destination
+
+  if printf '%s\n' "$payload" |
+    CLAUDE_PROJECT_DIR="$project_dir" "$hook" >"$stdout_file" 2>"$stderr_file"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [[ "$status" -ne 2 ]]; then
+    fail "$name exited $status instead of 2"
+  fi
+  if ! grep -q 'Raw hex colour' "$stderr_file"; then
+    fail "$name did not emit the actionable raw-colour error"
+  fi
+  if ! grep -q 'core/designsystem' "$stderr_file"; then
+    fail "$name did not identify the design-system token location"
+  fi
+  actual_destination="$(readlink "$target")" || fail "$name replaced the final symlink"
+  if [[ "$actual_destination" != "$expected_destination" ]]; then
+    fail "$name changed the final symlink destination"
+  fi
+  if ! cmp -s "$expected_destination" "$expected_content"; then
+    fail "$name changed the final symlink destination content"
+  fi
+}
+
 expect_allowed() {
   local name="$1"
   local payload="$2"
@@ -74,9 +111,15 @@ traversal_target="$repo_root/core/designsystem/../../feature/escape/Raw.kt"
 symlink_project="$test_root/symlink-project"
 symlink_escape="$symlink_project/feature/escape"
 symlink_target="$symlink_project/core/designsystem/link/Raw.kt"
+final_symlink_target="$symlink_project/core/designsystem/FinalSymlink.kt"
+final_symlink_destination="$symlink_escape/Outside.kt"
+final_symlink_destination_before="$test_root/FinalSymlink-before.kt"
 
 mkdir -p "$symlink_project/core/designsystem" "$symlink_escape"
 ln -s "$symlink_escape" "$symlink_project/core/designsystem/link"
+printf 'val preserved = Color.Blue\n' >"$final_symlink_destination"
+cp "$final_symlink_destination" "$final_symlink_destination_before"
+ln -s "$final_symlink_destination" "$final_symlink_target"
 
 expect_blocked \
   "raw-write" \
@@ -99,6 +142,14 @@ expect_blocked \
   "$symlink_target" \
   "$symlink_project"
 
+expect_final_symlink_blocked \
+  "design-system-final-symlink-escape" \
+  "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$final_symlink_target\",\"content\":\"val escaped = Color(0xFF112233)\"}}" \
+  "$final_symlink_target" \
+  "$final_symlink_destination" \
+  "$final_symlink_destination_before" \
+  "$symlink_project"
+
 expect_allowed \
   "clean-kotlin" \
   "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$test_root/Clean.kt\",\"content\":\"package hook.harness\\n\\nval colour = Color.Blue\"}}"
@@ -116,4 +167,4 @@ if [[ "$failures" -ne 0 ]]; then
   exit 1
 fi
 
-printf 'Colour-hook protocol checks passed: 4 blocked, 3 allowed\n'
+printf 'Colour-hook protocol checks passed: 5 blocked, 3 allowed\n'

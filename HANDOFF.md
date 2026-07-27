@@ -458,12 +458,12 @@ change, app uninstall or emulator-data wipe was performed.
 
 ## Train 0 baseline manifest
 
-This is the audited, pre-checkpoint inventory of the completed P1/P2 work
-that was intentionally left in the working tree when the pause began. The
-inventory was captured with `git status --short` and
-`git ls-files --others --exclude-standard` before this section was added.
-Every captured path is accounted for below; the groups describe the completed
-slice(s) they support, not a new runtime API.
+This is the audited inventory of the completed P1/P2 work that Train 0
+committed as the verified baseline. The inventory was captured with
+`git status --short` and `git ls-files --others --exclude-standard` before this
+section was added. Every captured path is accounted for below; the groups
+describe the completed slice(s) they support, not a new runtime API. The
+working tree is expected to be clean when work resumes.
 
 | Group | Captured paths |
 |---|---|
@@ -506,11 +506,9 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 ## Current in-progress work
 
 None. The user explicitly paused the project after P2-F03 and before P2-F04.
-P2-F01, P2-F03 and the UK-English pass are complete locally. The P1/P2 source
-changes remain uncommitted so the paused GitHub checks are not resumed. The
-working tree is intentionally dirty and contains the accumulated completed
-P1/P2 implementation, tests, schemas and documentation; do not reset, clean,
-discard or overwrite those changes.
+P2-F01, P2-F03 and the UK-English pass are complete in the Train 0 verified
+baseline commit. The working tree is expected to be clean; investigate and
+preserve any new user changes before editing.
 
 The credential-free GitHub Actions matrix and release gate are repaired; queued
 dependency PR checks and resolution remain paused. P2-F02 cannot complete until
@@ -524,8 +522,8 @@ Drive task only if the user changes the focus back to P1.
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
-2. Re-scan the working tree before editing. Preserve all existing modified and
-   untracked files because they contain completed P1/P2 work.
+2. Re-scan the working tree before editing and confirm it is clean. The P1/P2
+   baseline is committed; investigate and preserve any new user changes.
 3. Confirm with the user that the intended next slice is still `P2-F04`.
 4. If confirmed, derive insights from `WorkspaceSnapshot` without introducing
    another data authority. Treat time affected by overlap conflicts as
@@ -554,7 +552,7 @@ even when their implementation is blocked by P1/P2 product work.
 | 4 | P0-R05 | Blocked | Screenshot/responsive regression suite for API 36/37, Fold cover/main, tablet, rotation, split-screen and live resizing | Stable P1/P2 UI plus screenshot harness |
 | 5 | P0-R06 | Blocked | Baseline Profile and Macrobenchmark module; validate startup, scrolling and large task sets | Stable critical journeys plus large-data fixture |
 | 6 | P0-R07 | Blocked | Final R8/resource-shrinking and performance budgets against production feature set | P0-R05, P0-R06 and all release features |
-| 7 | P0-R08 | Ready before secrets | Pin GitHub Actions to reviewed commit SHAs | Complete before CI receives signing or OAuth secrets |
+| 7 | P0-R08 | Done | Pin GitHub Actions to reviewed commit SHAs | Completed in Train 0 |
 | 8 | P0-R09 | Blocked | Complete recovery UX for Keystore loss, reinstall and new devices | P1-D04 cloud migration/recovery |
 | 9 | P0-R10 | External | Privacy Policy, OAuth brand verification, Play Data Safety, Play App Signing and internal/closed/open/staged rollout | P1 Drive slice, all product features, owner accounts and policy decisions |
 

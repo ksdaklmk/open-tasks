@@ -15,6 +15,9 @@ is_design_system_target() {
   local target_path="$file_path"
   local target_parent
   local canonical_parent
+  local canonical_target
+  local link_target
+  local symlink_hops=0
 
   default_project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
   project_root="$(
@@ -27,10 +30,34 @@ is_design_system_target() {
   if [[ "$target_path" != /* ]]; then
     target_path="$project_root/$target_path"
   fi
-  target_parent="$(dirname "$target_path")"
-  canonical_parent="$(cd "$target_parent" 2>/dev/null && pwd -P)" || return 1
 
-  case "$canonical_parent/" in
+  if [[ -e "$target_path" || -L "$target_path" ]]; then
+    while :; do
+      target_parent="$(dirname "$target_path")"
+      canonical_parent="$(cd "$target_parent" 2>/dev/null && pwd -P)" || return 1
+      canonical_target="$canonical_parent/$(basename "$target_path")"
+
+      if [[ ! -L "$canonical_target" ]]; then
+        [[ -e "$canonical_target" ]] || return 1
+        break
+      fi
+
+      symlink_hops=$((symlink_hops + 1))
+      [[ "$symlink_hops" -le 40 ]] || return 1
+      link_target="$(readlink "$canonical_target")" || return 1
+      if [[ "$link_target" == /* ]]; then
+        target_path="$link_target"
+      else
+        target_path="$canonical_parent/$link_target"
+      fi
+    done
+  else
+    target_parent="$(dirname "$target_path")"
+    canonical_parent="$(cd "$target_parent" 2>/dev/null && pwd -P)" || return 1
+    canonical_target="$canonical_parent/$(basename "$target_path")"
+  fi
+
+  case "$canonical_target/" in
     "$design_system_root/"*)
       return 0
       ;;

@@ -78,8 +78,9 @@ workspace slice:
 
 Development is paused at the user's request after P2-F03 manual time entry and
 before P2-F04 insights. [HANDOFF.md](HANDOFF.md) is the single authoritative
-pause record, completed implementation history and dependency-ordered backlog;
-existing uncommitted P1/P2 work must be preserved when development resumes.
+pause record, completed implementation history and dependency-ordered backlog.
+Train 0 committed the verified P1/P2 baseline; the working tree is expected to
+be clean when development resumes.
 
 Drive authorisation and transport remain behind production interfaces so a
 Google OAuth client is not required for local development.
@@ -105,16 +106,21 @@ Requirements:
 ```bash
 ./gradlew testDebugUnitTest
 ./gradlew :core:data:connectedDebugAndroidTest \
+  :app:connectedDebugAndroidTest \
   :feature:tasks:connectedDebugAndroidTest \
   :feature:projects:connectedDebugAndroidTest \
+  :feature:schedule:connectedDebugAndroidTest \
   :feature:more:connectedDebugAndroidTest
 ./gradlew lintDebug
 ./gradlew :app:assembleDebug
 ```
 
-CI runs the unit/lint/build gate and the four instrumented suites on API 36 and
+CI runs the unit/lint/build gate and the six instrumented suites on API 36 and
 37 emulators. Local device testing remains required for fold posture, rotation,
 split-screen, large text and assistive-technology acceptance.
+
+Run the App suite only on a disposable emulator: AGP uninstalls
+`app.opentasks`.
 
 The app ID is `app.opentasks`, `minSdk` is 36, and both `compileSdk` and
 `targetSdk` are 37.
