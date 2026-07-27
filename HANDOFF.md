@@ -2,8 +2,14 @@
 
 - Last updated: 27 July 2026
 - Branch: `main`
-- Pause point: P0 implementation and verification complete;
-  dependency-blocked release gates are recorded below.
+- Session status: **Paused at the user's request. Do not start P2-F04 or any
+  GitHub maintenance until the user explicitly resumes the work.**
+- Pause point: P2-F03 manual time entry and overlap reconciliation are complete,
+  alongside P2-F01 project templates and the UK-English application-language
+  pass. P1-L01 through P1-L04 plus P1-L06 and P1-L07 remain complete. P2-F02
+  is blocked by the attachment/cloud design, making P2-F04 insights the next
+  ready P2 task. P1-L08 remains deliberately deferred until local schemas
+  settle; GitHub merge/CI repair is deliberately deferred.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -13,18 +19,43 @@ or verification status.
 
 Open Tasks is a working local-first Android foundation, not yet a production
 release. The encrypted local workspace, adaptive shell, task editor, recurring
-tasks, workflows, Trash, project workbench, search and timers persist across
-process restarts. The current P0 code hardening and acceptance slice is
-complete and verified.
+tasks, custom per-project workflows, editable milestones, Bin, project
+workbench, search, timers and due-relative reminders persist across process
+restarts. Reminder permission timing, exact-alarm fallback, lock-screen
+redaction, task deep links, Snooze and Complete actions are implemented.
+Workflow add, rename, reorder, archive and restore preserve immutable reporting
+categories and assigned tasks.
+Milestone create/edit/complete/reopen/delete and project-scoped task membership
+are implemented with atomic outbox writes and exact Undo. Task dependency
+editing, cycle rejection, dynamic blocking and named completion warnings are
+also implemented. Schedule now derives real selected-day and Monday–Sunday
+views from task dates and reminders, with an open-only unscheduled tray.
+Routes, selected records, filters, meaningful scroll positions and bounded
+drafts restore across process recreation without the initial repository
+emission replacing unsaved text. Running timers resume from their encrypted
+time entry and original start instant. Completed time can now be added, edited
+and deleted from a task, with optional bounded notes, exact repository-produced
+Undo and encrypted restart persistence. Overlapping records are deliberately
+preserved and surfaced for review so double-counted work is never hidden. The
+P0 hardening slice and P1-L01 through P1-L04 plus P1-L06 and P1-L07 product
+slices are complete and verified. P2-F01 adds versioned reusable project
+templates with relative zoned dates, deterministic relation remapping,
+encrypted Room persistence and atomic outbox writes. The application is fixed
+to UK English with UK spelling, day–month dates, 24-hour time and Bin
+terminology.
 
 The public GitHub authority is
 [ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
-tracks `origin/main`. GitHub Actions runs the configured checks, while secret
-scanning, push protection, Dependabot alerts and security updates are enabled.
-Non-provider secret patterns and validity checks are unavailable in the
-current repository plan and remain disabled. Google Identity, Drive transport,
-cloud recovery and Play Console work have not started. P0 release gates which
-depend on those features remain blocked by their listed prerequisites.
+tracks `origin/main`. Secret scanning, push protection, Dependabot alerts and
+security updates are enabled. The current instrumented GitHub Actions matrix
+does not pass: its API 37 job requests a system image unavailable on the
+default channel, and the expanded UI suite is configured with a compact
+emulator profile. Repairing those checks and resolving the queued dependency
+PRs is explicitly deferred under P3-T00 at the user's request. Non-provider
+secret patterns and validity checks are unavailable in the current repository
+plan and remain disabled. Google Identity, Drive transport, cloud recovery and
+Play Console work have not started. P0 release gates which depend on those
+features remain blocked by their listed prerequisites.
 
 No task is intentionally left half-implemented at this pause point.
 
@@ -61,14 +92,45 @@ No task is intentionally left half-implemented at this pause point.
 
 - Encrypted task CRUD, core-field editing, debounced auto-save and exact Undo.
 - Granular checklist and reusable tag editing with relation-safe Undo.
-- Persisted first-class workflow statuses with semantic completion behaviour
-  and blocked-completion acknowledgement.
-- Thirty-day Trash, restore, startup expiry, permanent delete and sync
+- Independent first-class workflows for every project and Inbox, including
+  add, rename, explicit reorder, archive and restore; semantic completion
+  behaviour and blocked-completion acknowledgement remain repository rules.
+- Thirty-day Bin, restore, startup expiry, permanent delete and sync
   tombstones.
 - Adaptive Project Workbench with create, edit, archive, restore, progress,
-  workflow counts, milestone context and deep links.
+  workflow counts, milestone lifecycle editing and deep links.
+- Project milestones support create, rename, optional due dates, complete,
+  reopen and confirmed delete. Deleting clears assigned task memberships in
+  the same transaction; Undo restores the milestone and captured memberships.
+- Task milestone membership is limited to the selected project's milestones.
+  Project moves clear membership; exact Undo restores the prior project,
+  workflow status and milestone ID.
+- Task prerequisites can be searched, added and removed in a bounded editor.
+  Links survive prerequisite completion, but only unfinished linked tasks
+  contribute to `blockedBy`; reopening a prerequisite blocks dependants again.
+  Self-links, transitive cycles and more than 100 prerequisites are rejected.
+- Active projects can be saved as reusable templates containing their active
+  workflow, open milestones and open task structure. Using a template shifts
+  local/zoned dates from a chosen anchor, resets progress, remaps parent,
+  milestone, tag, checklist and dependency relationships, and creates all
+  records plus outbox operations atomically.
+- Blocked completion is enforced by the repository and confirmed consistently
+  from every implemented completion path. The confirmation names unfinished
+  prerequisites, while reminder notifications omit unsafe Complete actions.
 - Universal search across the implemented local records.
-- Persisted timer and time-entry foundation.
+- Compact Schedule shows a navigable selected-day agenda; expanded Schedule
+  groups the containing Monday–Sunday week by actual local task dates and
+  exposes an open-only unscheduled tray. Both views retain project, blocking,
+  completion and reminder context and open the existing task editor.
+- First-class timer and manual time history. Completed entries support add,
+  edit and delete with exact Undo, a 500-character note bound and a 10,000-row
+  per-task cap. Running entries remain timer-owned and read-only. A deterministic
+  linear interval sweep exposes overlaps without deleting, truncating or
+  silently merging recorded work.
+- Process recreation preserves the current destination, selected task/project,
+  task filter, list/editor scroll, search and quick-add input, and task/project
+  drafts. Restored drafts win over the first repository emission; timer
+  continuity remains a durable Room concern.
 - One-time sample workspace seed followed by Room as the sole local authority.
 
 ### Recurring tasks
@@ -85,10 +147,33 @@ No task is intentionally left half-implemented at this pause point.
   occurrence.
 - Editing a generated occurrence and undoing that edit restores its exact
   recurrence rule, due time, series ID, anchor and occurrence index.
-- Room v1→v2 migration is non-destructive and preserves encrypted data.
+- Room v1→v2, v2→v3, v3→v4 and v4→v5 migrations are non-destructive and
+  preserve encrypted data; v3 creates project/Inbox workflows and remaps
+  existing task statuses, v4 adds milestone revisions and v5 adds template
+  revisions.
 - On-device Compose coverage exercises every cadence, interval editing,
   multiple weekdays, count ending, 200% text, 48 dp targets and keyboard
   activation.
+
+### Reminders and notifications
+
+- One persisted due-relative reminder per task with deterministic identity.
+- Task and reminder editor changes, Undo and independent outbox operations are
+  committed atomically.
+- Flexible delivery uses an idle-safe inexact alarm. Precise delivery uses an
+  exact alarm only while Android special access is granted and falls back
+  safely if access is absent or revoked.
+- Notification permission is requested only when the user selects a reminder;
+  disabled app/channel state and precise-timing fallback are explained inline.
+- Alarm payloads contain opaque IDs. The notification channel is private on
+  the lock screen and supplies generic public content.
+- Notification taps open the task. Snooze schedules 15 minutes later and
+  Complete executes through the repository; blocked tasks omit Complete.
+- Reboot, package replacement, time/time-zone changes and exact-access changes
+  reconcile future alarms.
+- Recurring occurrences inherit reminder lead time and precision. Completion
+  Undo and permanent task purge queue reminder deletions with their task
+  operations.
 
 ### Data, cryptography and sync foundations
 
@@ -108,6 +193,15 @@ No task is intentionally left half-implemented at this pause point.
 - Repository shutdown now cancels and joins the Room observation job before
   its owner closes SQLCipher. This fixes a real connection-pool race found by
   the restart suite.
+- Template payload v1 is self-contained and bounded to 2 MiB. Its strict
+  decoder validates metadata binding, sizes, counts, workflow semantics, zones,
+  relative dates and acyclic relationship graphs before use. SQLCipher protects
+  the local rows and outbox; damaged template rows can still be deleted safely.
+- Time-entry add, update, delete and restore use the same typed-command and
+  exact-Undo contract in both repositories. Room commits each record change and
+  its revisioned, delimiter-safe time-entry outbox v2 operation atomically.
+  Workspace snapshots derive the running timer, full history and representative
+  overlap conflicts from the same persisted stream.
 
 ### Security and maintenance
 
@@ -139,13 +233,32 @@ No task is intentionally left half-implemented at this pause point.
 | P0-06 | Added API 36/37 instrumented CI jobs | `.github/workflows/android.yml`; YAML parsed locally |
 | P0-07 | Completed threat and direct-dependency review | `docs/threat-model.md`; weekly Dependabot configuration |
 | P0-08 | Added crypto golden, tamper, wrong-passphrase and key-loss coverage | Core crypto unit suite and Android Keystore device suite |
-| P0-09 | Rehearsed every released Room migration | Only v1→v2 exists; encrypted migration device test passes |
+| P0-09 | Rehearsed every migration released at the P0 gate | The then-current v1→v2 encrypted migration device test passed; later P1 migrations are recorded below |
 | P0-10 | Strengthened multi-device foundations | Second-device recovery test plus merge/HLC rollback, retry and order tests |
 | P0-11 | Fixed repository teardown ordering | All 12 encrypted Room/Keystore device tests pass without connection-pool crashes |
 | P0-12 | Verified R8/resource shrinking and installed final debug build in place | Release assembly passes; app data retained after cold restart |
 | P0-13 | Published the audited history as a public GitHub repository | `main` tracks `origin/main`; GitHub secret scanning and push protection enabled |
 
-## Final verification record
+## Work completed in this P1 pass
+
+| ID | Result | Evidence |
+|---|---|---|
+| P1-L01 | Added persisted reminders, notification actions, in-context permission timing and exact-alarm fallback | Repository/JVM tests, encrypted Room restart/recurrence tests, Compose device test, app scheduling policy tests, architecture/design/threat-model updates |
+| P1-L02 | Added independent project/Inbox workflows with add, rename, explicit reorder, archive/restore and semantic-preserving task moves | Repository/JVM tests, encrypted Room restart and v2→v3 migration tests, Tasks/Projects Compose device tests, in-place migration and visual QA, architecture/design/threat-model updates |
+| P1-L03 | Added milestone create/edit/complete/reopen/delete, exact membership Undo and project-scoped task assignment | Repository/JVM tests, encrypted Room restart/outbox and v3→v4 migration tests, Tasks/Projects Compose device tests, architecture/design/threat-model updates |
+| P1-L04 | Added searchable task prerequisites, cycle/limit rejection, dynamic unblock/reblock semantics and named blocked-completion warnings | Repository/JVM tests, encrypted Room restart/outbox tests, Tasks Compose device tests, full neighbouring-screen regression suite, live Fold visual QA, architecture/design/threat-model updates |
+| P1-L06 | Replaced the static Schedule mock with a real compact day agenda, expanded date-grouped week timeline and open-only unscheduled tray | Schedule Compose device tests, reminder/status context checks, compact/unfolded Fold visual QA and 200% text acceptance, architecture/design updates |
+| P1-L07 | Completed process restoration for navigation, selection, filters, list/editor scroll, search/quick-add and task/project drafts; bounded every saveable text input and kept running timers in encrypted Room state | Saved-state unit and Compose device tests, encrypted Room restart/timer test, keyboard-submit length guard, architecture/design/threat-model updates |
+
+## Work completed in this P2 pass
+
+| ID | Result | Evidence |
+|---|---|---|
+| P2-F01 | Added reusable project templates with active workflows, open milestones, open task structure, relative zoned dates, deterministic relation remapping, exact capture/delete Undo and atomic instantiation/outbox writes | Domain/codec/repository JVM tests; 21 encrypted Room/migration device tests; 9 Projects and 3 More Compose device tests; live unfolded Fold visual QA; schema v5; architecture/design/threat-model updates |
+| P2-F03 | Added task-scoped manual time-entry add/edit/delete, optional notes, exact Undo, encrypted persistence and explicit timer/manual overlap reconciliation without silent data loss | Domain and repository JVM tests; 22 encrypted Room/Keystore/migration device tests; 18 Tasks Compose device tests; live unfolded Fold editor visual QA; release/lint verification; architecture/design/product/threat-model updates |
+| P2-I18N | Fixed the application to UK English and aligned visible terminology/date handling | `en-GB` per-app locale, UK formatters, Organisation/Bin copy, live installed-app verification and product/design documentation |
+
+## P0 verification record
 
 The final source state passed:
 
@@ -179,10 +292,211 @@ sources are replaced, producing a transient missing
 `Hilt_MainActivity.java`. Running release assembly and unit/lint as the two
 phases above is stable. This is a tooling race, not a lint finding.
 
+## P1 verification record
+
+The combined P1-L01 through P1-L04 plus P1-L06 and P1-L07 local source state
+passed:
+
+```bash
+./gradlew testDebugUnitTest lintDebug --stacktrace
+./gradlew :app:connectedDebugAndroidTest \
+  :core:data:connectedDebugAndroidTest \
+  :feature:tasks:connectedDebugAndroidTest \
+  :feature:projects:connectedDebugAndroidTest \
+  :feature:more:connectedDebugAndroidTest \
+  :feature:schedule:connectedDebugAndroidTest --stacktrace
+./gradlew :app:assembleRelease --stacktrace
+./gradlew :app:installDebug
+```
+
+Results:
+
+- All debug unit tests passed.
+- Lint passed with zero errors. The app report contains 20 non-blocking
+  version/folder warnings; Projects and Tasks each retain one existing
+  modifier-order warning.
+- R8 minification, resource shrinking and release APK assembly passed.
+- All 50 affected device tests passed on the API 37 Pixel 10 Pro Fold
+  emulator: 3 app restoration, 19 data/Room/migration, 16 Tasks, 8 Projects,
+  2 More and 2 Schedule.
+- Debug APK installed over the existing workspace without uninstall or data
+  clear. Room v2→v3 and v3→v4 were both exercised in place across the P1
+  slices; persisted projects and tasks remained visible, project workflow
+  counts resolved to their project-scoped statuses and milestone records
+  gained revision metadata without data loss.
+- Visual QA passed for Home, Tasks, the reminder controls, Project Workbench
+  and the project workflow editor on the unfolded display. The editor exposes
+  readable category/task context, 48 dp save/up/down/archive actions and a
+  scrollable add/restore path without clipping.
+- Live milestone visual QA passed on the unfolded API 37 Fold display. The
+  create editor renders as a bounded, readable bottom sheet and the task
+  editor exposes only `No milestone` plus open milestones from its selected
+  project, without clipping or cross-project options.
+- Milestone verification covers v3→v4 migration, encrypted restart, atomic
+  milestone/task outbox writes, create/edit/complete/reopen/delete callbacks,
+  project-filtered assignment and exact delete/project-move Undo.
+- Dependency verification covers encrypted restart, atomic task outbox
+  payloads, add/remove Undo, completion resolution, reopen reblocking,
+  self/transitive-cycle rejection and the 100-link cap.
+- Live dependency visual QA passed on the unfolded API 37 Fold display. The
+  searchable sheet is bounded and readable, exposes completion/project
+  context and a `0/100` count, and the blocked-completion confirmation names
+  the unfinished prerequisite without clipping.
+- Schedule visual QA passed on both Fold displays. The compact day agenda
+  remains usable at normal and 200% text, while the unfolded view exposes real
+  Monday–Sunday columns beside the unscheduled tray with no hard-coded dates.
+- Process-restoration acceptance covers serializable navigation, selected
+  record IDs, filters, task-list and task/project editor scroll, quick-add,
+  search re-query, unsaved editor drafts and active-timer elapsed continuity
+  across an encrypted database restart.
+- All saveable user text is bounded before it enters Android saved-instance
+  state. Domain editors retain one over-limit character so validation remains
+  visible; search queries are capped outright. Quick Add's keyboard action now
+  enforces the same title limit as its button.
+- The final restoration hardening rerun passed all 27 affected device tests:
+  3 app restoration, 16 Tasks and 8 Projects.
+- Source checks found no application logging calls, credential patterns or
+  whitespace errors.
+
+## P2 verification record
+
+The P2-F01, P2-F03 and UK-English source state passed:
+
+```bash
+./gradlew testDebugUnitTest lintDebug --stacktrace
+./gradlew :core:data:connectedDebugAndroidTest \
+  :feature:tasks:connectedDebugAndroidTest \
+  :feature:projects:connectedDebugAndroidTest \
+  :feature:more:connectedDebugAndroidTest --stacktrace
+./gradlew :app:assembleRelease --stacktrace
+./gradlew :app:installDebug
+```
+
+Results:
+
+- All debug unit tests and lint checks passed with zero errors.
+- R8 minification, resource shrinking and release APK assembly passed.
+- The latest P2-F03 affected rerun passed all 40 device tests on the API 37
+  Pixel 10 Pro Fold: 22 encrypted Room/Keystore/migration tests and 18 Tasks
+  Compose tests. The preceding P2-F01 acceptance also passed 9 Projects and
+  3 More tests.
+- Template coverage includes relative date/DST-safe wall-clock shifting,
+  start-only recurrence anchors, deterministic child IDs, relation remapping,
+  progress reset, exclusion rules, payload round-trip, oversize/metadata/cycle
+  rejection, encrypted restart, v4→v5 migration, atomic outbox writes and
+  capture/delete Undo.
+- Live unfolded-Fold visual QA passed for Home, More, the empty Templates
+  library, the Project Workbench template action and the capture sheet. It
+  exposed and fixed singular count copy before the final build.
+- Time-entry acceptance covers strict positive intervals, bounded optional
+  notes, the per-task entry cap, encrypted restart, add/update/delete outbox
+  writes, exact add/edit/delete Undo and deterministic linear overlap
+  reconciliation. Running timer rows remain read-only until stopped.
+- Tasks Compose acceptance covers task-scoped history, UK 24-hour ranges,
+  date/start/duration/note editing, add and delete callbacks, explicit overlap
+  warning/review and 48 dp actions. Live unfolded-Fold visual QA confirmed the
+  editor sheet remains bounded, readable and unclipped.
+- The final debug APK was installed in place without clearing the existing
+  encrypted workspace. The observed UI used `Monday, 27 July`, Bin and other
+  UK-English terminology.
+- Source scans and `git diff --check` found no new user-visible US-English
+  spellings, default-locale date formatters or whitespace errors.
+
+## Pause closure verification
+
+After adding the explicit pause and resume instructions, the exact paused code
+state passed the repository gate on 27 July 2026:
+
+```bash
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+```
+
+Gradle reported `BUILD SUCCESSFUL`: all debug unit tests passed, Android lint
+completed and the debug APK assembled. This pause closure changed Markdown
+only; the immediately preceding P2 verification record remains the device and
+release evidence for the unchanged application code. No commit, push, branch
+change, app uninstall or emulator-data wipe was performed.
+
+## Train 0 baseline manifest
+
+This is the audited, pre-checkpoint inventory of the completed P1/P2 work
+that was intentionally left in the working tree when the pause began. The
+inventory was captured with `git status --short` and
+`git ls-files --others --exclude-standard` before this section was added.
+Every captured path is accounted for below; the groups describe the completed
+slice(s) they support, not a new runtime API.
+
+| Group | Captured paths |
+|---|---|
+| P1/P2 product contracts and UK-English documentation | `DESIGN.md`; `PRODUCT.md`; `README.md`; `docs/architecture.md`; `docs/threat-model.md` |
+| P1/P2 application shell, reminders, restoration and UK-English resources | `app/src/main/AndroidManifest.xml`; `app/src/main/kotlin/app/opentasks/MainActivity.kt`; `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`; `app/src/main/kotlin/app/opentasks/OpenTasksApplication.kt`; `app/src/main/kotlin/app/opentasks/QuickAddSheet.kt`; `app/src/main/kotlin/app/opentasks/SearchSurface.kt`; `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt`; `app/src/main/res/values/strings.xml`; `app/src/androidTest/kotlin/app/opentasks/ProcessRestorationInstrumentedTest.kt`; `app/src/main/kotlin/app/opentasks/reminders/ReminderSystem.kt`; `app/src/main/res/drawable/ic_notification.xml`; `app/src/main/res/xml/locales_config.xml`; `app/src/test/kotlin/app/opentasks/WorkspaceSelectionStateTest.kt`; `app/src/test/kotlin/app/opentasks/reminders/ReminderSystemTest.kt` |
+| P1/P2 data, migrations, templates and time-entry verification | `core/data/build.gradle.kts`; `core/data/src/androidTest/kotlin/app/opentasks/core/data/RoomVaultRepositoryInstrumentedTest.kt`; `core/data/src/main/kotlin/app/opentasks/core/data/InMemoryVaultRepository.kt`; `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt`; `core/data/src/main/kotlin/app/opentasks/core/data/db/Entities.kt`; `core/data/src/main/kotlin/app/opentasks/core/data/db/EntityMappers.kt`; `core/data/src/main/kotlin/app/opentasks/core/data/db/VaultDatabase.kt`; `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryVaultRepositoryTest.kt`; `core/data/src/test/kotlin/app/opentasks/core/data/db/EntityMappersTest.kt`; `core/data/schemas/app.opentasks.core.data.db.VaultDatabase/3.json`; `core/data/schemas/app.opentasks.core.data.db.VaultDatabase/4.json`; `core/data/schemas/app.opentasks.core.data.db.VaultDatabase/5.json`; `core/data/src/main/kotlin/app/opentasks/core/data/TemplatePayloadCodec.kt`; `core/data/src/test/kotlin/app/opentasks/core/data/TemplatePayloadCodecTest.kt` |
+| P1/P2 domain and shared presentation rules | `core/designsystem/src/main/kotlin/app/opentasks/core/designsystem/Components.kt`; `core/domain/src/main/kotlin/app/opentasks/core/domain/RecurringTaskPlanner.kt`; `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt`; `core/domain/src/main/kotlin/app/opentasks/core/domain/WorkspaceRules.kt`; `core/domain/src/test/kotlin/app/opentasks/core/domain/RecurringTaskPlannerTest.kt`; `core/domain/src/test/kotlin/app/opentasks/core/domain/WorkspaceRulesTest.kt`; `core/domain/src/main/kotlin/app/opentasks/core/domain/ProjectTemplatePlanner.kt`; `core/domain/src/test/kotlin/app/opentasks/core/domain/ProjectTemplatePlannerTest.kt`; `core/model/src/main/kotlin/app/opentasks/core/model/Fixtures.kt`; `core/model/src/main/kotlin/app/opentasks/core/model/Identifiers.kt`; `core/model/src/main/kotlin/app/opentasks/core/model/Records.kt`; `core/model/src/main/kotlin/app/opentasks/core/model/Snapshots.kt` |
+| P1/P2 feature surfaces and device coverage | `feature/home/src/main/kotlin/app/opentasks/feature/home/HomeScreen.kt`; `feature/more/src/androidTest/kotlin/app/opentasks/feature/more/TrashScreenInstrumentedTest.kt`; `feature/more/src/main/kotlin/app/opentasks/feature/more/MoreScreen.kt`; `feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/ProjectWorkbenchInstrumentedTest.kt`; `feature/projects/src/main/kotlin/app/opentasks/feature/projects/ProjectsScreen.kt`; `feature/schedule/build.gradle.kts`; `feature/schedule/src/main/kotlin/app/opentasks/feature/schedule/ScheduleScreen.kt`; `feature/schedule/src/androidTest/kotlin/app/opentasks/feature/schedule/ScheduleScreenInstrumentedTest.kt`; `feature/tasks/src/androidTest/kotlin/app/opentasks/feature/tasks/TaskEditorInstrumentedTest.kt`; `feature/tasks/src/main/kotlin/app/opentasks/feature/tasks/TasksScreen.kt` |
+| Existing P1/P2 handoff | `HANDOFF.md` (its pre-existing P1/P2 content plus this Train 0 audit record) |
+
+The tracked/untracked audit contained 42 modified paths and 14 untracked
+paths. `git diff --check` exited 0 with no output. The credential-pattern scan
+reported two benign text matches: `.gitignore` excludes
+`client_secret*.json`, and the Train 0 plan documents the scan pattern itself.
+Neither is a credential, private key or OAuth client secret. All unrelated
+user files remain unstaged; this checkpoint stages only `HANDOFF.md`.
+
+Room schema evidence: exported schemas `1.json`, `2.json`, `3.json`,
+`4.json` and `5.json` exist under
+`core/data/schemas/app.opentasks.core.data.db.VaultDatabase/`.
+`VaultDatabase.version` is 5, and `5.json` declares database version 5
+(identity hash `9678c8424993d9f4d0694e59aa6912fa).
+
+Train 0 gate results on 27 July 2026:
+
+```bash
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+./gradlew :app:assembleRelease --stacktrace
+```
+
+Both commands exited 0. The debug gate reported `BUILD SUCCESSFUL` in 9s
+(547 actionable tasks: 13 executed, 534 up-to-date); debug unit tests, lint
+and debug assembly completed. The separately run release gate reported
+`BUILD SUCCESSFUL` in 1s (441 actionable tasks: 5 executed, 436 up-to-date),
+including `:app:minifyReleaseWithR8`,
+`:app:convertShrunkResourcesToBinaryRelease`,
+`:app:optimizeReleaseResources` and `:app:assembleRelease`. The release
+configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
+
 ## Current in-progress work
 
-None. Work is paused at the requested P0 boundary. The working tree should be
-committed as one P0 checkpoint after this handoff is reviewed.
+None. The user explicitly paused the project after P2-F03 and before P2-F04.
+P2-F01, P2-F03 and the UK-English pass are complete locally. The P1/P2 source
+changes remain uncommitted so the paused GitHub checks are not resumed. The
+working tree is intentionally dirty and contains the accumulated completed
+P1/P2 implementation, tests, schemas and documentation; do not reset, clean,
+discard or overwrite those changes.
+
+GitHub merge/CI repair remains deliberately deferred. P2-F02 cannot complete
+until its attachment/cloud prerequisites exist; P2-F04 is the next ready P2
+task when the user resumes the P2 plan. P1-D02 remains the next
+credential-independent Drive task only if the user changes the focus back to
+P1.
+
+## Resume instructions
+
+1. Read this file first, then
+   [docs/architecture.md](docs/architecture.md),
+   [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
+   [PRODUCT.md](PRODUCT.md).
+2. Re-scan the working tree before editing. Preserve all existing modified and
+   untracked files because they contain completed P1/P2 work.
+3. Confirm with the user that the intended next slice is still `P2-F04`.
+4. If confirmed, derive insights from `WorkspaceSnapshot` without introducing
+   another data authority. Treat time affected by overlap conflicts as
+   explicitly qualified data rather than silently trustworthy actuals.
+5. Keep `P2-F02`, `P1-L05`, the blocked cloud/release gates and P3-T00 paused
+   unless their listed prerequisites or the user's direction change.
+6. Before recording the next pause or completion, run the repository gate from
+   `CLAUDE.md`, affected device suites, release assembly when production code
+   changed, and `git diff --check`; update this hand-off and every affected
+   contract document in the same change.
 
 ## Remaining tasks ordered by priority and dependency
 
@@ -208,13 +522,13 @@ even when their implementation is blocked by P1/P2 product work.
 
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
-| 1 | P1-L01 | Ready | Reminders and notification actions, permission timing and exact-alarm fallback | Existing task/due model |
-| 2 | P1-L02 | Ready | Custom per-project workflows: rename, reorder, add and archive while preserving semantic reporting categories | Existing workflow records and commands |
-| 3 | P1-L03 | Ready | Milestone editing and task milestone membership | Existing milestone schema/project workbench |
-| 4 | P1-L04 | Ready | Dependency editor, cycle-rejection UI and blocked-completion warnings at every task entry point | Existing dependency rules |
-| 5 | P1-L05 | Ready | Full-text search for notes and attachment names | P2-F02 note/attachment records |
-| 6 | P1-L06 | Ready | Schedule compact day agenda, expanded week timeline and unscheduled-task tray | Existing due dates; P1-L01 for reminder affordances |
-| 7 | P1-L07 | Ready | Complete process restoration for selection, drafts, scroll, filters and timer state | Current SavedStateHandle/navigation foundation |
+| 1 | P1-L01 | Done | Reminders and notification actions, permission timing and exact-alarm fallback | Existing task/due model |
+| 2 | P1-L02 | Done | Custom per-project workflows: rename, reorder, add and archive while preserving semantic reporting categories | Existing workflow records and commands |
+| 3 | P1-L03 | Done | Milestone editing and task milestone membership | Existing milestone schema/project workbench |
+| 4 | P1-L04 | Done | Dependency editor, cycle-rejection UI and blocked-completion warnings at every task entry point | Existing dependency rules |
+| 5 | P1-L05 | Blocked | Full-text search for notes and attachment names | P2-F02 note/attachment records |
+| 6 | P1-L06 | Done | Schedule compact day agenda, expanded week timeline and unscheduled-task tray | Existing due dates; P1-L01 for reminder affordances |
+| 7 | P1-L07 | Done | Complete process restoration for selection, drafts, scroll, filters and timer state | Current SavedStateHandle/navigation foundation |
 | 8 | P1-L08 | Deferred | Encrypted `.otvault` import/export and deliberate plaintext CSV warnings | Threat-model parser gates; final local schemas |
 
 ### P1 — Drive-primary storage and recovery
@@ -234,10 +548,10 @@ even when their implementation is blocked by P1/P2 product work.
 
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
-| 1 | P2-F01 | Deferred | Templates with relative dates, workflows, milestones and task structure | P1-L02, P1-L03 |
-| 2 | P2-F02 | Deferred | Notes/activity history and attachments using Photo Picker, Storage Access Framework, Sharesheet, drag/drop, constrained `FileProvider` cleanup and 100 MB limits | Local attachment encryption/design; P1-D07 for cloud |
-| 3 | P2-F03 | Deferred | Manual time entries and timer-overlap reconciliation | Existing timer foundation |
-| 4 | P2-F04 | Deferred | Insights for completion, overdue work, estimate/actual time, project/tag time and milestone health, with table/text alternatives | P1-L03, P2-F03 |
+| 1 | P2-F01 | Done | Templates with relative dates, workflows, milestones and task structure | P1-L02, P1-L03 |
+| 2 | P2-F02 | Blocked | Notes/activity history and attachments using Photo Picker, Storage Access Framework, Sharesheet, drag/drop, constrained `FileProvider` cleanup and 100 MB limits | Local attachment encryption/design; P1-D07 for cloud |
+| 3 | P2-F03 | Done | Manual time entries and timer-overlap reconciliation | Existing timer foundation |
+| 4 | P2-F04 | Ready | Insights for completion, overdue work, estimate/actual time, project/tag time and milestone health, with table/text alternatives | P1-L03, P2-F03 |
 | 5 | P2-F05 | Deferred | Today Glance widget, Quick Add launcher refinement and app-lock title privacy | P1-L01; privacy review |
 | 6 | P2-F06 | Deferred | Keyboard shortcut helper, mouse/hover support and accessible alternatives to drag actions | Stable final navigation/editors |
 | 7 | P2-F07 | Deferred | One-way calendar export through `ACTION_INSERT` | P1-L06; export/privacy review |
@@ -246,9 +560,10 @@ even when their implementation is blocked by P1/P2 product work.
 
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
-| 1 | P3-T01 | Ready | Restart Claude Code or open `/hooks` once to load `.claude/settings.json`; confirm the raw-colour hook fires through the harness | Local developer action |
-| 2 | P3-T02 | Ready | Decide whether ktlint or Spotless is worth the maintenance cost; current authority is official Kotlin IDE formatting | Team preference |
-| 3 | P3-T03 | Optional | Evaluate optional Compose/frontend and skill-authoring plugins only if a concrete workflow needs them | None |
+| 1 | P3-T00 | Deferred | Repair the GitHub Actions instrumented matrix (available API 37 SDK channel and genuinely expanded emulator profile), re-run queued PR checks and resume dependency-PR resolution | User chooses to resume GitHub maintenance |
+| 2 | P3-T01 | Ready | Restart Claude Code or open `/hooks` once to load `.claude/settings.json`; confirm the raw-colour hook fires through the harness | Local developer action |
+| 3 | P3-T02 | Ready | Decide whether ktlint or Spotless is worth the maintenance cost; current authority is official Kotlin IDE formatting | Team preference |
+| 4 | P3-T03 | Optional | Evaluate optional Compose/frontend and skill-authoring plugins only if a concrete workflow needs them | None |
 
 ## Architecture and security rules for the next agent
 
@@ -264,6 +579,43 @@ even when their implementation is blocked by P1/P2 product work.
   close joins the observation job.
 - A Room version bump requires an exported schema and non-destructive
   migration fixture.
+- Template capture includes only an active project's active workflow, open
+  milestones and open/non-Bin/non-complete tasks. Preserve the 100-template,
+  500-task, 100-year and 2 MiB limits; validate bounded self-contained payloads
+  and acyclic parent/dependency graphs before use. Instantiation must retain
+  wall-clock zone intent, derive relation IDs from the new project ID and
+  commit every new record/outbox operation atomically.
+- Workflow status writes stay project/Inbox scoped, preserve immutable
+  semantic categories and retain at least one active status per category.
+  Moving a task between projects maps by semantic category; Undo restores the
+  exact prior status ID.
+- Milestones stay project-scoped, retain revision metadata and enforce 120
+  character names, case-insensitive project uniqueness and a 100-row project
+  cap. Deletion and membership restoration must remain atomic with every
+  affected task outbox operation.
+- Dependency links stay distinct from derived blocking state: `dependencyIds`
+  is the durable relation set and `blockedBy` contains only unfinished linked
+  tasks. All writes use `SetTaskDependency`, enforce the 100-link cap and
+  reject self/transitive cycles before the task, relation and v5 outbox state
+  are committed atomically.
+- Every completion entry point must route through the same repository gate.
+  UI confirmation is an acknowledgement, not an authority bypass, and
+  notifications must continue to omit Complete for blocked tasks.
+- Schedule remains a read-only snapshot projection. Group by the `start`
+  moment's local date, falling back to `due`, preserve each moment's stored
+  zone and open the canonical task editor for mutation.
+- Process restoration stays layered: serializable Navigation 3 state for the
+  destination, `SavedStateHandle` for selected IDs, bounded Compose saveable
+  state for filters/scroll/drafts and Room for active timers. Never place
+  passphrases, keys, attachments or vault payloads in saved-instance state, and
+  never let the initial repository emission overwrite a restored draft.
+- Time entries are first-class records. Keep add/update/delete/restore as
+  repository commands with exact Undo and atomic outbox writes; enforce a
+  positive interval, 500-character notes and 10,000 entries per task. Running
+  entries are timer-owned and cannot be edited or deleted. Preserve overlapping
+  records, reconcile them with the deterministic linear sweep and keep the
+  warning visible until the user corrects the source intervals. Do not turn
+  reconciliation into silent trimming, merging or deletion.
 - A crypto-format bump requires old-format fixtures and golden-vector review.
 - Never replace a missing Keystore key for an existing local envelope.
 - Keep passphrases as `CharArray` and zero temporary key arrays.
@@ -271,14 +623,29 @@ even when their implementation is blocked by P1/P2 product work.
   encryption metadata.
 - Future Drive code receives encrypted objects only and requests only
   `drive.appdata`.
+- Alarm and pending-intent payloads contain record IDs only; private
+  notification content must retain a generic lock-screen public version.
 - Layout decisions use `WorkspaceLayoutPolicy`, never a device model.
 - Feature composables stay stateless and free of Hilt.
+- User-facing language is UK English: use UK spelling, Bin terminology,
+  day–month dates and the 24-hour clock. Stable internal identifiers may retain
+  historic names, but must never leak them into UI copy.
 - Update architecture, design, threat-model and handoff documents in the same
   change whenever their contracts are affected.
 
 ## Recommended next action
 
-Start with `P1-L01` unless Drive credentials and cloud work are the immediate
-product priority. If Drive is chosen, implement `P1-D01` and `P1-D02` as
-separate reviewable changes, then join them at `P1-D03`. Do not attempt the
-blocked P0 cloud/release gates before their product dependencies exist.
+Wait for the user to resume the project. Do not begin another task
+automatically. When the user confirms the current P2 direction, start
+`P2-F04`: derive completion, overdue, estimate-versus-actual, project/tag time
+and milestone-health insights from the existing snapshot without creating a
+second data authority. Provide table/text alternatives to every visual summary
+and make overlap treatment explicit so conflicted time is not silently
+presented as trustworthy actuals.
+
+`P2-F02` and therefore `P1-L05` remain blocked until the attachment/cloud
+design and `P1-D07` exist; do not weaken encrypted attachment requirements to
+start them early. Keep P3-T00 paused unless the user explicitly resumes GitHub
+maintenance. If the focus returns to Drive, `P1-D02` remains the next
+credential-independent P1 task. Do not attempt blocked P0 cloud/release gates
+before their product dependencies exist.
