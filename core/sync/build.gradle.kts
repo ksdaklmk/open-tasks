@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -19,5 +20,6 @@ android {
 dependencies {
     api(project(":core:model"))
     implementation(libs.coroutines.core)
+    implementation(libs.serialization.json)
     testImplementation(libs.junit)
 }
