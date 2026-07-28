@@ -15,6 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import app.opentasks.core.data.backup.BackupCaptureDao
 import app.opentasks.core.data.backup.BackupJournalDao
 import app.opentasks.core.data.backup.BackupJournalEntity
+import app.opentasks.core.data.backup.BackupMutationDao
 import app.opentasks.core.data.backup.BackupStateDao
 import app.opentasks.core.data.backup.BackupStateEntity
 import app.opentasks.core.data.backup.LegacySyncOperationDao
@@ -358,34 +359,6 @@ interface TimeEntryDao {
     suspend fun delete(id: String): Int
 }
 
-@Dao
-interface SyncOperationDao {
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun append(operation: SyncOperationEntity)
-
-    @Query(
-        """
-        SELECT * FROM sync_operations
-        WHERE uploadedAtEpochMillis IS NULL
-        ORDER BY revisionWallMillis, revisionLogical, deviceId
-        LIMIT :limit
-        """,
-    )
-    suspend fun pending(limit: Int): List<SyncOperationEntity>
-
-    @Query(
-        """
-        UPDATE sync_operations
-        SET uploadedAtEpochMillis = :uploadedAtEpochMillis
-        WHERE id IN (:operationIds)
-        """,
-    )
-    suspend fun markUploaded(operationIds: List<String>, uploadedAtEpochMillis: Long)
-
-    @Query("SELECT COUNT(*) FROM sync_operations WHERE uploadedAtEpochMillis IS NULL")
-    suspend fun pendingCount(): Int
-}
-
 @Database(
     entities = [
         VaultEntity::class,
@@ -418,37 +391,17 @@ abstract class VaultDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun workspaceDao(): WorkspaceDao
     abstract fun timeEntryDao(): TimeEntryDao
-    abstract fun syncOperationDao(): SyncOperationDao
     abstract fun legacySyncOperationDao(): LegacySyncOperationDao
     abstract fun backupJournalDao(): BackupJournalDao
+    internal abstract fun backupMutationDao(): BackupMutationDao
     abstract fun backupStateDao(): BackupStateDao
     abstract fun vaultRecoveryEnvelopeDao(): VaultRecoveryEnvelopeDao
     abstract fun backupCaptureDao(): BackupCaptureDao
 
     @Transaction
-    open suspend fun upsertTaskAndAppendOperation(
-        task: TaskEntity,
-        operation: SyncOperationEntity,
-    ) {
-        taskDao().upsert(task)
-        syncOperationDao().append(operation)
-    }
-
-    @Transaction
-    open suspend fun upsertProjectAndAppendOperation(
-        project: ProjectEntity,
-        operation: SyncOperationEntity,
-    ) {
-        workspaceDao().upsertProject(project)
-        syncOperationDao().append(operation)
-    }
-
-    @Transaction
-    open suspend fun purgeTaskAndAppendOperation(
+    open suspend fun purgeTask(
         taskId: String,
         tombstone: TombstoneEntity,
-        operation: SyncOperationEntity,
-        reminderOperation: SyncOperationEntity?,
     ) {
         workspaceDao().deleteChecklistForTask(taskId)
         workspaceDao().deleteTagsForTask(taskId)
@@ -459,8 +412,6 @@ abstract class VaultDatabase : RoomDatabase() {
         workspaceDao().deleteTimeForTask(taskId)
         taskDao().deleteById(taskId)
         workspaceDao().upsertTombstone(tombstone)
-        syncOperationDao().append(operation)
-        reminderOperation?.let { syncOperationDao().append(it) }
     }
 
     companion object {

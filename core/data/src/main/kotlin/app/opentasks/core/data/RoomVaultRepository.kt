@@ -1,11 +1,15 @@
 package app.opentasks.core.data
 
 import androidx.room.withTransaction
+import app.opentasks.core.data.backup.BackupJournalAppendBoundary
+import app.opentasks.core.data.backup.BackupMutationCodec
+import app.opentasks.core.data.backup.RoomBackupJournalSession
+import app.opentasks.core.data.backup.defaultBackupState
+import app.opentasks.core.data.backup.snapshots
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
-import app.opentasks.core.data.db.SyncOperationEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskEntity
@@ -93,7 +97,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
-import java.util.Base64
 import java.util.UUID
 
 class RoomVaultRepository(
@@ -102,6 +105,8 @@ class RoomVaultRepository(
     private val now: () -> Instant = Instant::now,
     private val zoneId: () -> ZoneId = ZoneId::systemDefault,
     private val seedSnapshot: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
+    private val backupJournalAppendBoundary: BackupJournalAppendBoundary =
+        BackupJournalAppendBoundary { dao, entity -> dao.insert(entity) },
 ) : VaultRepository, AutoCloseable {
     private val repositoryJob = SupervisorJob()
     private val repositoryScope = CoroutineScope(repositoryJob + Dispatchers.IO)
@@ -128,7 +133,7 @@ class RoomVaultRepository(
         repositoryScope.launch {
             try {
                 seedIfEmpty()
-                purgeExpiredTrashRecords(now())
+                purgeExpiredTrashRecordsAtomically(now())
                 observeDatabase().collect { snapshot ->
                     mutableWorkspace.emit(snapshot)
                     if (!ready.isCompleted) ready.complete(Unit)
@@ -143,7 +148,31 @@ class RoomVaultRepository(
     override suspend fun execute(command: DomainCommand): CommandResult {
         ready.await()
         return writeMutex.withLock {
-            when (command) {
+            database.withTransaction {
+                val mutationDao = database.backupMutationDao()
+                val before = mutationDao.snapshots()
+                val session = RoomBackupJournalSession(
+                    vaultId = VAULT_ID,
+                    stateDao = database.backupStateDao(),
+                    journalDao = database.backupJournalDao(),
+                    mutationDao = mutationDao,
+                    mutationCodec = BackupMutationCodec,
+                    operationId = { UUID.randomUUID().toString() },
+                    sourceDeviceId = deviceId.value,
+                    appendBoundary = backupJournalAppendBoundary,
+                )
+                val result = dispatch(command)
+                session.appendChanges(
+                    before = before,
+                    after = mutationDao.snapshots(),
+                )
+                result
+            }
+        }
+    }
+
+    private suspend fun dispatch(command: DomainCommand): CommandResult =
+        when (command) {
                 is DomainCommand.CreateProject -> createProject(command)
                 is DomainCommand.UpdateProject -> updateProject(command)
                 is DomainCommand.RestoreProject -> restoreProject(command)
@@ -196,8 +225,6 @@ class RoomVaultRepository(
                 is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
                 is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
             }
-        }
-    }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
         ready.await()
@@ -267,12 +294,8 @@ class RoomVaultRepository(
         val statuses = WorkflowStatus.defaults(project.id)
         database.withTransaction {
             database.workspaceDao().upsertProject(project.toEntity(revision))
-            database.syncOperationDao().append(projectOperation(project, revision, "create"))
             statuses.forEach { status ->
                 database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
-                database.syncOperationDao().append(
-                    workflowStatusOperation(status, revision, deleted = false),
-                )
             }
         }
         return CommandResult.Success("Project created")
@@ -345,9 +368,6 @@ class RoomVaultRepository(
         }
         database.withTransaction {
             database.workspaceDao().upsertTemplate(entity)
-            database.syncOperationDao().append(
-                templateOperation(template, revision),
-            )
         }
         return CommandResult.Success(
             message = "Template saved",
@@ -422,24 +442,14 @@ class RoomVaultRepository(
 
         database.withTransaction {
             database.workspaceDao().upsertProject(created.project.toEntity(revision))
-            database.syncOperationDao().append(
-                projectOperation(created.project, revision, "template_create"),
-            )
             created.workflowStatuses.forEach { status ->
                 database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
-                database.syncOperationDao().append(
-                    workflowStatusOperation(status, revision, deleted = false),
-                )
             }
             created.milestones.forEach { milestone ->
                 database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
-                database.syncOperationDao().append(
-                    milestoneOperation(milestone, revision, deleted = false),
-                )
             }
             newTags.forEach { tag ->
                 database.workspaceDao().upsertTag(tag.toEntity())
-                database.syncOperationDao().append(tagOperation(tag, revision))
             }
             tasks.forEach { task ->
                 database.taskDao().upsert(task.toEntity())
@@ -448,9 +458,6 @@ class RoomVaultRepository(
                 task.dependencyEntities().forEach {
                     database.workspaceDao().upsertDependency(it)
                 }
-                database.syncOperationDao().append(
-                    taskOperation(task, "template_create"),
-                )
             }
         }
         return CommandResult.Success("Project created from template")
@@ -465,9 +472,6 @@ class RoomVaultRepository(
         val revision = nextTemplateRevision(entity)
         database.withTransaction {
             database.workspaceDao().deleteTemplate(entity.id)
-            database.syncOperationDao().append(
-                templateDeleteOperation(command.templateId, revision),
-            )
         }
         return CommandResult.Success(
             message = if (template == null) {
@@ -521,9 +525,6 @@ class RoomVaultRepository(
         }
         database.withTransaction {
             database.workspaceDao().upsertTemplate(entity)
-            database.syncOperationDao().append(
-                templateOperation(restored, revision),
-            )
         }
         return CommandResult.Success(
             message = "Template restored",
@@ -568,9 +569,6 @@ class RoomVaultRepository(
         val revision = workflowRevision()
         database.withTransaction {
             database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
-            database.syncOperationDao().append(
-                workflowStatusOperation(status, revision, deleted = false),
-            )
         }
         return CommandResult.Success(
             message = "$name added",
@@ -746,12 +744,8 @@ class RoomVaultRepository(
                 "Keep at least one active ${status.semanticStatus.readableCategory()} status.",
             )
         }
-        val revision = nextWorkflowRevision(entity)
         database.withTransaction {
             database.workspaceDao().deleteWorkflowStatus(entity.id)
-            database.syncOperationDao().append(
-                workflowStatusOperation(status, revision, deleted = true),
-            )
         }
         return CommandResult.Success("Workflow status removed")
     }
@@ -789,9 +783,6 @@ class RoomVaultRepository(
         val revision = milestoneRevision()
         database.withTransaction {
             database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
-            database.syncOperationDao().append(
-                milestoneOperation(milestone, revision, deleted = false),
-            )
         }
         return CommandResult.Success(
             message = "$name added",
@@ -844,16 +835,11 @@ class RoomVaultRepository(
                 revision = nextRevision(task, changedAt),
             )
         }
-        val revision = nextMilestoneRevision(entity, changedAt)
         database.withTransaction {
             updatedTasks.forEach { task ->
                 database.taskDao().upsert(task.toEntity())
-                database.syncOperationDao().append(taskOperation(task, "milestone.clear"))
             }
             database.workspaceDao().deleteMilestone(entity.id)
-            database.syncOperationDao().append(
-                milestoneOperation(milestone, revision, deleted = true),
-            )
         }
         return CommandResult.Success(
             message = "Milestone deleted",
@@ -897,12 +883,8 @@ class RoomVaultRepository(
         }
         database.withTransaction {
             database.workspaceDao().upsertMilestone(command.milestone.toEntity(revision))
-            database.syncOperationDao().append(
-                milestoneOperation(command.milestone, revision, deleted = false),
-            )
             updatedTasks.forEach { task ->
                 database.taskDao().upsert(task.toEntity())
-                database.syncOperationDao().append(taskOperation(task, "milestone.restore"))
             }
         }
         return CommandResult.Success("Milestone restored")
@@ -1162,22 +1144,11 @@ class RoomVaultRepository(
         } else {
             database.withTransaction {
                 database.taskDao().upsert(updated.toEntity())
-                database.syncOperationDao().append(taskOperation(updated, operationKind))
                 database.taskDao().upsert(generated.toEntity())
                 database.workspaceDao().insertTaskTags(generated.tagEntities())
                 database.workspaceDao().insertChecklistItems(generated.checklistEntities())
-                database.syncOperationDao().append(
-                    taskOperation(generated, "recurrence.create"),
-                )
                 generatedReminder?.let { reminder ->
                     database.workspaceDao().upsertReminder(reminder.toEntity())
-                    database.syncOperationDao().append(
-                        reminderOperation(
-                            reminder = reminder,
-                            revision = generated.revision,
-                            deleted = false,
-                        ),
-                    )
                 }
             }
         }
@@ -1211,9 +1182,6 @@ class RoomVaultRepository(
         val generatedEntity = command.generatedOccurrenceId?.let { generatedId ->
             database.taskDao().getById(generatedId.value)
         }
-        val generatedReminder = generatedEntity?.let { generated ->
-            database.workspaceDao().getReminderForTask(generated.id)?.toModel()
-        }
         if (generatedEntity == null) {
             persistTask(restored, "status.restore")
         } else {
@@ -1238,9 +1206,6 @@ class RoomVaultRepository(
             )
             database.withTransaction {
                 database.taskDao().upsert(restored.toEntity())
-                database.syncOperationDao().append(
-                    taskOperation(restored, "status.restore"),
-                )
                 val generatedId = generatedEntity.id
                 database.workspaceDao().deleteChecklistForTask(generatedId)
                 database.workspaceDao().deleteTagsForTask(generatedId)
@@ -1251,12 +1216,6 @@ class RoomVaultRepository(
                 database.workspaceDao().deleteTimeForTask(generatedId)
                 database.taskDao().deleteById(generatedId)
                 database.workspaceDao().upsertTombstone(tombstone)
-                database.syncOperationDao().append(tombstoneOperation(tombstone))
-                generatedReminder?.let { reminder ->
-                    database.syncOperationDao().append(
-                        reminderOperation(reminder, tombstoneRevision, deleted = true),
-                    )
-                }
             }
         }
         return CommandResult.Success("Status restored")
@@ -1300,7 +1259,6 @@ class RoomVaultRepository(
         )
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
-            database.syncOperationDao().append(taskOperation(updated, "trash"))
             database.timeEntryDao().getActive()
                 ?.takeIf { active -> active.taskId == task.id.value }
                 ?.let { active ->
@@ -1309,9 +1267,6 @@ class RoomVaultRepository(
                         active.startedAtEpochMillis,
                     )
                     database.timeEntryDao().stop(active.id, stoppedAt)
-                    database.syncOperationDao().append(
-                        timeOperation(active.copy(stoppedAtEpochMillis = stoppedAt), "stop"),
-                    )
                 }
         }
         return CommandResult.Success(
@@ -1368,6 +1323,27 @@ class RoomVaultRepository(
         return expired.size
     }
 
+    private suspend fun purgeExpiredTrashRecordsAtomically(at: Instant) {
+        database.withTransaction {
+            val mutationDao = database.backupMutationDao()
+            val before = mutationDao.snapshots()
+            purgeExpiredTrashRecords(at)
+            RoomBackupJournalSession(
+                vaultId = VAULT_ID,
+                stateDao = database.backupStateDao(),
+                journalDao = database.backupJournalDao(),
+                mutationDao = mutationDao,
+                mutationCodec = BackupMutationCodec,
+                operationId = { UUID.randomUUID().toString() },
+                sourceDeviceId = deviceId.value,
+                appendBoundary = backupJournalAppendBoundary,
+            ).appendChanges(
+                before = before,
+                after = mutationDao.snapshots(),
+            )
+        }
+    }
+
     private suspend fun purgeTaskEntity(
         entity: TaskEntity,
         purgedAt: Instant,
@@ -1388,16 +1364,9 @@ class RoomVaultRepository(
             revisionLogical = revision.logicalCounter,
             revisionDeviceId = revision.deviceId.value,
         )
-        val reminder = database.workspaceDao()
-            .getReminderForTask(entity.id)
-            ?.toModel()
-        database.purgeTaskAndAppendOperation(
+        database.purgeTask(
             taskId = entity.id,
             tombstone = tombstone,
-            operation = tombstoneOperation(tombstone),
-            reminderOperation = reminder?.let {
-                reminderOperation(it, revision, deleted = true)
-            },
         )
     }
 
@@ -1559,11 +1528,9 @@ class RoomVaultRepository(
         } else {
             database.withTransaction {
                 database.taskDao().upsert(updated.toEntity())
-                database.syncOperationDao().append(taskOperation(updated, "update"))
                 persistReminderChange(
                     previous = existingReminder,
                     requested = requestedReminder,
-                    revision = updated.revision,
                 )
             }
         }
@@ -1612,11 +1579,9 @@ class RoomVaultRepository(
         val updated = task.copy(revision = nextRevision(task))
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
-            database.syncOperationDao().append(taskOperation(updated, "reminder"))
             persistReminderChange(
                 previous = existing,
                 requested = requested,
-                revision = updated.revision,
             )
         }
         return CommandResult.Success(
@@ -1656,7 +1621,6 @@ class RoomVaultRepository(
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().upsertChecklistItem(item.toEntity(task.id))
-            database.syncOperationDao().append(taskOperation(updated, "checklist.add"))
         }
         return CommandResult.Success(
             message = "Checklist item added",
@@ -1689,7 +1653,6 @@ class RoomVaultRepository(
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().upsertChecklistItem(updatedItem.toEntity(task.id))
-            database.syncOperationDao().append(taskOperation(updated, "checklist.update"))
         }
         return CommandResult.Success(
             message = if (command.completed) "Checklist item completed" else "Checklist saved",
@@ -1719,7 +1682,6 @@ class RoomVaultRepository(
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().deleteChecklistItem(task.id.value, existing.id)
-            database.syncOperationDao().append(taskOperation(updated, "checklist.delete"))
         }
         return CommandResult.Success(
             message = "Checklist item deleted",
@@ -1756,7 +1718,6 @@ class RoomVaultRepository(
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().upsertChecklistItem(restored.toEntity(task.id))
-            database.syncOperationDao().append(taskOperation(updated, "checklist.restore"))
         }
         return CommandResult.Success(
             message = "Checklist item restored",
@@ -1797,7 +1758,6 @@ class RoomVaultRepository(
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().upsertTaskTag(relation)
-            database.syncOperationDao().append(taskOperation(updated, "tags.update"))
         }
         return CommandResult.Success(
             message = if (command.present) "Tag added" else "Tag removed",
@@ -1846,8 +1806,6 @@ class RoomVaultRepository(
             database.workspaceDao().upsertTag(tag.toEntity())
             database.taskDao().upsert(updated.toEntity())
             database.workspaceDao().upsertTaskTag(relation)
-            database.syncOperationDao().append(tagOperation(tag, updated.revision))
-            database.syncOperationDao().append(taskOperation(updated, "tags.create_assign"))
         }
         return CommandResult.Success(
             message = "Tag created and added",
@@ -1944,9 +1902,6 @@ class RoomVaultRepository(
                     dependsOnTaskId = dependency.id.value,
                 )
             }
-            database.syncOperationDao().append(
-                taskOperation(updated, "dependencies.update"),
-            )
         }
         return CommandResult.Success(
             message = if (command.present) "Dependency added" else "Dependency removed",
@@ -1988,8 +1943,7 @@ class RoomVaultRepository(
     }
 
     private suspend fun persistTask(task: Task, operationKind: String) {
-        val operation = taskOperation(task, operationKind)
-        database.upsertTaskAndAppendOperation(task.toEntity(), operation)
+        database.taskDao().upsert(task.toEntity())
     }
 
     private suspend fun persistProject(
@@ -1997,10 +1951,7 @@ class RoomVaultRepository(
         revision: Revision,
         operationKind: String,
     ) {
-        database.upsertProjectAndAppendOperation(
-            project = project.toEntity(revision),
-            operation = projectOperation(project, revision, operationKind),
-        )
+        database.workspaceDao().upsertProject(project.toEntity(revision))
     }
 
     private suspend fun persistWorkflowStatuses(
@@ -2024,9 +1975,6 @@ class RoomVaultRepository(
             statuses.forEachIndexed { index, status ->
                 val revision = revisions[index]
                 database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
-                database.syncOperationDao().append(
-                    workflowStatusOperation(status, revision, deleted = false),
-                )
             }
         }
     }
@@ -2055,7 +2003,6 @@ class RoomVaultRepository(
                 noteCiphertext = ByteArray(0),
             )
             database.timeEntryDao().insert(entry)
-            database.syncOperationDao().append(timeOperation(entry, "start"))
             CommandResult.Success("Timer started")
         }
 
@@ -2067,13 +2014,6 @@ class RoomVaultRepository(
             )
         val stoppedAt = maxOf(now().toEpochMilli(), active.startedAtEpochMillis)
         database.timeEntryDao().stop(active.id, stoppedAt)
-        database.syncOperationDao().append(
-            timeOperation(
-                active.copy(stoppedAtEpochMillis = stoppedAt),
-                kind = "stop",
-                revisionWallMillis = stoppedAt,
-            ),
-        )
         CommandResult.Success("Timer stopped")
     }
 
@@ -2110,16 +2050,6 @@ class RoomVaultRepository(
         val overlaps = wouldOverlap(entry, excluding = null, at = command.changedAt)
         database.withTransaction {
             database.timeEntryDao().insert(entry)
-            database.syncOperationDao().append(
-                timeOperation(
-                    entry,
-                    kind = "upsert",
-                    revisionWallMillis = maxOf(
-                        command.changedAt.toEpochMilli(),
-                        requireNotNull(entry.stoppedAtEpochMillis),
-                    ),
-                ),
-            )
         }
         return CommandResult.Success(
             message = if (overlaps) {
@@ -2168,16 +2098,6 @@ class RoomVaultRepository(
         val overlaps = wouldOverlap(updated, excluding = existing.id, at = command.changedAt)
         database.withTransaction {
             database.timeEntryDao().update(updated)
-            database.syncOperationDao().append(
-                timeOperation(
-                    updated,
-                    kind = "upsert",
-                    revisionWallMillis = maxOf(
-                        command.changedAt.toEpochMilli(),
-                        requireNotNull(updated.stoppedAtEpochMillis),
-                    ),
-                ),
-            )
         }
         return CommandResult.Success(
             message = if (overlaps) {
@@ -2205,13 +2125,6 @@ class RoomVaultRepository(
         }
         database.withTransaction {
             database.timeEntryDao().delete(existing.id)
-            database.syncOperationDao().append(
-                timeOperation(
-                    existing,
-                    kind = "delete",
-                    revisionWallMillis = command.deletedAt.toEpochMilli(),
-                ),
-            )
         }
         return CommandResult.Success(
             message = "Time entry deleted",
@@ -2248,16 +2161,6 @@ class RoomVaultRepository(
             } else {
                 database.timeEntryDao().update(restored)
             }
-            database.syncOperationDao().append(
-                timeOperation(
-                    restored,
-                    kind = "upsert",
-                    revisionWallMillis = maxOf(
-                        command.restoredAt.toEpochMilli(),
-                        stoppedAt.toEpochMilli(),
-                    ),
-                ),
-            )
         }
         return CommandResult.Success(
             message = "Time entry restored",
@@ -2361,115 +2264,6 @@ class RoomVaultRepository(
         logicalCounter = template.revisionLogical + 1,
     )
 
-    private fun taskOperation(task: Task, kind: String): SyncOperationEntity =
-        SyncOperationEntity(
-            id = UUID.randomUUID().toString(),
-            deviceId = deviceId.value,
-            objectId = task.id.value,
-            objectType = "task.$kind",
-            encryptedPayload = buildString {
-                append("v5")
-                append('\u0000')
-                append(task.id.value)
-                append('\u0000')
-                append(task.statusId.value)
-                append('\u0000')
-                append(task.semanticStatus.name)
-                append('\u0000')
-                append(task.completedAt?.toEpochMilli() ?: -1)
-                append('\u0000')
-                append(task.title)
-                append('\u0000')
-                append(task.description)
-                append('\u0000')
-                append(task.projectId?.value.orEmpty())
-                append('\u0000')
-                append(task.priority.name)
-                append('\u0000')
-                append(task.start?.instant?.toEpochMilli() ?: -1)
-                append('\u0000')
-                append(task.start?.zoneId.orEmpty())
-                append('\u0000')
-                append(task.due?.instant?.toEpochMilli() ?: -1)
-                append('\u0000')
-                append(task.due?.zoneId.orEmpty())
-                append('\u0000')
-                append(task.recurrence?.frequency?.name.orEmpty())
-                append('\u0000')
-                append(task.recurrence?.interval ?: -1)
-                append('\u0000')
-                append(
-                    task.recurrence
-                        ?.weekdays
-                        ?.sortedBy { it.value }
-                        ?.joinToString(",") { it.name }
-                        .orEmpty(),
-                )
-                append('\u0000')
-                append(task.recurrence?.count ?: -1)
-                append('\u0000')
-                append(task.recurrence?.endDate?.toString().orEmpty())
-                append('\u0000')
-                append(task.recurrenceSeriesId?.value.orEmpty())
-                append('\u0000')
-                append(task.recurrenceAnchor?.instant?.toEpochMilli() ?: -1)
-                append('\u0000')
-                append(task.recurrenceAnchor?.zoneId.orEmpty())
-                append('\u0000')
-                append(task.recurrenceOccurrenceIndex ?: -1)
-                append('\u0000')
-                append(task.estimate?.seconds ?: -1)
-                append('\u0000')
-                append(task.milestoneId?.value.orEmpty())
-                append('\u0000')
-                append(task.deletedAt?.toEpochMilli() ?: -1)
-                append('\u0000')
-                append(task.tagIds.sortedBy(TagId::value).joinToString(",") { it.value })
-                append('\u0000')
-                append(
-                    task.dependencyIds
-                        .sortedBy(TaskId::value)
-                        .joinToString(",") { it.value },
-                )
-                task.checklist.sortedBy(ChecklistItem::rank).forEach { item ->
-                    append('\u0000')
-                    append(item.id.length)
-                    append(':')
-                    append(item.id)
-                    append(item.text.length)
-                    append(':')
-                    append(item.text)
-                    append(if (item.completed) '1' else '0')
-                    append(item.rank.length)
-                    append(':')
-                    append(item.rank)
-                }
-            }.toByteArray(Charsets.UTF_8),
-            revisionWallMillis = task.revision.wallTimeMillis,
-            revisionLogical = task.revision.logicalCounter,
-            uploadedAtEpochMillis = null,
-        )
-
-    private fun tagOperation(tag: Tag, revision: Revision): SyncOperationEntity =
-        SyncOperationEntity(
-            id = UUID.randomUUID().toString(),
-            deviceId = deviceId.value,
-            objectId = tag.id.value,
-            objectType = "tag.create",
-            encryptedPayload = buildString {
-                append("v1")
-                append('\u0000')
-                append(tag.id.value)
-                append('\u0000')
-                append(tag.workspaceId.value)
-                append('\u0000')
-                append(tag.name)
-            }.toByteArray(Charsets.UTF_8),
-            revisionWallMillis = revision.wallTimeMillis,
-            revisionLogical = revision.logicalCounter,
-            uploadedAtEpochMillis = null,
-        )
-
     private fun Template.toTemplateEntity(): TemplateEntity = TemplateEntity(
         id = id.value,
         workspaceId = workspaceId.value,
@@ -2478,94 +2272,6 @@ class RoomVaultRepository(
         revisionWallMillis = revision.wallTimeMillis,
         revisionLogical = revision.logicalCounter,
         revisionDeviceId = revision.deviceId.value,
-    )
-
-    private fun templateOperation(
-        template: Template,
-        revision: Revision,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = template.id.value,
-        objectType = "template.upsert",
-        encryptedPayload = TemplatePayloadCodec.encode(template),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
-    )
-
-    private fun templateDeleteOperation(
-        templateId: TemplateId,
-        revision: Revision,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = templateId.value,
-        objectType = "template.delete",
-        encryptedPayload = "v1\u0000${templateId.value}".toByteArray(Charsets.UTF_8),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
-    )
-
-    private fun projectOperation(
-        project: Project,
-        revision: Revision,
-        kind: String,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = project.id.value,
-        objectType = "project.$kind",
-        encryptedPayload = buildString {
-            append("v1")
-            append('\u0000')
-            append(project.id.value)
-            append('\u0000')
-            append(project.workspaceId.value)
-            append('\u0000')
-            append(project.name)
-            append('\u0000')
-            append(project.summary)
-            append('\u0000')
-            append(project.status.name)
-            append('\u0000')
-            append(project.dueDate?.toString().orEmpty())
-            append('\u0000')
-            append(project.archivedAt?.toEpochMilli() ?: -1)
-        }.toByteArray(Charsets.UTF_8),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
-    )
-
-    private fun workflowStatusOperation(
-        status: WorkflowStatus,
-        revision: Revision,
-        deleted: Boolean,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = status.id.value,
-        objectType = if (deleted) "workflow_status.delete" else "workflow_status.upsert",
-        encryptedPayload = buildString {
-            append("v1")
-            append('\u0000')
-            append(status.id.value)
-            append('\u0000')
-            append(status.projectId?.value.orEmpty())
-            append('\u0000')
-            append(if (deleted) "" else status.name)
-            append('\u0000')
-            append(if (deleted) "" else status.semanticStatus.name)
-            append('\u0000')
-            append(if (deleted) "" else status.rank)
-            append('\u0000')
-            append(if (deleted) -1 else status.archivedAt?.toEpochMilli() ?: -1)
-        }.toByteArray(Charsets.UTF_8),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
     )
 
     private suspend fun persistMilestone(
@@ -2579,136 +2285,21 @@ class RoomVaultRepository(
             } else {
                 database.workspaceDao().upsertMilestone(milestone.toEntity(revision))
             }
-            database.syncOperationDao().append(
-                milestoneOperation(milestone, revision, deleted),
-            )
         }
-    }
-
-    private fun milestoneOperation(
-        milestone: Milestone,
-        revision: Revision,
-        deleted: Boolean,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = milestone.id.value,
-        objectType = if (deleted) "milestone.delete" else "milestone.upsert",
-        encryptedPayload = buildString {
-            append("v1")
-            append('\u0000')
-            append(milestone.id.value)
-            append('\u0000')
-            append(milestone.projectId.value)
-            append('\u0000')
-            append(if (deleted) "" else milestone.name)
-            append('\u0000')
-            append(if (deleted) "" else milestone.dueDate?.toString().orEmpty())
-            append('\u0000')
-            append(if (deleted) -1 else milestone.completedAt?.toEpochMilli() ?: -1)
-        }.toByteArray(Charsets.UTF_8),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
-    )
-
-    private fun timeOperation(
-        entry: TimeEntryEntity,
-        kind: String,
-        revisionWallMillis: Long = entry.stoppedAtEpochMillis ?: entry.startedAtEpochMillis,
-    ): SyncOperationEntity {
-        return SyncOperationEntity(
-            id = UUID.randomUUID().toString(),
-            deviceId = deviceId.value,
-            objectId = entry.id,
-            objectType = "time_entry.$kind",
-            encryptedPayload = buildString {
-                append("v2")
-                append('\u0000')
-                append(entry.id)
-                append('\u0000')
-                append(entry.taskId)
-                append('\u0000')
-                append(entry.deviceId)
-                append('\u0000')
-                append(entry.startedAtEpochMillis)
-                append('\u0000')
-                append(entry.stoppedAtEpochMillis ?: -1)
-                append('\u0000')
-                append(Base64.getEncoder().encodeToString(entry.noteCiphertext))
-            }.toByteArray(Charsets.UTF_8),
-            revisionWallMillis = revisionWallMillis,
-            revisionLogical = 0,
-            uploadedAtEpochMillis = null,
-        )
     }
 
     private suspend fun persistReminderChange(
         previous: Reminder?,
         requested: Reminder?,
-        revision: Revision,
     ) {
         if (requested == null) {
             previous?.let { reminder ->
                 database.workspaceDao().deleteReminder(reminder.id)
-                database.syncOperationDao().append(
-                    reminderOperation(reminder, revision, deleted = true),
-                )
             }
         } else {
             database.workspaceDao().upsertReminder(requested.toEntity())
-            database.syncOperationDao().append(
-                reminderOperation(requested, revision, deleted = false),
-            )
         }
     }
-
-    private fun reminderOperation(
-        reminder: Reminder,
-        revision: Revision,
-        deleted: Boolean,
-    ): SyncOperationEntity = SyncOperationEntity(
-        id = UUID.randomUUID().toString(),
-        deviceId = deviceId.value,
-        objectId = reminder.id,
-        objectType = if (deleted) "reminder.delete" else "reminder.upsert",
-        encryptedPayload = buildString {
-            append("v1")
-            append('\u0000')
-            append(reminder.id)
-            append('\u0000')
-            append(reminder.taskId.value)
-            append('\u0000')
-            append(if (deleted) -1 else reminder.triggerAt.instant.toEpochMilli())
-            append('\u0000')
-            append(if (deleted) "" else reminder.triggerAt.zoneId)
-            append('\u0000')
-            append(if (!deleted && reminder.precise) '1' else '0')
-        }.toByteArray(Charsets.UTF_8),
-        revisionWallMillis = revision.wallTimeMillis,
-        revisionLogical = revision.logicalCounter,
-        uploadedAtEpochMillis = null,
-    )
-
-    private fun tombstoneOperation(tombstone: TombstoneEntity): SyncOperationEntity =
-        SyncOperationEntity(
-            id = UUID.randomUUID().toString(),
-            deviceId = deviceId.value,
-            objectId = tombstone.objectId,
-            objectType = "task.purge",
-            encryptedPayload = buildString {
-                append("v1")
-                append('\u0000')
-                append(tombstone.objectId)
-                append('\u0000')
-                append(tombstone.deletedAtEpochMillis)
-                append('\u0000')
-                append(tombstone.purgeAfterEpochMillis)
-            }.toByteArray(Charsets.UTF_8),
-            revisionWallMillis = tombstone.revisionWallMillis,
-            revisionLogical = tombstone.revisionLogical,
-            uploadedAtEpochMillis = null,
-        )
 
     private fun Task.toUpdateCommand(
         reminder: Reminder? = null,
@@ -3062,11 +2653,14 @@ class RoomVaultRepository(
                     id = VAULT_ID.value,
                     storageMode = "LOCAL",
                     createdAtEpochMillis = now().toEpochMilli(),
-                    schemaVersion = 5,
+                    schemaVersion = 6,
                     cryptoVersion = 1,
                     minimumReaderVersion = 1,
                 ),
             )
+            if (database.backupStateDao().get(VAULT_ID.value) == null) {
+                database.backupStateDao().insert(defaultBackupState(VAULT_ID.value))
+            }
             workspaceDao.insertMember(MemberEntity(OWNER_ID, "You"))
             workspaceDao.insertWorkspace(
                 WorkspaceEntity(

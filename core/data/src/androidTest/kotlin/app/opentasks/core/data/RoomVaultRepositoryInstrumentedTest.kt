@@ -6,6 +6,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import app.opentasks.core.data.backup.BackupJournalAppendBoundary
+import app.opentasks.core.data.backup.BackupMutationCodec
+import app.opentasks.core.data.backup.BackupRecordFamily
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
@@ -35,6 +38,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -108,7 +112,6 @@ class RoomVaultRepositoryInstrumentedTest {
 
         assertTrue(update is CommandResult.Success)
         assertTrue(statusUpdate is CommandResult.Success)
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -232,7 +235,6 @@ class RoomVaultRepositoryInstrumentedTest {
                 snapshot.timeEntryConflicts.size == 1
             }
         }
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -327,7 +329,6 @@ class RoomVaultRepositoryInstrumentedTest {
                     expectedReminder
             }
         }
-        assertEquals(2, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -349,10 +350,10 @@ class RoomVaultRepositoryInstrumentedTest {
                     snapshot.reminders.none { it.taskId == original.id }
             }
         }
-        assertEquals(4, database!!.syncOperationDao().pendingCount())
         assertTrue(
-            database!!.syncOperationDao().pending(10).any {
-                it.objectId == expectedReminder.id && it.objectType == "reminder.delete"
+            latestJournalPayloads().any {
+                it.deletedFamily == BackupRecordFamily.REMINDER &&
+                    it.deletedIdentity == listOf(expectedReminder.id)
             },
         )
     }
@@ -386,7 +387,6 @@ class RoomVaultRepositoryInstrumentedTest {
                     }
             }
         }
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -504,7 +504,6 @@ class RoomVaultRepositoryInstrumentedTest {
             nextReminder.triggerAt.instant,
         )
         assertTrue(nextReminder.precise)
-        assertEquals(5, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -540,10 +539,10 @@ class RoomVaultRepositoryInstrumentedTest {
                 "task",
             ) != null,
         )
-        assertEquals(8, database!!.syncOperationDao().pendingCount())
         assertTrue(
-            database!!.syncOperationDao().pending(20).any {
-                it.objectId == nextReminder.id && it.objectType == "reminder.delete"
+            latestJournalPayloads().any {
+                it.deletedFamily == BackupRecordFamily.REMINDER &&
+                    it.deletedIdentity == listOf(nextReminder.id)
             },
         )
 
@@ -561,7 +560,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     snapshot.reminders.any { it == nextReminder }
             }
         }
-        assertEquals(11, database!!.syncOperationDao().pendingCount())
+        Unit
     }
 
     @Test
@@ -605,7 +604,6 @@ class RoomVaultRepositoryInstrumentedTest {
                 .filterNotNull()
                 .first()
         }
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.execute(
             DomainCommand.CompleteTask(
@@ -613,7 +611,6 @@ class RoomVaultRepositoryInstrumentedTest {
                 completedAt = Instant.parse("2026-07-31T10:00:01Z"),
             ),
         )
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -640,7 +637,6 @@ class RoomVaultRepositoryInstrumentedTest {
                 it.recurrenceSeriesId == original.id && it.id != original.id
             }.id,
         )
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         assertTrue(repository!!.execute(checkNotNull(firstCompletion.undo)) is CommandResult.Success)
         withTimeout(5_000) {
@@ -1136,8 +1132,9 @@ class RoomVaultRepositoryInstrumentedTest {
             }.templates.single { it.id == templateId }
         }
         assertTrue(
-            database!!.syncOperationDao().pending(100).any {
-                it.objectId == templateId.value && it.objectType == "template.upsert"
+            latestJournalPayloads().any {
+                it.record?.family == BackupRecordFamily.TEMPLATE &&
+                    it.record.identity == listOf(templateId.value)
             },
         )
 
@@ -1181,15 +1178,16 @@ class RoomVaultRepositoryInstrumentedTest {
             captured.milestones.size,
             instantiated.milestones.count { it.projectId == projectId },
         )
-        val operations = database!!.syncOperationDao().pending(1_000)
+        val operations = latestJournalPayloads()
         assertTrue(
             operations.any {
-                it.objectId == projectId.value && it.objectType == "project.template_create"
+                it.record?.family == BackupRecordFamily.PROJECT &&
+                    it.record.identity == listOf(projectId.value)
             },
         )
         assertEquals(
             captured.tasks.size,
-            operations.count { it.objectType == "task.template_create" },
+            operations.count { it.record?.family == BackupRecordFamily.TASK },
         )
 
         repository!!.execute(checkNotNull(capture.undo))
@@ -1275,8 +1273,9 @@ class RoomVaultRepositoryInstrumentedTest {
             database!!.workspaceDao().getTombstone(task.id.value, "task") != null,
         )
         assertTrue(
-            database!!.syncOperationDao().pending(20).any {
-                it.objectId == reminder.id && it.objectType == "reminder.delete"
+            latestJournalPayloads().any {
+                it.deletedFamily == BackupRecordFamily.REMINDER &&
+                    it.deletedIdentity == listOf(reminder.id)
             },
         )
 
@@ -1319,7 +1318,6 @@ class RoomVaultRepositoryInstrumentedTest {
                     PERSISTED_PROJECT_NAME
             }
         }
-        assertEquals(1, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -1385,7 +1383,6 @@ class RoomVaultRepositoryInstrumentedTest {
                         ?.archivedAt != null
             }
         }
-        assertEquals(5, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -1416,7 +1413,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     ?.archivedAt == null
             }
         }
-        assertEquals(6, database!!.syncOperationDao().pendingCount())
+        Unit
     }
 
     @Test
@@ -1456,7 +1453,6 @@ class RoomVaultRepositoryInstrumentedTest {
                     snapshot.home.projects.none { it.id == projectId }
             }
         }
-        assertEquals(8, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -1491,7 +1487,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     snapshot.home.projects.any { it.id == projectId }
             }
         }
-        assertEquals(9, database!!.syncOperationDao().pendingCount())
+        Unit
     }
 
     @Test
@@ -1540,7 +1536,6 @@ class RoomVaultRepositoryInstrumentedTest {
                 ),
             ) is CommandResult.Success,
         )
-        assertEquals(3, database!!.syncOperationDao().pendingCount())
 
         repository!!.close()
         database!!.close()
@@ -1571,7 +1566,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     }
             }
         }
-        assertEquals(7, database!!.syncOperationDao().pendingCount())
+        Unit
     }
 
     @Test
@@ -1612,12 +1607,9 @@ class RoomVaultRepositoryInstrumentedTest {
                 snapshot.tasks.firstOrNull { it.id == first.id }?.blockedBy == setOf(second.id)
             }
         }
-        val dependencyOperations = database!!.syncOperationDao().pending(100)
-            .filter { it.objectType == "task.dependencies.update" }
-        assertEquals(2, dependencyOperations.size)
         assertTrue(
-            dependencyOperations.all {
-                it.encryptedPayload.containsSubsequence("v5\u0000".toByteArray())
+            latestJournalPayloads().any {
+                it.record?.family == BackupRecordFamily.TASK_DEPENDENCY
             },
         )
 
@@ -1663,14 +1655,265 @@ class RoomVaultRepositoryInstrumentedTest {
         Unit
     }
 
+    @Test
+    fun taskEditBootstrapsStateAndCommitsOneGenerationAtomically() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val task = repository!!.currentWorkspace().tasks.first()
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(DomainCommand.RenameTask(task.id, "Atomic title"))
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(listOf(0), rows.map { it.sequence })
+        assertEquals(
+            BackupRecordFamily.TASK,
+            BackupMutationCodec.decode(rows.single().payload).record!!.family,
+        )
+    }
+
+    @Test
+    fun projectCreationCommitsProjectAndFiveWorkflowsUnderOneGeneration() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        repository!!.currentWorkspace()
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(
+            DomainCommand.CreateProject(
+                projectId = ProjectId("room-atomic-project"),
+                name = "Atomic project",
+            ),
+        )
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(List(6) { it }, rows.map { it.sequence })
+        assertEquals(
+            listOf(
+                BackupRecordFamily.PROJECT,
+                BackupRecordFamily.WORKFLOW_STATUS,
+                BackupRecordFamily.WORKFLOW_STATUS,
+                BackupRecordFamily.WORKFLOW_STATUS,
+                BackupRecordFamily.WORKFLOW_STATUS,
+                BackupRecordFamily.WORKFLOW_STATUS,
+            ),
+            rows.map { BackupMutationCodec.decode(it.payload).record!!.family },
+        )
+    }
+
+    @Test
+    fun workflowReorderCommitsBothRowsUnderOneGeneration() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val statuses = repository!!.currentWorkspace().workflowStatuses
+            .filter { it.projectId == OpenTasksFixtures.studioProject.id && it.archivedAt == null }
+            .sortedBy { it.rank }
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(
+            DomainCommand.MoveWorkflowStatus(
+                statusId = statuses[2].id,
+                direction = WorkflowMoveDirection.EARLIER,
+            ),
+        )
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(listOf(0, 1), rows.map { it.sequence })
+        assertTrue(
+            rows.all {
+                BackupMutationCodec.decode(it.payload).record!!.family ==
+                    BackupRecordFamily.WORKFLOW_STATUS
+            },
+        )
+    }
+
+    @Test
+    fun templateInstantiationCommitsEveryInsertedFamilyUnderOneGeneration() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val templateId = TemplateId("room-atomic-template")
+        repository!!.execute(
+            DomainCommand.CaptureProjectTemplate(
+                templateId = templateId,
+                projectId = OpenTasksFixtures.taxProject.id,
+                name = "Atomic template",
+            ),
+        )
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(
+            DomainCommand.InstantiateProjectTemplate(
+                templateId = templateId,
+                projectId = ProjectId("room-atomic-instantiation"),
+                projectName = "Atomic instantiation",
+                anchorDate = LocalDate.of(2026, 10, 1),
+            ),
+        )
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        val families = rows.map {
+            BackupMutationCodec.decode(it.payload).record!!.family
+        }.toSet()
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(rows.indices.toList(), rows.map { it.sequence })
+        assertTrue(BackupRecordFamily.PROJECT in families)
+        assertTrue(BackupRecordFamily.WORKFLOW_STATUS in families)
+        assertTrue(BackupRecordFamily.MILESTONE in families)
+        assertTrue(BackupRecordFamily.TASK in families)
+        assertTrue(BackupRecordFamily.TASK_TAG in families)
+    }
+
+    @Test
+    fun permanentTaskPurgeCommitsRelationDeletionsAndTombstoneTogether() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { now })
+        repository!!.execute(DomainCommand.StopTimer)
+        val task = repository!!.currentWorkspace().tasks.first { it.checklist.isNotEmpty() }
+        repository!!.execute(
+            DomainCommand.SetTaskReminder(
+                taskId = task.id,
+                triggerAt = ZonedMoment(now.plusSeconds(3_600), "UTC"),
+            ),
+        )
+        repository!!.execute(DomainCommand.DeleteTask(task.id, now.minusSeconds(60)))
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(DomainCommand.PermanentlyDeleteTask(task.id, now))
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        val payloads = rows.map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(rows.indices.toList(), rows.map { it.sequence })
+        assertEquals(3, payloads.count { it.deletedFamily == BackupRecordFamily.CHECKLIST_ITEM })
+        assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.TASK_TAG })
+        assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.REMINDER })
+        assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.TASK })
+        assertEquals(
+            1,
+            payloads.count { it.record?.family == BackupRecordFamily.TOMBSTONE },
+        )
+    }
+
+    @Test
+    fun multiTaskExpiryPurgeUsesOneGeneration() = runBlocking {
+        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
+        val purgedAt = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { deletedAt })
+        listOf("Expired one", "Expired two").forEach { title ->
+            repository!!.execute(DomainCommand.CreateTask(title))
+            val task = withTimeout(5_000) {
+                repository!!.observeWorkspace()
+                    .map { snapshot -> snapshot.tasks.singleOrNull { it.title == title } }
+                    .filterNotNull()
+                    .first()
+            }
+            repository!!.execute(DomainCommand.DeleteTask(task.id, deletedAt))
+        }
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val result = repository!!.execute(DomainCommand.PurgeExpiredTrash(purgedAt))
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val rows = journalRows(after.currentGeneration)
+        val payloads = rows.map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(result is CommandResult.Success)
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(rows.indices.toList(), rows.map { it.sequence })
+        assertEquals(2, payloads.count { it.deletedFamily == BackupRecordFamily.TASK })
+        assertEquals(2, payloads.count { it.record?.family == BackupRecordFamily.TOMBSTONE })
+    }
+
+    @Test
+    fun rejectedAndIdempotentCommandsDoNotAllocateGenerations() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val firstStatus = repository!!.currentWorkspace().workflowStatuses
+            .filter { it.projectId == OpenTasksFixtures.studioProject.id && it.archivedAt == null }
+            .minBy { it.rank }
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        val rejected = repository!!.execute(
+            DomainCommand.CreateProject(ProjectId("room-rejected"), " "),
+        )
+        val missingDelete = repository!!.execute(
+            DomainCommand.DeleteTemplate(TemplateId("missing-template")),
+        )
+        val unchangedMove = repository!!.execute(
+            DomainCommand.MoveWorkflowStatus(
+                firstStatus.id,
+                WorkflowMoveDirection.EARLIER,
+            ),
+        )
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        assertTrue(rejected is CommandResult.Rejected)
+        assertTrue(missingDelete is CommandResult.Success)
+        assertTrue(unchangedMove is CommandResult.Success)
+        assertEquals(before.currentGeneration, after.currentGeneration)
+        assertTrue(
+            database!!.backupJournalDao()
+                .after("vault-primary", before.currentGeneration, 10)
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun appendFailureRollsBackProductRowsGenerationAndJournal() = runBlocking {
+        openRepository(
+            now = { Instant.parse("2026-07-29T10:00:00Z") },
+            appendBoundary = BackupJournalAppendBoundary { _, _ ->
+                throw InjectedAppendFailure()
+            },
+        )
+        val task = repository!!.currentWorkspace().tasks.first()
+        val beforeState = database!!.backupStateDao().require("vault-primary")
+        val beforeEntity = database!!.taskDao().getById(task.id.value)
+
+        assertThrows(InjectedAppendFailure::class.java) {
+            runBlocking {
+                repository!!.execute(DomainCommand.RenameTask(task.id, "Must roll back"))
+            }
+        }
+
+        val afterState = database!!.backupStateDao().require("vault-primary")
+        val afterEntity = database!!.taskDao().getById(task.id.value)
+        assertEquals(beforeEntity!!.title, afterEntity!!.title)
+        assertEquals(beforeState.currentGeneration, afterState.currentGeneration)
+        assertTrue(
+            database!!.backupJournalDao()
+                .after("vault-primary", beforeState.currentGeneration, 10)
+                .isEmpty(),
+        )
+    }
+
+    private suspend fun journalRows(generation: Long) =
+        database!!.backupJournalDao().between("vault-primary", generation, generation)
+
+    private suspend fun latestJournalPayloads() =
+        database!!.backupStateDao().require("vault-primary").currentGeneration.let { generation ->
+            journalRows(generation).map { BackupMutationCodec.decode(it.payload) }
+        }
+
     private fun openRepository(
         now: () -> Instant = { Instant.now() },
+        appendBoundary: BackupJournalAppendBoundary = BackupJournalAppendBoundary { dao, entity ->
+            dao.insert(entity)
+        },
     ) {
         database = VaultDatabase.create(context, databaseName, databaseKey)
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("instrumented-test-device"),
             now = now,
+            backupJournalAppendBoundary = appendBoundary,
         )
     }
 
@@ -1685,6 +1928,8 @@ class RoomVaultRepositoryInstrumentedTest {
 
     private fun ZonedMoment.localDateString(): String =
         instant.atZone(java.time.ZoneId.of(zoneId)).toLocalDate().toString()
+
+    private class InjectedAppendFailure : RuntimeException()
 
     private companion object {
         const val PERSISTED_TITLE = "persists-across-restart"

@@ -1,5 +1,9 @@
 package app.opentasks.core.data
 
+import app.opentasks.core.data.backup.InMemoryBackupJournal
+import app.opentasks.core.data.backup.toBackupRecords
+import app.opentasks.core.data.db.TaskTagEntity
+import app.opentasks.core.data.db.TombstoneEntity
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
@@ -55,11 +59,29 @@ import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
 
-class InMemoryVaultRepository(
+class InMemoryVaultRepository internal constructor(
     initial: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
     private val now: () -> Instant = Instant::now,
+    private val backupJournal: InMemoryBackupJournal = InMemoryBackupJournal(),
 ) : VaultRepository {
     private val writeMutex = Mutex()
+    private val sourceDeviceId =
+        initial.tasks.firstOrNull()?.revision?.deviceId ?: DeviceId("in-memory")
+    private var tombstones = emptyList<TombstoneEntity>()
+    private var taskTags = initial.tasks
+        .flatMap { task ->
+            task.tagIds.map { tagId ->
+                TaskTagEntity(
+                    taskId = task.id.value,
+                    tagId = tagId.value,
+                    present = true,
+                    revisionWallMillis = task.revision.wallTimeMillis,
+                    revisionLogical = task.revision.logicalCounter,
+                    revisionDeviceId = task.revision.deviceId.value,
+                )
+            }
+        }
+        .sortedWith(compareBy(TaskTagEntity::taskId, TaskTagEntity::tagId))
     private val mutableWorkspace = MutableStateFlow(
         initial
             .withResolvedDependencyState()
@@ -79,6 +101,69 @@ class InMemoryVaultRepository(
     override suspend fun currentWorkspace(): WorkspaceSnapshot = mutableWorkspace.value
 
     override suspend fun execute(command: DomainCommand): CommandResult = writeMutex.withLock {
+        val before = mutableWorkspace.value
+        val beforeTombstones = tombstones
+        val beforeTaskTags = taskTags
+        try {
+            val result = dispatch(command)
+            reconcileTaskTags(before, mutableWorkspace.value)
+            if (
+                mutableWorkspace.value != before ||
+                tombstones != beforeTombstones ||
+                taskTags != beforeTaskTags
+            ) {
+                backupJournal.appendChanges(
+                    before = before.toBackupRecords(beforeTombstones, beforeTaskTags),
+                    after = mutableWorkspace.value.toBackupRecords(tombstones, taskTags),
+                    sourceDeviceId = sourceDeviceId,
+                )
+            }
+            result
+        } catch (failure: Throwable) {
+            mutableWorkspace.value = before
+            tombstones = beforeTombstones
+            taskTags = beforeTaskTags
+            throw failure
+        }
+    }
+
+    private fun reconcileTaskTags(
+        before: WorkspaceSnapshot,
+        after: WorkspaceSnapshot,
+    ) {
+        val beforeTasks = before.tasks.associateBy { it.id.value }
+        val afterTasks = after.tasks.associateBy { it.id.value }
+        val retained = taskTags
+            .filter { it.taskId in afterTasks }
+            .associateBy { it.taskId to it.tagId }
+            .toMutableMap()
+
+        afterTasks.values.forEach { task ->
+            val beforeTagIds = beforeTasks[task.id.value]
+                ?.tagIds
+                .orEmpty()
+                .mapTo(linkedSetOf()) { it.value }
+            val afterTagIds = task.tagIds.mapTo(linkedSetOf()) { it.value }
+            (beforeTagIds + afterTagIds).forEach { tagId ->
+                val key = task.id.value to tagId
+                val shouldBePresent = tagId in afterTagIds
+                val existing = retained[key]
+                if (existing == null || existing.present != shouldBePresent) {
+                    retained[key] = TaskTagEntity(
+                        taskId = task.id.value,
+                        tagId = tagId,
+                        present = shouldBePresent,
+                        revisionWallMillis = task.revision.wallTimeMillis,
+                        revisionLogical = task.revision.logicalCounter,
+                        revisionDeviceId = task.revision.deviceId.value,
+                    )
+                }
+            }
+        }
+        taskTags = retained.values.sortedWith(compareBy(TaskTagEntity::taskId, TaskTagEntity::tagId))
+    }
+
+    private fun dispatch(command: DomainCommand): CommandResult =
         when (command) {
             is DomainCommand.CreateProject -> createProject(command)
             is DomainCommand.UpdateProject -> updateProject(command)
@@ -127,7 +212,6 @@ class InMemoryVaultRepository(
             is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
             is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
         }
-    }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
         val needle = SearchNormalizer.normalize(query.text)
@@ -1013,6 +1097,11 @@ class InMemoryVaultRepository(
             completedAt = command.completedAt,
             revision = nextRevision(task),
         )
+        command.generatedOccurrenceId
+            ?.let { id -> current.tasks.firstOrNull { it.id == id } }
+            ?.let { generated ->
+                tombstones = tombstones.upsert(generated.toTombstone(command.restoredAt))
+            }
         publish(
             current.tasks
                 .filterNot { it.id == command.generatedOccurrenceId }
@@ -1106,6 +1195,7 @@ class InMemoryVaultRepository(
                 "Move the task to the Bin before deleting it permanently.",
             )
         }
+        tombstones = tombstones.upsert(task.toTombstone(command.purgedAt))
         publish(
             tasks = current.tasks.filterNot { it.id == task.id },
             reminders = current.reminders.filterNot { it.taskId == task.id },
@@ -1123,6 +1213,9 @@ class InMemoryVaultRepository(
         }
         if (expired.isNotEmpty()) {
             val expiredIds = expired.mapTo(hashSetOf(), Task::id)
+            expired.forEach { task ->
+                tombstones = tombstones.upsert(task.toTombstone(command.now))
+            }
             publish(
                 tasks = current.tasks.filterNot { it.id in expiredIds },
                 reminders = current.reminders.filterNot { it.taskId in expiredIds },
@@ -1138,6 +1231,25 @@ class InMemoryVaultRepository(
             },
         )
     }
+
+    private fun Task.toTombstone(purgedAt: Instant): TombstoneEntity {
+        val deletedAt = deletedAt ?: purgedAt
+        val tombstoneRevision = nextRevision(this, purgedAt)
+        return TombstoneEntity(
+            objectId = id.value,
+            objectType = "task",
+            deletedAtEpochMillis = deletedAt.toEpochMilli(),
+            purgeAfterEpochMillis = TrashPolicy.purgeAfter(deletedAt).toEpochMilli(),
+            revisionWallMillis = tombstoneRevision.wallTimeMillis,
+            revisionLogical = tombstoneRevision.logicalCounter,
+            revisionDeviceId = tombstoneRevision.deviceId.value,
+        )
+    }
+
+    private fun List<TombstoneEntity>.upsert(value: TombstoneEntity): List<TombstoneEntity> =
+        filterNot {
+            it.objectId == value.objectId && it.objectType == value.objectType
+        } + value
 
     private fun renameTask(command: DomainCommand.RenameTask): CommandResult {
         val title = command.title.trim()
