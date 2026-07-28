@@ -116,6 +116,84 @@ class TinkVaultCryptoTest {
     }
 
     @Test
+    fun encryptRecordClearsTemporaryAssociatedDataAfterDelegateSuccess() {
+        val capturingCrypto = CapturingRecordVaultCrypto()
+        val key = VaultKey(byteArrayOf(1, 2, 3, 4))
+        val plaintext = "caller-owned plaintext".toByteArray()
+        val originalPlaintext = plaintext.copyOf()
+
+        val ciphertext = capturingCrypto.encryptRecord(key, context, plaintext)
+
+        assertArrayEquals(originalPlaintext, plaintext)
+        assertTrue(capturingCrypto.associatedDataContainedData)
+        assertTrue(capturingCrypto.capturedAssociatedData.all { it == 0.toByte() })
+        ciphertext.fill(0)
+        originalPlaintext.fill(0)
+        plaintext.fill(0)
+        key.close()
+    }
+
+    @Test
+    fun encryptRecordClearsTemporaryAssociatedDataAfterDelegateFailure() {
+        val expected = ExpectedRecordDelegateFailure()
+        val capturingCrypto = CapturingRecordVaultCrypto(expected)
+        val key = VaultKey(byteArrayOf(1, 2, 3, 4))
+        val plaintext = "caller-owned plaintext".toByteArray()
+        val originalPlaintext = plaintext.copyOf()
+
+        val failure = assertThrows(ExpectedRecordDelegateFailure::class.java) {
+            capturingCrypto.encryptRecord(key, context, plaintext)
+        }
+
+        assertSame(expected, failure)
+        assertArrayEquals(originalPlaintext, plaintext)
+        assertTrue(capturingCrypto.associatedDataContainedData)
+        assertTrue(capturingCrypto.capturedAssociatedData.all { it == 0.toByte() })
+        originalPlaintext.fill(0)
+        plaintext.fill(0)
+        key.close()
+    }
+
+    @Test
+    fun decryptRecordClearsTemporaryAssociatedDataAfterDelegateSuccess() {
+        val capturingCrypto = CapturingRecordVaultCrypto()
+        val key = VaultKey(byteArrayOf(1, 2, 3, 4))
+        val ciphertext = "caller-owned ciphertext".toByteArray()
+        val originalCiphertext = ciphertext.copyOf()
+
+        val plaintext = capturingCrypto.decryptRecord(key, context, ciphertext)
+
+        assertArrayEquals(originalCiphertext, ciphertext)
+        assertTrue(capturingCrypto.associatedDataContainedData)
+        assertTrue(capturingCrypto.capturedAssociatedData.all { it == 0.toByte() })
+        plaintext.fill(0)
+        originalCiphertext.fill(0)
+        ciphertext.fill(0)
+        key.close()
+    }
+
+    @Test
+    fun decryptRecordClearsTemporaryAssociatedDataAfterDelegateFailure() {
+        val expected = ExpectedRecordDelegateFailure()
+        val capturingCrypto = CapturingRecordVaultCrypto(expected)
+        val key = VaultKey(byteArrayOf(1, 2, 3, 4))
+        val ciphertext = "caller-owned ciphertext".toByteArray()
+        val originalCiphertext = ciphertext.copyOf()
+
+        val failure = assertThrows(ExpectedRecordDelegateFailure::class.java) {
+            capturingCrypto.decryptRecord(key, context, ciphertext)
+        }
+
+        assertSame(expected, failure)
+        assertArrayEquals(originalCiphertext, ciphertext)
+        assertTrue(capturingCrypto.associatedDataContainedData)
+        assertTrue(capturingCrypto.capturedAssociatedData.all { it == 0.toByte() })
+        originalCiphertext.fill(0)
+        ciphertext.fill(0)
+        key.close()
+    }
+
+    @Test
     fun closedVaultKeyCannotEncryptBytes() {
         val key = crypto.createKey()
         key.close()
@@ -419,5 +497,57 @@ class TinkVaultCryptoTest {
         ): ByteArray = error("Not used")
     }
 
+    private class CapturingRecordVaultCrypto(
+        private val delegateFailure: RuntimeException? = null,
+    ) : VaultCrypto {
+        lateinit var capturedAssociatedData: ByteArray
+        var associatedDataContainedData = false
+            private set
+
+        override fun createKey(): VaultKey = error("Not used")
+
+        override fun wrapForRecovery(
+            unlockedKey: VaultKey,
+            passphrase: CharArray,
+        ): VaultKeyEnvelope = error("Not used")
+
+        override fun unlock(
+            passphrase: CharArray,
+            envelope: VaultKeyEnvelope,
+        ): VaultKey = error("Not used")
+
+        override fun changePassphrase(
+            unlockedKey: VaultKey,
+            newPassphrase: CharArray,
+        ): VaultKeyEnvelope = error("Not used")
+
+        override fun encryptBytes(
+            key: VaultKey,
+            plaintext: ByteArray,
+            associatedData: ByteArray,
+        ): ByteArray {
+            capture(associatedData)
+            delegateFailure?.let { throw it }
+            return plaintext.copyOf()
+        }
+
+        override fun decryptBytes(
+            key: VaultKey,
+            ciphertext: ByteArray,
+            associatedData: ByteArray,
+        ): ByteArray {
+            capture(associatedData)
+            delegateFailure?.let { throw it }
+            return ciphertext.copyOf()
+        }
+
+        private fun capture(associatedData: ByteArray) {
+            capturedAssociatedData = associatedData
+            associatedDataContainedData = associatedData.any { it != 0.toByte() }
+        }
+    }
+
     private class ExpectedWrapFailure : RuntimeException()
+
+    private class ExpectedRecordDelegateFailure : RuntimeException()
 }

@@ -13,6 +13,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -430,6 +431,54 @@ class CloudObjectFormatTest {
     }
 
     @Test
+    fun decodeClearsSourceRetainedCiphertextScratchOnChecksumMismatch() {
+        val golden = golden("manifest")
+        val tampered = golden.frame.copyOf()
+        tampered[tampered.lastIndex] = (tampered.last().toInt() xor 1).toByte()
+        val source = CiphertextBufferTrackingInputStream(tampered)
+
+        val failure = assertThrows(CloudFormatException::class.java) {
+            CloudObjectFormat.decode(source, tampered.size.toLong())
+        }
+
+        assertEquals(CloudFormatFailure.CHECKSUM_MISMATCH, failure.failure)
+        assertCiphertextTargetsWereUsedAndCleared(source)
+    }
+
+    @Test
+    fun decodeClearsSourceRetainedCiphertextScratchOnTruncation() {
+        val golden = golden("manifest")
+        val source = CiphertextBufferTrackingInputStream(
+            golden.frame.copyOf(golden.frame.size - 1),
+        )
+
+        val failure = assertThrows(CloudFormatException::class.java) {
+            CloudObjectFormat.decode(source, golden.frame.size.toLong())
+        }
+
+        assertEquals(CloudFormatFailure.TRUNCATED, failure.failure)
+        assertCiphertextTargetsWereUsedAndCleared(source)
+    }
+
+    @Test
+    fun decodeClearsSourceRetainedCiphertextScratchOnStreamFailure() {
+        val golden = golden("manifest")
+        val expected = ExpectedCiphertextReadFailure()
+        val source = CiphertextBufferTrackingInputStream(
+            frame = golden.frame,
+            failure = expected,
+            successfulCiphertextReadsBeforeFailure = 1,
+        )
+
+        val failure = assertThrows(ExpectedCiphertextReadFailure::class.java) {
+            CloudObjectFormat.decode(source, golden.frame.size.toLong())
+        }
+
+        assertSame(expected, failure)
+        assertCiphertextTargetsWereUsedAndCleared(source)
+    }
+
+    @Test
     fun decodeRejectsEveryInvalidAttachmentChunkTupleBeforeCiphertextRead() {
         val invalidTuples = listOf(
             null to null,
@@ -649,6 +698,16 @@ class CloudObjectFormatTest {
         assertFalse(source.ciphertextRead)
     }
 
+    private fun assertCiphertextTargetsWereUsedAndCleared(
+        source: CiphertextBufferTrackingInputStream,
+    ) {
+        assertTrue(source.ciphertextTargetContainedData)
+        assertTrue(source.ciphertextTargets.isNotEmpty())
+        source.ciphertextTargets.forEach { retained ->
+            assertTrue(retained.all { it == 0.toByte() })
+        }
+    }
+
     private fun boundaryCases(): List<Pair<CloudObjectFamily, Long>> = listOf(
         CloudObjectFamily.MANIFEST to CloudBounds.MAX_MANIFEST_CIPHERTEXT_BYTES,
         CloudObjectFamily.SNAPSHOT to CloudBounds.MAX_SNAPSHOT_CIPHERTEXT_BYTES,
@@ -783,17 +842,41 @@ class CloudObjectFormatTest {
 
     private class CiphertextBufferTrackingInputStream(
         frame: ByteArray,
+        private val failure: IOException? = null,
+        private val successfulCiphertextReadsBeforeFailure: Int = Int.MAX_VALUE,
     ) : ByteArrayInputStream(frame) {
         private val ciphertextOffset = 4 + ByteBuffer.wrap(frame, 0, 4).int
         val ciphertextTargets = mutableListOf<ByteArray>()
+        var ciphertextTargetContainedData = false
+            private set
+        private var successfulCiphertextReads = 0
 
         override fun read(target: ByteArray, offset: Int, length: Int): Int {
-            if (pos >= ciphertextOffset && ciphertextTargets.none { it === target }) {
+            if (pos < ciphertextOffset) {
+                return super.read(target, offset, length)
+            }
+            if (ciphertextTargets.none { it === target }) {
                 ciphertextTargets += target
             }
-            return super.read(target, offset, length)
+            if (
+                failure != null &&
+                successfulCiphertextReads >= successfulCiphertextReadsBeforeFailure
+            ) {
+                throw failure
+            }
+            val requested = if (failure == null) length else minOf(length, 1)
+            val count = super.read(target, offset, requested)
+            if (count > 0) {
+                successfulCiphertextReads += 1
+                ciphertextTargetContainedData =
+                    ciphertextTargetContainedData ||
+                    (offset until offset + count).any { target[it] != 0.toByte() }
+            }
+            return count
         }
     }
+
+    private class ExpectedCiphertextReadFailure : IOException()
 
     private class HeaderOnlyTrackingInputStream(
         headerBytes: ByteArray,

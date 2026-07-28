@@ -121,13 +121,22 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             header.ciphertextLength.toInt(),
             "ciphertext",
         )
-        if (header.ciphertextSha256 != sha256(ciphertext)) {
-            throw CloudFormatException(
-                CloudFormatFailure.CHECKSUM_MISMATCH,
-                "Ciphertext checksum does not match header",
-            )
+        var ownershipTransferred = false
+        return try {
+            if (header.ciphertextSha256 != sha256(ciphertext)) {
+                throw CloudFormatException(
+                    CloudFormatFailure.CHECKSUM_MISMATCH,
+                    "Ciphertext checksum does not match header",
+                )
+            }
+            CloudObjectFrame(header, ciphertext).also {
+                ownershipTransferred = true
+            }
+        } finally {
+            if (!ownershipTransferred) {
+                ciphertext.fill(0)
+            }
         }
-        return CloudObjectFrame(header, ciphertext)
     }
 
     private fun decodeCanonicalHeader(headerBytes: ByteArray): CloudObjectHeader {
@@ -269,31 +278,40 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         val owned = ByteArray(size)
         val scratch = ByteArray(minOf(size, MAX_CIPHERTEXT_READ_BUFFER_BYTES))
         var offset = 0
-        while (offset < size) {
-            val requested = minOf(scratch.size, size - offset)
-            val count = source.read(scratch, 0, requested)
-            if (count < 0) {
-                throw CloudFormatException(
-                    CloudFormatFailure.TRUNCATED,
-                    "Truncated cloud $label",
-                )
-            }
-            if (count == 0) {
-                val next = source.read()
-                if (next < 0) {
+        var readCompleted = false
+        return try {
+            while (offset < size) {
+                val requested = minOf(scratch.size, size - offset)
+                val count = source.read(scratch, 0, requested)
+                if (count < 0) {
                     throw CloudFormatException(
                         CloudFormatFailure.TRUNCATED,
                         "Truncated cloud $label",
                     )
                 }
-                owned[offset] = next.toByte()
-                offset += 1
-            } else {
-                scratch.copyInto(owned, offset, 0, count)
-                offset += count
+                if (count == 0) {
+                    val next = source.read()
+                    if (next < 0) {
+                        throw CloudFormatException(
+                            CloudFormatFailure.TRUNCATED,
+                            "Truncated cloud $label",
+                        )
+                    }
+                    owned[offset] = next.toByte()
+                    offset += 1
+                } else {
+                    scratch.copyInto(owned, offset, 0, count)
+                    offset += count
+                }
+            }
+            readCompleted = true
+            owned
+        } finally {
+            scratch.fill(0)
+            if (!readCompleted) {
+                owned.fill(0)
             }
         }
-        return owned
     }
 
     private fun sha256(bytes: ByteArray): String {
