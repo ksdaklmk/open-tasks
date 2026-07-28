@@ -4,6 +4,7 @@ import app.opentasks.core.model.VaultId
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -77,6 +78,81 @@ class TinkVaultCryptoTest {
         assertThrows(IllegalStateException::class.java) {
             crypto.wrapForRecovery(contentKey, "recovery phrase".toCharArray())
         }
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun deprecatedCreateVaultClosesItsTemporaryKeyAfterSuccess() {
+        val trackingCrypto = TrackingVaultCrypto()
+
+        trackingCrypto.createVault("recovery phrase".toCharArray())
+
+        assertTrue(trackingCrypto.createdKey.serializedKeyset.all { it == 0.toByte() })
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun deprecatedCreateVaultClosesItsTemporaryKeyAfterWrapFailure() {
+        val expected = ExpectedWrapFailure()
+        val trackingCrypto = TrackingVaultCrypto(expected)
+
+        val failure = assertThrows(ExpectedWrapFailure::class.java) {
+            trackingCrypto.createVault("recovery phrase".toCharArray())
+        }
+
+        assertSame(expected, failure)
+        assertTrue(trackingCrypto.createdKey.serializedKeyset.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun localVaultIdentityEncodingPreservesExactUtf16CodeUnits() {
+        val malformedHigh = VaultId("\uD800")
+        val malformedLow = VaultId("\uDC00")
+
+        assertArrayEquals(
+            byteArrayOf(0xd8.toByte(), 0x00),
+            LocalVaultIdentityEncoding.identityBytes(malformedHigh),
+        )
+        assertArrayEquals(
+            byteArrayOf(0xdc.toByte(), 0x00),
+            LocalVaultIdentityEncoding.identityBytes(malformedLow),
+        )
+        assertEquals(
+            "6e6535d29be7bfac2971dc0853620d739dd43a62c41409d21d39ccb9b29e224b",
+            LocalVaultIdentityEncoding.digest(malformedHigh),
+        )
+        assertEquals(
+            "34739425d55f591d570b36e6354822dbccd6453a78cbb9a61c05521248206762",
+            LocalVaultIdentityEncoding.digest(malformedLow),
+        )
+        assertFalse(
+            LocalVaultIdentityEncoding.digest(malformedHigh) ==
+                LocalVaultIdentityEncoding.digest(malformedLow),
+        )
+    }
+
+    @Test
+    fun localVaultAssociatedDataLengthPrefixesExactIdentityBytes() {
+        val vaultId = VaultId("A\uD83D\uDD10")
+        val prefix = "open-tasks:local-vault-content-key:v1".toByteArray(Charsets.UTF_8)
+        val expected = prefix + byteArrayOf(
+            0x00,
+            0x00,
+            0x00,
+            0x06,
+            0x00,
+            0x41,
+            0xd8.toByte(),
+            0x3d,
+            0xdd.toByte(),
+            0x10,
+        )
+
+        assertArrayEquals(expected, LocalVaultIdentityEncoding.associatedData(vaultId))
+        assertArrayEquals(
+            LocalVaultIdentityEncoding.associatedData(vaultId),
+            LocalVaultIdentityEncoding.associatedData(VaultId("A\uD83D\uDD10")),
+        )
     }
 
     @Test
@@ -239,4 +315,50 @@ class TinkVaultCryptoTest {
 
     private fun ByteArray.toHex(): String =
         joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
+    private class TrackingVaultCrypto(
+        private val wrapFailure: RuntimeException? = null,
+    ) : VaultCrypto {
+        lateinit var createdKey: VaultKey
+
+        override fun createKey(): VaultKey =
+            VaultKey(byteArrayOf(1, 2, 3, 4)).also { createdKey = it }
+
+        override fun wrapForRecovery(
+            unlockedKey: VaultKey,
+            passphrase: CharArray,
+        ): VaultKeyEnvelope {
+            wrapFailure?.let { throw it }
+            return VaultKeyEnvelope(
+                formatVersion = 1,
+                kdf = Argon2Metadata(salt = ByteArray(16)),
+                nonce = ByteArray(12),
+                wrappedKeyset = byteArrayOf(1),
+            )
+        }
+
+        override fun unlock(
+            passphrase: CharArray,
+            envelope: VaultKeyEnvelope,
+        ): VaultKey = error("Not used")
+
+        override fun changePassphrase(
+            unlockedKey: VaultKey,
+            newPassphrase: CharArray,
+        ): VaultKeyEnvelope = error("Not used")
+
+        override fun encryptRecord(
+            key: VaultKey,
+            context: CryptoContext,
+            plaintext: ByteArray,
+        ): ByteArray = error("Not used")
+
+        override fun decryptRecord(
+            key: VaultKey,
+            context: CryptoContext,
+            ciphertext: ByteArray,
+        ): ByteArray = error("Not used")
+    }
+
+    private class ExpectedWrapFailure : RuntimeException()
 }
