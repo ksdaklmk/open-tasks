@@ -18,9 +18,71 @@ class TinkVaultCryptoTest {
     )
 
     @Test
+    fun createKeyGeneratesIndependentVaultContentKeys() {
+        val first = crypto.createKey()
+        val second = crypto.createKey()
+
+        assertFalse(first.serializedKeyset.contentEquals(second.serializedKeyset))
+        first.close()
+        second.close()
+    }
+
+    @Test
+    fun vaultContentKeyDiffersFromSqlCipherDatabaseKeyFixture() {
+        val sqlCipherKeyFixture = ByteArray(32) { index -> (index + 1).toByte() }
+        val contentKey = crypto.createKey()
+
+        assertFalse(contentKey.serializedKeyset.contentEquals(sqlCipherKeyFixture))
+        sqlCipherKeyFixture.fill(0)
+        contentKey.close()
+    }
+
+    @Test
+    fun recoveryEnvelopeWrapsTheCreatedContentKey() {
+        val passphrase = "correct horse battery staple".toCharArray()
+        val contentKey = crypto.createKey()
+        val envelope = crypto.wrapForRecovery(contentKey, passphrase)
+        val ciphertext = crypto.encryptRecord(
+            contentKey,
+            context,
+            "private task body".toByteArray(),
+        )
+
+        val recovered = crypto.unlock(passphrase, envelope)
+
+        assertArrayEquals(
+            "private task body".toByteArray(),
+            crypto.decryptRecord(recovered, context, ciphertext),
+        )
+        passphrase.fill('\u0000')
+        contentKey.close()
+        recovered.close()
+    }
+
+    @Test
+    fun closedVaultKeyCannotEncryptRecords() {
+        val contentKey = crypto.createKey()
+        contentKey.close()
+
+        assertThrows(IllegalStateException::class.java) {
+            crypto.encryptRecord(contentKey, context, "secret".toByteArray())
+        }
+    }
+
+    @Test
+    fun closedVaultKeyCannotBeWrappedForRecovery() {
+        val contentKey = crypto.createKey()
+        contentKey.close()
+
+        assertThrows(IllegalStateException::class.java) {
+            crypto.wrapForRecovery(contentKey, "recovery phrase".toCharArray())
+        }
+    }
+
+    @Test
     fun secondDeviceCanUnlockAndDecrypt() {
         val passphrase = "correct horse battery staple".toCharArray()
-        val envelope = crypto.createVault(passphrase)
+        val envelope = createEnvelope(passphrase)
         val firstDevice = crypto.unlock(passphrase, envelope)
         val ciphertext = crypto.encryptRecord(
             firstDevice,
@@ -39,17 +101,19 @@ class TinkVaultCryptoTest {
 
     @Test
     fun wrongPassphraseCannotUnlock() {
-        val envelope = crypto.createVault("right passphrase".toCharArray())
+        val key = crypto.createKey()
+        val envelope = crypto.wrapForRecovery(key, "right passphrase".toCharArray())
 
         assertThrows(InvalidRecoveryPassphraseException::class.java) {
             crypto.unlock("wrong passphrase".toCharArray(), envelope)
         }
+        key.close()
     }
 
     @Test
     fun swappedAssociatedDataIsRejected() {
         val passphrase = "recovery phrase".toCharArray()
-        val envelope = crypto.createVault(passphrase)
+        val envelope = createEnvelope(passphrase)
         val key = crypto.unlock(passphrase, envelope)
         val ciphertext = crypto.encryptRecord(key, context, "secret".toByteArray())
         val swapped = context.copy(objectId = "task-elsewhere")
@@ -92,7 +156,7 @@ class TinkVaultCryptoTest {
     @Test
     fun tamperedRecoveryEnvelopeIsRejected() {
         val passphrase = "recovery phrase".toCharArray()
-        val envelope = crypto.createVault(passphrase)
+        val envelope = createEnvelope(passphrase)
         val tampered = envelope.copy(
             wrappedKeyset = envelope.wrappedKeyset.copyOf().also { bytes ->
                 bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
@@ -107,7 +171,7 @@ class TinkVaultCryptoTest {
     @Test
     fun tamperedRecordCiphertextIsRejected() {
         val passphrase = "recovery phrase".toCharArray()
-        val envelope = crypto.createVault(passphrase)
+        val envelope = createEnvelope(passphrase)
         val key = crypto.unlock(passphrase, envelope)
         val ciphertext = crypto.encryptRecord(key, context, "secret".toByteArray())
         ciphertext[ciphertext.lastIndex] =
@@ -121,7 +185,7 @@ class TinkVaultCryptoTest {
 
     @Test
     fun weakenedKdfMetadataIsRejected() {
-        val envelope = crypto.createVault("recovery phrase".toCharArray())
+        val envelope = createEnvelope("recovery phrase".toCharArray())
         val weakened = envelope.copy(
             kdf = envelope.kdf.copy(memoryKiB = 32_768),
         )
@@ -134,7 +198,7 @@ class TinkVaultCryptoTest {
     @Test
     fun closingVaultKeyErasesSerializedKeyMaterial() {
         val passphrase = "recovery phrase".toCharArray()
-        val key = crypto.unlock(passphrase, crypto.createVault(passphrase))
+        val key = crypto.unlock(passphrase, createEnvelope(passphrase))
         assertTrue(key.serializedKeyset.any { it != 0.toByte() })
 
         key.close()
@@ -145,8 +209,8 @@ class TinkVaultCryptoTest {
     @Test
     fun passphraseChangeRewrapsSameDataKey() {
         val oldPassphrase = "old recovery phrase".toCharArray()
-        val oldEnvelope = crypto.createVault(oldPassphrase)
-        val key = crypto.unlock(oldPassphrase, oldEnvelope)
+        val key = crypto.createKey()
+        val oldEnvelope = crypto.wrapForRecovery(key, oldPassphrase)
         val ciphertext = crypto.encryptRecord(key, context, "stable key".toByteArray())
 
         val newEnvelope = crypto.changePassphrase(key, "new recovery phrase".toCharArray())
@@ -159,6 +223,17 @@ class TinkVaultCryptoTest {
         assertFalse(oldEnvelope.wrappedKeyset.contentEquals(newEnvelope.wrappedKeyset))
         assertThrows(InvalidRecoveryPassphraseException::class.java) {
             crypto.unlock(oldPassphrase, newEnvelope)
+        }
+        key.close()
+        reopened.close()
+    }
+
+    private fun createEnvelope(passphrase: CharArray): VaultKeyEnvelope {
+        val key = crypto.createKey()
+        return try {
+            crypto.wrapForRecovery(key, passphrase)
+        } finally {
+            key.close()
         }
     }
 

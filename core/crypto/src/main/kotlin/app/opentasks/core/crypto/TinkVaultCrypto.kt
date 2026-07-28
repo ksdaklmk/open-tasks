@@ -24,13 +24,24 @@ class TinkVaultCrypto(
         AeadConfig.register()
     }
 
-    override fun createVault(passphrase: CharArray): VaultKeyEnvelope {
-        require(passphrase.isNotEmpty()) { "Recovery passphrase cannot be empty" }
+    override fun createKey(): VaultKey {
         val handle = KeysetHandle.generateNew(PredefinedAeadParameters.AES256_GCM)
         val serialized = TinkJsonProtoKeysetFormat
             .serializeKeyset(handle, InsecureSecretKeyAccess.get())
             .toByteArray(Charsets.UTF_8)
-        return wrap(serialized, passphrase)
+        return VaultKey(serialized)
+    }
+
+    override fun wrapForRecovery(
+        unlockedKey: VaultKey,
+        passphrase: CharArray,
+    ): VaultKeyEnvelope {
+        val serialized = unlockedKey.copySerializedKeyset()
+        return try {
+            wrap(serialized, passphrase)
+        } finally {
+            serialized.fill(0)
+        }
     }
 
     override fun unlock(
@@ -66,7 +77,7 @@ class TinkVaultCrypto(
     override fun changePassphrase(
         unlockedKey: VaultKey,
         newPassphrase: CharArray,
-    ): VaultKeyEnvelope = wrap(unlockedKey.serializedKeyset, newPassphrase)
+    ): VaultKeyEnvelope = wrapForRecovery(unlockedKey, newPassphrase)
 
     override fun encryptRecord(
         key: VaultKey,
@@ -106,11 +117,17 @@ class TinkVaultCrypto(
         )
     }
 
-    private fun primitive(key: VaultKey): Aead =
-        parseHandle(key.serializedKeyset).getPrimitive(
-            RegistryConfiguration.get(),
-            Aead::class.java,
-        )
+    private fun primitive(key: VaultKey): Aead {
+        val serialized = key.copySerializedKeyset()
+        return try {
+            parseHandle(serialized).getPrimitive(
+                RegistryConfiguration.get(),
+                Aead::class.java,
+            )
+        } finally {
+            serialized.fill(0)
+        }
+    }
 
     private fun parseHandle(serialized: ByteArray): KeysetHandle =
         TinkJsonProtoKeysetFormat.parseKeyset(

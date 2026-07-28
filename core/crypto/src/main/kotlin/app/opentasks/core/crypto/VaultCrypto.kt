@@ -38,14 +38,41 @@ data class VaultKeyEnvelope(
 class VaultKey internal constructor(
     internal val serializedKeyset: ByteArray,
 ) : AutoCloseable {
-    override fun close() {
+    private var closed = false
+
+    internal fun copySerializedKeyset(): ByteArray = synchronized(this) {
+        check(!closed) { "The vault key is closed" }
+        serializedKeyset.copyOf()
+    }
+
+    override fun close() = synchronized(this) {
         serializedKeyset.fill(0)
+        closed = true
     }
 }
 
 interface VaultCrypto {
-    fun createVault(passphrase: CharArray): VaultKeyEnvelope
+    fun createKey(): VaultKey
+
+    fun wrapForRecovery(
+        unlockedKey: VaultKey,
+        passphrase: CharArray,
+    ): VaultKeyEnvelope
+
+    @Deprecated(
+        message = "Create the content key and recovery envelope explicitly",
+    )
+    fun createVault(passphrase: CharArray): VaultKeyEnvelope {
+        val key = createKey()
+        return try {
+            wrapForRecovery(key, passphrase)
+        } finally {
+            key.close()
+        }
+    }
+
     fun unlock(passphrase: CharArray, envelope: VaultKeyEnvelope): VaultKey
+
     fun changePassphrase(
         unlockedKey: VaultKey,
         newPassphrase: CharArray,
