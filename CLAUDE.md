@@ -49,7 +49,15 @@ Do not uninstall the app or wipe emulator data — the emulator holds a workspac
 - Zero database key arrays after use (`key.fill(0)` in a `finally`), as `LocalVaultRepositoryFactory` does.
 - Recovery uses Argon2id (64 MiB, 3 iterations, parallelism 1, 16-byte salt); passphrases are never persisted.
 - Logs and telemetry must never contain task text, account details, Drive IDs, attachment names, or encryption metadata.
-- Drive transport is deliberately not wired to credentials; `CloudObjectStore` and `SyncCoordinator` are the seams for that later slice.
+- Drive transport is deliberately not wired to credentials. Future cloud work
+  must keep encrypted Room as the sole live structured-data authority, add no
+  bidirectional sync path, encrypt objects locally through the provider-neutral
+  authenticated codec, and use separate `BackupObjectStore` and
+  `AttachmentBlobStore` boundaries. The existing `CloudObjectStore` and
+  `SyncCoordinator` types are legacy, unused sync foundations; they must not
+  direct new provider, backup, or blob work. Stage 2 remains planning-only
+  until its focused plan is approved, and provider transport belongs no earlier
+  than Stage 3.
 
 ## Style
 
