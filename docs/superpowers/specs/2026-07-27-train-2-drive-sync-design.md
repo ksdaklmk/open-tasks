@@ -1,5 +1,9 @@
 # Train 2 — Drive Identity and Core Sync Design
 
+> **Superseded — 28 July 2026:** Do not execute this train. The approved
+> local-authority, backup, recovery-takeover, and cloud-attachment direction is
+> defined in the 28 July design and the live production master plan.
+
 ## Goal
 
 Implement P1-D01, P1-D03, and P1-D04: user-authorised Drive app-data access,

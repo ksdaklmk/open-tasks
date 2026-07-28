@@ -1,5 +1,9 @@
 # Train 4 — Notes, Attachments, and Search Design
 
+> **Superseded — 28 July 2026:** Do not execute this train. The approved
+> local-authority, backup, recovery-takeover, and cloud-attachment direction is
+> defined in the 28 July design and the live production master plan.
+
 ## Goal
 
 Implement P2-F02, P1-D07, and P1-L05 as one coherent local/cloud attachment

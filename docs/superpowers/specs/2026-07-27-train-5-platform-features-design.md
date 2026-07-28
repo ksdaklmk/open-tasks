@@ -1,5 +1,9 @@
 # Train 5 — Platform Features Design
 
+> **Replanning required — 28 July 2026:** The feature intent remains, but this
+> train cannot execute until Stage 4 freezes the final local metadata and
+> cloud-attachment contracts. Follow the live production master plan.
+
 ## Goal
 
 Complete P1-L08 and P2-F05 through P2-F07 after the local schema is stable:

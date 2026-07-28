@@ -1,5 +1,9 @@
 # Train 4 — Notes, Attachments, and Search Implementation Plan
 
+> **Superseded — 28 July 2026:** Do not execute this train. The approved
+> local-authority, backup, recovery-takeover, and cloud-attachment direction is
+> defined in the 28 July design and the live production master plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use

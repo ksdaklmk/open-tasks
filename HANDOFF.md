@@ -2,15 +2,18 @@
 
 - Last updated: 28 July 2026
 - Branch: `main`
-- Session status: **Paused at the user's requested boundary after Train 1
-  Task 1.5. Tasks 1.1–1.5 are complete and independently reviewed; Task 1.6
-  has not started. GitHub maintenance remains paused.**
+- Session status: **Stage 1 direction reset is the active programme. This
+  checkpoint is documentation-only; no Stage 1 source change has started.
+  Train 1 Tasks 1.1–1.5 remain complete and independently reviewed. GitHub
+  maintenance remains paused.**
 - Current implementation point: `ce8f5bf` (`fix: isolate verified ciphertext
-  ownership`). Task 1.5 passed its final re-review with zero open findings
-  after two correction rounds. This documentation update is the pause
-  checkpoint. No emulator was ADB-attached during the pause audit. The named
-  authorised replacement snapshot remains present; its last verified state was
-  expanded, light mode and 100% text.
+  ownership`) remains the last source commit. The local-authority direction was
+  approved in `6e3c816` (`docs: define local authority and cloud attachment
+  direction`) and clarified in `ebdc6b0` (`docs: clarify backup and blob
+  lifecycle boundaries`). The Stage 1 plan is `7a54bd2` (`docs: plan local
+  authority stage 1 foundation`). No emulator was ADB-attached during the
+  direction-reset audit. The named authorised replacement snapshot remains
+  present; its last verified state was expanded, light mode and 100% text.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -18,8 +21,9 @@ or verification status.
 
 ## Executive status
 
-Open Tasks is a working local-first Android foundation, not yet a production
-release. The encrypted local workspace, adaptive shell, task editor, recurring
+Open Tasks is a working local-authority Android foundation, not yet a
+production release. Encrypted Room is the sole live structured-data authority.
+The encrypted local workspace, adaptive shell, task editor, recurring
 tasks, custom per-project workflows, editable milestones, Bin, project
 workbench, search, timers and due-relative reminders persist across process
 restarts. Reminder permission timing, exact-alarm fallback, lock-screen
@@ -59,16 +63,19 @@ checks and resolution remain paused. A blocking `PreToolUse` guard rejects raw
 Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
-and remain disabled. Google Identity, Drive transport, cloud recovery and Play
-Console work have not started. P0 release gates which depend on those features
-remain blocked by their listed prerequisites.
+and remain disabled. Google Identity, Drive transport, app-managed backup,
+Android Auto Backup, recovery UI, cloud attachments and Play Console work have
+not started. Android backup remains disabled. Release gates which depend on
+those features remain blocked by their listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 are complete. Vault-content keys are now independent of
 SQLCipher database keys and have separate recovery and per-vault Android
 Keystore wrapping. Canonical bounded cloud frames exist for manifests,
 snapshots, operation segments and attachment chunks. These are foundations
-only: the authenticated cloud codec, Drive transport and user recovery flow
-are not implemented. Task 1.6 is the next approved task when work resumes.
+only: the authenticated provider-independent codec, backup, Drive transport,
+user recovery and attachments are not implemented. The historical Train 1
+Task 1.6 is superseded. After this contract-reset commit, Stage 1 Task 2,
+**Clear the Insights Instrumented-Test Lint Gate**, is the first source change.
 
 ## Train 0 baseline checkpoint verification
 
@@ -642,21 +649,23 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-There is no in-progress implementation. Work is deliberately paused at the
-user's request after the independently reviewed Task 1.5 commit `ce8f5bf`.
-Task 1.6 has not started; no authenticated cloud-object codec, new
-`core:data`/`core:crypto` dependency, Drive transport or user-facing sync flow
-should be inferred from the completed frame foundation.
+There is no in-progress implementation. This is the Stage 1 documentation-only
+direction-reset checkpoint, and no Stage 1 source change has started. The
+independently reviewed Train 1 Task 1.5 commit `ce8f5bf` remains the last
+source commit. No authenticated object codec, new `core:data`/`core:crypto`
+dependency, backup, Drive transport, recovery, or attachment flow should be
+inferred from the completed frame foundation.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
-queued dependency PR checks and resolution remain paused. P2-F02 cannot
-complete until its attachment/cloud prerequisites exist. Train 1 resumes with
-Task 1.6 before blocked Drive/provider work.
+queued dependency PR checks and resolution remain paused. The next source
+change is Stage 1 Task 2, which corrects the existing Insights instrumented-test
+lint findings. Later stage work remains blocked by the six-stage dependency
+chain.
 
 ## Resume instructions
 
 1. Read this file first, the
-   [Train 1 plan](docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md),
+   [Stage 1 plan](docs/superpowers/plans/2026-07-28-stage-1-direction-reset-authenticated-object-foundation-plan.md),
    its ignored SDD progress ledger, then
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
@@ -664,92 +673,58 @@ Task 1.6 before blocked Drive/provider work.
 2. Re-scan the working tree and preserve any user changes. Tasks 1.1–1.5 are
    complete; do not amend or reopen their reviewed commits without a new
    finding.
-3. Resume the approved subagent-driven workflow at Task 1.6 with strict
-   test-first coverage. Add `core:data`'s dependency on `core:crypto`, bind the
-   full canonical header identity as AEAD associated data, verify checksum
-   before decryption, translate failures to typed values and freeze independent
-   golden vectors.
-4. Before claiming the train exit gate is green, correct the five recorded
+3. Start source work at Stage 1 Task 2 and nowhere later: correct the five
    `UnrememberedMutableState` findings in the Task 1.3 Insights device test and
    rerun the repository command from `CLAUDE.md`.
+4. Continue Stage 1 Tasks 3–6 in order with strict test-first coverage:
+   canonical identity/failures, generic AEAD, authenticated codec, then
+   independent golden vectors.
 5. Run any device suite on a sole disposable emulator. Do not let Keystore or
    App instrumentation mutate the protected workspace.
-6. Keep `P2-F02`, `P1-L05` and the blocked cloud/release gates paused unless
-   their listed prerequisites or the user's direction change. The P3 baseline
-   developer-experience tasks are closed.
-7. Complete and independently review Task 1.6 before starting any Drive or
-   provider work.
+6. Preserve existing outbox and local data. Android Auto Backup stays disabled
+   until Stage 2, and no provider work starts before Stage 3.
+7. Follow the six-stage dependency chain; historical Train 1–6 plans are
+   evidence or replanning inputs, not executable contracts.
 8. Before recording the next pause or completion, run the repository gate from
    `CLAUDE.md`, affected device suites, release assembly when production code
    changed, and `git diff --check`; update this hand-off and every affected
    contract document in the same change.
 
-## Remaining tasks ordered by priority and dependency
+## Live backlog: six dependency-ordered stages
 
-The order within each table is topological: start with the lowest-numbered
-ready item whose dependencies are satisfied. Release-gate P0 items remain P0
-even when their implementation is blocked by P1/P2 product work.
+This is the only active backlog. The 27 July Train 1–6 documents are historical
+evidence or replanning inputs and must not be executed. Completed Train 0,
+local-workspace, Insights, key-separation, and bounded-frame evidence remains
+recorded above.
 
-### P0 — release and acceptance gates
+| Order | Stage | Status | Exit decision |
+|---:|---|---|---|
+| 1 | Direction reset and authenticated object foundation | In progress: contract reset only | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
+| 2 | Local backup and Android Auto Backup | Blocked by Stage 1 | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 3 | App-managed backup and recovery takeover | Blocked by Stage 2 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
+| 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
+| 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
+| 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
-| Order | ID | Status | Task | Depends on |
-|---:|---|---|---|---|
-| 1 | P0-R02 | External | Direct TalkBack, Switch Access, high-contrast, reduced-motion and RTL acceptance on the currently implemented surfaces | Human/physical-device session |
-| 2 | P0-R03 | Blocked | End-to-end multi-device conflict, authentication expiry, quota, pagination, corruption, retry, reinstall and new-device recovery tests | P1-D01 through P1-D06 |
-| 3 | P0-R04 | Blocked | Final full-app accessibility audit at 100/130/200% text, keyboard, TalkBack, Switch Access, high contrast, reduced motion, RTL and compact/expanded layouts | All P1/P2 UI surfaces complete |
-| 4 | P0-R05 | Blocked | Screenshot/responsive regression suite for API 36/37, Fold cover/main, tablet, rotation, split-screen and live resizing | Stable P1/P2 UI plus screenshot harness |
-| 5 | P0-R06 | Blocked | Baseline Profile and Macrobenchmark module; validate startup, scrolling and large task sets | Stable critical journeys plus large-data fixture |
-| 6 | P0-R07 | Blocked | Final R8/resource-shrinking and performance budgets against production feature set | P0-R05, P0-R06 and all release features |
-| 7 | P0-R08 | Done | Pin GitHub Actions to reviewed commit SHAs | Completed in Train 0 |
-| 8 | P0-R09 | Blocked | Complete recovery UX for Keystore loss, reinstall and new devices | P1-D04 cloud migration/recovery |
-| 9 | P0-R10 | External | Privacy Policy, OAuth brand verification, Play Data Safety, Play App Signing and internal/closed/open/staged rollout | P1 Drive slice, all product features, owner accounts and policy decisions |
+The dependency chain is strict:
 
-### P1 — local core workspace
+```text
+Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
+```
 
-| Order | ID | Status | Task | Depends on |
-|---:|---|---|---|---|
-| 1 | P1-L01 | Done | Reminders and notification actions, permission timing and exact-alarm fallback | Existing task/due model |
-| 2 | P1-L02 | Done | Custom per-project workflows: rename, reorder, add and archive while preserving semantic reporting categories | Existing workflow records and commands |
-| 3 | P1-L03 | Done | Milestone editing and task milestone membership | Existing milestone schema/project workbench |
-| 4 | P1-L04 | Done | Dependency editor, cycle-rejection UI and blocked-completion warnings at every task entry point | Existing dependency rules |
-| 5 | P1-L05 | Blocked | Full-text search for notes and attachment names | P2-F02 note/attachment records |
-| 6 | P1-L06 | Done | Schedule compact day agenda, expanded week timeline and unscheduled-task tray | Existing due dates; P1-L01 for reminder affordances |
-| 7 | P1-L07 | Done | Complete process restoration for selection, drafts, scroll, filters and timer state | Current SavedStateHandle/navigation foundation |
-| 8 | P1-L08 | Deferred | Encrypted `.otvault` import/export and deliberate plaintext CSV warnings | Threat-model parser gates; final local schemas |
+### Current execution order
 
-### P1 — Drive-primary storage and recovery
+1. Complete and commit Stage 1 Task 1, this documentation-only contract reset.
+2. Begin source work with Stage 1 Task 2, **Clear the Insights
+   Instrumented-Test Lint Gate**.
+3. Complete Stage 1 Tasks 3–6 in order: typed/canonical identity, generic AEAD,
+   authenticated object codec, and independent golden vectors.
+4. Run Stage 1 exit gates and record the verified checkpoint before designing
+   or executing Stage 2.
 
-| Order | ID | Status | Task | Depends on |
-|---:|---|---|---|---|
-| 1 | P1-D01 | Ready with credentials | Google Identity authorisation using only `drive.appdata` | OAuth client/account configuration |
-| 2 | P1-D02 | Paused | Finish authenticated encryption for the completed versioned, checksummed and bounded manifest, snapshot, operation-segment and attachment-chunk frames | Train 1 Task 1.6; existing `core:crypto`, `core:sync`, threat model |
-| 3 | P1-D03 | Blocked | Drive `CloudObjectStore`, `changes.list`, pagination and resumable object transport | P1-D01, P1-D02 |
-| 4 | P1-D04 | Blocked | Outbox upload, remote download, idempotent merge, retry/backoff and visible sync health | P1-D03 |
-| 5 | P1-D05 | Blocked | Local-to-Drive migration with checksum verification and a seven-day local rollback copy | P1-D04 |
-| 6 | P1-D06 | Blocked | Drive-to-local disconnect without cloud deletion; guarded cloud-delete recovery | P1-D04, P1-D05 |
-| 7 | P1-D07 | Blocked | Resumable encrypted attachment upload and offline attachment cache policy | P1-D02 through P1-D04; P2-F02 |
-| 8 | P1-D08 | Blocked | Complete the cloud/multi-device P0 test matrix | P1-D01 through P1-D07 |
-
-### P2 — productivity and full-workspace features
-
-| Order | ID | Status | Task | Depends on |
-|---:|---|---|---|---|
-| 1 | P2-F01 | Done | Templates with relative dates, workflows, milestones and task structure | P1-L02, P1-L03 |
-| 2 | P2-F02 | Blocked | Notes/activity history and attachments using Photo Picker, Storage Access Framework, Sharesheet, drag/drop, constrained `FileProvider` cleanup and 100 MB limits | Local attachment encryption/design; P1-D07 for cloud |
-| 3 | P2-F03 | Done | Manual time entries and timer-overlap reconciliation | Existing timer foundation |
-| 4 | P2-F04 | Done | Accessible qualified insights for completion, overdue work, estimate/actual time, project/tag time and milestone health | P1-L03, P2-F03 |
-| 5 | P2-F05 | Deferred | Today Glance widget, Quick Add launcher refinement and app-lock title privacy | P1-L01; privacy review |
-| 6 | P2-F06 | Deferred | Keyboard shortcut helper, mouse/hover support and accessible alternatives to drag actions | Stable final navigation/editors |
-| 7 | P2-F07 | Deferred | One-way calendar export through `ACTION_INSERT` | P1-L06; export/privacy review |
-
-### P3 — repository and developer experience
-
-| Order | ID | Status | Task | Depends on |
-|---:|---|---|---|---|
-| 1 | P3-T00 | Done | Repaired the GitHub Actions instrumented matrix with API 36 stable/Pixel 6 and API 37 canary/Pixel Tablet entries, a structural verifier and a separate release gate | Queued dependency PR checks and resolution remain paused |
-| 2 | P3-T01 | Done | Replaced the warning-only post-write colour check with a blocking `PreToolUse` guard and deterministic Write/Edit protocol verifier | None |
-| 3 | P3-T02 | Done | Retained the official Kotlin IDE formatter without adding ktlint or Spotless | None |
-| 4 | P3-T03 | Done | Closed optional plugin evaluation without installation; reconsider only for a concrete workflow need | None |
+GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
+remains disabled until Stage 2. Existing Room, outbox, and local workspace data
+remain untouched until their explicitly planned, verified migrations.
 
 ## Architecture and security rules for the next agent
 
@@ -812,9 +787,9 @@ even when their implementation is blocked by P1/P2 product work.
   explicit version fields, exact vault/object identity and optional attachment
   chunk identity. Validate the 16 KiB header and family-specific length/count
   bounds before allocating or reading ciphertext.
-- A checksum detects corruption but is not authentication. Task 1.6 must bind
-  the full `CloudHeaderIdentity` as AEAD associated data and must not expose
-  plaintext or claim cloud integrity until decryption succeeds.
+- A checksum detects corruption but is not authentication. Stage 1 Tasks 3–6
+  must bind the full `CloudHeaderIdentity` as AEAD associated data and must not
+  expose plaintext or claim object integrity until decryption succeeds.
 - Preserve `CloudObjectFrame`'s one-shot ciphertext ownership. Ciphertext reads
   from caller-controlled streams may use only bounded scratch storage, never
   the retained verified ciphertext array.
@@ -835,15 +810,13 @@ even when their implementation is blocked by P1/P2 product work.
 
 ## Recommended next action
 
-Wait for the user's explicit resume. Then continue with Train 1 Task 1.6:
-authenticate the completed canonical frames with the independent vault-content
-key, bind every header identity field as associated data, verify the checksum
-before AEAD decryption, return typed decode failures and freeze independent
-golden vectors. Correct the recorded Task 1.3 lint findings before claiming the
-train exit gate is green.
+After this contract-reset commit, start Stage 1 Task 2: correct the five
+recorded `UnrememberedMutableState` findings in the accepted Insights
+instrumented test and rerun its specified lint gate. Then execute Stage 1 Tasks
+3–6 in order and complete the Stage 1 exit review before any Stage 2 design or
+implementation.
 
-`P2-F02` and therefore `P1-L05` remain blocked until the attachment/cloud
-design and `P1-D07` exist; do not weaken encrypted attachment requirements to
-start them early. Keep queued dependency PR checks and resolution paused unless
-the user explicitly resumes GitHub maintenance. Do not start Task 1.6, Drive or
-blocked P0 cloud/release work during this pause.
+Keep the protected workspace untouched and run device suites only on a sole
+disposable emulator. Preserve existing outbox data, keep Android Auto Backup
+disabled until Stage 2, and keep queued dependency PR checks and resolution
+paused unless the user explicitly resumes GitHub maintenance.

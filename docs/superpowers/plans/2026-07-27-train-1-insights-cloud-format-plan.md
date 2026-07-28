@@ -1,5 +1,9 @@
 # Train 1 — Insights and Cloud Format Implementation Plan
 
+> **Direction update — 28 July 2026:** Tasks 1.1–1.5 remain accepted
+> historical evidence. The unstarted Task 1.6 is replaced by the Stage 1
+> local-authority foundation plan and must not be executed from this file.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use

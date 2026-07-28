@@ -5,6 +5,10 @@
 **Scope:** Revised storage, backup, attachment, recovery, and delivery
 direction
 
+This approved decision is the active direction for the production programme.
+Its initial decision and lifecycle clarification are recorded by commits
+`6e3c816` and `ebdc6b0`.
+
 ## Decision
 
 Open Tasks will have one live data authority: the encrypted Room database on

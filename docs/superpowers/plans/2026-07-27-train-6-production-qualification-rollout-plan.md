@@ -1,5 +1,10 @@
 # Train 6 — Production Qualification and Rollout Implementation Plan
 
+> **Replanning required — 28 July 2026:** Keep non-cloud qualification intent,
+> but replace every sync/convergence gate with the approved backup, takeover,
+> stale-writer, Android Auto Backup, attachment, and recovery matrices before
+> execution.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use

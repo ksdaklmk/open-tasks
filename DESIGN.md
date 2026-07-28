@@ -100,8 +100,10 @@ for floating controls and temporary surfaces.
 - Context FAB: one Quick Add action; label may expand where room permits.
 - Task row: completion control, title, project, due context, priority, and
   blocking state with accessible custom actions.
-- Sync health: text and icon with a tonal attention state; never a decorative
-  dot or colour-only signal.
+- Backup attention: Home has no standing cloud-status decoration. After backup
+  is configured, Home may show a text-and-icon attention state only when
+  backup is blocked or meaningfully overdue; colour never carries the state
+  alone.
 - Timer: charcoal focus surface with ember numerals and explicit pause/stop.
 - Time tracking: task detail shows completed logged duration and a plain
   Review/Add action. A single scrollable Material sheet lists entries with UK
@@ -157,6 +159,29 @@ for floating controls and temporary surfaces.
 
 All interactive components cover default, pressed, focused, selected, disabled,
 loading, error, and empty states where relevant.
+
+## Backup & recovery
+
+These are approved future surfaces, not current implementation. More will gain
+**Backup & recovery** with four independent sections:
+
+- **Encrypted app backup** — enabled state, last verified time, pending
+  generation, failure category, retry, and **Back up now**.
+- **Android backup package** — ready or unavailable state, local production
+  time, generation, and size. It never claims that Android uploaded the
+  package or invents a platform backup time.
+- **Cloud attachments** — account connection and temporary-cache usage, with
+  clear remote, downloading, unavailable, tombstoned, and failed states.
+- **Active device** — the current writer and explicit takeover explanation.
+
+Backup, attachment, and active-device states use text and iconography and
+remain distinct. Local task editing stays available when backup or attachment
+transport is offline or failing. Android Auto Backup remains disabled until
+Stage 2 supplies and verifies its strict portable-package allow-list.
+
+Home may show backup attention only after backup is configured and blocked or
+meaningfully overdue. The threshold is future injected product policy, not a
+format or current UI claim.
 
 ## Language and locale
 

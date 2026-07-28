@@ -1,5 +1,10 @@
 # Train 6 — Production Qualification and Rollout Design
 
+> **Replanning required — 28 July 2026:** Keep non-cloud qualification intent,
+> but replace every sync/convergence gate with the approved backup, takeover,
+> stale-writer, Android Auto Backup, attachment, and recovery matrices before
+> execution.
+
 ## Goal
 
 Complete P1-D08, P0-R02, P0-R04 through P0-R07, and P0-R10; qualify the full

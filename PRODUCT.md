@@ -21,7 +21,7 @@ Open Tasks combines fast personal task capture with the workflow, scheduling,
 dependency, milestone, and time context of a full project workspace. Success
 means the complete core workflow remains useful offline, resists data loss, and
 continues seamlessly through rotation, resizing, folding, process recreation,
-and an eventual move between local and encrypted Drive-primary storage.
+and recovery from a verified encrypted backup.
 
 ## Positioning
 
@@ -31,16 +31,32 @@ personal tool.
 ## Current Delivery Boundary
 
 The current application remains local-only. Its encrypted workspace is fully
-useful without an account or network connection. The cloud foundation now has
-an independently generated vault-content key with separate recovery and local
+useful without an account or network connection, and encrypted Room is the
+sole live structured-data authority. The cloud foundation now has an
+independently generated vault-content key with separate recovery and local
 Android Keystore wrapping, plus strict bounded canonical frames for manifests,
 snapshots, operation segments and attachment chunks.
 
-Those foundations are not a user-visible sync or recovery feature. The
-authenticated cloud codec, Google Identity, Drive transport, migration,
-multi-device coordination and recovery UI remain unavailable. Product copy
-must not imply cloud backup, cross-device sync or reinstall recovery until
-those flows pass their release gates.
+Those foundations are not a user-visible backup or recovery feature. The
+authenticated object codec, Google Identity, Drive transport, app-managed
+backup, Android Auto Backup, writer takeover, cloud attachments, and recovery
+UI remain unavailable. Android backup is still disabled. Product copy must not
+imply cloud backup, attachment availability, or reinstall recovery until those
+flows pass their release gates.
+
+## Approved future contract
+
+- Structured workspace data remains local in Room during normal use.
+- App-managed encrypted backup preserves structured data for recovery.
+- Android Auto Backup supplements that guarantee with one strictly
+  whitelisted portable encrypted package.
+- Attachment metadata remains local structured data, while attachment bytes
+  are durable only in the cloud attachment service.
+- Each backed-up vault has one active writer. Recovery on another device is an
+  explicit takeover that advances writer ownership; it never merges two live
+  workspaces.
+- Backup failure never blocks local editing, and attachment failure affects
+  only the file operation.
 
 ## Brand Personality
 
@@ -59,7 +75,8 @@ communication.
 ## Design Principles
 
 1. Put the next useful action ahead of workspace administration.
-2. Keep privacy, sync state, and recovery legible rather than invisible.
+2. Keep privacy, backup state, active-device ownership, and recovery legible
+   rather than invisible.
 3. Restructure for the current window instead of stretching a phone layout.
 4. Preserve context across interruption: selection, drafts, scroll, filters,
    navigation, and timer state should survive.

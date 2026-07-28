@@ -1,5 +1,9 @@
 # Train 1 — Insights and Cloud-Format Foundation Design
 
+> **Direction update — 28 July 2026:** Tasks 1.1–1.5 remain accepted
+> historical evidence. The unstarted Task 1.6 is replaced by the Stage 1
+> local-authority foundation plan and must not be executed from this file.
+
 ## Goal
 
 Deliver the next ready user-facing slice, P2-F04 Insights, and establish the

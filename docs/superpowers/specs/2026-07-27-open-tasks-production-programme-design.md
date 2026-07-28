@@ -1,36 +1,44 @@
 # Open Tasks Production Programme Design
 
-**Date:** 27 July 2026
-**Status:** Approved design
-**Target:** Globally available production release with staged updates
+**Date:** 28 July 2026
+**Status:** Approved programme contract
+**Target:** Local-authority, recoverable production release with cloud-only
+attachment bytes and staged updates
 
 ## Purpose
 
-Complete the remaining Open Tasks P0–P3 roadmap from the current working tree
-and deliver a production-ready, privacy-first Android application. The first
-production publication is global because Google Play cannot percentage-stage a
-new app's first production release. Closed and open testing contain that launch
-risk; all later production updates use staged percentages.
+Deliver a private Android workspace whose structured data remains locally
+authoritative, whose encrypted backups support verified recovery, and whose
+attachment bytes can remain durably cloud-authoritative. This programme
+implements the approved
+[Local Authority, Cloud Attachments, and Backup Direction](2026-07-28-local-authority-cloud-attachments-backup-design.md).
 
-This programme starts from the locally completed P1/P2 state recorded in
-`HANDOFF.md`. It preserves and checkpoints those changes rather than
-reimplementing them.
+The programme starts from the completed local workspace and Train 1 Tasks
+1.1–1.5 recorded in `HANDOFF.md`. Those shipped facts remain evidence. Backup,
+Android Auto Backup, Google authorisation, Drive transport, recovery UI, and
+attachments are approved future work and are not operational at this
+checkpoint.
 
 ## Product contract
 
 Open Tasks remains:
 
-- Android-only, adaptive from compact phones through foldables and tablets.
+- Android-only and adaptive across compact phones, foldables, and tablets.
 - A solo-professional workspace without collaboration or a proprietary server.
 - Free, without advertising, purchases, analytics, or crash-reporting SDKs.
-- Local-first, with SQLCipher local authority or encrypted Drive-primary
-  authority.
+- Fully useful offline, with encrypted Room as the sole live authority for
+  structured workspace data.
+- Recoverable through app-managed encrypted backup, supplemented by one
+  strictly whitelisted Android Auto Backup package after Stage 2.
+- Explicit that attachment metadata is local structured data while attachment
+  bytes are durable only in the cloud attachment service.
+- Limited to one active writer per backed-up vault; recovery elsewhere is an
+  explicit takeover.
 - Globally available with UK English (`en-GB`) as the only v1 locale.
-- Useful while offline and explicit about sync, recovery, conflicts, and risk.
 
-The v1 release does not add collaboration, a web client, iOS support,
-background two-way calendar sync, plaintext cloud data, or an alternate
-analytics data store.
+The release does not add collaboration, a web client, iOS support, background
+two-way calendar behaviour, plaintext cloud data, or an alternate analytics
+store. It does not merge structured records from two active devices.
 
 ## Programme-wide engineering constraints
 
@@ -38,236 +46,219 @@ analytics data store.
   daemon toolchain, and AGP built-in Kotlin.
 - Keep Navigation 3, `WorkspaceLayoutPolicy`, stateless feature composables,
   and app-layer command dispatch.
-- Route every durable mutation through a typed `DomainCommand` and
+- Route every durable structured mutation through `DomainCommand` and
   `VaultRepository.execute`.
-- Commit each mutation and its outbox operation atomically.
+- Commit every accepted mutation and its backup-journal entry atomically.
+- Preserve existing outbox rows and local data until Stage 2 verifies their
+  migration.
 - Use repository-produced Undo for reversible commands.
-- Keep `InMemoryVaultRepository` behaviour aligned with
-  `RoomVaultRepository`.
-- Keep the SQLCipher database and cloud vault-content key independent.
+- Keep `InMemoryVaultRepository` aligned with `RoomVaultRepository`.
+- Allow only `RecoveryCoordinator` to reconstruct Room from backup input.
+- Keep the SQLCipher database and vault-content keys independent.
 - Zero temporary key arrays and retain passphrases as `CharArray`.
 - Never put keys, passphrases, attachment content, or vault payloads in saved
   instance state.
 - Never log private content, filenames, account details, Drive identifiers,
   ciphertext, keys, or encryption metadata.
-- Require a non-destructive migration and exported Room schema for every
-  database version.
-- Require old-format fixtures and golden-vector review for every crypto-format
-  change.
+- Require a non-destructive migration, exported Room schema, prior-version
+  fixture, restart verification, and protected-workspace run for every database
+  version.
+- Require old-format fixtures and independent golden-vector review for every
+  crypto-format change.
 - Put new copy in resources and retain UK spelling, day–month dates, 24-hour
-  times, localisation readiness, and RTL-safe layout.
-- Update architecture, design, threat model, README, and handoff documents in
-  the same change whenever their contracts change.
+  times, localisation readiness, RTL-safe layout, 48 dp actions, and
+  non-colour status cues.
+- Update the active architecture, design, threat model, README, handoff, and
+  programme contracts together whenever responsibilities change.
 
 ## System architecture
 
-The existing module graph remains authoritative. New code is placed in focused
-files inside current modules, except for the dedicated Baseline Profile and
-Macrobenchmark modules required by production qualification.
-
-`VaultRepository` remains the only product-data mutation boundary. Local UI
-commands and downloaded remote changes use different execution paths:
-
 ```text
 Compose feature UI
-    │ callbacks
+    │ typed callbacks
     ▼
-app coordinators / ViewModels
+app ViewModels / coordinators
     │ DomainCommand
     ▼
-VaultRepository.execute
-    │
-    ├── record transaction + outbox append
+VaultRepository
+    ├── SQLCipher Room records ─────────── sole live authority
+    ├── atomic BackupJournal entry
     └── immutable WorkspaceSnapshot
 
-WorkManager / manual refresh
-    │
-    ▼
-SyncCoordinator
-    ├── upload pending encrypted operations
-    ├── download encrypted remote objects
-    └── internal remote-batch merge transaction
-            └── no new upload operation for unchanged remote data
+BackupCoordinator
+    ├── reads consistent local snapshots and journal generations
+    ├── encrypts through AuthenticatedCloudObjectCodec
+    └── writes BackupObjectStore
+
+PortableBackupPublisher
+    └── atomically publishes one eligible encrypted package
+
+AttachmentBlobCoordinator
+    ├── streams bounded chunks through temporary cache
+    ├── encrypts through AuthenticatedCloudObjectCodec
+    └── writes AttachmentBlobStore
+
+RecoveryCoordinator
+    ├── stages and verifies a replacement SQLCipher vault
+    ├── claims the next writer epoch
+    └── atomically activates the staged vault
 ```
 
-Remote merge is an internal repository collaborator, not a UI command. This
-prevents downloaded operations from recursively returning to the outbox.
+Normal provider flows have no structured cloud-to-Room path.
+`RecoveryCoordinator` is the only boundary allowed to reconstruct Room from a
+backup or restored portable package.
 
-Large existing files are split only when their train touches the corresponding
-responsibility:
+## Data and service boundaries
 
-- `MoreScreen.kt`: Insights, Settings, Privacy/Recovery, Templates, Archive,
-  and Bin.
-- `TasksScreen.kt`: core editor, recurrence, dependencies, time, activity, and
-  attachments.
-- `OpenTasksApp.kt`: Navigation 3 shell, platform launchers, and destination
-  binding.
-- `WorkspaceViewModel.kt`: workspace commands plus focused sync, recovery, and
-  attachment coordinators.
-- `RoomVaultRepository.kt`: command execution, snapshot assembly, outbox
-  encoding, and remote merge.
+### Room and `BackupJournal`
 
-## Data authority
+Room owns all live structured data: tasks, projects, workflows, milestones,
+reminders, templates, notes, activity, time entries, settings, attachment
+metadata, and tombstones. `VaultRepository` writes a record mutation and its
+backup-journal entry in one transaction. The journal proves local-generation
+coverage; it is not a remote merge log.
 
-Exactly one vault is active:
+### `BackupCoordinator`
 
-- In `LOCAL`, SQLCipher and encrypted app-private files are durable authority.
-- In `DRIVE_PRIMARY`, the same local state is the immediate offline cache and
-  atomic outbox; encrypted Drive app-data objects are durable authority.
+`BackupCoordinator` creates bounded complete snapshots and later journal
+segments, uploads them through a provider-independent object store, downloads
+and authenticates published bytes, advances checkpoints only after full
+verification, and preserves current/previous recovery bases. Backup failure
+does not block local editing.
 
-The vault-content key is random, independent from the SQLCipher key, and
-wrapped locally by Android Keystore. Drive migration adds a passphrase-wrapped
-recovery envelope for that same key. Local-only attachments can therefore be
-encrypted without forcing Drive enrolment, while later migration does not
-reencrypt every attachment.
+### `PortableBackupPublisher`
 
-Drive uses four encrypted object families:
+`PortableBackupPublisher` atomically replaces one encrypted package containing
+a complete structured snapshot, recovery envelope, format metadata,
+attachment metadata, and opaque blob references. It excludes raw Room,
+WAL/SHM, preferences, keys, credentials, cache, and attachment bytes and
+withdraws packages above 24 MiB.
 
-1. A bounded manifest with compatibility and recovery-envelope metadata.
-2. Periodic complete workspace snapshots.
-3. Immutable per-device operation segments ordered by hybrid logical clock.
-4. Opaque, chunked attachment objects.
+### `AttachmentBlobCoordinator`
 
-SHA-256 ciphertext checksums detect incomplete transport. Tink AEAD associated
-data binds vault, object, format, and chunk identity. Unsupported, oversized,
-damaged, or unauthenticated objects are quarantined before merge.
+`AttachmentBlobCoordinator` owns provisional upload sessions, bounded chunk
+transfer, verification, temporary cache, open/share cleanup, retention, and
+remote garbage collection. `VaultRepository` remains the attachment-metadata
+mutation boundary. Attachment failure cannot disable task editing.
+
+### `RecoveryCoordinator`
+
+`RecoveryCoordinator` authenticates a selected backup or portable package,
+constructs a new staged SQLCipher vault under a fresh database key, verifies
+relations and references, creates a new local wrapper for the existing
+vault-content key, claims the next writer epoch where applicable, and activates
+only after every gate passes. Failure leaves the current installation
+unchanged.
 
 ## Product surfaces
 
 The five top-level destinations remain unchanged:
 
-- Home retains daily focus, a compact insight summary, and sync health.
-- Tasks owns canonical task editing, activity, notes, files, and time history.
-- Projects adds project activity context and filtered-insight entry points.
-- Schedule remains a read-only snapshot projection and offers explicit
+- Home retains daily focus and compact Insights. It may show backup attention
+  only after backup is configured and is blocked or meaningfully overdue.
+- Tasks owns canonical task editing, activity, notes, cloud attachments, and
+  time history.
+- Projects owns project context and filtered Insights.
+- Schedule remains a read-only Room snapshot projection and offers explicit
   one-way calendar insertion.
-- More owns Insights, Templates, Archive, Bin, Settings, and Privacy &
-  recovery.
+- More owns Insights, Templates, Archive, Bin, Settings, and **Backup &
+  recovery**.
+
+**Backup & recovery** contains independent encrypted app backup, Android backup
+package, cloud attachments, and active-device sections. User-facing
+terminology is backup, cloud attachment, restore, and active device. Backup
+history and attachment blobs have separate destructive actions. Neither
+claims to delete Android's separately managed backup dataset.
 
 All charts have equivalent ordered tables or text summaries. Meaning never
 depends on colour. Restored routes, selections, filters, scroll positions,
-drafts, and open sheets use the existing layered restoration contract.
+drafts, and open sheets retain the existing layered restoration contract.
 
-## Failure and privacy model
+## Failure, ownership, and privacy model
 
-Local editing continues when Drive is offline, unauthorised, over quota, or
-temporarily failing. Sync exposes explicit offline, authentication, quota,
-checksum, decryption, incompatible-format, and retry-exhausted states.
+- Offline, authentication, quota, or provider failure leaves local structured
+  editing available.
+- A backup checkpoint advances only after complete upload, download, checksum,
+  authentication, decode, identity, and generation checks.
+- Current and previous verified snapshot bases are retained with the journal
+  segments each needs.
+- Backup and attachment object namespaces, retention, status, and destructive
+  operations remain separate.
+- A monotonically increasing writer epoch and conditional control-manifest
+  update enforce one active writer.
+- A previous writer cannot publish backup or attachment mutations after
+  takeover. Divergent local work is never merged automatically.
+- Attachment intake is capped at 100 MiB and uses bounded 4 MiB chunks.
+- Recovery passphrases require at least 12 characters, confirmation, and
+  strength guidance; they may be generated locally as a multi-word phrase.
+- Encrypted import validates in an isolated staging vault and activates only
+  after confirmation. Plaintext CSV is export-only and warns on every export.
+- App lock uses Android biometric or device credential as an access gate, not
+  a replacement encryption scheme.
 
-Migration switches authority only after an encrypted upload/download/decrypt
-round-trip passes. Disconnect materialises and verifies the complete vault
-locally before switching to `LOCAL`; it does not delete Drive content. Cloud
-deletion is a separate passphrase-confirmed action.
+## Six-stage programme
 
-Attachment intake streams into bounded temporary storage, encrypts and verifies
-chunks, atomically publishes the file, and only then registers metadata and an
-outbox operation. Failure removes temporary state. Startup cleanup removes
-abandoned intake and share files.
+| Order | Stage | Exit decision |
+|---:|---|---|
+| 1 | Direction reset and authenticated object foundation | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
+| 2 | Local backup and Android Auto Backup | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 3 | App-managed backup and recovery takeover | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
+| 4 | Notes, activity, cloud attachments, and search | Cloud-authoritative blob lifecycle and final structured metadata are complete |
+| 5 | Remaining platform features | Import/export, widget, app lock, input, and calendar features use the final local schema |
+| 6 | Production qualification and rollout | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
-Recovery passphrases require at least 12 characters, use no composition rules,
-include confirmation and strength guidance, and may be generated locally as a
-multi-word phrase. App lock uses Android biometric or device credential as an
-access gate rather than a replacement encryption scheme.
-
-Encrypted `.otvault` import validates in an isolated staging vault and activates
-only after confirmation. Plaintext CSV is export-only in v1 and presents a new
-disclosure for each export.
-
-## Release trains
-
-| Train | Scope | Primary backlog |
-|---|---|---|
-| 0 | Baseline and delivery pipeline | P0-R08, P3-T00–P3-T03 |
-| 1 | Insights and cloud-format foundation | P2-F04, P1-D02 |
-| 2 | Drive identity and core sync | P1-D01, P1-D03, P1-D04 |
-| 3 | Migration and recovery | P1-D05, P1-D06, P0-R03, P0-R09 |
-| 4 | Notes, activity, attachments, and search | P2-F02, P1-D07, P1-L05 |
-| 5 | Remaining workspace and platform features | P1-L08, P2-F05–P2-F07 |
-| 6 | Production qualification and rollout | P1-D08, P0-R02, P0-R04–P0-R07, P0-R10 |
-
-The dependency chain is:
+The programme dependency chain is:
 
 ```text
-Train 0 → Train 1 → Train 2 → Train 3 → Train 4 → Train 5 → Train 6
+Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 ```
 
-Train 1 Insights can ship independently, but its cloud-format work gates Train
-2. Train 4 resolves the former circular dependency between local attachments
-and cloud attachment transport by defining one attachment contract before
-implementing either side. Train 5 waits for the final local schema. Train 6
-qualifies the complete product.
+Stage 1 preserves accepted Insights and frame work while completing the
+authenticated provider-independent codec. Stage 2 establishes local backup and
+the strictly whitelisted portable package before any provider recovery claim.
+Stage 3 adds app-managed Drive backup and takeover. Stage 4 freezes metadata
+and cloud attachment lifecycle. Stage 5 rebases the remaining features on that
+schema. Stage 6 qualifies the complete product.
 
-## Verification strategy
+## Acceptance matrix
 
-- JVM tests cover pure domain logic, codecs, checksums, parsers, merge rules,
-  cache policy, retries, import/export, and failure classification.
-- A shared repository contract suite runs against in-memory and encrypted Room
-  implementations.
-- Room device tests cover migrations, restarts, atomic writes, remote merge,
-  rollback, and malformed-input rejection.
-- Fake Drive tests inject pagination, duplicates, ordering changes, expired
-  authentication, quota, partial transfer, checksum failure, and network loss.
-- Credentialed tests exercise the real Drive `appDataFolder`.
-- Compose semantics and behaviour tests cover all new feature surfaces.
-- Pinned official Compose preview screenshot tests cover representative
-  light/dark, compact/medium/expanded, font-scale, and RTL configurations.
-- Manual physical-device acceptance covers fold posture, tablets, split
-  screen, live resizing, keyboard/mouse, TalkBack, Switch Access, high
-  contrast, reduced motion, notifications, widgets, sharing, and recovery.
-- Baseline Profiles and Macrobenchmarks measure startup and critical journeys
-  on a physical device with a large encrypted fixture.
+| Area | Required evidence |
+|---|---|
+| Local authority | Accountless/offline CRUD, reminders, timers, search, Insights, migrations, atomic record/journal writes, and proof that normal provider paths cannot write Room |
+| Authenticated objects | Independent golden vectors, full identity-bound AEAD, checksum-before-decrypt, bounded decoders, wrong-key/passphrase, tamper, truncation, future-reader, and zeroisation cases |
+| App backup | Scheduling policy, pagination, retry, quota, current/previous snapshot recovery, corrupt/missing segment handling, retention, and independent cloud deletion |
+| Android backup | Manifest/rule audit on supported APIs, 24 MiB boundary, atomic replacement/withdrawal, restore round-trip, and proof that databases, keys, credentials, cache, and blobs are excluded |
+| Active device | Conditional epoch acquisition, stale-writer rejection, offline prior-device reconnect, missing control record, explicit takeover, and divergent-work preservation |
+| Attachments | Hostile input, 100 MiB limit, chunk interruption, cache eviction, open/share cleanup, unavailable state, delete/Undo, retained-backup references, and garbage collection |
+| Recovery | Reinstall, new device, Keystore loss, portable fallback, damaged primary, failed takeover, staging rollback, and no activation before full verification |
+| Product quality | 100/130/200% text, keyboard, TalkBack, Switch Access, compact/foldable/expanded layouts, screenshots, performance, privacy, signing, Play testing, and rollout |
 
 ## Production delivery
 
-The Play path is internal testing, required closed testing, production-access
-approval where applicable, globally available open testing, and global
-production publication. A qualifying newer personal account must retain at
-least 12 opted-in closed testers for 14 continuous days.
+The Play path is internal testing, required closed testing,
+production-access approval where applicable, globally available open testing,
+and global production publication. The first production release is published
+globally after those gates because percentage staging is unavailable for a new
+app. Later updates progress through 5%, 20%, 50%, and 100% with explicit
+observation and halt gates.
 
-Google Play does not support percentage staging for an app's first production
-publication. The first release is therefore contained through closed/open
-testing and then published globally. Later updates progress through 5%, 20%,
-50%, and 100%, with explicit observation and halt gates.
-
-Drive requests only the non-sensitive `drive.appdata` scope. OAuth production
-branding, correct signing-certificate fingerprints, privacy policy, Data
-Safety, app-content declarations, Play App Signing, upload-key custody, and
-verified developer details are release gates.
+Drive requests only `drive.appdata`. OAuth production branding, signing
+fingerprints, privacy policy, Data Safety, app-content declarations, Play App
+Signing, upload-key custody, and verified developer details remain release
+gates.
 
 ## Definition of production complete
 
-- Every non-optional remaining P0–P3 item is implemented or has passed its
-  external acceptance gate.
-- Unit, lint, debug, release, migration, crypto, cloud, accessibility,
-  screenshot, and performance gates pass.
-- No open critical/high security issue, data-loss issue, blocking
-  accessibility failure, or incompatible-format gap remains.
-- Reinstall, new-device, and Keystore-loss recovery are exercised.
-- Internal, required closed, and open testing are complete.
-- The initial global production release is approved and published.
-- The staged-update, monitoring, halt, and rollback procedures are verified.
-
-## Focused specifications
-
-- [Train 0 — Baseline and delivery](2026-07-27-train-0-baseline-delivery-design.md)
-- [Train 1 — Insights and cloud format](2026-07-27-train-1-insights-cloud-format-design.md)
-- [Train 2 — Drive identity and core sync](2026-07-27-train-2-drive-sync-design.md)
-- [Train 3 — Migration and recovery](2026-07-27-train-3-migration-recovery-design.md)
-- [Train 4 — Notes, attachments, and
-  search](2026-07-27-train-4-notes-attachments-search-design.md)
-- [Train 5 — Platform features](2026-07-27-train-5-platform-features-design.md)
-- [Train 6 — Production qualification and
-  rollout](2026-07-27-train-6-production-qualification-rollout-design.md)
-
-## Authoritative external constraints
-
-- [Drive application-data folder](https://developers.google.com/workspace/drive/api/guides/appdata)
-- [OAuth verification](https://support.google.com/cloud/answer/13463073)
-- [Google Play testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465)
-- [Google Play staged rollouts](https://support.google.com/googleplay/android-developer/answer/6346149)
-- [Google Play target API requirements](https://developer.android.com/google/play/requirements/target-sdk)
-- [Google Play Data Safety](https://support.google.com/googleplay/android-developer/answer/10787469)
-- [Google Play App Signing](https://support.google.com/googleplay/android-developer/answer/9842756)
-- [Compose screenshot testing](https://developer.android.com/studio/preview/compose-screenshot-testing)
-- [Baseline Profiles](https://developer.android.com/topic/performance/baselineprofiles/create-baselineprofile)
-- [Macrobenchmark measurement](https://developer.android.com/topic/performance/baselineprofiles/measure-baselineprofile)
+- Structured data remains locally authoritative and fully usable offline.
+- Verified app-managed backup restores after reinstall, new-device setup, and
+  Keystore loss.
+- Android Auto Backup contains only the eligible portable encrypted package.
+- Cloud attachment bytes use bounded working storage and do not become durable
+  local authority.
+- Backup history and attachment blobs can be deleted independently.
+- Recovery takeover cannot create a second writer for the same vault identity.
+- Existing local data survives every transition and migration.
+- Accessibility, responsive, performance, privacy, security, and store gates
+  pass with no critical/high open issue.
+- Internal, closed, and open testing complete before the initial global
+  production release; later staged-update halt procedures are rehearsed.

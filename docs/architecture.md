@@ -6,17 +6,52 @@ Feature UI emits typed actions; ViewModels reduce those actions and call
 
 ## Data authority
 
-Exactly one vault is active.
-
-- `LOCAL`: the SQLCipher Room database and encrypted app-private attachments
-  are authoritative.
-- `DRIVE_PRIMARY`: the same local database is the immediate offline cache and
-  atomic outbox, while encrypted Drive app-data objects are durable authority.
+Exactly one vault is active, and encrypted SQLCipher Room is its sole live
+structured-data authority. Normal operation has no runtime authority mode and
+no cloud-to-Room record path.
 
 Every write is represented by a `DomainCommand`. The Room implementation
 updates records and appends an outbox operation in one transaction. The current
 foundation seeds the sample workspace into SQLCipher once, then treats Room as
 the authority for task, timer/time-entry, Bin, search, and outbox state.
+Existing outbox rows remain untouched during Stage 1.
+
+Stage 2 will narrow that outbox responsibility into `BackupJournal`: an atomic
+record of local generations that need backup, not a remote merge log. The
+migration must preserve every existing row until a verified complete baseline
+backup covers it.
+
+The approved future service boundaries are:
+
+```text
+VaultRepository
+    ├── SQLCipher Room records ─────────── sole live authority
+    ├── atomic BackupJournal
+    └── immutable WorkspaceSnapshot
+
+BackupCoordinator
+    ├── reads consistent snapshots and journal generations
+    ├── encrypts through AuthenticatedCloudObjectCodec
+    └── writes BackupObjectStore
+
+PortableBackupPublisher
+    └── atomically publishes one Auto Backup-eligible encrypted package
+
+AttachmentBlobCoordinator
+    ├── streams bounded chunks through temporary cache
+    ├── encrypts through AuthenticatedCloudObjectCodec
+    └── writes AttachmentBlobStore
+
+RecoveryCoordinator
+    ├── stages and verifies a replacement SQLCipher vault
+    ├── claims the next writer epoch
+    └── atomically activates the staged vault
+```
+
+These services are approved, not implemented. `RecoveryCoordinator` will be
+the only component allowed to reconstruct Room from backup data or a restored
+portable package. `BackupCoordinator`, `PortableBackupPublisher`, and
+`AttachmentBlobCoordinator` cannot mutate structured product records.
 
 `RoomVaultRepository` owns its observation scope. Closing the repository
 cancels and joins that scope before its database owner closes SQLCipher. This
@@ -83,7 +118,7 @@ milestone deletion plus each revised task operation in one Room transaction.
 The repository-produced Undo restores the milestone and only the captured
 project-matching memberships. Schema v4 adds milestone revision fields through
 a non-destructive v3→v4 migration. Task outbox payload v5 includes start and due
-moments plus milestone identity, so future Drive reconciliation cannot silently
+moments plus milestone identity, so a future backup segment cannot silently
 lose scheduling or membership.
 
 Project templates are immutable, revisioned snapshots captured from an active
@@ -107,8 +142,8 @@ A workspace is capped at 100 templates and each template at 500 tasks and a
 lengths, semantic workflow coverage, collection bounds, zone IDs, date ranges,
 unique ranks/keys and acyclic parent/dependency graphs before instantiation.
 Local payload bytes are protected by SQLCipher at rest; the upsert outbox
-payload is self-contained so future cloud encryption can transport the
-template without relying on a local database row. Schema v5 adds template
+payload is self-contained so a future encrypted backup segment can preserve
+the template without relying on a local database row. Schema v5 adds template
 revision fields through a non-destructive v4→v5 migration. Capture and delete
 provide repository-produced Undo; creating a project from a template follows
 the existing non-Undoable project-creation contract.
@@ -181,10 +216,10 @@ interval sweep and exposes conflict pairs with their overlap duration in the
 snapshot. The task editor shows both an inline warning and a complete
 time-entry review sheet; editing or deleting either completed entry resolves
 the warning. Running entries remain read-only until their timer is stopped.
-This also makes concurrent-device timer conflicts visible without inventing
-or discarding duration. Time-entry outbox payload v2 carries the entry ID,
+This also keeps overlapping local records visible without inventing or
+discarding duration. Time-entry outbox payload v2 carries the entry ID,
 task ID, source device, start/end instants and a delimiter-safe encoded note;
-future cloud transport must encrypt the containing operation before upload.
+future backup publication must encrypt the containing operation before upload.
 
 Moving a task to the Bin stops its timer in the same transaction, and restore
 clears only the deletion timestamp. Expired Bin content is purged on repository
@@ -194,7 +229,7 @@ where required, and appends a task tombstone/outbox operation atomically; the
 UI requires a confirmation because this command has no Undo.
 
 Project Workbench edits use complete, validated project updates. Room reads the
-latest project revision, writes the project row, and appends its sync operation
+latest project revision, writes the project row, and appends its outbox operation
 atomically. The previous project value becomes an exact Undo command. Selected
 project identity lives in `SavedStateHandle`, while compact and expanded
 windows render the same repository state as one-pane or list/detail workbenches.
@@ -249,7 +284,11 @@ app
 ```
 
 `core:sync` and `core:crypto` are independent of Compose. This keeps
-new-device recovery and multi-device merge proofs runnable as unit tests.
+authenticated object-format and recovery proofs runnable as unit tests.
+`core:sync` is a historical module name: its product responsibility is bounded
+provider-independent object formats. Hybrid logical clocks and deterministic
+merge primitives may remain as unused, well-tested internal code, but are not
+a product or release dependency.
 
 ## Security invariants
 
@@ -269,14 +308,17 @@ new-device recovery and multi-device merge proofs runnable as unit tests.
 - Record encryption binds vault, object, and format identifiers as associated
   data.
 - Recovery passphrases are never persisted.
-- Android Auto Backup excludes databases, keys, vault files, and attachments.
+- Android backup is currently disabled. Stage 2 may enable Android Auto Backup
+  only for one strictly whitelisted portable encrypted package; databases,
+  WAL/SHM, preferences, keys, credentials, cache, and attachment bytes remain
+  excluded.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
   attachment names, or encryption metadata.
 
 The asset inventory, trust boundaries, adversaries, residual risks and release
 gates are maintained in [Threat Model](threat-model.md).
 
-## Sync format
+## Authenticated object foundation
 
 The implemented v1 cloud frame is a four-byte big-endian header length,
 canonical UTF-8 JSON header, then raw ciphertext. The header has fixed property
@@ -294,18 +336,19 @@ records and 10,000 operations per segment. For ciphertext reads, the input
 source receives only an 8 KiB-bounded scratch buffer; the decoder retains one
 separate full-size verified ciphertext array and transfers it at most once.
 
-The SHA-256 field is a corruption check, not an authentication claim. Task 1.6
-must bind the complete `CloudHeaderIdentity` as AEAD associated data, verify
-the checksum before decryption and translate rejection to typed decode
-failures. Until that codec exists, canonical frames must not be treated as
-authenticated cloud objects.
+The SHA-256 field is a corruption check, not an authentication claim. Stage 1
+Task 2 must bind the complete `CloudHeaderIdentity` as AEAD associated data,
+verify the checksum before decryption, and translate rejection to typed
+failures. Until that provider-independent codec exists, canonical frames must
+not be treated as authenticated backup or blob objects.
 
-Operations use hybrid logical clocks plus device ID tie-breaking. Scalar
-fields merge independently; sets use timestamped add/remove operations.
-Time-entry upsert/delete operations are ordered by their operation revisions;
-concurrent overlaps remain separate records and are surfaced for explicit
-reconciliation. Newer deletes dominate until an explicitly newer restore.
+Hybrid logical clocks and merge primitives remain implemented internal
+utilities but do not define product behaviour. Future journal segments carry
+local backup continuity for one active writer. Normal operation never
+downloads or merges structured records.
 
-Drive transport is intentionally not wired to credentials in this foundation.
-`CloudObjectStore` and `SyncCoordinator` remain the production seams for a
-later OAuth-configured slice.
+Google authorisation and Drive transport are not wired to credentials.
+Approved future transports implement separate `BackupObjectStore` and
+`AttachmentBlobStore` namespaces. Their shared codec remains
+provider-independent, and only `RecoveryCoordinator` may use decoded backup
+data to construct a staged replacement Room vault.

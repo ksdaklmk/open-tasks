@@ -46,7 +46,8 @@ workspace slice:
   relationships are deterministically remapped, and completed/Bin history is
   excluded.
 - A 30-day Bin workspace with reversible task deletion, restore, explicit
-  permanent-delete confirmation, startup expiry cleanup, and sync tombstones.
+  permanent-delete confirmation, startup expiry cleanup, and durable
+  tombstones.
 - An adaptive Project Workbench with persisted name, summary, health, and due
   date editing; live progress and workflow counts; milestone context; project
   task links; exact Undo; and Home/Search deep-link continuity.
@@ -66,35 +67,41 @@ workspace slice:
 - Random 256-bit database key wrapped by a non-exportable Android Keystore key;
   only the AES-GCM envelope is stored in app-private preferences.
 - Tink AES-256-GCM record encryption and Argon2id recovery-key envelopes.
-- Hybrid logical clock and field-level merge primitives for Drive operation
-  reconciliation.
+- Provider-independent bounded cloud-object frames plus legacy hybrid logical
+  clock and merge primitives retained as well-tested internal foundations.
 - Hilt application wiring, Navigation 3, Material 3 Adaptive, edge-to-edge,
-  predictive Back, backup exclusions, and notification permission discipline.
+  predictive Back, Android backup disabled, and notification permission
+  discipline.
 - Process restoration for the top-level route, selected task/project, task
   filters, list/editor scroll, quick-add/search and editor drafts. Active
   timers resume from their encrypted Room time entry and original start time.
 - UK English is the fixed application locale, including UK spelling,
   day–month dates, 24-hour times and Bin terminology.
 
-Development is paused at the user's request after P2-F03 manual time entry and
-before P2-F04 insights. [HANDOFF.md](HANDOFF.md) is the single authoritative
-pause record, completed implementation history and dependency-ordered backlog.
-Train 0 committed the verified P1/P2 baseline; the working tree is expected to
-be clean when development resumes.
+The approved programme now keeps encrypted Room as the sole live authority.
+[HANDOFF.md](HANDOFF.md) is the single authoritative checkpoint, completed
+implementation history, and dependency-ordered backlog. Train 0 committed the
+verified P1/P2 baseline, and Train 1 Tasks 1.1–1.5 remain accepted historical
+evidence.
 
-Drive authorisation and transport remain behind production interfaces so a
-Google OAuth client is not required for local development.
+Encrypted app-managed backup, supplementary Android Auto Backup, recovery
+takeover, and cloud-only attachment bytes are approved future work. None is
+shipped: Google authorisation and Drive transport are not connected, Android
+Auto Backup remains disabled, recovery UI is absent, and attachments are not
+operational.
 
 The runnable app is deliberately a foundation slice, not the completed
-five-phase release. Encrypted task CRUD and core-field editing, project
+six-stage release. Encrypted task CRUD and core-field editing, project
 workbench editing, project creation and Archive/Restore, Bin/restore
 commands, search, timers, manual time history, and the local outbox now persist
 across process restarts. Recurrence rules, series metadata, reminders and
 project workflows persist through the encrypted Room store. Transient route,
 selection, filter, scroll and draft context is also restored without
-overwriting unsaved editor text on the first repository emission. Drive
-transport, attachments, widgets, import/export, the remaining More subfeatures,
-and Play release operations are the next milestones.
+overwriting unsaved editor text on the first repository emission. The current
+outbox data remains untouched until Stage 2 deliberately migrates it to backup
+journal semantics. Backup, Drive transport, recovery, attachments, widgets,
+import/export, the remaining More subfeatures, and Play release operations are
+future milestones.
 
 ## Build
 
@@ -135,7 +142,8 @@ Studio. The baseline intentionally adds neither ktlint nor Spotless.
 - `core/domain` — commands, repository contracts, dependency and recurrence rules.
 - `core/data` — Room/SQLCipher schema and local fixture repository.
 - `core/crypto` — Argon2id recovery envelopes and Tink AEAD.
-- `core/sync` — hybrid logical clocks and deterministic merges.
+- `core/sync` — bounded provider-independent object formats and legacy,
+  non-product merge primitives.
 - `core/designsystem` — fixed light/dark palette, typography, shapes, and components.
 - `feature/*` — destination-specific Compose UI.
 

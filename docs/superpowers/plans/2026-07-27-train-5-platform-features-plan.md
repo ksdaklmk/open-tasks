@@ -1,5 +1,9 @@
 # Train 5 — Platform Features Implementation Plan
 
+> **Replanning required — 28 July 2026:** The feature intent remains, but this
+> train cannot execute until Stage 4 freezes the final local metadata and
+> cloud-attachment contracts. Follow the live production master plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
