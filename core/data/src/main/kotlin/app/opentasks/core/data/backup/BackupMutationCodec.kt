@@ -11,6 +11,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Base64
@@ -97,7 +98,7 @@ internal object BackupMutationCodec {
         }
     }
 
-    private fun validateRecord(record: BackupRecordV1) {
+    internal fun validateRecord(record: BackupRecordV1) {
         val schema = schemas.getValue(record.family)
         require(record.fields.size == schema.fields.size) {
             "${record.family} has the wrong field count"
@@ -224,7 +225,10 @@ internal object BackupMutationCodec {
         fun zone(name: String) {
             value(name)?.let {
                 require(it.length <= 64 && it.isNotBlank()) { "$name is not a bounded zone ID" }
-                ZoneId.of(it)
+                runCatching { ZoneId.of(it) }
+                    .getOrElse { failure ->
+                        throw IllegalArgumentException("$name is not a zone ID", failure)
+                    }
             }
         }
         fun revision() {
@@ -303,10 +307,15 @@ internal object BackupMutationCodec {
                     (value("recurrenceAnchorEpochMillis") == null) ==
                         (value("recurrenceAnchorZoneId") == null),
                 )
-                nonNegativeInt("recurrenceOccurrenceIndex")
+                value("recurrenceOccurrenceIndex")?.let {
+                    require(it.toInt() >= -1) {
+                        "recurrenceOccurrenceIndex cannot be below -1"
+                    }
+                }
                 positiveLong("estimateSeconds")
                 identifier("milestoneId")
                 revision()
+                validateTaskRecurrence(::value)
             }
             BackupRecordFamily.CHECKLIST_ITEM -> {
                 identifier("taskId")
@@ -369,6 +378,68 @@ internal object BackupMutationCodec {
                         requireNotNull(value("deletedAtEpochMillis")).toLong(),
                 )
                 revision()
+            }
+        }
+    }
+
+    private fun validateTaskRecurrence(value: (String) -> String?) {
+        val frequency = value("recurrenceFrequency")
+        val ruleValues = listOf(
+            value("recurrenceInterval"),
+            value("recurrenceWeekdays"),
+            value("recurrenceCount"),
+            value("recurrenceEndDate"),
+        )
+        val metadataValues = listOf(
+            value("recurrenceSeriesId"),
+            value("recurrenceAnchorEpochMillis"),
+            value("recurrenceAnchorZoneId"),
+            value("recurrenceOccurrenceIndex"),
+        )
+        if (frequency == null) {
+            require(ruleValues.all { it == null } && metadataValues.all { it == null }) {
+                "Non-recurring task contains recurrence state"
+            }
+            return
+        }
+
+        require(value("startEpochMillis") != null || value("dueEpochMillis") != null) {
+            "Recurring task requires a start or due instant"
+        }
+        require(value("recurrenceCount") == null || value("recurrenceEndDate") == null) {
+            "Recurrence cannot contain both count and end date"
+        }
+        require(metadataValues.all { it == null } || metadataValues.all { it != null }) {
+            "Recurrence series metadata is incomplete"
+        }
+
+        if (value("recurrenceOccurrenceIndex") == "-1") {
+            val weekdays = requireNotNull(value("recurrenceWeekdays"))
+                .split(',')
+                .filter(String::isNotEmpty)
+                .map(DayOfWeek::valueOf)
+            require(frequency == RecurrenceFrequency.WEEKLY.name && weekdays.isNotEmpty()) {
+                "Pending recurrence occurrence requires explicit weekly weekdays"
+            }
+            val anchorDay = Instant.ofEpochMilli(
+                requireNotNull(value("recurrenceAnchorEpochMillis")).toLong(),
+            ).atZone(
+                ZoneId.of(requireNotNull(value("recurrenceAnchorZoneId"))),
+            ).dayOfWeek
+            require(anchorDay !in weekdays) {
+                "Pending recurrence occurrence requires an anchor outside the weekly schedule"
+            }
+        }
+
+        val recurrenceEnd = value("recurrenceEndDate")
+        val dueEpochMillis = value("dueEpochMillis")
+        val dueZoneId = value("dueZoneId")
+        if (recurrenceEnd != null && dueEpochMillis != null && dueZoneId != null) {
+            val dueDate = Instant.ofEpochMilli(dueEpochMillis.toLong())
+                .atZone(ZoneId.of(dueZoneId))
+                .toLocalDate()
+            require(!LocalDate.parse(recurrenceEnd).isBefore(dueDate)) {
+                "Recurrence end date is before the task due date"
             }
         }
     }

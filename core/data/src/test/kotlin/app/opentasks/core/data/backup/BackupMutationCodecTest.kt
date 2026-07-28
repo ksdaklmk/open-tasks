@@ -466,6 +466,36 @@ class BackupMutationCodecTest {
     }
 
     @Test
+    fun weeklyRecurrenceAllowsPendingFirstOccurrenceSentinel() {
+        val task = weeklyTaskWithOccurrenceIndex(-1)
+
+        BackupMutationCodec.encode(
+            BackupMutationPayloadV1(
+                mutationKind = BackupMutationKind.UPSERT,
+                record = task,
+                deletedFamily = null,
+                deletedIdentity = null,
+            ),
+        )
+    }
+
+    @Test
+    fun recurrenceOccurrenceIndexBelowPendingSentinelIsRejected() {
+        val task = weeklyTaskWithOccurrenceIndex(-2)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.encode(
+                BackupMutationPayloadV1(
+                    mutationKind = BackupMutationKind.UPSERT,
+                    record = task,
+                    deletedFamily = null,
+                    deletedIdentity = null,
+                ),
+            )
+        }
+    }
+
+    @Test
     fun immediatelyStoppedTimerAllowsEqualStartAndStopMillis() {
         val record = TimeEntryEntity(
             id = "time-immediate",
@@ -545,6 +575,29 @@ class BackupMutationCodecTest {
             """{"name":"workspaceId","type":"STRING","value":"workspace-1"},""" +
             """{"name":"name","type":"STRING","value":"Urgent"}]},""" +
             """"deletedFamily":null,"deletedIdentity":null}"""
+
+    private fun weeklyTaskWithOccurrenceIndex(index: Int): BackupRecordV1 {
+        val task = roomRecords().single { it.family == BackupRecordFamily.TASK }
+        return task.copy(
+            fields = task.fields.map { field ->
+                val replacement = when (field.name) {
+                    "recurrenceFrequency" -> "WEEKLY" to BackupFieldType.STRING
+                    "recurrenceInterval" -> "1" to BackupFieldType.INT
+                    "recurrenceWeekdays" -> "MONDAY" to BackupFieldType.STRING
+                    "recurrenceSeriesId" -> "series-1" to BackupFieldType.STRING
+                    "recurrenceAnchorEpochMillis" -> "1" to BackupFieldType.LONG
+                    "recurrenceAnchorZoneId" -> "UTC" to BackupFieldType.STRING
+                    "recurrenceOccurrenceIndex" -> index.toString() to BackupFieldType.INT
+                    else -> null
+                }
+                if (replacement == null) {
+                    field
+                } else {
+                    field.copy(type = replacement.second, value = replacement.first)
+                }
+            },
+        )
+    }
 
     private fun roomRecords(): List<BackupRecordV1> = listOf(
         VaultEntity("vault-1", "LOCAL", 1, 6, 1, 1).toBackupRecordV1(),
