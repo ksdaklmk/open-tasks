@@ -51,7 +51,6 @@ import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SemanticStatus
-import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
@@ -3027,7 +3026,6 @@ class RoomVaultRepository(
                 .take(HOME_TASK_LIMIT),
             projects = projects.filter { it.archivedAt == null },
             activeTimer = activeTimer,
-            syncState = SyncState.LocalOnly,
             overdueCount = openTasks.count { task ->
                 task.due?.instant?.isBefore(currentTime) == true
             },
@@ -3122,7 +3120,6 @@ class RoomVaultRepository(
             upcomingTasks = emptyList(),
             projects = emptyList(),
             activeTimer = null,
-            syncState = SyncState.LocalOnly,
             overdueCount = 0,
         ),
         tasks = emptyList(),

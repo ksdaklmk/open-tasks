@@ -38,7 +38,6 @@ dependencies {
     implementation(libs.room.ktx)
     implementation(libs.sqlite)
     implementation(libs.sqlcipher)
-    implementation(libs.work.runtime)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.core)

@@ -6,11 +6,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 
-enum class StorageMode {
-    LOCAL,
-    DRIVE_PRIMARY,
-}
-
 enum class SemanticStatus {
     BACKLOG,
     PLANNED,
@@ -25,39 +20,6 @@ enum class Priority {
     MEDIUM,
     HIGH,
     URGENT,
-}
-
-enum class SyncPhase {
-    PREPARING,
-    UPLOADING,
-    DOWNLOADING,
-    MERGING,
-    VERIFYING,
-}
-
-enum class SyncBlockReason {
-    AUTHENTICATION,
-    OFFLINE,
-    QUOTA,
-    CHECKSUM,
-    DECRYPTION,
-    RETRY_EXHAUSTED,
-}
-
-sealed interface SyncState {
-    data object LocalOnly : SyncState
-    data object Synced : SyncState
-    data class Pending(val operations: Int) : SyncState
-    data class Running(val phase: SyncPhase, val progress: Float?) : SyncState
-    data class Blocked(val reason: SyncBlockReason) : SyncState
-}
-
-enum class SyncReason {
-    STARTUP,
-    EDIT,
-    USER_REFRESH,
-    PERIODIC,
-    PROVIDER_MIGRATION,
 }
 
 data class Revision(
@@ -75,7 +37,6 @@ data class ZonedMoment(
 
 data class Vault(
     val id: VaultId,
-    val storageMode: StorageMode,
     val createdAt: Instant,
     val schemaVersion: Int,
     val cryptoVersion: Int,
@@ -329,14 +290,5 @@ data class Tombstone(
     val objectType: String,
     val deletedAt: Instant,
     val purgeAfter: Instant,
-    val revision: Revision,
-)
-
-data class SyncOperation(
-    val id: String,
-    val deviceId: DeviceId,
-    val objectId: String,
-    val objectType: String,
-    val payload: ByteArray,
     val revision: Revision,
 )

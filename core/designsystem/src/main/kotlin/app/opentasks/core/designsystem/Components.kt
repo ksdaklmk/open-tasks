@@ -18,8 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.CloudDone
-import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Icon
@@ -45,7 +43,6 @@ import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.SemanticStatus
-import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.Task
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -81,53 +78,6 @@ fun SectionHeader(
         if (action != null) {
             Spacer(Modifier.width(16.dp))
             action()
-        }
-    }
-}
-
-@Composable
-fun SyncHealthChip(
-    state: SyncState,
-    modifier: Modifier = Modifier,
-) {
-    val content = when (state) {
-        SyncState.LocalOnly -> Triple("On this device", Icons.Rounded.CloudOff, false)
-        SyncState.Synced -> Triple("Up to date", Icons.Rounded.CloudDone, false)
-        is SyncState.Pending -> Triple("${state.operations} changes pending", Icons.Rounded.Schedule, true)
-        is SyncState.Running ->
-            Triple("Syncing ${state.phase.name.lowercase(Locale.UK)}", Icons.Rounded.Schedule, true)
-        is SyncState.Blocked -> Triple("Sync needs attention", Icons.Rounded.CloudOff, true)
-    }
-    Surface(
-        modifier = modifier,
-        color = if (content.third) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
-        contentColor = if (content.third) {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        shape = MaterialTheme.shapes.small,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                content.second,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = if (content.third) {
-                    MaterialTheme.colorScheme.secondary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-            Text(content.first, style = MaterialTheme.typography.labelLarge)
         }
     }
 }

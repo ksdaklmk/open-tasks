@@ -33,12 +33,16 @@ Do not uninstall the app or wipe emulator data — the emulator holds a workspac
 ## Architecture rules
 
 - Every write is a `DomainCommand` executed through `VaultRepository.execute`. Never touch Room outside `RoomVaultRepository`.
-- Each mutation updates records **and** appends an outbox operation in one transaction.
+- Each accepted mutation updates records **and** appends ordered backup-journal
+  entries in one transaction. The old outbox table is migration-only and must
+  not receive new mutations.
 - Undo is produced by the repository and returned in `CommandResult.Success(message, undo)`. Never reconstruct undo in the UI.
 - Checklist and tag edits use granular commands, not whole-relation replacement.
 - `feature/*` modules depend only on `:core:model` and `:core:designsystem`. Feature composables are stateless — plain data in, lambdas out. No Hilt in feature or core modules; all command dispatch lives in `:app`.
 - `:core:sync` and `:core:crypto` stay free of Compose and Android UI so merge and recovery proofs run as unit tests.
-- `InMemoryVaultRepository` (in `:core:data` `src/main`, used by unit tests) must stay behaviorally in sync with `RoomVaultRepository` whenever a command is added.
+- `InMemoryVaultRepository` (in `:core:data` `src/main`, used by unit tests)
+  must stay behaviorally in sync with `RoomVaultRepository` whenever a command
+  is added, including backup-journal atomicity.
 - Selected task/project identity lives in `SavedStateHandle`, not in composable state.
 - Navigation is **Navigation 3** (`NavDisplay` + `rememberNavBackStack` + `entryProvider`, routes are `@Serializable data object … : NavKey`). Not `navigation-compose`, no `NavHost`.
 - Layout comes from `WorkspaceLayoutPolicy.calculate(widthDp, hasSeparatingFold)`, never from `WindowSizeClass` or device model.
@@ -53,11 +57,9 @@ Do not uninstall the app or wipe emulator data — the emulator holds a workspac
   must keep encrypted Room as the sole live structured-data authority, add no
   bidirectional sync path, encrypt objects locally through the provider-neutral
   authenticated codec, and use separate `BackupObjectStore` and
-  `AttachmentBlobStore` boundaries. The existing `CloudObjectStore` and
-  `SyncCoordinator` types are legacy, unused sync foundations; they must not
-  direct new provider, backup, or blob work. Stage 2 remains planning-only
-  until its focused plan is approved, and provider transport belongs no earlier
-  than Stage 3.
+  `AttachmentBlobStore` boundaries. The `core:sync` framing types are internal
+  provider-independent foundations; they must not direct new provider, backup,
+  or blob work. Provider transport belongs no earlier than Stage 3.
 
 ## Style
 

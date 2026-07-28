@@ -37,7 +37,6 @@ import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.OpenTasksColors
 import app.opentasks.core.designsystem.ProjectProgressRow
 import app.opentasks.core.designsystem.SectionHeader
-import app.opentasks.core.designsystem.SyncHealthChip
 import app.opentasks.core.designsystem.TaskRow
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.InsightsSnapshot
@@ -231,8 +230,6 @@ private fun HomeHeader(
                 Icon(Icons.Rounded.Search, contentDescription = "Search workspace")
             }
         }
-        Spacer(Modifier.height(12.dp))
-        SyncHealthChip(snapshot.syncState)
     }
 }
 

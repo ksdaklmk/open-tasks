@@ -19,7 +19,6 @@ data class HomeSnapshot(
     val upcomingTasks: List<Task>,
     val projects: List<Project>,
     val activeTimer: ActiveTimerSnapshot?,
-    val syncState: SyncState,
     val overdueCount: Int,
 )
 

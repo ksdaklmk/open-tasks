@@ -194,7 +194,6 @@ object OpenTasksFixtures {
                 startedAt = Instant.parse("2026-07-26T07:37:00Z"),
                 elapsed = Duration.ofMinutes(46).plusSeconds(12),
             ),
-            syncState = SyncState.LocalOnly,
             overdueCount = 1,
         ),
         tasks = tasks,

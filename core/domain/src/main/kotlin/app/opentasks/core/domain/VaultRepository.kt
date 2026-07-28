@@ -12,8 +12,6 @@ import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
-import app.opentasks.core.model.SyncReason
-import app.opentasks.core.model.SyncState
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -351,9 +349,4 @@ interface VaultRepository {
     suspend fun currentWorkspace(): WorkspaceSnapshot
     suspend fun execute(command: DomainCommand): CommandResult
     suspend fun search(query: SearchQuery): List<SearchResult>
-}
-
-interface SyncCoordinator {
-    val state: StateFlow<SyncState>
-    suspend fun requestSync(reason: SyncReason)
 }

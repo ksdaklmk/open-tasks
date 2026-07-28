@@ -18,6 +18,7 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    implementation(project(":core:sync"))
     implementation(libs.coroutines.core)
     testImplementation(libs.junit)
 }
