@@ -154,7 +154,7 @@ object CloudObjectFormat : CloudObjectFrameCodec {
                 failure,
             )
         }
-        validateHeader(header)
+        validateHeader(header, headerBytes.size)
         if (!headerBytes.contentEquals(canonicalHeaderBytes(header))) {
             throw CloudFormatException(
                 CloudFormatFailure.MALFORMED,
@@ -182,7 +182,10 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         return ByteArray(encoded.remaining()).also(encoded::get)
     }
 
-    private fun validateHeader(header: CloudObjectHeader) {
+    private fun validateHeader(
+        header: CloudObjectHeader,
+        headerLength: Int? = null,
+    ) {
         if (header.magic != MAGIC) {
             throw CloudFormatException(
                 CloudFormatFailure.UNSUPPORTED_FORMAT,
@@ -196,11 +199,15 @@ object CloudObjectFormat : CloudObjectFrameCodec {
                 "Ciphertext length must be positive",
             )
         }
-        if (header.ciphertextLength >= Long.MAX_VALUE - LENGTH_PREFIX_BYTES) {
-            throw CloudFormatException(
-                CloudFormatFailure.LENGTH_MISMATCH,
-                "Cloud frame length overflows",
-            )
+        if (headerLength == null) {
+            if (header.ciphertextLength >= Long.MAX_VALUE - LENGTH_PREFIX_BYTES) {
+                throw CloudFormatException(
+                    CloudFormatFailure.LENGTH_MISMATCH,
+                    "Cloud frame length overflows",
+                )
+            }
+        } else {
+            checkedFrameLength(headerLength, header.ciphertextLength)
         }
         if (header.ciphertextLength > CloudBounds.maximumCiphertextBytes(header.family)) {
             throw CloudFormatException(

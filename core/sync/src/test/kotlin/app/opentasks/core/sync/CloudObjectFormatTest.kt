@@ -174,6 +174,23 @@ class CloudObjectFormatTest {
     }
 
     @Test
+    fun decodeClassifiesExactFrameOverflowBeforeFamilyBound() {
+        val declaredLength = Long.MAX_VALUE - 5
+        val headerBytes = canonicalHeader(
+            ciphertextLength = declaredLength,
+            ciphertextSha256 = ZERO_SHA256,
+        )
+        val source = HeaderOnlyTrackingInputStream(headerBytes)
+
+        val failure = assertThrows(CloudFormatException::class.java) {
+            CloudObjectFormat.decode(source, Long.MAX_VALUE)
+        }
+
+        assertEquals(CloudFormatFailure.LENGTH_MISMATCH, failure.failure)
+        assertFalse(source.ciphertextRead)
+    }
+
+    @Test
     fun decodeRejectsNegativeZeroOversizedAndTruncatedHeaderPrefixes() {
         val invalidPrefixes = listOf(
             byteArrayOf(-1, -1, -1, -1) to CloudFormatFailure.MALFORMED,
