@@ -160,7 +160,7 @@ The file responsibilities locked by this plan are:
   existing master-plan path, and explicit historical markers on every
   superseded train document.
 
-- [ ] **Step 1: Prove the active contracts still express the old direction**
+- [x] **Step 1: Prove the active contracts still express the old direction**
 
 Run:
 
@@ -176,7 +176,7 @@ rg -n \
 Expected: matches in the live handoff, product, architecture, threat model, or
 old programme prove that the direction reset is not yet recorded.
 
-- [ ] **Step 2: Make the approved design record final**
+- [x] **Step 2: Make the approved design record final**
 
 Keep its status exactly:
 
@@ -186,7 +186,7 @@ Keep its status exactly:
 
 Do not change the approved decisions while performing the contract rewrite.
 
-- [ ] **Step 3: Rewrite the active product and architecture contracts**
+- [x] **Step 3: Rewrite the active product and architecture contracts**
 
 Apply these exact responsibilities:
 
@@ -216,7 +216,7 @@ The current-state wording must distinguish implemented facts from approved
 future work. In particular, do not claim that backup, Android Auto Backup,
 Drive transport, recovery UI, or attachments are operational.
 
-- [ ] **Step 4: Replace the live handoff and programme map**
+- [x] **Step 4: Replace the live handoff and programme map**
 
 `HANDOFF.md` must:
 
@@ -257,7 +257,7 @@ boundaries; its product surfaces and acceptance matrix must use backup and
 active-device terminology. Preserve still-valid privacy, accessibility,
 platform, and rollout decisions.
 
-- [ ] **Step 5: Mark historical train documents without erasing evidence**
+- [x] **Step 5: Mark historical train documents without erasing evidence**
 
 Keep completed evidence, but add an immediately visible banner after each
 historical title.
@@ -295,7 +295,7 @@ For Train 6:
 > execution.
 ```
 
-- [ ] **Step 6: Verify terminology, current-state honesty, and historical banners**
+- [x] **Step 6: Verify terminology, current-state honesty, and historical banners**
 
 Run:
 
@@ -333,7 +333,7 @@ git diff --check
 
 Expected: exit `0` with no output.
 
-- [ ] **Step 7: Commit the direction reset**
+- [x] **Step 7: Commit the direction reset**
 
 ```bash
 git add HANDOFF.md README.md PRODUCT.md DESIGN.md docs/architecture.md \
@@ -357,7 +357,7 @@ git commit -m "docs: reset programme to local data authority"
 - Produces: the same five mutable test states scoped correctly to their
   compositions, with no product-code or assertion change.
 
-- [ ] **Step 1: Reproduce the five recorded lint failures**
+- [x] **Step 1: Reproduce the five recorded lint failures**
 
 Run:
 
@@ -369,7 +369,7 @@ Expected: FAIL with five `UnrememberedMutableState` findings in
 `InsightsScreenInstrumentedTest.kt`. If the exact failure count differs, stop
 and record the actual findings before editing.
 
-- [ ] **Step 2: Remember only state created inside compositions**
+- [x] **Step 2: Remember only state created inside compositions**
 
 Add:
 
@@ -393,7 +393,7 @@ There are two separate `presentation` declarations and both use the shown
 remembered form. Leave the `openInsights` state created outside composition
 unchanged.
 
-- [ ] **Step 3: Re-run the focused lint gate**
+- [x] **Step 3: Re-run the focused lint gate**
 
 Run:
 
@@ -403,7 +403,7 @@ Run:
 
 Expected: PASS with no `UnrememberedMutableState` finding.
 
-- [ ] **Step 4: Verify the source change is limited to state lifetime**
+- [x] **Step 4: Verify the source change is limited to state lifetime**
 
 Run:
 
@@ -416,7 +416,7 @@ git diff --check
 Expected: one import and five `remember` wrappers; no changed assertions,
 semantics queries, product source, or whitespace errors.
 
-- [ ] **Step 5: Commit the lint correction**
+- [x] **Step 5: Commit the lint correction**
 
 ```bash
 git add \
@@ -477,7 +477,7 @@ interface CloudObjectFrameCodec {
 
 Later tasks depend on those exact names and enum values.
 
-- [ ] **Step 1: Write failing identity-encoding tests**
+- [x] **Step 1: Write failing identity-encoding tests**
 
 Create `CloudHeaderIdentityEncodingTest.kt` with:
 
@@ -545,7 +545,7 @@ families. The hard-coded manifest golden proves that schema, crypto, and
 minimum-reader versions each occupy a distinct length-prefixed field even
 though v1 is the only supported value.
 
-- [ ] **Step 2: Write failing typed-frame tests**
+- [x] **Step 2: Write failing typed-frame tests**
 
 Extend `CloudObjectFormatTest.kt` so checksum, version, bound, length, and
 truncation cases assert the exact failure:
@@ -573,7 +573,7 @@ assertEquals(identity, decoded.header.identity)
 assertArrayEquals(ciphertext, decoded.takeCiphertext())
 ```
 
-- [ ] **Step 3: Run the focused tests to verify they fail**
+- [x] **Step 3: Run the focused tests to verify they fail**
 
 Run:
 
@@ -587,7 +587,7 @@ Run:
 Expected: compilation failure because the new encoding, failure types, and
 identity overload do not exist.
 
-- [ ] **Step 4: Implement strict length-prefixed identity encoding**
+- [x] **Step 4: Implement strict length-prefixed identity encoding**
 
 Encode these nine UTF-8 fields in this exact order, each preceded by one
 four-byte unsigned big-endian byte length:
@@ -642,7 +642,7 @@ Validation accepts only v1 schema/crypto/minimum-reader values, non-blank
 strict UTF-8 IDs, a complete `0 <= chunkIndex < chunkCount <= 26` tuple for
 attachments, and two null chunk fields for every other family.
 
-- [ ] **Step 5: Implement typed frame failures and identity framing**
+- [x] **Step 5: Implement typed frame failures and identity framing**
 
 Replace untyped decode-path `require` failures with
 `CloudFormatException`. Preserve their safe messages, but callers branch only
@@ -665,7 +665,7 @@ Implement `encode(identity, ciphertext)` by deriving `ciphertextLength` and
 lowercase SHA-256 internally, then delegating to the existing header overload.
 Call identity validation before framing.
 
-- [ ] **Step 6: Run the complete sync unit suite**
+- [x] **Step 6: Run the complete sync unit suite**
 
 Run:
 
@@ -676,7 +676,7 @@ Run:
 Expected: PASS. Existing canonical v1 frame resources remain byte-identical,
 and all existing ownership/boundary tests still pass.
 
-- [ ] **Step 7: Verify no framing fixture changed unintentionally**
+- [x] **Step 7: Verify no framing fixture changed unintentionally**
 
 Run:
 
@@ -689,7 +689,7 @@ git diff --check
 Expected: no diff under the existing `v1` resource directory and no whitespace
 errors.
 
-- [ ] **Step 8: Commit the identity and frame contract**
+- [x] **Step 8: Commit the identity and frame contract**
 
 ```bash
 git add core/sync
@@ -733,7 +733,7 @@ interface VaultCrypto {
 `encryptRecord` and `decryptRecord` become default convenience methods that
 derive and clear `CryptoContext.associatedData()` around those byte methods.
 
-- [ ] **Step 1: Write failing generic-AEAD tests**
+- [x] **Step 1: Write failing generic-AEAD tests**
 
 Add:
 
@@ -779,7 +779,7 @@ fun genericAeadRejectsChangedAssociatedData() {
 Add assertions that `encryptBytes` does not modify caller plaintext or
 associated data and that a closed `VaultKey` fails closed.
 
-- [ ] **Step 2: Run the crypto tests to verify compilation fails**
+- [x] **Step 2: Run the crypto tests to verify compilation fails**
 
 Run:
 
@@ -792,7 +792,7 @@ Run:
 Expected: compilation failure because `encryptBytes` and `decryptBytes` do not
 exist.
 
-- [ ] **Step 3: Add the byte AEAD methods and preserve record behaviour**
+- [x] **Step 3: Add the byte AEAD methods and preserve record behaviour**
 
 Implement in `VaultCrypto`:
 
@@ -845,7 +845,7 @@ interface defaults exercise the new methods. Update the test-only
 `TrackingVaultCrypto` implementation for the new abstract methods. Do not
 expose serialized keysets or Tink primitives outside `core:crypto`.
 
-- [ ] **Step 4: Run the complete crypto unit suite**
+- [x] **Step 4: Run the complete crypto unit suite**
 
 Run:
 
@@ -856,7 +856,7 @@ Run:
 Expected: PASS, including existing recovery-envelope, Argon2id, key-erasure,
 record-associated-data, wrong-passphrase, and tamper tests.
 
-- [ ] **Step 5: Commit the AEAD boundary**
+- [x] **Step 5: Commit the AEAD boundary**
 
 ```bash
 git add core/crypto
@@ -935,7 +935,7 @@ retains one owned array, returns defensive copies before transfer, transfers
 the exact array once, rejects use after transfer, and zeroes retained plaintext
 on `close`.
 
-- [ ] **Step 1: Write failing round-trip and ownership tests**
+- [x] **Step 1: Write failing round-trip and ownership tests**
 
 Create `AuthenticatedCloudObjectCodecTest.kt` with real
 `TinkVaultCrypto`:
@@ -994,7 +994,7 @@ Add focused tests for defensive `copyPlaintext`, one-shot
 `takePlaintext`, close-before-transfer zeroisation, caller plaintext
 preservation, and a closed key.
 
-- [ ] **Step 2: Write failing authentication and ordering tests**
+- [x] **Step 2: Write failing authentication and ordering tests**
 
 Add tests that:
 
@@ -1022,7 +1022,7 @@ private fun assertFailure(
 }
 ```
 
-- [ ] **Step 3: Run the focused test to verify it fails**
+- [x] **Step 3: Run the focused test to verify it fails**
 
 Run:
 
@@ -1035,7 +1035,7 @@ Run:
 Expected: compilation failure because `core:data` does not depend on
 `core:crypto` and the authenticated codec types do not exist.
 
-- [ ] **Step 4: Add the dependency and implement owned plaintext**
+- [x] **Step 4: Add the dependency and implement owned plaintext**
 
 Add:
 
@@ -1074,7 +1074,7 @@ class DecryptedCloudObject internal constructor(
 }
 ```
 
-- [ ] **Step 5: Implement encryption with explicit ownership cleanup**
+- [x] **Step 5: Implement encryption with explicit ownership cleanup**
 
 Use:
 
@@ -1102,7 +1102,7 @@ override fun encrypt(
 Identity validation therefore completes before AEAD encryption. The codec does
 not clear caller plaintext.
 
-- [ ] **Step 6: Implement checksum-before-decrypt and typed failure mapping**
+- [x] **Step 6: Implement checksum-before-decrypt and typed failure mapping**
 
 Decode the frame first, map `CloudFormatException.failure` exactly, then
 transfer and clear the verified ciphertext around AEAD:
@@ -1166,7 +1166,7 @@ private fun CloudFormatFailure.toDecodeFailure(): CloudDecodeFailure =
 Do not catch `IllegalStateException` from a closed key; that is a local
 programming/lifecycle fault rather than an untrusted-object result.
 
-- [ ] **Step 7: Run all three affected module suites**
+- [x] **Step 7: Run all three affected module suites**
 
 Run:
 
@@ -1179,7 +1179,7 @@ Run:
 
 Expected: PASS. No Android device or provider credential is required.
 
-- [ ] **Step 8: Scan the codec boundary**
+- [x] **Step 8: Scan the codec boundary**
 
 Run:
 
@@ -1194,7 +1194,7 @@ git diff --check
 
 Expected: no logging match and no whitespace errors.
 
-- [ ] **Step 9: Commit the authenticated codec**
+- [x] **Step 9: Commit the authenticated codec**
 
 ```bash
 git add core/data core/crypto core/sync
@@ -1249,7 +1249,7 @@ Each JSON fixture has exactly:
 The other three resources use the exact identities, nonces, and plaintexts
 listed in Step 1 and the same calculated field set.
 
-- [ ] **Step 1: Create the independent deterministic generator**
+- [x] **Step 1: Create the independent deterministic generator**
 
 Use Node built-ins only:
 
@@ -1415,7 +1415,7 @@ for (const testCase of cases) {
 }
 ```
 
-- [ ] **Step 2: Generate and inspect the four immutable resources**
+- [x] **Step 2: Generate and inspect the four immutable resources**
 
 Run:
 
@@ -1430,7 +1430,7 @@ head -40 \
 Expected: exactly four JSON files; every hex field is lowercase and non-empty;
 null chunk values remain JSON null.
 
-- [ ] **Step 3: Write the failing independent golden test**
+- [x] **Step 3: Write the failing independent golden test**
 
 `AuthenticatedCloudObjectGoldenTest` parses each fixture, constructs its
 `CloudHeaderIdentity`, and supplies a test-only `FixtureVaultCrypto` whose
@@ -1473,7 +1473,7 @@ Also reconstruct the canonical header bytes from `frameHex` and compare them
 to `headerJson`; do not trust the production JSON encoder to derive the
 expected string.
 
-- [ ] **Step 4: Run the golden test to verify it fails before the test fake is complete**
+- [x] **Step 4: Run the golden test to verify it fails before the test fake is complete**
 
 Run:
 
@@ -1486,7 +1486,7 @@ Run:
 Expected: compilation or assertion failure until fixture parsing and
 `FixtureVaultCrypto` are complete.
 
-- [ ] **Step 5: Complete the independent test AEAD**
+- [x] **Step 5: Complete the independent test AEAD**
 
 `FixtureVaultCrypto` delegates key creation/wrapping to `TinkVaultCrypto`, but
 its byte AEAD methods:
@@ -1501,7 +1501,7 @@ its byte AEAD methods:
 The fake exists only in `src/test`; production never accepts a raw key or fixed
 nonce.
 
-- [ ] **Step 6: Run generator reproducibility and all codec tests**
+- [x] **Step 6: Run generator reproducibility and all codec tests**
 
 Capture the fixture digest, regenerate, and compare:
 
@@ -1519,7 +1519,7 @@ git diff --exit-code -- \
 Expected: regeneration produces no diff and both authenticated-codec test
 classes pass.
 
-- [ ] **Step 7: Review the fixture boundary**
+- [x] **Step 7: Review the fixture boundary**
 
 Run:
 
@@ -1534,7 +1534,7 @@ git diff --check
 
 Expected: no provider/private-content match and no whitespace errors.
 
-- [ ] **Step 8: Commit the vectors**
+- [x] **Step 8: Commit the vectors**
 
 ```bash
 git add scripts/generate-authenticated-cloud-v1-fixtures.mjs \
@@ -1557,7 +1557,7 @@ git commit -m "test: freeze authenticated cloud object vectors"
 - Produces: a reproducible Stage 1 completion record and a single next action:
   write the focused Stage 2 local-backup and Android Auto Backup plan.
 
-- [ ] **Step 1: Run the focused JVM and lint gates**
+- [x] **Step 1: Run the focused JVM and lint gates**
 
 Run:
 
@@ -1571,7 +1571,7 @@ Run:
 
 Expected: exit `0`.
 
-- [ ] **Step 2: Audit ADB before any device test**
+- [x] **Step 2: Audit ADB before any device test**
 
 Run:
 
@@ -1584,7 +1584,7 @@ emulator that is not the protected normal workspace. If the protected
 workspace is attached, stop before instrumentation and use the repository's
 recorded disposable-emulator procedure.
 
-- [ ] **Step 3: Run the affected device suites on the disposable emulator**
+- [x] **Step 3: Run the affected device suites on the disposable emulator**
 
 Run:
 
@@ -1597,7 +1597,7 @@ Run:
 Expected: exit `0`; the Insights suite and application process-restoration
 suite pass without touching the protected workspace.
 
-- [ ] **Step 4: Run the repository debug gate**
+- [x] **Step 4: Run the repository debug gate**
 
 Run:
 
@@ -1607,7 +1607,7 @@ Run:
 
 Expected: exit `0`.
 
-- [ ] **Step 5: Run release assembly separately**
+- [x] **Step 5: Run release assembly separately**
 
 Run:
 
@@ -1617,7 +1617,7 @@ Run:
 
 Expected: exit `0`, including R8 and resource shrinking.
 
-- [ ] **Step 6: Run source, placeholder, and whitespace audits**
+- [x] **Step 6: Run source, placeholder, and whitespace audits**
 
 Run:
 
@@ -1633,7 +1633,7 @@ git status --short
 Expected: no new placeholder/logging match, no whitespace error, and only the
 two checkpoint documents remain modified.
 
-- [ ] **Step 7: Re-read the approved acceptance boundary**
+- [x] **Step 7: Re-read the approved acceptance boundary**
 
 Confirm all of the following from code and fresh command output:
 
@@ -1652,7 +1652,7 @@ Confirm all of the following from code and fresh command output:
 - Active documents contain no Drive-primary or multi-device product promise.
 - Android Auto Backup remains unmodified and accurately described as Stage 2.
 
-- [ ] **Step 8: Record exact evidence in the handoff**
+- [x] **Step 8: Record exact evidence in the handoff**
 
 Update `HANDOFF.md` with:
 
@@ -1667,7 +1667,7 @@ Update `HANDOFF.md` with:
 Mark completed checkboxes in this plan only after their command or commit has
 actually succeeded.
 
-- [ ] **Step 9: Invoke completion verification and commit the checkpoint**
+- [x] **Step 9: Invoke completion verification and commit the checkpoint**
 
 Invoke `superpowers:verification-before-completion`, then re-run:
 

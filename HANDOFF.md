@@ -2,18 +2,19 @@
 
 - Last updated: 28 July 2026
 - Branch: `main`
-- Session status: **Stage 1 direction reset is the active programme. This
-  checkpoint is documentation-only; no Stage 1 source change has started.
-  Train 1 Tasks 1.1–1.5 remain complete and independently reviewed. GitHub
-  maintenance remains paused.**
-- Current implementation point: `ce8f5bf` (`fix: isolate verified ciphertext
-  ownership`) remains the last source commit. The local-authority direction was
+- Session status: **Stage 1 direction reset and authenticated object
+  foundation are complete and verified. No Stage 2 source work has started.
+  The sole recommended next action is to write the focused Stage 2 local-backup
+  and Android Auto Backup implementation plan. Train 1 Tasks 1.1–1.5 remain
+  complete and independently reviewed. GitHub maintenance remains paused.**
+- Current implementation point: `377c5c3` (`test: freeze authenticated cloud
+  object vectors`) is the last source commit. The local-authority direction was
   approved in `6e3c816` (`docs: define local authority and cloud attachment
   direction`) and clarified in `ebdc6b0` (`docs: clarify backup and blob
   lifecycle boundaries`). The Stage 1 plan is `7a54bd2` (`docs: plan local
-  authority stage 1 foundation`). No emulator was ADB-attached during the
-  direction-reset audit. The named authorised replacement snapshot remains
-  present; its last verified state was expanded, light mode and 100% text.
+  authority stage 1 foundation`). The Stage 1 checkpoint below records every
+  source commit and fresh exit gate. The named authorised replacement snapshot
+  remains present and was restored after the disposable-emulator suites.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -68,14 +69,15 @@ Android Auto Backup, recovery UI, cloud attachments and Play Console work have
 not started. Android backup remains disabled. Release gates which depend on
 those features remain blocked by their listed prerequisites.
 
-Train 1 Tasks 1.1–1.5 are complete. Vault-content keys are now independent of
+Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are now independent of
 SQLCipher database keys and have separate recovery and per-vault Android
 Keystore wrapping. Canonical bounded cloud frames exist for manifests,
-snapshots, operation segments and attachment chunks. These are foundations
-only: the authenticated provider-independent codec, backup, Drive transport,
-user recovery and attachments are not implemented. The historical Train 1
-Task 1.6 is superseded. After this contract-reset commit, Stage 1 Task 2,
-**Clear the Insights Instrumented-Test Lint Gate**, is the first source change.
+snapshots, operation segments and attachment chunks. The authenticated
+provider-independent codec binds their complete identity as AEAD associated
+data and has independent deterministic vectors for all four families. These
+remain foundations only: backup, Drive transport, user recovery and
+attachments are not implemented. The historical Train 1 Task 1.6 is
+superseded.
 
 ## Train 0 baseline checkpoint verification
 
@@ -583,6 +585,150 @@ were both still present. Treat the recorded identity as the last verified
 protected state and restore the named snapshot before any future live-app
 acceptance.
 
+## Stage 1 authenticated object foundation checkpoint
+
+Stage 1 is complete at source commit `377c5c3`. Its reviewed commit chain is:
+
+- Task 1: `29bd550` — `docs: reset programme to local data authority`;
+  correction `4c97929` — `docs: make stage 1 task 2 next`.
+- Task 2: `9822e03` — `test: remember Insights composition state`.
+- Task 3: `6449940` — `feat: type cloud frame identity failures`; correction
+  `a4fffed` — `fix: classify cloud frame length overflow`.
+- Task 4: `e9388fb` — `feat: expose associated-data AEAD boundary`.
+- Task 5: `53d63fb` — `feat: add authenticated cloud object codec`.
+- Task 6: `377c5c3` — `test: freeze authenticated cloud object vectors`.
+
+Fresh host gates passed on 28 July 2026:
+
+```bash
+./gradlew :core:sync:testDebugUnitTest \
+  :core:crypto:testDebugUnitTest \
+  :core:data:testDebugUnitTest \
+  :feature:more:lintDebug \
+  --stacktrace
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+./gradlew :app:assembleRelease --stacktrace
+```
+
+The exact focused command exited 0 in 772 ms (154 actionable tasks: 1
+executed, 1 from cache and 152 up-to-date). Its forced fresh confirmation with
+`--rerun-tasks` exited 0 in 14 seconds with 154/154 tasks executed and 125/125
+JVM tests passing: Sync 49, Crypto 22 and Data 54. More lint reported no errors
+and no `UnrememberedMutableState` finding; its 11 non-blocking findings are 10
+warnings and one hint.
+
+The exact repository debug gate exited 0 in 17 seconds (547 actionable tasks:
+62 executed and 485 up-to-date). Its forced fresh confirmation with
+`--rerun-tasks` exited 0 in 25 seconds with 547/547 tasks executed and 186/186
+JVM tests passing: App 25, Crypto 22, Data 54, Domain 36 and Sync 49. Lint and
+`:app:assembleDebug` completed.
+
+The exact release gate exited 0 in 47 seconds (441 actionable tasks: 49
+executed, 4 from cache and 388 up-to-date). Its forced fresh confirmation with
+`--rerun-tasks` exited 0 in 54 seconds with 441/441 tasks executed, including
+`:app:minifyReleaseWithR8`, resource conversion/shrinking and
+`:app:assembleRelease`.
+
+The required ADB audit first found one attached `emulator-5554`. Read-only
+inspection identified the protected `Pixel_10_Pro_Fold` AVD, API 37 / Android
+17, because its process had none of the disposable flags. Its package identity
+matched the protected record: UID `10232`, first install
+`2026-07-28 05:53:59`, CE inode `549494`, and database/WAL/SHM inodes
+`567204`/`567205`/`567234`. No instrumentation ran against it.
+
+The protected instance was stopped and ADB was verified empty. The same AVD
+was then started as the sole disposable target with:
+
+```bash
+/Users/kk/Library/Android/sdk/emulator/emulator \
+  -avd Pixel_10_Pro_Fold \
+  -read-only -no-snapshot-save -no-snapshot-load -no-window
+```
+
+The process arguments and sole ADB identity were verified before running:
+
+```bash
+./gradlew :feature:more:connectedDebugAndroidTest \
+  :app:connectedDebugAndroidTest \
+  --stacktrace
+```
+
+The first run accurately exposed inherited AVD test state: the disposable
+overlay had global font scale `2.0`. App restoration passed 3/3, while More
+passed 21/24 and failed the three display/layout assertions
+`expandedFoldableContentUsesTwoColumnsAfterTheNavigationRail`,
+`contentWidthAtSevenHundredTwentyDpUsesTwoColumns`, and
+`conflictedTimeIsDisclosedExcludedByDefaultAndCanBeIncluded`. The command
+exited 1 in 1 minute 17 seconds (322 actionable tasks: 20 executed, 5 from
+cache and 297 up-to-date).
+
+Only the disposable overlay was changed to the suite's accepted baseline font
+scale `1.0`; its API, opened Fold posture, density and sole-ADB state remained
+unchanged. The full exact command then exited 0 in 1 minute 18 seconds (322
+actionable tasks: 2 executed and 320 up-to-date): More passed 24/24 (Insights
+21 and More/Archive/Bin 3), and App process restoration passed 3/3, for 27/27
+device tests. Dedicated 200%-text coverage remained part of the passing
+Insights suite.
+
+The disposable emulator was stopped without snapshot save. The protected
+snapshot `task13_fixround1_replacement_20260728_055359` was restored with
+`-no-snapshot-save`. Its AVD/API, UID, install time, light mode, opened posture,
+CE inode and database/WAL/SHM inodes matched the pre-suite audit exactly.
+The restored snapshot currently reports font scale `2.0`; this differs from
+the older handoff text that described its last verified visual state as 100%,
+but does not change its exact package or encrypted-data identity. No protected
+install, uninstall, data clear or instrumentation occurred; the exact
+protected workspace identity remained unchanged.
+
+The independent fixture generator was rerun and
+`git diff --exit-code -- core/data/src/test/resources/cloud-format/v1-authenticated`
+returned no diff. The 19 authenticated-object tests passed as part of the
+fresh Data suite. Fixture SHA-256 digests are:
+
+```text
+6a685fe9ca734e102e0f96408a1e531fff79c912d7474098599cfb5044faa24e  attachment-chunk.json
+15d967d35a59e0466a53733fc4a0ee21df1e1aad740f028d279e086f21faf042  manifest.json
+8ba80ec4c814abcd767e61131ac2bf9ee14d25a3efd103ca18cd6f17ca3d6410  operation-segment.json
+3ce3780b33e62c2954ba8e9999346f7c49b4872b1d08db51b246a7f97ce35cb2  snapshot.json
+```
+
+The final acceptance audit confirmed:
+
+- Room remains the sole live structured-data authority. Stage 1 added only
+  the internal `core:data` → `core:crypto` dependency; no provider transport,
+  credential, backup scheduler or cloud-to-Room path was added.
+- No Room model, repository, outbox or exported-schema path changed from the
+  approved Stage 1 plan commit. `VaultDatabase` remains version 5 with the
+  existing five schema resources. The protected package/database identity is
+  unchanged.
+- All eight `CloudHeaderIdentity` fields are encoded as strict
+  length-prefixed AEAD associated data. Tests prove valid family, vault,
+  object, chunk-index and chunk-count substitutions fail authentication;
+  schema, crypto and minimum-reader incompatibilities reject before AEAD.
+- Declared frame length and ciphertext checksum reject before AEAD.
+  Untrusted frame/authentication failures map to typed categories; exception
+  text interpolates only public version, bound, family or fixed region labels,
+  never private identifiers, checksums, keys or recovery metadata.
+- Caller plaintext remains caller-owned. Associated-data and owned ciphertext
+  buffers are cleared in `finally`; successful plaintext is closeable,
+  defensively copyable or transferred exactly once.
+- The active-contract scan found no stale provider-primary,
+  runtime-coordinator, cloud-status or concurrent-device product promise.
+- `android:allowBackup` remains `false`; extraction rules still exclude the
+  application root and legacy rules remain unchanged. Android Auto Backup is
+  not shipped and remains Stage 2 work.
+- The placeholder/logging scan, fixture provider/private-content scan,
+  `git diff --check` and working-tree audit were clean.
+
+The sole non-blocking residual risk is environmental reproducibility: the
+current protected AVD snapshot carries 200% global text, so device suites that
+assume the 100% baseline must explicitly verify their disposable overlay
+before running. The product's dedicated 200%-text acceptance remains covered.
+
+The only recommended next action is to write the focused Stage 2 local-backup
+and Android Auto Backup implementation plan. Do not begin Stage 2 source work
+from this checkpoint.
+
 ## Previous P1/P2 pause closure verification
 
 After adding the explicit pause and resume instructions, the exact paused code
@@ -649,18 +795,15 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-There is no in-progress implementation. This is the Stage 1 documentation-only
-direction-reset checkpoint, and no Stage 1 source change has started. The
-independently reviewed Train 1 Task 1.5 commit `ce8f5bf` remains the last
-source commit. No authenticated object codec, new `core:data`/`core:crypto`
-dependency, backup, Drive transport, recovery, or attachment flow should be
-inferred from the completed frame foundation.
+There is no in-progress implementation. Stage 1 is complete at source commit
+`377c5c3`; its authenticated provider-independent object codec and four
+independent vectors passed the checkpoint above. No backup, Drive transport,
+recovery, Android Auto Backup or attachment flow should be inferred from this
+foundation.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
-queued dependency PR checks and resolution remain paused. The next source
-change is Stage 1 Task 2, which corrects the existing Insights instrumented-test
-lint findings. Later stage work remains blocked by the six-stage dependency
-chain.
+queued dependency PR checks and resolution remain paused. No later-stage
+source change is authorised; the next action is the focused Stage 2 plan.
 
 ## Resume instructions
 
@@ -670,22 +813,19 @@ chain.
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
-2. Re-scan the working tree and preserve any user changes. Tasks 1.1–1.5 are
-   complete; do not amend or reopen their reviewed commits without a new
-   finding.
-3. Start source work at Stage 1 Task 2 and nowhere later: correct the five
-   `UnrememberedMutableState` findings in the Task 1.3 Insights device test and
-   rerun the repository command from `CLAUDE.md`.
-4. Continue Stage 1 Tasks 3–6 in order with strict test-first coverage:
-   canonical identity/failures, generic AEAD, authenticated codec, then
-   independent golden vectors.
-5. Run any device suite on a sole disposable emulator. Do not let Keystore or
-   App instrumentation mutate the protected workspace.
-6. Preserve existing outbox and local data. Android Auto Backup stays disabled
+2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
+   1.1–1.5 and Stage 1 are complete; do not amend or reopen their reviewed
+   commits without a new finding.
+3. Write the focused Stage 2 local-backup and Android Auto Backup plan. Do not
+   begin Stage 2 source work before that plan is approved.
+4. Run any device suite on a sole disposable emulator. Verify the disposable
+   font scale as well as AVD/API/posture before instrumentation. Do not let
+   Keystore or App instrumentation mutate the protected workspace.
+5. Preserve existing outbox and local data. Android Auto Backup stays disabled
    until Stage 2, and no provider work starts before Stage 3.
-7. Follow the six-stage dependency chain; historical Train 1–6 plans are
+6. Follow the six-stage dependency chain; historical Train 1–6 plans are
    evidence or replanning inputs, not executable contracts.
-8. Before recording the next pause or completion, run the repository gate from
+7. Before recording the next pause or completion, run the repository gate from
    `CLAUDE.md`, affected device suites, release assembly when production code
    changed, and `git diff --check`; update this hand-off and every affected
    contract document in the same change.
@@ -699,8 +839,8 @@ recorded above.
 
 | Order | Stage | Status | Exit decision |
 |---:|---|---|---|
-| 1 | Direction reset and authenticated object foundation | In progress: contract reset only | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
-| 2 | Local backup and Android Auto Backup | Blocked by Stage 1 | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
+| 2 | Local backup and Android Auto Backup | Ready for focused planning | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Blocked by Stage 2 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
@@ -714,12 +854,9 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Begin source work with Stage 1 Task 2, **Clear the Insights
-   Instrumented-Test Lint Gate**.
-2. Complete Stage 1 Tasks 3–6 in order: typed/canonical identity, generic AEAD,
-   authenticated object codec, and independent golden vectors.
-3. Run Stage 1 exit gates and record the verified checkpoint before designing
-   or executing Stage 2.
+1. Write the focused Stage 2 local-backup and Android Auto Backup
+   implementation plan.
+2. Obtain approval for that plan before any Stage 2 source change.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 remains disabled until Stage 2. Existing Room, outbox, and local workspace data
@@ -809,11 +946,9 @@ remain untouched until their explicitly planned, verified migrations.
 
 ## Recommended next action
 
-After this contract-reset commit, start Stage 1 Task 2: correct the five
-recorded `UnrememberedMutableState` findings in the accepted Insights
-instrumented test and rerun its specified lint gate. Then execute Stage 1 Tasks
-3–6 in order and complete the Stage 1 exit review before any Stage 2 design or
-implementation.
+Write the focused Stage 2 local-backup and Android Auto Backup implementation
+plan. Do not begin Stage 2 source work before that plan is reviewed and
+approved.
 
 Keep the protected workspace untouched and run device suites only on a sole
 disposable emulator. Preserve existing outbox data, keep Android Auto Backup
