@@ -79,17 +79,17 @@ class TinkVaultCrypto(
         newPassphrase: CharArray,
     ): VaultKeyEnvelope = wrapForRecovery(unlockedKey, newPassphrase)
 
-    override fun encryptRecord(
+    override fun encryptBytes(
         key: VaultKey,
-        context: CryptoContext,
         plaintext: ByteArray,
-    ): ByteArray = primitive(key).encrypt(plaintext, context.associatedData())
+        associatedData: ByteArray,
+    ): ByteArray = primitive(key).encrypt(plaintext, associatedData)
 
-    override fun decryptRecord(
+    override fun decryptBytes(
         key: VaultKey,
-        context: CryptoContext,
         ciphertext: ByteArray,
-    ): ByteArray = primitive(key).decrypt(ciphertext, context.associatedData())
+        associatedData: ByteArray,
+    ): ByteArray = primitive(key).decrypt(ciphertext, associatedData)
 
     private fun wrap(
         serializedKeyset: ByteArray,

@@ -78,15 +78,41 @@ interface VaultCrypto {
         newPassphrase: CharArray,
     ): VaultKeyEnvelope
 
+    fun encryptBytes(
+        key: VaultKey,
+        plaintext: ByteArray,
+        associatedData: ByteArray,
+    ): ByteArray
+
+    fun decryptBytes(
+        key: VaultKey,
+        ciphertext: ByteArray,
+        associatedData: ByteArray,
+    ): ByteArray
+
     fun encryptRecord(
         key: VaultKey,
         context: CryptoContext,
         plaintext: ByteArray,
-    ): ByteArray
+    ): ByteArray {
+        val associatedData = context.associatedData()
+        return try {
+            encryptBytes(key, plaintext, associatedData)
+        } finally {
+            associatedData.fill(0)
+        }
+    }
 
     fun decryptRecord(
         key: VaultKey,
         context: CryptoContext,
         ciphertext: ByteArray,
-    ): ByteArray
+    ): ByteArray {
+        val associatedData = context.associatedData()
+        return try {
+            decryptBytes(key, ciphertext, associatedData)
+        } finally {
+            associatedData.fill(0)
+        }
+    }
 }

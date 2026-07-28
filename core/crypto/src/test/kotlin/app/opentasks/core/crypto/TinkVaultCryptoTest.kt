@@ -71,6 +71,65 @@ class TinkVaultCryptoTest {
     }
 
     @Test
+    fun genericAeadRoundTripsWithCallerAssociatedData() {
+        val key = crypto.createKey()
+        val associatedData = "independent-context".toByteArray()
+        val originalAssociatedData = associatedData.copyOf()
+        val plaintext = "private payload".toByteArray()
+        val originalPlaintext = plaintext.copyOf()
+
+        val ciphertext = crypto.encryptBytes(key, plaintext, associatedData)
+
+        assertArrayEquals(originalPlaintext, plaintext)
+        assertArrayEquals(originalAssociatedData, associatedData)
+
+        val decoded = crypto.decryptBytes(key, ciphertext, associatedData)
+
+        assertArrayEquals(originalPlaintext, decoded)
+        plaintext.fill(0)
+        originalPlaintext.fill(0)
+        decoded.fill(0)
+        associatedData.fill(0)
+        originalAssociatedData.fill(0)
+        ciphertext.fill(0)
+        key.close()
+    }
+
+    @Test
+    fun genericAeadRejectsChangedAssociatedData() {
+        val key = crypto.createKey()
+        val ciphertext = crypto.encryptBytes(
+            key,
+            "private payload".toByteArray(),
+            "context-a".toByteArray(),
+        )
+
+        assertThrows(GeneralSecurityException::class.java) {
+            crypto.decryptBytes(
+                key,
+                ciphertext,
+                "context-b".toByteArray(),
+            )
+        }
+        ciphertext.fill(0)
+        key.close()
+    }
+
+    @Test
+    fun closedVaultKeyCannotEncryptBytes() {
+        val key = crypto.createKey()
+        key.close()
+
+        assertThrows(IllegalStateException::class.java) {
+            crypto.encryptBytes(
+                key,
+                "private payload".toByteArray(),
+                "independent-context".toByteArray(),
+            )
+        }
+    }
+
+    @Test
     fun closedVaultKeyCannotBeWrappedForRecovery() {
         val contentKey = crypto.createKey()
         contentKey.close()
@@ -347,16 +406,16 @@ class TinkVaultCryptoTest {
             newPassphrase: CharArray,
         ): VaultKeyEnvelope = error("Not used")
 
-        override fun encryptRecord(
+        override fun encryptBytes(
             key: VaultKey,
-            context: CryptoContext,
             plaintext: ByteArray,
+            associatedData: ByteArray,
         ): ByteArray = error("Not used")
 
-        override fun decryptRecord(
+        override fun decryptBytes(
             key: VaultKey,
-            context: CryptoContext,
             ciphertext: ByteArray,
+            associatedData: ByteArray,
         ): ByteArray = error("Not used")
     }
 
