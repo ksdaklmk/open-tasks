@@ -105,7 +105,11 @@ fun MoreScreen(
 ) {
     var destination by rememberSaveable { mutableStateOf(MoreDestination.OVERVIEW) }
     LaunchedEffect(openInsights) {
-        if (openInsights) destination = MoreDestination.INSIGHTS
+        if (openInsights) {
+            destination = MoreDestination.INSIGHTS
+        } else if (destination == MoreDestination.INSIGHTS) {
+            destination = MoreDestination.OVERVIEW
+        }
     }
     val closeInsights = {
         destination = MoreDestination.OVERVIEW

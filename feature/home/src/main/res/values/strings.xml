@@ -3,6 +3,7 @@
     <string name="home_insights_heading">Last 7 days</string>
     <string name="home_insights_summary">%1$d completed • %2$s recorded</string>
     <string name="home_insights_open">Open Insights</string>
+    <string name="home_insights_less_than_minute">&lt;1 min</string>
     <string name="home_insights_minutes">%1$d min</string>
     <string name="home_insights_hours">%1$d h</string>
     <string name="home_insights_hours_minutes">%1$d h %2$d min</string>

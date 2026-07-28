@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -41,12 +42,19 @@ import app.opentasks.core.model.InsightsRange
 import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.InstantRange
+import app.opentasks.core.model.MilestoneHealthRow
+import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.MetricComparison
+import app.opentasks.core.model.OverdueBand
+import app.opentasks.core.model.OverdueRow
+import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.ProjectTimeRow
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TagTimeRow
+import app.opentasks.core.model.TaskId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -95,6 +103,41 @@ class InsightsScreenInstrumentedTest {
         composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
         Espresso.pressBack()
         composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+    }
+
+    @Test
+    fun externalInsightsRequestIsOneShotAndClearsWhenSwitchingAway() {
+        var openInsights by mutableStateOf(true)
+        composeRule.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = emptyList(),
+                    insightsState = populatedState(),
+                    openInsights = openInsights,
+                    onInsightsClosed = { openInsights = false },
+                    onInsightsRangeChange = {},
+                    onInsightsProjectFilter = { _, _ -> },
+                    onInsightsTagFilter = { _, _ -> },
+                    onInsightsIncludeConflictedTimeChange = {},
+                    onInsightsPresentationChange = {},
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
+
+        composeRule.runOnIdle { openInsights = false }
+        composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+
+        composeRule.runOnIdle { openInsights = true }
+        composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-back").performClick()
+        composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+        assertFalse(openInsights)
     }
 
     @Test
@@ -261,6 +304,134 @@ class InsightsScreenInstrumentedTest {
     }
 
     @Test
+    fun qualifiedEngineFieldsRemainExplicitInChartAndTablePresentations() {
+        composeRule.setContent {
+            var presentation by mutableStateOf(InsightsPresentation.CHART)
+            OpenTasksTheme {
+                InsightsScreen(
+                    state = qualifiedState().copy(presentation = presentation),
+                    onRangeChange = {},
+                    onProjectFilter = { _, _ -> },
+                    onTagFilter = { _, _ -> },
+                    onIncludeConflictedTimeChange = {},
+                    onPresentationChange = { presentation = it },
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("1 more completed task than the previous range.")
+            .performScrollTo()
+            .assertIsDisplayed()
+        listOf(
+            "1–7 days overdue",
+            "8–30 days overdue",
+            "31+ days overdue",
+            "Due soon",
+            "Due earlier",
+            "Due oldest",
+        ).forEach { text ->
+            composeRule.onNodeWithText(text).performScrollTo().assertIsDisplayed()
+        }
+        composeRule.onNodeWithText(
+            "Tag totals may overlap because a task can have more than one tag.",
+        ).performScrollTo().assertIsDisplayed()
+        val oldest = composeRule.onNodeWithTag("insights-overdue-row-due-oldest")
+            .getUnclippedBoundsInRoot()
+        val earlier = composeRule.onNodeWithTag("insights-overdue-row-due-earlier")
+            .getUnclippedBoundsInRoot()
+        val soon = composeRule.onNodeWithTag("insights-overdue-row-due-soon")
+            .getUnclippedBoundsInRoot()
+        assertTrue("Engine overdue order should be preserved across groups", oldest.top < earlier.top)
+        assertTrue("Engine overdue order should be preserved across groups", earlier.top < soon.top)
+
+        listOf(
+            "On track" to "Due 30 Jul 2026",
+            "At risk" to "Due 31 Jul 2026",
+            "Blocked" to "No due date",
+            "Complete" to "Due 1 Aug 2026",
+        ).forEachIndexed { index, (health, due) ->
+            composeRule.onNodeWithTag("insights-milestone-row-$index")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertTextContains("Project health: $health")
+                .assertTextContains(due)
+        }
+
+        composeRule.onNodeWithTag("insights-presentation-table")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("insights-table").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Tag totals may overlap because a task can have more than one tag.",
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-overdue-row-due-oldest")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("Due oldest")
+        composeRule.onNodeWithText(
+            "1 Jun 2026 • Alpha",
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun positiveSubMinuteDurationsKeepNonZeroLabelsAndBarRatios() {
+        val state = populatedState().copy(
+            snapshot = populatedState().snapshot.copy(
+                estimateActual = populatedState().snapshot.estimateActual.copy(
+                    estimated = Duration.ofSeconds(30),
+                    actual = DurationQuality(
+                        trusted = Duration.ofSeconds(1),
+                        conflicted = Duration.ZERO,
+                        included = Duration.ofSeconds(1),
+                    ),
+                ),
+                projectTime = listOf(
+                    ProjectTimeRow(
+                        projectId = ProjectId("alpha"),
+                        displayName = "Alpha",
+                        duration = DurationQuality(
+                            trusted = Duration.ofSeconds(1),
+                            conflicted = Duration.ZERO,
+                            included = Duration.ofSeconds(1),
+                        ),
+                    ),
+                ),
+                tagTime = listOf(
+                    TagTimeRow(
+                        tagId = TagId("focus"),
+                        displayName = "Focus",
+                        duration = DurationQuality(
+                            trusted = Duration.ofMillis(500),
+                            conflicted = Duration.ZERO,
+                            included = Duration.ofMillis(500),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestInsightsScreen(state)
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Alpha, <1 min")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Focus, <1 min")
+            .performScrollTo()
+            .assertIsDisplayed()
+        assertTrue(
+            durationRatio(Duration.ofMillis(500), Duration.ofSeconds(30)) > 0f,
+        )
+        assertTrue(
+            durationBarProgress(Duration.ofMillis(1), Duration.ofSeconds(30)) >= 0.01f,
+        )
+    }
+
+    @Test
     fun noDataStateNamesTheSelectedRange() {
         composeRule.setContent {
             OpenTasksTheme {
@@ -400,6 +571,58 @@ class InsightsScreenInstrumentedTest {
     }
 
     @Test
+    fun compactLightTwoHundredPercentStacksLongOverdueLabelAboveMetadata() {
+        val base = populatedState()
+        val state = base.copy(
+            snapshot = base.snapshot.copy(
+                overdue = listOf(
+                    OverdueRow(
+                        taskId = TaskId("long-overdue"),
+                        title = "Reconcile July invoices",
+                        projectName = "Quarterly accounts",
+                        dueAt = Instant.parse("2026-07-27T12:00:00Z"),
+                        band = OverdueBand.ONE_TO_SEVEN_DAYS,
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f),
+            ) {
+                OpenTasksTheme(darkTheme = false) {
+                    Box(
+                        modifier = Modifier
+                            .width(320.dp)
+                            .height(640.dp),
+                    ) {
+                        TestInsightsScreen(state)
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("insights-overdue-row-long-overdue")
+            .performScrollTo()
+            .assertIsDisplayed()
+        val label = composeRule.onNodeWithText(
+            text = "Reconcile July invoices",
+            useUnmergedTree = true,
+        ).getUnclippedBoundsInRoot()
+        val metadata = composeRule.onNodeWithText(
+            text = "Quarterly accounts",
+            substring = true,
+            useUnmergedTree = true,
+        ).getUnclippedBoundsInRoot()
+
+        assertTrue(
+            "At compact 200% text, the overdue label should be above long metadata",
+            metadata.top > label.top,
+        )
+    }
+
+    @Test
     fun expandedFoldableContentUsesTwoColumnsAfterTheNavigationRail() {
         composeRule.setContent {
             OpenTasksTheme {
@@ -428,6 +651,90 @@ class InsightsScreenInstrumentedTest {
     }
 
     @Test
+    fun contentWidthBelowSevenHundredTwentyDpUsesStackedSections() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                Box(
+                    modifier = Modifier
+                        .width(719.dp)
+                        .height(800.dp),
+                ) {
+                    TestInsightsScreen(populatedState())
+                }
+            }
+        }
+
+        val projects = composeRule.onNodeWithText("Projects")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val view = composeRule.onNodeWithText("View")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertTrue("The report should be below filters at 719 dp", view.top > projects.top)
+    }
+
+    @Test
+    fun contentWidthAtSevenHundredTwentyDpUsesTwoColumns() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                Box(
+                    modifier = Modifier
+                        .width(720.dp)
+                        .height(800.dp),
+                ) {
+                    TestInsightsScreen(populatedState())
+                }
+            }
+        }
+
+        val projects = composeRule.onNodeWithText("Projects")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val view = composeRule.onNodeWithText("View")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertTrue("The report should be right of filters at 720 dp", view.left > projects.left)
+        assertEquals(projects.top, view.top, 1f)
+    }
+
+    @Test
+    fun expandedTwoHundredPercentTextKeepsQualifiedContentReachable() {
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f),
+            ) {
+                OpenTasksTheme {
+                    Box(
+                        modifier = Modifier
+                            .width(720.dp)
+                            .height(640.dp),
+                    ) {
+                        TestInsightsScreen(qualifiedState())
+                    }
+                }
+            }
+        }
+
+        val projects = composeRule.onNodeWithText("Projects")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val view = composeRule.onNodeWithText("View")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "At 200% text, the report should stack below filters",
+            view.top > projects.top,
+        )
+        composeRule.onNodeWithTag("insights-milestone-row-3")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("Project health: Complete")
+    }
+
+    @Test
     fun keyboardTabTraversalFollowsTheVisibleControlOrder() {
         composeRule.setContent {
             val inputModeManager = LocalInputModeManager.current
@@ -439,17 +746,30 @@ class InsightsScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithTag("insights-range-7")
+        val traversal = listOf(
+            "insights-back",
+            "insights-range-7",
+            "insights-range-30",
+            "insights-range-90",
+            "insights-project-filter-alpha",
+            "insights-project-filter-beta",
+            "insights-tag-filter-focus",
+            "insights-tag-filter-urgent",
+            "insights-include-conflicted",
+            "insights-presentation-chart",
+            "insights-presentation-table",
+        )
+        composeRule.onNodeWithTag(traversal.first())
             .performSemanticsAction(SemanticsActions.RequestFocus)
-            .assertIsFocused()
-            .performKeyInput { pressKey(Key.Tab) }
-        composeRule.onNodeWithTag("insights-range-30")
-            .assertIsFocused()
-            .performKeyInput { pressKey(Key.Tab) }
-        composeRule.onNodeWithTag("insights-range-90")
-            .assertIsFocused()
-            .performKeyInput { pressKey(Key.Tab) }
-        composeRule.onNodeWithTag("insights-project-filter-alpha").assertIsFocused()
+
+        traversal.forEachIndexed { index, tag ->
+            val node = composeRule.onNodeWithTag(tag)
+                .assertIsFocused()
+                .assertIsDisplayed()
+            if (index < traversal.lastIndex) {
+                node.performKeyInput { pressKey(Key.Tab) }
+            }
+        }
     }
 
     @Test
@@ -571,6 +891,55 @@ class InsightsScreenInstrumentedTest {
             ),
         )
     }
+
+    private fun qualifiedState(): InsightsUiState = populatedState().copy(
+        snapshot = populatedState().snapshot.copy(
+            overdue = listOf(
+                OverdueRow(
+                    taskId = TaskId("due-oldest"),
+                    title = "Due oldest",
+                    projectName = "Alpha",
+                    dueAt = Instant.parse("2026-06-01T12:00:00Z"),
+                    band = OverdueBand.THIRTY_ONE_DAYS_OR_MORE,
+                ),
+                OverdueRow(
+                    taskId = TaskId("due-earlier"),
+                    title = "Due earlier",
+                    projectName = "Beta",
+                    dueAt = Instant.parse("2026-07-01T12:00:00Z"),
+                    band = OverdueBand.EIGHT_TO_THIRTY_DAYS,
+                ),
+                OverdueRow(
+                    taskId = TaskId("due-soon"),
+                    title = "Due soon",
+                    projectName = null,
+                    dueAt = Instant.parse("2026-07-24T12:00:00Z"),
+                    band = OverdueBand.ONE_TO_SEVEN_DAYS,
+                ),
+            ),
+            milestoneHealth = listOf(
+                milestone(0, ProjectHealth.ON_TRACK, "2026-07-30T12:00:00Z"),
+                milestone(1, ProjectHealth.AT_RISK, "2026-07-31T12:00:00Z"),
+                milestone(2, ProjectHealth.BLOCKED, null),
+                milestone(3, ProjectHealth.COMPLETE, "2026-08-01T12:00:00Z"),
+            ),
+        ),
+    )
+
+    private fun milestone(
+        index: Int,
+        health: ProjectHealth,
+        dueAt: String?,
+    ): MilestoneHealthRow = MilestoneHealthRow(
+        milestoneId = MilestoneId("milestone-$index"),
+        displayName = "Milestone $index",
+        projectName = "Project $index",
+        dueAt = dueAt?.let(Instant::parse),
+        projectHealth = health,
+        completedTasks = index.toLong(),
+        totalTasks = 4,
+        overdueTasks = if (index == 1) 1 else 0,
+    )
 
     private fun emptyState(): InsightsUiState = InsightsUiState(
         snapshot = emptySnapshot(),

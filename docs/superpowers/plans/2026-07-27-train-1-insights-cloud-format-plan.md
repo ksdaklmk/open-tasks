@@ -20,6 +20,19 @@ Tink AEAD, Android Keystore, JUnit 4, Compose UI test, Room/SQLCipher fixtures.
 
 **Backlog:** P2-F04 and P1-D02.
 
+## Execution status — paused 27 July 2026
+
+- Train 0 and Train 1 Tasks 1.1–1.2 are complete and independently reviewed.
+- Task 1.3's initial implementation is commit `2b4df62`.
+- Task 1.3 fix round 1 is intentionally paused in an unstaged dirty tree after
+  its post-font-scale-layout More suite passed 22/22. Compact corrected visual
+  recapture, final-source App verification, commit
+  `fix: preserve live insights qualifications`, and independent re-review
+  remain.
+- Do not start Task 1.4 until Task 1.3's re-review is clean. The exact device,
+  dirty-path, evidence and resume state is authoritative in `HANDOFF.md` and
+  the ignored SDD progress ledger.
+
 ## Global Constraints
 
 - Follow the master plan constraints.
@@ -194,6 +207,8 @@ git commit -m "feat: complete qualified insights metrics"
 - Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
 - Modify: `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt`
 - Modify: `app/src/main/kotlin/app/opentasks/di/AppModule.kt`
+- Create:
+  `app/src/test/kotlin/app/opentasks/WorkspaceInsightsStateTest.kt`
 - Create: `feature/more/src/main/res/values/strings.xml`
 - Create: `feature/home/src/main/res/values/strings.xml`
 - Modify:
@@ -288,9 +303,42 @@ lists required by its own project/tag multi-filter controls. The immutable
 option fields above close that testability and interaction gap without
 changing the engine or stateless-screen boundary.
 
+**Approved review correction (2026-07-27):** restoration must treat stored
+values as untrusted `Any?` data and safely ignore wrong scalar types, wrong
+collection types, mixed list elements, blanks, unknown enum names, and unknown
+record IDs. Add the app JVM test path above for restoration and temporal
+derivation coverage.
+
+Insights time context must come from an injected, fakeable provider and be
+captured once per refresh. Recalculate on foreground resume and at relevant
+due/local-midnight boundaries; detect clock or time-zone changes without
+waiting for an unrelated workspace mutation. Tests cross a due instant and a
+local midnight with a fake provider.
+
+The detailed screen preserves the engine's trust qualifications: grouped
+overdue bands, a plain-language completion comparison, an explicit statement
+that tag totals can overlap, and milestone due plus explicit project-health
+labels. Both presentations expose the same ordered qualified data. Positive
+sub-minute durations render as non-zero and bar ratios use sub-minute
+precision.
+
+**Pause checkpoint (2026-07-27):** manual 200% QA rejected the width-only
+two-column decision because it collapsed labels into vertical characters.
+The current unstaged correction bases expansion on effective width after font
+scaling, so 200% text uses the stacked structure; its focused and full More
+device suites pass. The invalid visual RED and valid replacement expanded
+captures are retained. Compact corrected captures and the final verification,
+commit and re-review steps remain as recorded in `HANDOFF.md`.
+
+**User acceptance correction (2026-07-28):** light mode is the required
+acceptance colour scheme for this application. Existing dark-theme support is
+retained as best-effort, but dark appearance is not a Task 1.3 release gate.
+
 ### Task 1.4: Separate and locally wrap the vault-content key
 
 **Files:**
+- Modify:
+  `core/crypto/build.gradle.kts`
 - Modify:
   `core/crypto/src/main/kotlin/app/opentasks/core/crypto/VaultCrypto.kt`
 - Modify:
@@ -340,6 +388,12 @@ interface VaultContentKeyStore {
 Keep `createVault(passphrase)` only as a deprecated source-compatible default
 that calls `createKey` and `wrapForRecovery`; remove it after all callers
 migrate.
+
+Configure `core:crypto` with
+`androidx.test.runner.AndroidJUnitRunner` and the AndroidX test core, JUnit,
+runner and rules dependencies before adding its instrumentation test. The
+module does not currently declare an Android test runner or Android-test
+dependencies.
 
 - [ ] Add failing tests proving two calls create different keys, local key
 bytes differ from the SQLCipher key fixture, recovery rewrapping preserves

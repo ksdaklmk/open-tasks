@@ -192,6 +192,8 @@ private fun homeDurationText(duration: Duration): String {
     val hours = minutes / 60
     val remainingMinutes = minutes % 60
     return when {
+        duration > Duration.ZERO && minutes == 0L ->
+            stringResource(R.string.home_insights_less_than_minute)
         hours == 0L -> stringResource(R.string.home_insights_minutes, remainingMinutes)
         remainingMinutes == 0L -> stringResource(R.string.home_insights_hours, hours)
         else -> stringResource(

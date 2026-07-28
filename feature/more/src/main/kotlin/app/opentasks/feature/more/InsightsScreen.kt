@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -51,12 +52,18 @@ import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.InstantRange
 import app.opentasks.core.model.MetricComparison
 import app.opentasks.core.model.MilestoneHealthRow
+import app.opentasks.core.model.OverdueBand
+import app.opentasks.core.model.OverdueRow
+import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.ProjectTimeRow
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TagTimeRow
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.max
 
 data class InsightsUiState(
@@ -98,7 +105,7 @@ fun InsightsScreen(
             .fillMaxSize()
             .testTag("insights-screen"),
     ) {
-        val expanded = maxWidth >= 720.dp
+        val expanded = maxWidth.value / LocalDensity.current.fontScale >= 720f
         val horizontalPadding = if (expanded) 32.dp else 16.dp
         Column(
             modifier = Modifier
@@ -349,6 +356,8 @@ private fun InsightsReport(
 
         CompletionSummary(state.snapshot)
         HorizontalDivider(Modifier.padding(vertical = 24.dp))
+        OverdueRows(state.snapshot.overdue)
+        HorizontalDivider(Modifier.padding(vertical = 24.dp))
         TimeQuality(
             quality = state.snapshot.quality.recordedTime,
             includeConflicted = state.selection.includeConflictedTime,
@@ -415,10 +424,66 @@ private fun CompletionSummary(snapshot: InsightsSnapshot) {
     )
     Spacer(Modifier.height(4.dp))
     Text(
+        text = completionComparisonText(snapshot.completed),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(
         text = stringResource(R.string.insights_overdue_count, snapshot.overdue.size),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+@Composable
+private fun completionComparisonText(comparison: MetricComparison): String {
+    val difference = comparison.current - comparison.previous
+    return when {
+        difference > 0 -> pluralStringResource(
+            R.plurals.insights_completed_more,
+            difference.toInt(),
+            difference,
+        )
+        difference < 0 -> pluralStringResource(
+            R.plurals.insights_completed_fewer,
+            (-difference).toInt(),
+            -difference,
+        )
+        else -> stringResource(R.string.insights_completed_same)
+    }
+}
+
+@Composable
+private fun OverdueRows(rows: List<OverdueRow>) {
+    SectionHeader(stringResource(R.string.insights_overdue_heading))
+    Spacer(Modifier.height(12.dp))
+    if (rows.isEmpty()) {
+        SupportingText(stringResource(R.string.insights_no_overdue))
+        return
+    }
+    rows.groupBy(OverdueRow::band).forEach { (band, bandRows) ->
+        val titleResource = when (band) {
+            OverdueBand.ONE_TO_SEVEN_DAYS -> R.string.insights_overdue_1_7
+            OverdueBand.EIGHT_TO_THIRTY_DAYS -> R.string.insights_overdue_8_30
+            OverdueBand.THIRTY_ONE_DAYS_OR_MORE -> R.string.insights_overdue_31_plus
+        }
+        TableSectionHeader(stringResource(titleResource))
+        bandRows.forEach { row ->
+            DataRow(
+                label = row.title,
+                value = buildString {
+                    append(formatInsightsDate(row.dueAt))
+                    row.projectName?.let { projectName ->
+                        append(" • ")
+                        append(projectName)
+                    }
+                },
+                modifier = Modifier.testTag("insights-overdue-row-${row.taskId.value}"),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+    }
 }
 
 @Composable
@@ -528,19 +593,16 @@ private fun EstimateChart(snapshot: InsightsSnapshot) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     } else {
-        val maximum = max(
-            estimate.estimated.toMinutes(),
-            estimate.actual.included.toMinutes(),
-        ).coerceAtLeast(1)
+        val maximum = maxOf(estimate.estimated, estimate.actual.included)
         MetricBar(
             label = stringResource(R.string.insights_estimated),
             value = durationText(estimate.estimated),
-            progress = estimate.estimated.toMinutes().toFloat() / maximum,
+            progress = durationBarProgress(estimate.estimated, maximum),
         )
         MetricBar(
             label = stringResource(R.string.insights_actual),
             value = durationText(estimate.actual.included),
-            progress = estimate.actual.included.toMinutes().toFloat() / maximum,
+            progress = durationBarProgress(estimate.actual.included, maximum),
         )
         SupportingText(
             stringResource(
@@ -572,12 +634,12 @@ private fun DurationChartSection(
         SupportingText(stringResource(R.string.insights_no_project_time))
         return
     }
-    val maximum = rows.maxOf { it.duration.included.toMinutes() }.coerceAtLeast(1)
+    val maximum = rows.maxOf { it.duration.included }
     rows.forEach { row ->
         MetricBar(
             label = row.displayName,
             value = durationText(row.duration.included),
-            progress = row.duration.included.toMinutes().toFloat() / maximum,
+            progress = durationBarProgress(row.duration.included, maximum),
         )
     }
 }
@@ -590,12 +652,14 @@ private fun TagDurationChart(rows: List<TagTimeRow>) {
         SupportingText(stringResource(R.string.insights_no_tag_time))
         return
     }
-    val maximum = rows.maxOf { it.duration.included.toMinutes() }.coerceAtLeast(1)
+    SupportingText(stringResource(R.string.insights_tag_totals_overlap))
+    Spacer(Modifier.height(8.dp))
+    val maximum = rows.maxOf { it.duration.included }
     rows.forEach { row ->
         MetricBar(
             label = row.displayName,
             value = durationText(row.duration.included),
-            progress = row.duration.included.toMinutes().toFloat() / maximum,
+            progress = durationBarProgress(row.duration.included, maximum),
         )
     }
 }
@@ -717,6 +781,8 @@ private fun InsightsTable(snapshot: InsightsSnapshot) {
         if (snapshot.tagTime.isEmpty()) {
             SupportingText(stringResource(R.string.insights_no_tag_time))
         } else {
+            SupportingText(stringResource(R.string.insights_tag_totals_overlap))
+            Spacer(Modifier.height(4.dp))
             snapshot.tagTime.forEach { row ->
                 DataRow(
                     label = row.displayName,
@@ -744,23 +810,44 @@ private fun DataRow(
     value: String,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
             .semantics(mergeDescendants = true) {},
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.Top,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.labelLarge,
-        )
+        val stacked =
+            maxWidth.value / LocalDensity.current.fontScale <
+                DATA_ROW_STACKING_EFFECTIVE_WIDTH_DP
+        if (stacked) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
     }
 }
 
@@ -768,16 +855,38 @@ private fun DataRow(
 private fun MilestoneRows(rows: List<MilestoneHealthRow>) {
     SectionHeader(stringResource(R.string.insights_milestone_heading))
     Spacer(Modifier.height(12.dp))
-    rows.forEach { row ->
+    rows.forEachIndexed { index, row ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .padding(vertical = 8.dp)
+                .semantics(mergeDescendants = true) {}
+                .testTag("insights-milestone-row-$index"),
         ) {
             Text(row.displayName, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
                 text = row.projectName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = row.dueAt?.let { dueAt ->
+                    stringResource(
+                        R.string.insights_milestone_due,
+                        formatInsightsDate(dueAt),
+                    )
+                } ?: stringResource(R.string.insights_milestone_no_due),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.insights_milestone_health,
+                    projectHealthText(row.projectHealth),
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -815,6 +924,8 @@ internal fun durationText(duration: Duration): String {
     val hours = minutes / 60
     val remainingMinutes = minutes % 60
     return when {
+        duration > Duration.ZERO && minutes == 0L ->
+            stringResource(R.string.insights_less_than_minute)
         hours == 0L -> stringResource(R.string.insights_minutes, remainingMinutes)
         remainingMinutes == 0L -> stringResource(R.string.insights_hours, hours)
         else -> stringResource(
@@ -824,6 +935,31 @@ internal fun durationText(duration: Duration): String {
         )
     }
 }
+
+internal fun durationRatio(value: Duration, maximum: Duration): Float {
+    if (value <= Duration.ZERO || maximum <= Duration.ZERO) return 0f
+    val valueNanos = value.seconds.toDouble() * NANOS_PER_SECOND + value.nano
+    val maximumNanos = maximum.seconds.toDouble() * NANOS_PER_SECOND + maximum.nano
+    return (valueNanos / maximumNanos).toFloat().coerceIn(0f, 1f)
+}
+
+internal fun durationBarProgress(value: Duration, maximum: Duration): Float {
+    val ratio = durationRatio(value, maximum)
+    return if (ratio > 0f) ratio.coerceAtLeast(MIN_VISIBLE_DURATION_PROGRESS) else 0f
+}
+
+@Composable
+private fun projectHealthText(health: ProjectHealth): String = stringResource(
+    when (health) {
+        ProjectHealth.ON_TRACK -> R.string.insights_project_health_on_track
+        ProjectHealth.AT_RISK -> R.string.insights_project_health_at_risk
+        ProjectHealth.BLOCKED -> R.string.insights_project_health_blocked
+        ProjectHealth.COMPLETE -> R.string.insights_project_health_complete
+    },
+)
+
+private fun formatInsightsDate(instant: Instant): String =
+    INSIGHTS_DATE_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 
 private fun InsightsSnapshot.hasData(): Boolean =
     completed.current > 0 ||
@@ -864,3 +1000,8 @@ internal fun emptyInsightsUiState(): InsightsUiState {
         tagOptions = emptyList(),
     )
 }
+
+private const val NANOS_PER_SECOND = 1_000_000_000.0
+private const val MIN_VISIBLE_DURATION_PROGRESS = 0.01f
+private const val DATA_ROW_STACKING_EFFECTIVE_WIDTH_DP = 360f
+private val INSIGHTS_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK)

@@ -26,6 +26,20 @@
     <string name="insights_completed_previous">Previous range</string>
     <string name="insights_task_count">%1$d completed</string>
     <string name="insights_overdue_count">%1$d overdue</string>
+    <plurals name="insights_completed_more">
+        <item quantity="one">%1$d more completed task than the previous range.</item>
+        <item quantity="other">%1$d more completed tasks than the previous range.</item>
+    </plurals>
+    <plurals name="insights_completed_fewer">
+        <item quantity="one">%1$d fewer completed task than the previous range.</item>
+        <item quantity="other">%1$d fewer completed tasks than the previous range.</item>
+    </plurals>
+    <string name="insights_completed_same">The same number of completed tasks as the previous range.</string>
+    <string name="insights_overdue_heading">Overdue tasks</string>
+    <string name="insights_no_overdue">No overdue tasks.</string>
+    <string name="insights_overdue_1_7">1–7 days overdue</string>
+    <string name="insights_overdue_8_30">8–30 days overdue</string>
+    <string name="insights_overdue_31_plus">31+ days overdue</string>
 
     <string name="insights_estimate_heading">Estimate and actual</string>
     <string name="insights_estimated">Estimated</string>
@@ -47,11 +61,20 @@
 
     <string name="insights_project_time_heading">Time by project</string>
     <string name="insights_tag_time_heading">Time by tag</string>
+    <string name="insights_tag_totals_overlap">Tag totals may overlap because a task can have more than one tag.</string>
     <string name="insights_no_project_time">No project time in this range.</string>
     <string name="insights_no_tag_time">No tagged time in this range.</string>
     <string name="insights_milestone_heading">Open milestones</string>
     <string name="insights_milestone_progress">%1$d of %2$d tasks complete • %3$d overdue</string>
+    <string name="insights_milestone_due">Due %1$s</string>
+    <string name="insights_milestone_no_due">No due date</string>
+    <string name="insights_milestone_health">Project health: %1$s</string>
+    <string name="insights_project_health_on_track">On track</string>
+    <string name="insights_project_health_at_risk">At risk</string>
+    <string name="insights_project_health_blocked">Blocked</string>
+    <string name="insights_project_health_complete">Complete</string>
 
+    <string name="insights_less_than_minute">&lt;1 min</string>
     <string name="insights_minutes">%1$d min</string>
     <string name="insights_hours">%1$d h</string>
     <string name="insights_hours_minutes">%1$d h %2$d min</string>

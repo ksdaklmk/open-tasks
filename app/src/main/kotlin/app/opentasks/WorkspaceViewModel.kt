@@ -28,16 +28,20 @@ import app.opentasks.feature.more.InsightsTagOption
 import app.opentasks.feature.more.InsightsUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -72,50 +76,25 @@ class WorkspaceViewModel @Inject constructor(
     private val repository: VaultRepository,
     private val reminderScheduler: ReminderScheduler,
     private val insightsEngine: InsightsEngine,
+    insightsTimeProvider: InsightsTimeProvider,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val selectionState = WorkspaceSelectionState(savedStateHandle)
-    private val insightsSelectionState = InsightsSelectionSavedState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
     private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
 
     val snapshot: StateFlow<WorkspaceSnapshot> = repository.observeWorkspace()
-    val insightsSummary: StateFlow<InsightsSnapshot> = snapshot
-        .map { workspace ->
-            insightsEngine.calculate(
-                workspace = workspace,
-                selection = InsightsSelection(),
-                now = Instant.now(),
-                zoneId = ZoneId.systemDefault(),
-            )
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = insightsEngine.calculate(
-                workspace = snapshot.value,
-                selection = InsightsSelection(),
-                now = Instant.now(),
-                zoneId = ZoneId.systemDefault(),
-            ),
-        )
-    val insightsUiState: StateFlow<InsightsUiState> = combine(
-        snapshot,
-        insightsSelectionState.selection,
-        insightsSelectionState.presentation,
-    ) { workspace, selection, presentation ->
-        buildInsightsUiState(workspace, selection, presentation)
-    }.stateIn(
+    private val workspaceInsightsState = WorkspaceInsightsState(
+        workspace = snapshot,
+        savedStateHandle = savedStateHandle,
+        insightsEngine = insightsEngine,
+        timeProvider = insightsTimeProvider,
         scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = buildInsightsUiState(
-            workspace = snapshot.value,
-            selection = insightsSelectionState.selection.value,
-            presentation = insightsSelectionState.presentation.value,
-        ),
     )
+    val insightsSummary: StateFlow<InsightsSnapshot> = workspaceInsightsState.summary
+    val insightsUiState: StateFlow<InsightsUiState> = workspaceInsightsState.uiState
     val searchResults: StateFlow<List<SearchResult>> = mutableSearchResults.asStateFlow()
     val events = eventChannel.receiveAsFlow()
 
@@ -168,25 +147,29 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     fun setInsightsRange(range: InsightsRange) {
-        insightsSelectionState.setRange(range)
+        workspaceInsightsState.setRange(range)
     }
 
     fun setInsightsProjectFilter(id: ProjectId, selected: Boolean) {
         if (snapshot.value.projects.none { it.id == id }) return
-        insightsSelectionState.setProjectFilter(id, selected)
+        workspaceInsightsState.setProjectFilter(id, selected)
     }
 
     fun setInsightsTagFilter(id: TagId, selected: Boolean) {
         if (snapshot.value.tags.none { it.id == id }) return
-        insightsSelectionState.setTagFilter(id, selected)
+        workspaceInsightsState.setTagFilter(id, selected)
     }
 
     fun setInsightsIncludeConflictedTime(include: Boolean) {
-        insightsSelectionState.setIncludeConflictedTime(include)
+        workspaceInsightsState.setIncludeConflictedTime(include)
     }
 
     fun setInsightsPresentation(presentation: InsightsPresentation) {
-        insightsSelectionState.setPresentation(presentation)
+        workspaceInsightsState.setPresentation(presentation)
+    }
+
+    fun refreshInsightsTime() {
+        workspaceInsightsState.refreshInsightsTime()
     }
 
     fun addTask(title: String) {
@@ -401,10 +384,130 @@ class WorkspaceViewModel @Inject constructor(
         eventChannel.send(WorkspaceEvent.Message(result.message, result.undo))
     }
 
-    private fun buildInsightsUiState(
+}
+
+data class InsightsTimeContext(
+    val now: Instant,
+    val zoneId: ZoneId,
+)
+
+interface InsightsTimeProvider {
+    fun capture(): InsightsTimeContext
+
+    suspend fun awaitUntil(instant: Instant)
+}
+
+internal class SystemInsightsTimeProvider : InsightsTimeProvider {
+    override fun capture(): InsightsTimeContext = InsightsTimeContext(
+        now = Instant.now(),
+        zoneId = ZoneId.systemDefault(),
+    )
+
+    override suspend fun awaitUntil(instant: Instant) {
+        val remaining = Duration.between(Instant.now(), instant)
+        if (!remaining.isNegative && !remaining.isZero) {
+            delay(remaining.toMillis().coerceAtLeast(1L))
+        }
+    }
+}
+
+internal class WorkspaceInsightsState(
+    private val workspace: StateFlow<WorkspaceSnapshot>,
+    savedStateHandle: SavedStateHandle,
+    private val insightsEngine: InsightsEngine,
+    private val timeProvider: InsightsTimeProvider,
+    private val scope: CoroutineScope,
+) {
+    private val selectionState = InsightsSelectionSavedState(savedStateHandle)
+    private var timeContext = timeProvider.capture()
+    private val mutableSummary = MutableStateFlow(
+        calculate(workspace.value, InsightsSelection(), timeContext),
+    )
+    private val mutableUiState = MutableStateFlow(
+        buildUiState(
+            workspace = workspace.value,
+            selection = selectionState.selection.value,
+            presentation = selectionState.presentation.value,
+            context = timeContext,
+        ),
+    )
+    private var scheduleJob: Job? = null
+
+    val summary: StateFlow<InsightsSnapshot> = mutableSummary.asStateFlow()
+    val uiState: StateFlow<InsightsUiState> = mutableUiState.asStateFlow()
+
+    init {
+        scope.launch {
+            workspace.drop(1).collect {
+                refreshInsightsTime()
+            }
+        }
+        scheduleNextRefresh()
+    }
+
+    fun setRange(range: InsightsRange) {
+        selectionState.setRange(range)
+        refreshSelection()
+    }
+
+    fun setProjectFilter(id: ProjectId, selected: Boolean) {
+        selectionState.setProjectFilter(id, selected)
+        refreshSelection()
+    }
+
+    fun setTagFilter(id: TagId, selected: Boolean) {
+        selectionState.setTagFilter(id, selected)
+        refreshSelection()
+    }
+
+    fun setIncludeConflictedTime(include: Boolean) {
+        selectionState.setIncludeConflictedTime(include)
+        refreshSelection()
+    }
+
+    fun setPresentation(presentation: InsightsPresentation) {
+        selectionState.setPresentation(presentation)
+        mutableUiState.value = mutableUiState.value.copy(presentation = presentation)
+    }
+
+    fun refreshInsightsTime() {
+        timeContext = timeProvider.capture()
+        val currentWorkspace = workspace.value
+        mutableSummary.value = calculate(currentWorkspace, InsightsSelection(), timeContext)
+        mutableUiState.value = buildUiState(
+            workspace = currentWorkspace,
+            selection = selectionState.selection.value,
+            presentation = selectionState.presentation.value,
+            context = timeContext,
+        )
+        scheduleNextRefresh()
+    }
+
+    private fun refreshSelection() {
+        mutableUiState.value = buildUiState(
+            workspace = workspace.value,
+            selection = selectionState.selection.value,
+            presentation = selectionState.presentation.value,
+            context = timeContext,
+        )
+    }
+
+    private fun calculate(
+        workspace: WorkspaceSnapshot,
+        selection: InsightsSelection,
+        context: InsightsTimeContext,
+    ): InsightsSnapshot = insightsEngine.calculate(
+        workspace = workspace,
+        selection = selection,
+        now = context.now,
+        zoneId = context.zoneId,
+    )
+
+    private fun buildUiState(
         workspace: WorkspaceSnapshot,
         selection: InsightsSelection,
         presentation: InsightsPresentation,
+        context: InsightsTimeContext,
     ): InsightsUiState {
         val projectIds = workspace.projects.mapTo(hashSetOf(), Project::id)
         val tagIds = workspace.tags.mapTo(hashSetOf()) { it.id }
@@ -413,12 +516,7 @@ class WorkspaceViewModel @Inject constructor(
             tagIds = selection.tagIds.intersect(tagIds),
         )
         return InsightsUiState(
-            snapshot = insightsEngine.calculate(
-                workspace = workspace,
-                selection = effectiveSelection,
-                now = Instant.now(),
-                zoneId = ZoneId.systemDefault(),
-            ),
+            snapshot = calculate(workspace, effectiveSelection, context),
             selection = effectiveSelection,
             presentation = presentation,
             projectOptions = workspace.projects
@@ -437,7 +535,45 @@ class WorkspaceViewModel @Inject constructor(
                 ),
         )
     }
+
+    private fun scheduleNextRefresh() {
+        scheduleJob?.cancel()
+        val nextRefresh = nextInsightsRefresh(workspace.value, timeContext)
+        scheduleJob = scope.launch {
+            timeProvider.awaitUntil(nextRefresh)
+            if (currentCoroutineContext().isActive) {
+                scheduleJob = null
+                refreshInsightsTime()
+            }
+        }
+    }
 }
+
+private fun nextInsightsRefresh(
+    workspace: WorkspaceSnapshot,
+    context: InsightsTimeContext,
+): Instant {
+    val midnight = context.now
+        .atZone(context.zoneId)
+        .toLocalDate()
+        .plusDays(1)
+        .atStartOfDay(context.zoneId)
+        .toInstant()
+    val recheck = context.now.plus(INSIGHTS_TIME_RECHECK)
+    val dueBoundary = workspace.tasks
+        .asSequence()
+        .filter { task ->
+            task.deletedAt == null &&
+                task.semanticStatus != app.opentasks.core.model.SemanticStatus.COMPLETED
+        }
+        .mapNotNull { task -> task.due?.instant }
+        .filter { dueAt -> !dueAt.isBefore(context.now) }
+        .mapNotNull { dueAt -> runCatching { dueAt.plusNanos(1L) }.getOrNull() }
+        .minOrNull()
+    return listOfNotNull(midnight, recheck, dueBoundary).min()
+}
+
+private val INSIGHTS_TIME_RECHECK: Duration = Duration.ofMinutes(15)
 
 internal class InsightsSelectionSavedState(
     private val savedStateHandle: SavedStateHandle,
@@ -445,18 +581,18 @@ internal class InsightsSelectionSavedState(
     val selection = MutableStateFlow(
         InsightsSelection(
             range = restoredEnum(
-                savedStateHandle[INSIGHTS_RANGE],
+                savedStateHandle.get<Any?>(INSIGHTS_RANGE),
                 InsightsRange.SEVEN_DAYS,
             ),
             projectIds = restoredStrings(INSIGHTS_PROJECT_IDS).mapTo(linkedSetOf(), ::ProjectId),
             tagIds = restoredStrings(INSIGHTS_TAG_IDS).mapTo(linkedSetOf(), ::TagId),
             includeConflictedTime =
-                savedStateHandle[INSIGHTS_INCLUDE_CONFLICTED] ?: false,
+                savedStateHandle.get<Any?>(INSIGHTS_INCLUDE_CONFLICTED) as? Boolean ?: false,
         ),
     )
     val presentation = MutableStateFlow(
         restoredEnum(
-            savedStateHandle[INSIGHTS_PRESENTATION],
+            savedStateHandle.get<Any?>(INSIGHTS_PRESENTATION),
             InsightsPresentation.CHART,
         ),
     )
@@ -505,15 +641,15 @@ internal class InsightsSelectionSavedState(
     }
 
     private fun restoredStrings(key: String): List<String> =
-        savedStateHandle.get<List<String>>(key)
+        (savedStateHandle.get<Any?>(key) as? List<*>)
             .orEmpty()
-            .filter(String::isNotBlank)
+            .mapNotNull { value -> (value as? String)?.takeIf(String::isNotBlank) }
             .distinct()
 
     private inline fun <reified T : Enum<T>> restoredEnum(
-        storedName: String?,
+        storedValue: Any?,
         fallback: T,
-    ): T = enumValues<T>().firstOrNull { it.name == storedName } ?: fallback
+    ): T = enumValues<T>().firstOrNull { it.name == storedValue as? String } ?: fallback
 
     private fun <T> Set<T>.withSelection(value: T, selected: Boolean): Set<T> =
         if (selected) this + value else this - value
