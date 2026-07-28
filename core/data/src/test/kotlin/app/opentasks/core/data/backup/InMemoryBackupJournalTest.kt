@@ -107,6 +107,20 @@ class InMemoryBackupJournalTest {
     }
 
     @Test
+    fun sameTitleRenameDoesNotAllocateGenerationOrJournalEntry() = runBlocking {
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+
+        val result = repository.execute(DomainCommand.RenameTask(task.id, task.title))
+
+        assertTrue(result is CommandResult.Success)
+        assertEquals(task, repository.currentWorkspace().tasks.first { it.id == task.id })
+        assertEquals(0, journal.currentGeneration)
+        assertTrue(journal.entries.isEmpty())
+    }
+
+    @Test
     fun journalAppendFailureRestoresProductRowsGenerationAndEntries() = runBlocking {
         val journal = InMemoryBackupJournal(
             appendBoundary = { throw InjectedAppendFailure() },

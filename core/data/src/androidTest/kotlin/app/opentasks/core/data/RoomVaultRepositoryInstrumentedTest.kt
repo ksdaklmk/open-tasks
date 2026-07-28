@@ -1736,6 +1736,23 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun templateInstantiationCommitsEveryInsertedFamilyUnderOneGeneration() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val uniqueTagName = "Atomic template-only tag"
+        val sourceTask = repository!!.currentWorkspace().tasks
+            .single { it.projectId == OpenTasksFixtures.taxProject.id }
+        val tagResult = repository!!.execute(
+            DomainCommand.CreateAndAssignTag(sourceTask.id, uniqueTagName),
+        )
+        assertTrue(tagResult is CommandResult.Success)
+        val tagUndo = (tagResult as CommandResult.Success).undo as DomainCommand.SetTaskTag
+        val uniqueTagId = tagUndo.tagId
+        withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .first { snapshot ->
+                    snapshot.tags.any { it.id == uniqueTagId && it.name == uniqueTagName } &&
+                        snapshot.tasks.single { it.id == sourceTask.id }
+                            .tagIds.contains(uniqueTagId)
+                }
+        }
         val templateId = TemplateId("room-atomic-template")
         repository!!.execute(
             DomainCommand.CaptureProjectTemplate(
@@ -1743,6 +1760,16 @@ class RoomVaultRepositoryInstrumentedTest {
                 projectId = OpenTasksFixtures.taxProject.id,
                 name = "Atomic template",
             ),
+        )
+        val sourceTag = database!!.workspaceDao().getTagById(uniqueTagId.value)!!
+        database!!.workspaceDao().upsertTag(
+            sourceTag.copy(name = "Atomic source tag after capture"),
+        )
+        assertTrue(
+            database!!.workspaceDao().findTagByName(
+                OpenTasksFixtures.workspaceId.value,
+                uniqueTagName,
+            ) == null,
         )
         val before = database!!.backupStateDao().require("vault-primary")
 
@@ -1757,9 +1784,11 @@ class RoomVaultRepositoryInstrumentedTest {
 
         val after = database!!.backupStateDao().require("vault-primary")
         val rows = journalRows(after.currentGeneration)
-        val families = rows.map {
-            BackupMutationCodec.decode(it.payload).record!!.family
-        }.toSet()
+        val payloads = rows.map { BackupMutationCodec.decode(it.payload) }
+        val families = payloads.map { it.record!!.family }.toSet()
+        val insertedTag = payloads.single {
+            it.record?.family == BackupRecordFamily.TAG
+        }.record!!
         assertTrue(result is CommandResult.Success)
         assertEquals(before.currentGeneration + 1, after.currentGeneration)
         assertEquals(rows.indices.toList(), rows.map { it.sequence })
@@ -1767,7 +1796,12 @@ class RoomVaultRepositoryInstrumentedTest {
         assertTrue(BackupRecordFamily.WORKFLOW_STATUS in families)
         assertTrue(BackupRecordFamily.MILESTONE in families)
         assertTrue(BackupRecordFamily.TASK in families)
+        assertTrue(BackupRecordFamily.TAG in families)
         assertTrue(BackupRecordFamily.TASK_TAG in families)
+        assertEquals(
+            uniqueTagName,
+            insertedTag.fields.single { it.name == "name" }.value,
+        )
     }
 
     @Test
@@ -1776,6 +1810,54 @@ class RoomVaultRepositoryInstrumentedTest {
         openRepository(now = { now })
         repository!!.execute(DomainCommand.StopTimer)
         val task = repository!!.currentWorkspace().tasks.first { it.checklist.isNotEmpty() }
+        val dependency = repository!!.currentWorkspace().tasks.first {
+            it.id != task.id && it.deletedAt == null && !it.isCompleted
+        }
+        assertTrue(
+            repository!!.execute(
+                DomainCommand.SetTaskDependency(
+                    taskId = task.id,
+                    dependsOnTaskId = dependency.id,
+                    present = true,
+                ),
+            ) is CommandResult.Success,
+        )
+        val attachmentId = "room-purge-attachment"
+        val activityId = "room-purge-activity"
+        database!!.openHelper.writableDatabase.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount,
+                contentHash, keepOffline
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            arrayOf<Any>(
+                attachmentId,
+                task.id.value,
+                byteArrayOf(1, 2, 3),
+                "text/plain",
+                3L,
+                "room-purge-content-hash",
+                1,
+            ),
+        )
+        database!!.openHelper.writableDatabase.execSQL(
+            """
+            INSERT INTO activity_entries (
+                id, taskId, projectId, kind, bodyCiphertext, createdAtEpochMillis
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            arrayOf<Any>(
+                activityId,
+                task.id.value,
+                task.projectId!!.value,
+                "comment",
+                byteArrayOf(4, 5, 6),
+                now.minusSeconds(120).toEpochMilli(),
+            ),
+        )
+        val stoppedTimer = database!!.timeEntryDao().getAll()
+            .single { it.taskId == task.id.value }
         repository!!.execute(
             DomainCommand.SetTaskReminder(
                 taskId = task.id,
@@ -1795,7 +1877,31 @@ class RoomVaultRepositoryInstrumentedTest {
         assertEquals(rows.indices.toList(), rows.map { it.sequence })
         assertEquals(3, payloads.count { it.deletedFamily == BackupRecordFamily.CHECKLIST_ITEM })
         assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.TASK_TAG })
+        assertEquals(
+            listOf(listOf(task.id.value, dependency.id.value)),
+            payloads.filter {
+                it.deletedFamily == BackupRecordFamily.TASK_DEPENDENCY
+            }.map { it.deletedIdentity },
+        )
         assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.REMINDER })
+        assertEquals(
+            listOf(listOf(attachmentId)),
+            payloads.filter {
+                it.deletedFamily == BackupRecordFamily.ATTACHMENT
+            }.map { it.deletedIdentity },
+        )
+        assertEquals(
+            listOf(listOf(activityId)),
+            payloads.filter {
+                it.deletedFamily == BackupRecordFamily.ACTIVITY_ENTRY
+            }.map { it.deletedIdentity },
+        )
+        assertEquals(
+            listOf(listOf(stoppedTimer.id)),
+            payloads.filter {
+                it.deletedFamily == BackupRecordFamily.TIME_ENTRY
+            }.map { it.deletedIdentity },
+        )
         assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.TASK })
         assertEquals(
             1,
@@ -1861,6 +1967,30 @@ class RoomVaultRepositoryInstrumentedTest {
         assertTrue(
             database!!.backupJournalDao()
                 .after("vault-primary", before.currentGeneration, 10)
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun sameTitleRenameDoesNotAllocateGenerationOrJournalEntry() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val task = repository!!.currentWorkspace().tasks.first()
+        val beforeState = database!!.backupStateDao().require("vault-primary")
+        val beforeEntity = database!!.taskDao().getById(task.id.value)
+
+        val result = repository!!.execute(DomainCommand.RenameTask(task.id, task.title))
+
+        val afterState = database!!.backupStateDao().require("vault-primary")
+        val afterEntity = database!!.taskDao().getById(task.id.value)
+        assertTrue(result is CommandResult.Success)
+        assertEquals(beforeEntity!!.title, afterEntity!!.title)
+        assertEquals(beforeEntity.revisionWallMillis, afterEntity.revisionWallMillis)
+        assertEquals(beforeEntity.revisionLogical, afterEntity.revisionLogical)
+        assertEquals(beforeEntity.revisionDeviceId, afterEntity.revisionDeviceId)
+        assertEquals(beforeState.currentGeneration, afterState.currentGeneration)
+        assertTrue(
+            database!!.backupJournalDao()
+                .after("vault-primary", beforeState.currentGeneration, 10)
                 .isEmpty(),
         )
     }

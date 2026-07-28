@@ -199,7 +199,11 @@ class RoomVaultRepository(
                 is DomainCommand.RenameTask -> updateTask(command.taskId) { task ->
                     val title = command.title.trim()
                     if (title.isEmpty()) return@updateTask null
-                    task.copy(title = title, revision = nextRevision(task))
+                    if (title == task.title) {
+                        task
+                    } else {
+                        task.copy(title = title, revision = nextRevision(task))
+                    }
                 }
                 is DomainCommand.UpdateTask -> updateTaskDetails(command)
                 is DomainCommand.SetTaskReminder -> setTaskReminder(command)

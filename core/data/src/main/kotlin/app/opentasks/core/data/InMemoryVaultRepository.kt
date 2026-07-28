@@ -1260,7 +1260,11 @@ class InMemoryVaultRepository internal constructor(
             )
         }
         return updateTask(command.taskId) { task ->
-            task.copy(title = title, revision = nextRevision(task))
+            if (title == task.title) {
+                task
+            } else {
+                task.copy(title = title, revision = nextRevision(task))
+            }
         }
     }
 
