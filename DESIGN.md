@@ -10,7 +10,8 @@ filled-action colour.
 
 The primary usage scene is a solo professional moving between a foldable cover
 screen in daylight, the unfolded workbench at a desk, and a tablet in lower
-evening light. Both light and dark schemes are first-class.
+evening light. Light mode is the required and release-gated colour scheme.
+Existing dark support is retained as best-effort but is not an acceptance gate.
 
 ## Colour
 
@@ -30,7 +31,7 @@ This preserves the design contract without scattering raw hexadecimal colours.
 - Error: `oklch(0.520 0.190 25)`.
 - Success: `oklch(0.480 0.100 150)`.
 
-### Dark
+### Dark (best-effort)
 
 - Background: `oklch(0.150 0.006 29)`.
 - Surface: `oklch(0.190 0.007 29)`.

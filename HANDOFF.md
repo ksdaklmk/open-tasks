@@ -1,17 +1,15 @@
 # Open Tasks Handoff
 
-- Last updated: 27 July 2026
+- Last updated: 28 July 2026
 - Branch: `main`
-- Session status: **Paused at the user's request. Do not start P2-F04 or any
-  GitHub maintenance until the user explicitly resumes the work.**
-- Pause point: P2-F03 manual time entry and overlap reconciliation are complete,
-  alongside P2-F01 project templates and the UK-English application-language
-  pass. P1-L01 through P1-L04 plus P1-L06 and P1-L07 remain complete. P2-F02
-  is blocked by the attachment/cloud design, making P2-F04 insights the next
-  ready P2 task. P1-L08 remains deliberately deferred until local schemas
-  settle. Train 0 repaired the credential-free Android CI matrix, release gate
-  and blocking raw-colour hook, and closed the baseline tooling decisions;
-  GitHub maintenance remains paused.
+- Session status: **Train 1 is active. Tasks 1.1–1.3 are complete and
+  independently reviewed; Task 1.4 is the next implementation task. GitHub
+  maintenance remains paused.**
+- Current point: `main` is at `f39af40` (`fix: defer background insights
+  projection`) and is 17 commits ahead of `origin/main`. Task 1.3 passed its
+  final re-review with zero open findings after three correction rounds. The
+  authorised replacement emulator baseline is running in expanded state,
+  light mode and 100% text from a verified no-save recovery point.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -42,9 +40,11 @@ preserved and surfaced for review so double-counted work is never hidden. The
 P0 hardening slice and P1-L01 through P1-L04 plus P1-L06 and P1-L07 product
 slices are complete and verified. P2-F01 adds versioned reusable project
 templates with relative zoned dates, deterministic relation remapping,
-encrypted Room persistence and atomic outbox writes. The application is fixed
-to UK English with UK spelling, day–month dates, 24-hour time and Bin
-terminology.
+encrypted Room persistence and atomic outbox writes. Qualified workspace
+Insights now cover completion, overdue work, estimate/actual time, project/tag
+time and milestone health with accessible table/text alternatives. The
+application is fixed to UK English with UK spelling, day–month dates, 24-hour
+time and Bin terminology.
 
 The public GitHub authority is
 [ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
@@ -62,7 +62,8 @@ and remain disabled. Google Identity, Drive transport, cloud recovery and Play
 Console work have not started. P0 release gates which depend on those features
 remain blocked by their listed prerequisites.
 
-No task is intentionally left half-implemented at this pause point.
+Train 1 Tasks 1.1–1.3 are complete. Task 1.4 separates the vault-content key
+from the SQLCipher database key and is the next approved task.
 
 ## Train 0 baseline checkpoint verification
 
@@ -104,6 +105,7 @@ identity above was unchanged after the module suites.
 |---|---|
 | Done | Implemented and verified for its current scope |
 | Ready | Can be started without another project task |
+| Paused | Active work deliberately stopped at the user's request; resume from the recorded checkpoint |
 | Blocked | Cannot be completed until the named dependency or external input exists |
 | Deferred | Deliberately ordered after higher-priority work |
 | External | Requires an account, policy decision, physical-device session or store operation |
@@ -441,7 +443,76 @@ Results:
 - Source scans and `git diff --check` found no new user-visible US-English
   spellings, default-locale date formatters or whitespace errors.
 
-## Pause closure verification
+## Train 1 Task 1.3 completion and protected baseline
+
+Train 1 is being executed from
+[the checked-in Train 1 plan](docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md)
+with the approved subagent-driven workflow directly on `main`.
+
+Task 1.3 completed through these independently reviewed commits:
+
+- `cd4de59` — `feat: add pure workspace insights engine`
+- `0ae7de2` — `fix: preserve historical insights selection`
+- `29c7fb8` — `feat: complete qualified insights metrics`
+- `f677fb7` — `fix: qualify insights display totals`
+- `2b4df62` — `feat: add accessible workspace insights`
+- `aeebbc48` — `fix: preserve live insights qualifications`
+- `3bd1f4c0` — `fix: respect insights lifecycle boundaries`
+- `f39af40e` — `fix: defer background insights projection`
+
+The correction rounds made restored selections type-safe, refreshed time and
+zone qualifications only while foregrounded, preserved restored internal
+navigation, exposed every qualified metric, rendered positive sub-minute time
+visibly, and kept 200% text in a readable stacked layout. Background workspace
+emissions now defer analytics projection until foreground re-entry, and the
+boundary scheduler remains tracked across clock jumps.
+
+Final Task 1.3 evidence:
+
+- App JVM: 25/25 passed after the final lifecycle correction;
+- More device suite: 24/24 passed after the navigation correction;
+- App device suite: 3/3 passed on a sole disposable API 37 emulator;
+- debug assembly passed after the final source changes;
+- four compact, light, 200%-text Insights captures passed direct inspection,
+  including overdue metadata and complete milestone due/health/progress;
+- three independent correction re-reviews closed with zero open findings.
+
+Light mode is the required application acceptance colour scheme. Existing dark
+theme support remains best-effort and is not a release gate.
+
+The Android SDK update and Android Studio run coincided with loss of the old
+snapshot identity; causation is unproven. The user authorised the fresh
+installation as the replacement protected baseline. The untouched
+pre-replacement AVD clone remains at
+`/private/tmp/open-tasks-avd-recovery.m7hw3u`. The verified replacement snapshot
+is `task13_fixround1_replacement_20260728_055359`, and the active emulator was
+started from it with `-no-snapshot-save`.
+
+Replacement protected identity:
+
+```text
+Pixel_10_Pro_Fold, API 37 / Android 17
+device state: 2 (opened)
+font scale: 1.0
+night mode: no (light)
+package UID: 10232
+firstInstallTime: 2026-07-28 05:53:59
+CE directory inode: 549494
+open_tasks.db inode: 567204
+open_tasks.db-wal inode: 567205
+open_tasks.db-shm inode: 567234
+```
+
+Never run `:app:connectedDebugAndroidTest` on this protected emulator: AGP
+uninstalls `app.opentasks`. Use a sole disposable emulator started read-only
+with no snapshot load/save, then restore and re-verify the named protected
+snapshot.
+
+Before dispatching Task 1.4, retain the plan correction that adds
+`core/crypto/build.gradle.kts`: its new instrumentation test requires an
+Android test runner plus AndroidX core/JUnit/runner/rules dependencies.
+
+## Previous P1/P2 pause closure verification
 
 After adding the explicit pause and resume instructions, the exact paused code
 state passed the repository gate on 27 July 2026:
@@ -463,7 +534,9 @@ committed as the verified baseline. The inventory was captured with
 `git status --short` and `git ls-files --others --exclude-standard` before this
 section was added. Every captured path is accounted for below; the groups
 describe the completed slice(s) they support, not a new runtime API. The
-working tree is expected to be clean when work resumes.
+working tree was clean at that baseline checkpoint. It should also be clean at
+each reviewed Train 1 task boundary; investigate and preserve unexpected user
+changes.
 
 | Group | Captured paths |
 |---|---|
@@ -505,33 +578,36 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-None. The user explicitly paused the project after P2-F03 and before P2-F04.
-P2-F01, P2-F03 and the UK-English pass are complete in the Train 0 verified
-baseline commit. The working tree is expected to be clean; investigate and
-preserve any new user changes before editing.
+Train 1 Task 1.4 is the current task. It separates the vault-content key from
+the SQLCipher database key, wraps that content key locally with a per-vault
+Android Keystore alias, and keeps recovery rewrapping independent. No Task 1.4
+source change existed when this checkpoint was written.
 
-The credential-free GitHub Actions matrix and release gate are repaired; queued
-dependency PR checks and resolution remain paused. P2-F02 cannot complete until
-its attachment/cloud prerequisites exist; P2-F04 is the next ready P2 task when
-the user resumes the P2 plan. P1-D02 remains the next credential-independent
-Drive task only if the user changes the focus back to P1.
+The credential-free GitHub Actions matrix and release gate remain repaired;
+queued dependency PR checks and resolution remain paused. P2-F02 cannot
+complete until its attachment/cloud prerequisites exist. Train 1 continues
+through Tasks 1.4–1.6 before blocked Drive/provider work.
 
 ## Resume instructions
 
-1. Read this file first, then
+1. Read this file first, the
+   [Train 1 plan](docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md),
+   its ignored SDD progress ledger, then
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
-2. Re-scan the working tree before editing and confirm it is clean. The P1/P2
-   baseline is committed; investigate and preserve any new user changes.
-3. Confirm with the user that the intended next slice is still `P2-F04`.
-4. If confirmed, derive insights from `WorkspaceSnapshot` without introducing
-   another data authority. Treat time affected by overlap conflicts as
-   explicitly qualified data rather than silently trustworthy actuals.
+2. Re-scan the working tree and preserve any user changes. Task 1.3 is complete;
+   do not amend or reopen its reviewed commits without a new finding.
+3. Continue the approved subagent-driven workflow at Task 1.4 with strict
+   test-first coverage for independent content keys and local wrapping.
+4. Run crypto instrumentation on a disposable emulator. Do not let Keystore
+   tests or App instrumentation mutate the protected workspace.
 5. Keep `P2-F02`, `P1-L05` and the blocked cloud/release gates paused unless
    their listed prerequisites or the user's direction change. The P3 baseline
    developer-experience tasks are closed.
-6. Before recording the next pause or completion, run the repository gate from
+6. Continue sequentially through Tasks 1.4, 1.5 and 1.6; review each scoped
+   commit independently before beginning the next task.
+7. Before recording the next pause or completion, run the repository gate from
    `CLAUDE.md`, affected device suites, release assembly when production code
    changed, and `git diff --check`; update this hand-off and every affected
    contract document in the same change.
@@ -589,7 +665,7 @@ even when their implementation is blocked by P1/P2 product work.
 | 1 | P2-F01 | Done | Templates with relative dates, workflows, milestones and task structure | P1-L02, P1-L03 |
 | 2 | P2-F02 | Blocked | Notes/activity history and attachments using Photo Picker, Storage Access Framework, Sharesheet, drag/drop, constrained `FileProvider` cleanup and 100 MB limits | Local attachment encryption/design; P1-D07 for cloud |
 | 3 | P2-F03 | Done | Manual time entries and timer-overlap reconciliation | Existing timer foundation |
-| 4 | P2-F04 | Ready | Insights for completion, overdue work, estimate/actual time, project/tag time and milestone health, with table/text alternatives | P1-L03, P2-F03 |
+| 4 | P2-F04 | Done | Accessible qualified insights for completion, overdue work, estimate/actual time, project/tag time and milestone health | P1-L03, P2-F03 |
 | 5 | P2-F05 | Deferred | Today Glance widget, Quick Add launcher refinement and app-lock title privacy | P1-L01; privacy review |
 | 6 | P2-F06 | Deferred | Keyboard shortcut helper, mouse/hover support and accessible alternatives to drag actions | Stable final navigation/editors |
 | 7 | P2-F07 | Deferred | One-way calendar export through `ACTION_INSERT` | P1-L06; export/privacy review |
@@ -673,17 +749,14 @@ even when their implementation is blocked by P1/P2 product work.
 
 ## Recommended next action
 
-Wait for the user to resume the project. Do not begin another task
-automatically. When the user confirms the current P2 direction, start
-`P2-F04`: derive completion, overdue, estimate-versus-actual, project/tag time
-and milestone-health insights from the existing snapshot without creating a
-second data authority. Provide table/text alternatives to every visual summary
-and make overlap treatment explicit so conflicted time is not silently
-presented as trustworthy actuals.
+Continue Train 1 Task 1.4: create independent random vault-content keys, wrap
+them locally with per-vault Android Keystore aliases, keep recovery passphrase
+rewrapping on the same content key, zero temporary key bytes and fail closed
+when a stored alias is lost or invalidated.
 
 `P2-F02` and therefore `P1-L05` remain blocked until the attachment/cloud
 design and `P1-D07` exist; do not weaken encrypted attachment requirements to
 start them early. Keep queued dependency PR checks and resolution paused unless
-the user explicitly resumes GitHub maintenance. If the focus returns to Drive,
-`P1-D02` remains the next credential-independent P1 task. Do not attempt
-blocked P0 cloud/release gates before their product dependencies exist.
+the user explicitly resumes GitHub maintenance. Follow the approved Train 1
+order through bounded cloud formats and authenticated encrypted codecs. Do not
+attempt blocked P0 cloud/release gates before their product dependencies exist.
