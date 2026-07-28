@@ -14,9 +14,10 @@ implements the approved
 [Local Authority, Cloud Attachments, and Backup Direction](2026-07-28-local-authority-cloud-attachments-backup-design.md).
 
 The programme starts from the completed local workspace and Train 1 Tasks
-1.1–1.5 recorded in `HANDOFF.md`. Those shipped facts remain evidence. Backup,
-Android Auto Backup, Google authorisation, Drive transport, recovery UI, and
-attachments are approved future work and are not operational at this
+1.1–1.5 recorded in `HANDOFF.md`. Those shipped facts remain evidence. Stage 1
+also completed the internal authenticated provider-independent object codec.
+Backup, Android Auto Backup, Google authorisation, Drive transport, recovery
+UI, and attachments are approved future work and are not operational at this
 checkpoint.
 
 ## Product contract
@@ -213,7 +214,7 @@ The programme dependency chain is:
 Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 ```
 
-Stage 1 preserves accepted Insights and frame work while completing the
+Stage 1 preserved accepted Insights and frame work and completed the
 authenticated provider-independent codec. Stage 2 establishes local backup and
 the strictly whitelisted portable package before any provider recovery claim.
 Stage 3 adds app-managed Drive backup and takeover. Stage 4 freezes metadata

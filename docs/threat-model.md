@@ -65,7 +65,7 @@ VaultRepository
 
 BackupCoordinator ── AuthenticatedCloudObjectCodec ── BackupObjectStore
 PortableBackupPublisher ───────────────────────────── portable package
-AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ BlobObjectStore
+AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
 RecoveryCoordinator ── staged verification/takeover ── replacement Room vault
 
 Recovery passphrase ── Argon2id ── AES-GCM unwrap ── vault-content key
@@ -113,14 +113,14 @@ fails safely where practical and must not weaken platform protections.
 | T03 | Wrapped key modified or partially stored | AES-GCM authentication, exact-vault associated data, strict envelope validation, synchronous preference commits, and rollback where possible | Preferences and Keystore are not atomic; first-run interruption and orphan aliases remain test cases |
 | T04 | Recovery passphrase guessed offline | Argon2id with 64 MiB, three iterations, parallelism one, and random 16-byte salt | Password strength remains user-dependent; future UI requires strength guidance |
 | T05 | Encrypted record modified | AES-GCM/Tink authentication, format-bound associated data, tamper tests, and golden vectors | Every future decrypted parser must retain allocation bounds |
-| T06 | Ciphertext moved between vaults, objects, or chunks | Canonical headers preserve family, version, vault/object, and optional chunk identity | Stage 1 codec must authenticate the complete identity before plaintext use |
+| T06 | Ciphertext moved between vaults, objects, or chunks | The implemented authenticated codec binds the complete canonical family, version, vault/object, and optional chunk identity as AEAD associated data before plaintext use | Future family payload decoders must preserve the same identity and allocation bounds |
 | T07 | Key bytes remain in memory | Derived keys, temporary database keys, and `VaultKey` buffers are explicitly zeroed | JVM/Android copies and immutable strings cannot be guaranteed erased; passphrases stay `CharArray` |
 | T08 | Android backup leaks live vault, keys, or blobs | Android backup is currently disabled; extraction/transfer rules exclude the application root | Stage 2 may enable only the reviewed portable-package allow-list and must audit packaged rules on every supported API |
 | T09 | Portable package includes excluded data or grows beyond safe platform bounds | No package exists today | Stage 2 must build from a consistent snapshot, cap at 24 MiB, withdraw ineligible generations, and prove raw database, preferences, credentials, cache, and blob exclusion |
 | T10 | Logs or telemetry leak private fields | Architecture prohibits private content and sensitive routing data; current review found no application logging calls | Any telemetry requires a separate field allow-list review |
 | T11 | Exported component mutates or leaks data | Only launcher activity is exported; reminder receivers and pending intents are private/immutable; `FileProvider` is private and constrained | Sharesheet/import and attachment paths require explicit validation, grants, and cleanup tests |
-| T12 | Provider reads backup or attachment content | Approved objects are encrypted locally and request only `drive.appdata` | Transport is not implemented; no provider confidentiality claim may be made yet |
-| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded canonical outer frames, checksums, version identity, family limits, and one-shot ciphertext ownership exist | Stage 1 adds authenticated decoding; Stage 3 must stage and fully verify records, relations, tombstones, and references before activation |
+| T12 | Provider reads backup or attachment content | The implemented authenticated codec is provider-independent; no provider transport or authorisation request exists today | Stage 3 must encrypt locally, request only `drive.appdata`, and prove transport before any provider confidentiality claim |
+| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded canonical outer frames, checksum-before-AEAD, complete identity authentication, typed failures, family limits, and one-shot ciphertext ownership exist | Stage 3 must stage and fully verify records, relations, tombstones, and references before activation |
 | T14 | Stale writer overwrites a recovered lineage or mutates blob state | No cloud writer exists today | Stage 3 requires monotonically increasing epochs, conditional control-manifest updates, ownership-loss handling, and offline prior-device reconnect tests |
 | T15 | Missing/replaced control record recreates a known lineage | No cloud control record exists today | A client that observed control state must treat absence/replacement as ownership loss and never recreate automatically |
 | T16 | Backup retention deletes the only recoverable base | No backup retention is operational | Keep current and previous verified complete snapshots plus the segments required by either; verify recovery before pruning |
@@ -145,6 +145,8 @@ fails safely where practical and must not weaken platform protections.
 - Argon2id parameters are 65,536 KiB, three iterations, and parallelism one.
 - AES-GCM uses 96-bit nonces and 128-bit authentication tags.
 - Record associated-data encoding is covered by a golden vector.
+- Cloud-object AEAD binds the complete canonical header identity and verifies
+  frame length and ciphertext checksum before decryption.
 - Changing a recovery passphrase re-wraps the existing content key.
 - A database schema bump requires a non-destructive migration and exported
   Room schema. A cryptographic format bump requires old-format fixtures.
@@ -172,8 +174,9 @@ compatibility tests and a fresh threat-model review.
 
 Before production release:
 
-1. Complete and independently verify the authenticated provider-independent
-   object codec with bounded plaintext decoders.
+1. Retain independent verification of the implemented authenticated
+   provider-independent object codec, and add family-specific bounded plaintext
+   decoders before backup or recovery consumes plaintext.
 2. Prove app-managed backup verification, current/previous snapshot fallback,
    retention, corruption handling, and independent destructive actions.
 3. Prove Android Auto Backup includes only the eligible portable package and

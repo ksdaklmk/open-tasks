@@ -67,8 +67,9 @@ workspace slice:
 - Random 256-bit database key wrapped by a non-exportable Android Keystore key;
   only the AES-GCM envelope is stored in app-private preferences.
 - Tink AES-256-GCM record encryption and Argon2id recovery-key envelopes.
-- Provider-independent bounded cloud-object frames plus legacy hybrid logical
-  clock and merge primitives retained as well-tested internal foundations.
+- Provider-independent bounded cloud-object frames and an authenticated codec
+  that binds complete object identity, plus legacy hybrid logical clock and
+  merge primitives retained as well-tested internal foundations.
 - Hilt application wiring, Navigation 3, Material 3 Adaptive, edge-to-edge,
   predictive Back, Android backup disabled, and notification permission
   discipline.

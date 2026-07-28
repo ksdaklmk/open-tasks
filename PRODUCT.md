@@ -35,14 +35,17 @@ useful without an account or network connection, and encrypted Room is the
 sole live structured-data authority. The cloud foundation now has an
 independently generated vault-content key with separate recovery and local
 Android Keystore wrapping, plus strict bounded canonical frames for manifests,
-snapshots, operation segments and attachment chunks.
+snapshots, operation segments and attachment chunks. The implemented internal
+authenticated object codec binds each frame's complete identity as AEAD
+associated data, verifies its checksum before decryption, and returns typed
+untrusted-object failures.
 
-Those foundations are not a user-visible backup or recovery feature. The
-authenticated object codec, Google Identity, Drive transport, app-managed
-backup, Android Auto Backup, writer takeover, cloud attachments, and recovery
-UI remain unavailable. Android backup is still disabled. Product copy must not
-imply cloud backup, attachment availability, or reinstall recovery until those
-flows pass their release gates.
+Those foundations are not a user-visible backup or recovery feature. Google
+Identity, Drive transport, app-managed backup, Android Auto Backup, writer
+takeover, cloud attachments, and recovery UI remain unavailable. Android
+backup is still disabled. Product copy must not imply cloud backup, attachment
+availability, or reinstall recovery until those flows pass their release
+gates.
 
 ## Approved future contract
 

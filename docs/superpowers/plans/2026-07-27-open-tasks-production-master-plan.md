@@ -24,9 +24,12 @@ Macrobenchmark, JUnit 4, Compose UI test v2, and GitHub Actions.
 ## Current checkpoint
 
 - Train 0 and Train 1 Tasks 1.1–1.5 remain completed, reviewed evidence.
-- The old Train 1 Task 1.6 is replaced by the Stage 1 authenticated,
-  provider-independent object-codec work.
-- No Stage 1 source change has started.
+- Stage 1 is complete and verified. Its implemented internal foundation
+  includes the authenticated provider-independent object codec in `core:data`,
+  with canonical framing in `core:sync` and generic AEAD in `core:crypto`.
+- No Stage 2 source change has started. Provider transport, backup/blob
+  services, recovery, scheduling, and product-visible backup or attachment
+  features remain unimplemented.
 - Existing Room, outbox, and other local data remain untouched.
 - Android Auto Backup remains disabled until Stage 2.
 - GitHub dependency maintenance remains paused.
@@ -94,13 +97,14 @@ actions.
 
 ### Stage 1 — Direction reset and authenticated object foundation
 
-- Ratify the approved direction in every active contract and mark historical
-  train files immediately.
-- Fix the known Insights lint gate without changing accepted Insights
+- Ratified the approved direction in every active contract and marked
+  historical train files immediately.
+- Fixed the known Insights lint gate without changing accepted Insights
   behaviour.
-- Complete the provider-independent `AuthenticatedCloudObjectCodec`.
-- Bind complete object identity as associated data, verify checksums before
-  decryption, return typed failures, and freeze independent golden vectors.
+- Completed the provider-independent `AuthenticatedCloudObjectCodec` in
+  `core:data`.
+- Bound complete object identity as associated data, verified checksums before
+  decryption, returned typed failures, and froze independent golden vectors.
 
 ### Stage 2 — Local backup and Android Auto Backup
 
@@ -156,14 +160,15 @@ actions.
   contracts, pure rules, object-store abstractions, administration interfaces,
   and repository contract tests.
 - `core:sync` owns bounded provider-independent object formats,
-  `AuthenticatedCloudObjectCodec`, legacy internal clocks/merge primitives,
-  payload codecs, bounds, retry policy, and failure classification. It is not a
-  product synchronisation module.
+  canonical cloud-header identity, legacy internal clocks/merge primitives,
+  payload codecs, bounds, retry policy, and format-failure classification. It
+  is not a product synchronisation module.
 - `core:crypto` owns vault-content key creation, Android Keystore local
-  wrapping, passphrase recovery envelopes, AEAD, and authenticated chunking.
-- `core:data` owns Room, SQLCipher, backup-journal persistence, WorkManager,
-  provider transports, portable-package files, attachment cache, and recovery
-  staging.
+  wrapping, passphrase recovery envelopes, and generic AEAD.
+- `core:data` owns Room and SQLCipher and composes `core:sync` framing with
+  `core:crypto` AEAD in the implemented `AuthenticatedCloudObjectCodec`.
+  Later stages add backup-journal persistence, WorkManager, provider
+  transports, portable-package files, attachment cache, and recovery staging.
 - `app` owns Hilt, ViewModels, `BackupCoordinator`,
   `PortableBackupPublisher`, `AttachmentBlobCoordinator`,
   `RecoveryCoordinator`, activity-result APIs, permissions, authorisation,

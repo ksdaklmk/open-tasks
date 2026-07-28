@@ -30,10 +30,11 @@ have separate interfaces, object namespaces, retention policies, statuses, and
 destructive operations. Outside recovery backups, attachment bytes are the
 only product content whose durable authority is in the cloud.
 
-Android Auto Backup is enabled as a supplementary transport for one portable
-encrypted structured-data package. It does not replace the app-managed backup
-guarantee and never receives the live database, device-bound key envelopes, or
-attachment bytes.
+Android Auto Backup is approved as a future supplementary transport for one
+portable encrypted structured-data package. It remains disabled until Stage 2
+installs the strict include rules. It does not replace the app-managed backup
+guarantee and never receives the live database, device-bound key envelopes,
+or attachment bytes.
 
 A backed-up vault has one active writer device. Recovery on another device is
 an explicit takeover, not multi-device synchronisation.
@@ -82,10 +83,13 @@ The following completed work remains valid:
   attachment-chunk frames.
 - Strict header parsing, checksum verification, and one-shot ciphertext
   ownership.
+- The provider-independent authenticated object codec, with complete
+  identity-bound AEAD, typed failures, and independent vectors for all four
+  object families.
 
-The paused authenticated-codec task remains necessary, but it becomes a
-provider-independent backup and blob codec. It must not introduce Drive-primary
-or remote-merge behaviour.
+The authenticated codec is an implemented internal foundation shared by the
+future backup and blob services. It remains provider-independent and introduces
+no Drive-primary or remote-merge behaviour.
 
 The hybrid logical clock and merge primitives may remain as unused,
 well-tested internal code until a focused cleanup is justified. They are no
@@ -228,10 +232,10 @@ generation, last verified backup time, failure category, and retry state.
 
 ## Android Auto Backup
 
-The manifest enables Android Auto Backup, but the include rules whitelist only
-one atomically replaced portable package. All other application roots remain
-excluded from cloud backup and device transfer unless a later reviewed design
-explicitly adds another safe file.
+The future Stage 2 manifest may enable Android Auto Backup only when the
+include rules whitelist one atomically replaced portable package. All other
+application roots remain excluded from cloud backup and device transfer unless
+a later reviewed design explicitly adds another safe file.
 
 The package contains:
 
@@ -504,7 +508,7 @@ simulation is permitted.
 The transition must:
 
 1. record this approved direction and supersede the old future roadmap;
-2. complete the authenticated object codec without sync semantics;
+2. retain the implemented authenticated object codec without sync semantics;
 3. normalise the product model to local authority;
 4. preserve existing outbox rows until a complete baseline backup is verified;
 5. establish that baseline as the first backup generation;

@@ -7,14 +7,15 @@
   The sole recommended next action is to write the focused Stage 2 local-backup
   and Android Auto Backup implementation plan. Train 1 Tasks 1.1–1.5 remain
   complete and independently reviewed. GitHub maintenance remains paused.**
-- Current implementation point: `377c5c3` (`test: freeze authenticated cloud
-  object vectors`) is the last source commit. The local-authority direction was
-  approved in `6e3c816` (`docs: define local authority and cloud attachment
-  direction`) and clarified in `ebdc6b0` (`docs: clarify backup and blob
-  lifecycle boundaries`). The Stage 1 plan is `7a54bd2` (`docs: plan local
-  authority stage 1 foundation`). The Stage 1 checkpoint below records every
-  source commit and fresh exit gate. The named authorised replacement snapshot
-  remains present and was restored after the disposable-emulator suites.
+- Current implementation point: `21c33bc` (`fix: clear rejected cloud
+  ciphertext buffers`) is the Stage 1 final-review implementation correction.
+  The local-authority direction was approved in `6e3c816` (`docs: define local
+  authority and cloud attachment direction`) and clarified in `ebdc6b0`
+  (`docs: clarify backup and blob lifecycle boundaries`). The Stage 1 plan is
+  `7a54bd2` (`docs: plan local authority stage 1 foundation`). The Stage 1
+  checkpoint below records every source commit and fresh exit gate. The named
+  authorised replacement snapshot remains present and was restored after the
+  disposable-emulator suites.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -547,15 +548,17 @@ executed, 2 from cache and 440 up-to-date). Stage 1 Task 2 subsequently
 resolved all five findings, and Task 7 reran the complete repository gate
 successfully, as recorded in the Stage 1 checkpoint below.
 
+The following block is historical replacement-baseline evidence from before
+the Stage 1 exit restoration; it is not the current protected-state record.
 The Android SDK update and Android Studio run coincided with loss of the old
-snapshot identity; causation is unproven. The user authorised the fresh
-installation as the replacement protected baseline. The untouched
+snapshot identity, although causation was unproven. The user authorised the
+fresh installation as the replacement protected baseline. The untouched
 pre-replacement AVD clone remains at
 `/private/tmp/open-tasks-avd-recovery.m7hw3u`. The verified replacement snapshot
-is `task13_fixround1_replacement_20260728_055359`, and the active emulator was
-started from it with `-no-snapshot-save`.
+was `task13_fixround1_replacement_20260728_055359`, and the emulator used at
+that checkpoint was started from it with `-no-snapshot-save`.
 
-Replacement protected identity:
+Historical replacement protected identity:
 
 ```text
 Pixel_10_Pro_Fold, API 37 / Android 17
@@ -570,24 +573,25 @@ open_tasks.db-wal inode: 567205
 open_tasks.db-shm inode: 567234
 ```
 
-Never run `:app:connectedDebugAndroidTest` on this protected emulator: AGP
-uninstalls `app.opentasks`. Use a sole disposable emulator started read-only
-with no snapshot load/save, then restore and re-verify the named protected
-snapshot.
+At that checkpoint, the safety procedure prohibited
+`:app:connectedDebugAndroidTest` on the protected emulator because AGP
+uninstalls `app.opentasks`; connected suites used a sole disposable emulator
+started read-only with no snapshot load/save.
 
 The Task 1.4 plan correction for `core/crypto/build.gradle.kts` was applied:
 its instrumentation suite has the Android test runner and AndroidX
 core/JUnit/runner/rules dependencies it requires.
 
-At the final pause audit, `adb devices -l` reported no attached device. The
-named replacement snapshot and the untouched pre-replacement recovery clone
-were both still present. Treat the recorded identity as the last verified
-protected state and restore the named snapshot before any future live-app
-acceptance.
+At that historical pause audit, `adb devices -l` reported no attached device.
+The named replacement snapshot and the untouched pre-replacement recovery
+clone were both still present. The restored 2.0-font-scale state recorded in
+the Stage 1 checkpoint below supersedes this historical 1.0 identity and is
+the authoritative current protected-state record.
 
 ## Stage 1 authenticated object foundation checkpoint
 
-Stage 1 is complete at source commit `377c5c3`. Its reviewed commit chain is:
+Stage 1's original source foundation completed at `377c5c3`; final review added
+the implementation correction `21c33bc`. Its reviewed commit chain is:
 
 - Task 1: `29bd550` — `docs: reset programme to local data authority`;
   correction `4c97929` — `docs: make stage 1 task 2 next`.
@@ -597,8 +601,9 @@ Stage 1 is complete at source commit `377c5c3`. Its reviewed commit chain is:
 - Task 4: `e9388fb` — `feat: expose associated-data AEAD boundary`.
 - Task 5: `53d63fb` — `feat: add authenticated cloud object codec`.
 - Task 6: `377c5c3` — `test: freeze authenticated cloud object vectors`.
+- Final review: `21c33bc` — `fix: clear rejected cloud ciphertext buffers`.
 
-Fresh host gates passed on 28 July 2026:
+The original Stage 1 exit host gates passed on 28 July 2026:
 
 ```bash
 ./gradlew :core:sync:testDebugUnitTest \
@@ -692,7 +697,7 @@ fresh Data suite. Fixture SHA-256 digests are:
 3ce3780b33e62c2954ba8e9999346f7c49b4872b1d08db51b246a7f97ce35cb2  snapshot.json
 ```
 
-The final acceptance audit confirmed:
+The original Stage 1 exit acceptance audit confirmed:
 
 - Room remains the sole live structured-data authority. Stage 1 added only
   the internal `core:data` → `core:crypto` dependency; no provider transport,
@@ -710,20 +715,115 @@ The final acceptance audit confirmed:
   text interpolates only public version, bound, family or fixed region labels,
   never private identifiers, checksums, keys or recovery metadata.
 - Caller plaintext remains caller-owned. Associated-data and owned ciphertext
-  buffers are cleared in `finally`; successful plaintext is closeable,
-  defensively copyable or transferred exactly once.
-- The active-contract scan found no stale provider-primary,
-  runtime-coordinator, cloud-status or concurrent-device product promise.
+  buffers are cleared in `finally`; decoder scratch, partial ciphertext and
+  checksum-rejected full ciphertext are cleared before ownership can transfer.
+  Successful plaintext is closeable, defensively copyable or transferred
+  exactly once.
+- Active contracts distinguish the implemented internal authenticated codec
+  in `core:data` from unimplemented provider transport, backup/blob services,
+  recovery, scheduling, Android Auto Backup, and product-visible features.
 - `android:allowBackup` remains `false`; extraction rules still exclude the
   application root and legacy rules remain unchanged. Android Auto Backup is
   not shipped and remains Stage 2 work.
 - The placeholder/logging scan, fixture provider/private-content scan,
   `git diff --check` and working-tree audit were clean.
 
-The sole non-blocking residual risk is environmental reproducibility: the
-current protected AVD snapshot carries 200% global text, so device suites that
-assume the 100% baseline must explicitly verify their disposable overlay
-before running. The product's dedicated 200%-text acceptance remains covered.
+### Final-review correction wave
+
+The single authorised final-review correction wave started from clean
+`main` at `19db11f`. Its implementation correction is:
+
+- `21c33bc` — `fix: clear rejected cloud ciphertext buffers`.
+
+Strict decoder TDD added three controlled-stream regressions before production
+changed. The stream retained every ciphertext read target and proved that it
+had held ciphertext. This forced-fresh RED command:
+
+```bash
+./gradlew :core:sync:testDebugUnitTest \
+  --tests '*CloudObjectFormatTest.decodeClearsSourceRetainedCiphertextScratch*' \
+  --stacktrace --rerun-tasks
+```
+
+failed all 3/3 new tests at the expected post-failure zeroisation assertion:
+checksum mismatch remained `CHECKSUM_MISMATCH`, truncation remained
+`TRUNCATED`, and stream failure rethrew the exact injected `IOException`.
+After the minimal ownership correction, the unchanged command passed 3/3 with
+25/25 Gradle tasks executed. The complete forced-fresh Sync suite then passed
+52/52 tests.
+
+Four direct `VaultCrypto` default-record tests use a capturing delegate that
+retains the derived associated-data reference. Encrypt and decrypt defaults
+both clear that reference after successful return and exact delegate failure,
+while caller-owned plaintext and ciphertext remain unchanged. Their focused
+forced-fresh command passed 4/4 tests. No production crypto API or internal
+visibility changed.
+
+The decoder now:
+
+- clears its bounded scratch array in `finally` on success and every failure;
+- clears partially filled owned ciphertext when truncation or a stream
+  exception prevents a complete read;
+- retains local ownership of complete ciphertext through checksum validation;
+  and
+- transfers the complete buffer to `CloudObjectFrame` only after checksum
+  success, clearing it on every pre-transfer failure.
+
+Typed failures, checksum-before-AEAD ordering, exact framing and all frozen
+fixtures remain unchanged. Fresh affected-module verification passed:
+
+```bash
+./gradlew :core:sync:testDebugUnitTest \
+  :core:crypto:testDebugUnitTest \
+  :core:data:testDebugUnitTest \
+  --stacktrace --rerun-tasks
+```
+
+The command exited 0 with 67/67 Gradle tasks executed and 132/132 JVM tests
+passing: Sync 52, Crypto 26 and Data 54.
+
+Deterministic authenticated vectors retained their four recorded SHA-256
+digests. The generator produced no diff, and the forced-fresh authenticated
+codec/golden command passed all 19 tests with 57/57 tasks executed. A first
+attempt to start that Gradle command was denied by the workspace sandbox before
+Gradle startup because it could not open the existing wrapper-cache lock; the
+unchanged command was rerun with cache-lock access and passed.
+
+The complete requested host gates then passed:
+
+```bash
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug \
+  --stacktrace --rerun-tasks
+./gradlew :app:assembleRelease --stacktrace --rerun-tasks
+```
+
+The debug gate exited 0 in 37 seconds with 547/547 tasks executed and 193/193
+JVM tests passing: App 25, Crypto 26, Data 54, Domain 36 and Sync 52. Lint and
+`:app:assembleDebug` completed. The separate release gate exited 0 in 39
+seconds with 441/441 tasks executed, including R8, resource shrinking,
+packaging and `:app:assembleRelease`.
+
+Final-review contract reconciliation records the internal authenticated codec
+as implemented in `core:data`, composed from `core:sync` framing/identity and
+`core:crypto` generic AEAD. It does not claim provider transport, separate
+backup/blob services, recovery, scheduling, Android Auto Backup, or
+product-visible backup/attachment flows. `AttachmentBlobStore` is the active
+blob contract name. Android backup remains disabled and supplementary future
+Stage 2 work.
+
+The source/terminology scans found no placeholder, logging, provider/private
+fixture, stale codec-status/ownership or obsolete blob-store contract name.
+Negative mentions of superseded Drive-primary, multi-device and `keepOffline`
+concepts remain only where the approved design explicitly rejects them. There
+is no change to Room, schemas, repositories, provider code, manifests,
+extraction or backup rules. No ADB, connected test, install, uninstall, data
+clear or other device command ran in this correction wave; the protected state
+was untouched. The ignored SDD progress ledger was not edited.
+
+The current protected AVD snapshot carries 200% global text. This is the
+authoritative protected-state record, not a correction blocker. Any future
+device suite that assumes a 100% baseline must verify its disposable overlay
+before running; the product's dedicated 200%-text acceptance remains covered.
 
 The only recommended next action is to write the focused Stage 2 local-backup
 and Android Auto Backup implementation plan. Do not begin Stage 2 source work
@@ -795,11 +895,11 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-There is no in-progress implementation. Stage 1 is complete at source commit
-`377c5c3`; its authenticated provider-independent object codec and four
-independent vectors passed the checkpoint above. No backup, Drive transport,
-recovery, Android Auto Backup or attachment flow should be inferred from this
-foundation.
+There is no in-progress implementation. Stage 1 is complete through final-review
+implementation correction `21c33bc`; its authenticated provider-independent
+object codec and four independent vectors passed the checkpoint above. No
+backup, Drive transport, recovery, Android Auto Backup or attachment flow
+should be inferred from this foundation.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 queued dependency PR checks and resolution remain paused. No later-stage
@@ -923,12 +1023,14 @@ remain untouched until their explicitly planned, verified migrations.
   explicit version fields, exact vault/object identity and optional attachment
   chunk identity. Validate the 16 KiB header and family-specific length/count
   bounds before allocating or reading ciphertext.
-- A checksum detects corruption but is not authentication. Stage 1 Tasks 3–6
-  must bind the full `CloudHeaderIdentity` as AEAD associated data and must not
-  expose plaintext or claim object integrity until decryption succeeds.
+- A checksum detects corruption but is not authentication. The implemented
+  `core:data` codec binds the full `CloudHeaderIdentity` as AEAD associated
+  data, checks length and checksum before AEAD, and exposes no plaintext until
+  authentication succeeds.
 - Preserve `CloudObjectFrame`'s one-shot ciphertext ownership. Ciphertext reads
   from caller-controlled streams may use only bounded scratch storage, never
-  the retained verified ciphertext array.
+  the retained verified ciphertext array. Clear scratch in `finally` and clear
+  partial or checksum-rejected ciphertext before ownership transfer.
 - Keep passphrases as `CharArray` and zero temporary key arrays.
 - Never log private content, account data, Drive IDs, attachment names or
   encryption metadata.

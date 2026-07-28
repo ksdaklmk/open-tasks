@@ -48,10 +48,13 @@ RecoveryCoordinator
     └── atomically activates the staged vault
 ```
 
-These services are approved, not implemented. `RecoveryCoordinator` will be
-the only component allowed to reconstruct Room from backup data or a restored
-portable package. `BackupCoordinator`, `PortableBackupPublisher`, and
-`AttachmentBlobCoordinator` cannot mutate structured product records.
+The coordinators, stores, portable publisher and recovery path are approved,
+not implemented. The internal `AuthenticatedCloudObjectCodec` shown at their
+future encryption boundary is implemented in `core:data`.
+`RecoveryCoordinator` will be the only component allowed to reconstruct Room
+from backup data or a restored portable package. `BackupCoordinator`,
+`PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
+structured product records.
 
 `RoomVaultRepository` owns its observation scope. Closing the repository
 cancels and joins that scope before its database owner closes SQLCipher. This
@@ -334,13 +337,17 @@ segments and 4 MiB plaintext plus crypto-v1 overhead for each of at most 26
 attachment chunks. Model limits are 10,000 manifest entries, 100,000 snapshot
 records and 10,000 operations per segment. For ciphertext reads, the input
 source receives only an 8 KiB-bounded scratch buffer; the decoder retains one
-separate full-size verified ciphertext array and transfers it at most once.
+separate full-size ciphertext array. Scratch storage is cleared in `finally`;
+partial and complete locally owned ciphertext is cleared on every failure
+before the complete, checksum-verified array transfers at most once.
 
-The SHA-256 field is a corruption check, not an authentication claim. Stage 1
-Task 2 must bind the complete `CloudHeaderIdentity` as AEAD associated data,
-verify the checksum before decryption, and translate rejection to typed
-failures. Until that provider-independent codec exists, canonical frames must
-not be treated as authenticated backup or blob objects.
+The SHA-256 field is a corruption check, not an authentication claim. The
+implemented provider-independent codec in `core:data` binds the complete
+`CloudHeaderIdentity` as AEAD associated data, verifies length and checksum
+before decryption, and translates untrusted frame and authentication rejection
+to typed failures. It is an internal authenticated-object foundation only:
+provider transport, backup/blob services, payload recovery, scheduling, and
+product-visible backup or attachment flows are not implemented.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry
