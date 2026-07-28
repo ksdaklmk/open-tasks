@@ -29,6 +29,7 @@ import app.opentasks.feature.more.InsightsUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -442,8 +443,6 @@ internal class WorkspaceInsightsState(
             workspace.drop(1).collect {
                 if (foregrounded) {
                     refreshInsightsTime()
-                } else {
-                    reproject()
                 }
             }
         }
@@ -560,13 +559,15 @@ internal class WorkspaceInsightsState(
         scheduleJob = null
         if (!foregrounded) return
         val nextRefresh = nextInsightsRefresh(workspace.value, timeContext)
-        scheduleJob = scope.launch {
+        val nextJob = scope.launch(start = CoroutineStart.LAZY) {
             timeProvider.awaitUntil(nextRefresh)
             if (currentCoroutineContext().isActive && foregrounded) {
                 scheduleJob = null
                 refreshInsightsTime()
             }
         }
+        scheduleJob = nextJob
+        nextJob.start()
     }
 }
 

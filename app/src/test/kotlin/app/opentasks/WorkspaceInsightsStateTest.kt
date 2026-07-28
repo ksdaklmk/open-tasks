@@ -308,6 +308,83 @@ class WorkspaceInsightsStateTest {
     }
 
     @Test
+    fun backgroundWorkspaceEmissionsStayUnprojectedUntilForegrounded() {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val overdue = now.minusSeconds(60)
+        val baseTask = OpenTasksFixtures.tasks.first().copy(
+            semanticStatus = SemanticStatus.PLANNED,
+            completedAt = null,
+            deletedAt = null,
+            due = ZonedMoment(overdue, "UTC"),
+        )
+        val intermediateTask = baseTask.copy(id = TaskId("background-intermediate"))
+        val latestTask = baseTask.copy(id = TaskId("background-latest"))
+        val workspace = MutableStateFlow(
+            OpenTasksFixtures.snapshot.copy(tasks = emptyList()),
+        )
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val engine = RecordingInsightsEngine()
+        val scope = testScope()
+        val state = WorkspaceInsightsState(
+            workspace = workspace,
+            savedStateHandle = SavedStateHandle(),
+            insightsEngine = engine,
+            timeProvider = provider,
+            scope = scope,
+        )
+        val initialSummary = state.summary.value
+        val initialUiState = state.uiState.value
+
+        workspace.value = OpenTasksFixtures.snapshot.copy(tasks = listOf(intermediateTask))
+        workspace.value = OpenTasksFixtures.snapshot.copy(tasks = listOf(latestTask))
+
+        assertEquals(2, engine.workspaceTaskIds.size)
+        assertEquals(initialSummary, state.summary.value)
+        assertEquals(initialUiState, state.uiState.value)
+        assertEquals(1, provider.captureCount)
+        assertEquals(0, provider.scheduleCount)
+
+        state.setForegrounded(true)
+
+        assertEquals(
+            listOf(emptyList(), emptyList(), listOf(latestTask.id), listOf(latestTask.id)),
+            engine.workspaceTaskIds,
+        )
+        assertEquals(listOf(latestTask.id), state.summary.value.overdue.map { it.taskId })
+        assertEquals(listOf(latestTask.id), state.uiState.value.snapshot.overdue.map { it.taskId })
+        assertEquals(2, provider.captureCount)
+        assertEquals(1, provider.scheduleCount)
+        scope.cancel()
+    }
+
+    @Test
+    fun immediateBoundaryReturnKeepsReplacementSchedulerTrackedForBackgroundCancellation() {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val provider = ManualInsightsTimeProvider(
+            initialContext = InsightsTimeContext(now, ZoneId.of("UTC")),
+            immediateAwaitCount = 1,
+        )
+        val scope = testScope()
+        val state = workspaceInsightsState(
+            OpenTasksFixtures.snapshot.copy(tasks = emptyList()),
+            provider,
+            scope = scope,
+        )
+
+        state.setForegrounded(true)
+
+        assertEquals(3, provider.captureCount)
+        assertEquals(2, provider.scheduleCount)
+        assertEquals(1, provider.activeWaitCount)
+
+        state.setForegrounded(false)
+
+        assertEquals(0, provider.activeWaitCount)
+        assertEquals(1, provider.cancelledWaitCount)
+        scope.cancel()
+    }
+
+    @Test
     fun restoredUnknownIdsAreIgnoredAgainstTheCurrentWorkspace() {
         val handle = SavedStateHandle(
             mapOf(
@@ -361,6 +438,7 @@ class WorkspaceInsightsStateTest {
 
     private class RecordingInsightsEngine : InsightsEngine {
         val contexts = mutableListOf<InsightsTimeContext>()
+        val workspaceTaskIds = mutableListOf<List<TaskId>>()
         private val delegate = DefaultInsightsEngine()
 
         override fun calculate(
@@ -370,12 +448,14 @@ class WorkspaceInsightsStateTest {
             zoneId: ZoneId,
         ): InsightsSnapshot {
             contexts += InsightsTimeContext(now, zoneId)
+            workspaceTaskIds += workspace.tasks.map { it.id }
             return delegate.calculate(workspace, selection, now, zoneId)
         }
     }
 
     private class ManualInsightsTimeProvider(
         initialContext: InsightsTimeContext,
+        immediateAwaitCount: Int = 0,
     ) : InsightsTimeProvider {
         var context: InsightsTimeContext = initialContext
         var captureCount: Int = 0
@@ -386,6 +466,7 @@ class WorkspaceInsightsStateTest {
             private set
         var cancelledWaitCount: Int = 0
             private set
+        private var remainingImmediateAwaits = immediateAwaitCount
 
         private val scheduled = Channel<Instant>(Channel.UNLIMITED)
         private val releases = Channel<Unit>(Channel.UNLIMITED)
@@ -397,6 +478,10 @@ class WorkspaceInsightsStateTest {
 
         override suspend fun awaitUntil(instant: Instant) {
             scheduleCount++
+            if (remainingImmediateAwaits > 0) {
+                remainingImmediateAwaits--
+                return
+            }
             activeWaitCount++
             try {
                 scheduled.send(instant)
