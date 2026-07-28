@@ -266,6 +266,43 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
     }
 
     @Test
+    fun aliasDeleteFailureRestoresEnvelopeAndPreservesOriginalContentKey() {
+        val aliasFailure = ExpectedAliasDeleteFailure()
+        val failingWrappingKeys = FailingDeleteWrappingKeyBoundary(
+            delegate = AndroidKeystoreWrappingKeyBoundary(),
+            deleteFailure = aliasFailure,
+        )
+        val store = storeWith(
+            commitBoundary = SharedPreferencesCommitBoundary,
+            wrappingKeyBoundary = failingWrappingKeys,
+        )
+        val original = store.getOrCreate(firstVault)
+        val originalBytes = original.serializedKeyset.copyOf()
+        val priorNonce = checkNotNull(preferences().getString(nonceKey(firstVault), null))
+        val priorCiphertext =
+            checkNotNull(preferences().getString(ciphertextKey(firstVault), null))
+
+        val failure = assertThrows(ExpectedAliasDeleteFailure::class.java) {
+            store.delete(firstVault)
+        }
+
+        assertSame(aliasFailure, failure)
+        assertEquals(priorNonce, preferences().getString(nonceKey(firstVault), null))
+        assertEquals(
+            priorCiphertext,
+            preferences().getString(ciphertextKey(firstVault), null),
+        )
+        val trackingCrypto = CreateTrackingVaultCrypto()
+        val reopened =
+            AndroidVaultContentKeyStore(context, trackingCrypto).getOrCreate(firstVault)
+        assertEquals(0, trackingCrypto.createCount)
+        assertArrayEquals(originalBytes, reopened.serializedKeyset)
+        originalBytes.fill(0)
+        original.close()
+        reopened.close()
+    }
+
+    @Test
     fun failedCreateLeavesNoEnvelopeOrNewAliasAndReportsFailure() {
         val failingStore = storeWith(
             commitBoundary = FailedCommitAfterMemoryMutation(),
@@ -279,6 +316,50 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
         assertFalse(preferences().contains(nonceKey(firstVault)))
         assertFalse(preferences().contains(ciphertextKey(firstVault)))
         assertNull(keyStore().getKey(aliasFor(firstVault), null))
+    }
+
+    @Test
+    fun failedCreateRetainsPrimaryFailureWhenAliasCleanupAlsoFails() {
+        val primaryFailure = ExpectedPrimaryFailure()
+        val cleanupFailure = ExpectedCleanupFailure()
+        val failingStore = storeWith(
+            commitBoundary = FailedCommitAfterMemoryMutation(primaryFailure),
+            wrappingKeyBoundary = FailingDeleteWrappingKeyBoundary(
+                delegate = SharedWrappingKeyBoundary(),
+                deleteFailure = cleanupFailure,
+            ),
+        )
+
+        val failure = assertThrows(ExpectedPrimaryFailure::class.java) {
+            failingStore.getOrCreate(firstVault)
+        }
+
+        assertSame(primaryFailure, failure)
+        assertEquals(1, failure.suppressed.size)
+        assertSame(cleanupFailure, failure.suppressed.single())
+    }
+
+    @Test
+    fun absentReplaceRetainsPrimaryFailureWhenAliasCleanupAlsoFails() {
+        val primaryFailure = ExpectedPrimaryFailure()
+        val cleanupFailure = ExpectedCleanupFailure()
+        val supplied = TinkVaultCrypto().createKey()
+        val failingStore = storeWith(
+            commitBoundary = FailedCommitAfterMemoryMutation(primaryFailure),
+            wrappingKeyBoundary = FailingDeleteWrappingKeyBoundary(
+                delegate = SharedWrappingKeyBoundary(),
+                deleteFailure = cleanupFailure,
+            ),
+        )
+
+        val failure = assertThrows(ExpectedPrimaryFailure::class.java) {
+            failingStore.replace(firstVault, supplied)
+        }
+
+        assertSame(primaryFailure, failure)
+        assertEquals(1, failure.suppressed.size)
+        assertSame(cleanupFailure, failure.suppressed.single())
+        supplied.close()
     }
 
     @Test
@@ -575,7 +656,32 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
         override fun deleteEntry(alias: String) = Unit
     }
 
+    private class FailingDeleteWrappingKeyBoundary(
+        private val delegate: WrappingKeyBoundary,
+        private val deleteFailure: RuntimeException,
+    ) : WrappingKeyBoundary by delegate {
+        override fun deleteEntry(alias: String): Nothing = throw deleteFailure
+    }
+
+    private class CreateTrackingVaultCrypto(
+        private val delegate: VaultCrypto = TinkVaultCrypto(),
+    ) : VaultCrypto by delegate {
+        var createCount: Int = 0
+            private set
+
+        override fun createKey(): VaultKey {
+            createCount += 1
+            return delegate.createKey()
+        }
+    }
+
     private class ExpectedCommitFailure : RuntimeException()
+
+    private class ExpectedAliasDeleteFailure : RuntimeException()
+
+    private class ExpectedPrimaryFailure : RuntimeException()
+
+    private class ExpectedCleanupFailure : RuntimeException()
 
     private companion object {
         const val CONCURRENT_MANAGER_COUNT = 8

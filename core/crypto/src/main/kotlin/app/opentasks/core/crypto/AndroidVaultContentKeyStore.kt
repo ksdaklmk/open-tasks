@@ -162,7 +162,7 @@ class AndroidVaultContentKeyStore internal constructor(
             persist(vaultId, wrap(vaultId, key, requireExistingAlias), prior)
         } catch (failure: Throwable) {
             if (!aliasExisted && !requireExistingAlias) {
-                wrappingKeyBoundary.deleteEntry(alias)
+                cleanupAliasAfterFailure(alias, failure)
             }
             throw failure
         }
@@ -178,7 +178,12 @@ class AndroidVaultContentKeyStore internal constructor(
                 .remove(ciphertextPreferenceKey(vaultId)),
             failureMessage = "Unable to remove the local vault-content key envelope",
         )
-        wrappingKeyBoundary.deleteEntry(aliasFor(vaultId))
+        try {
+            wrappingKeyBoundary.deleteEntry(aliasFor(vaultId))
+        } catch (failure: Throwable) {
+            restorePreferenceState(vaultId, prior)
+            throw failure
+        }
     }
 
     private fun createAndPersist(
@@ -198,9 +203,22 @@ class AndroidVaultContentKeyStore internal constructor(
         } catch (failure: Throwable) {
             key.close()
             if (!aliasExisted) {
-                wrappingKeyBoundary.deleteEntry(alias)
+                cleanupAliasAfterFailure(alias, failure)
             }
             throw failure
+        }
+    }
+
+    private fun cleanupAliasAfterFailure(
+        alias: String,
+        primaryFailure: Throwable,
+    ) {
+        try {
+            wrappingKeyBoundary.deleteEntry(alias)
+        } catch (cleanupFailure: Throwable) {
+            if (cleanupFailure !== primaryFailure) {
+                primaryFailure.addSuppressed(cleanupFailure)
+            }
         }
     }
 
