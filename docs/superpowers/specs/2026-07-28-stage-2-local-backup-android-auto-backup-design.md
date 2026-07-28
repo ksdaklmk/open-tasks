@@ -1,7 +1,7 @@
 # Stage 2 Local Backup and Android Auto Backup Design
 
 **Date:** 28 July 2026
-**Status:** Approved in conversation; written-spec review pending
+**Status:** Approved
 **Scope:** Local backup generations, backup-journal migration, verified local
 backup objects, one portable encrypted package, Android Auto Backup allow-list,
 and minimal package status
@@ -179,7 +179,7 @@ Own:
 - Android file locations and `AtomicFile`;
 - recovery-passphrase setup orchestration;
 - restored-package detection and quarantine;
-- navigation to system backup settings; and
+- navigation to public system settings for platform backup state; and
 - binding status/actions into the stateless More feature.
 
 ### `feature:more`
@@ -384,7 +384,9 @@ The strict decoder rejects:
   time-entry, attachment, or tombstone bounds;
 - cyclic parent/dependency graphs;
 - impossible dates, instants, zones, counts, or sizes; and
-- any payload exceeding the existing 100,000-record or 64 MiB snapshot bounds.
+- any payload exceeding 100,000 records or `64 MiB - 33 bytes`
+  (`67_108_831` bytes), which preserves the existing 64 MiB snapshot
+  ciphertext bound after crypto-v1 overhead.
 
 The snapshot payload carries its covered local generation. The authenticated
 outer frame uses family `SNAPSHOT` and object identity
@@ -406,9 +408,10 @@ Operation segments contain:
 Entries sort by generation then sequence and preserve operation IDs and payload
 bytes exactly.
 
-One segment contains at most 10,000 operations and at most 16 MiB of plaintext
-before authenticated framing. The authenticated outer identity is
-`segment:<firstGeneration>:<lastGeneration>`.
+One segment contains at most 10,000 operations and at most
+`16 MiB - 33 bytes` (`16_777_183` bytes) of plaintext, preserving the existing
+16 MiB operation-segment ciphertext bound after crypto-v1 overhead. The
+authenticated outer identity is `segment:<firstGeneration>:<lastGeneration>`.
 
 Local checkpoint advancement occurs only after the complete frame is written,
 decoded, authenticated, strictly parsed, and compared with the source
@@ -494,6 +497,9 @@ The manifest plaintext repeats and cryptographically binds:
 
 Its authenticated outer family is `MANIFEST`, with object identity
 `portable-manifest:<generation>`.
+
+Manifest plaintext is at most `1 MiB - 33 bytes` (`1_048_543` bytes), so the
+existing 1 MiB manifest ciphertext bound remains authoritative.
 
 ### Authenticated snapshot
 
@@ -695,8 +701,8 @@ Show a bounded local reason:
 - local file I/O failure.
 
 Android exposes no dependable upload time or encryption-capability state to
-the app. The section links to system backup settings for platform state and
-does not infer upload success.
+the app and no public backup-settings intent action. The section links to
+public system settings for platform state and does not infer upload success.
 
 ### `RestoredPackageDetected`
 

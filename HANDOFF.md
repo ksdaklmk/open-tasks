@@ -1,14 +1,17 @@
 # Open Tasks Handoff
 
-- Last updated: 28 July 2026
+- Last updated: 29 July 2026
 - Branch: `main`
 - Session status: **Stage 1 direction reset and authenticated object
   foundation are complete and verified. The focused Stage 2 local-backup and
-  Android Auto Backup design is approved in conversation and written at
+  Android Auto Backup design is approved and written at
   `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`;
-  written-spec review is the sole next gate before implementation planning.
-  No Stage 2 source work has started. Train 1 Tasks 1.1–1.5 remain complete and
-  independently reviewed. GitHub maintenance remains paused.**
+  its detailed test-driven plan is written at
+  `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`
+  and is reviewed and approved. Stage 2 source execution is now authorised in
+  the approved subagent-driven mode; no Stage 2 source work has started yet.
+  Train 1 Tasks 1.1–1.5 remain complete and independently reviewed. GitHub
+  maintenance remains paused.**
 - Current implementation point: `21c33bc` (`fix: clear rejected cloud
   ciphertext buffers`) is the Stage 1 final-review implementation correction.
   The local-authority direction was approved in `6e3c816` (`docs: define local
@@ -828,9 +831,8 @@ device suite that assumes a 100% baseline must verify its disposable overlay
 before running; the product's dedicated 200%-text acceptance remains covered.
 
 At this Stage 1 checkpoint, the next recommended action was to design and plan
-Stage 2. That design has since been written and approved in conversation; the
-current gate is the written-spec review recorded below. Do not begin Stage 2
-source work from this checkpoint.
+Stage 2. That design and its detailed implementation plan have since received
+written approval. Execute the plan task-by-task from the current checkpoint.
 
 ## Previous P1/P2 pause closure verification
 
@@ -906,9 +908,8 @@ should be inferred from this foundation.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 queued dependency PR checks and resolution remain paused. No later-stage
-source change is authorised. The Stage 2 design is approved in conversation
-and awaiting written-spec review; its implementation plan comes only after
-that review.
+source change outside the approved Stage 2 plan is authorised. The Stage 2
+design and detailed implementation plan have written approval.
 
 ## Resume instructions
 
@@ -921,10 +922,9 @@ that review.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5 and Stage 1 are complete; do not amend or reopen their reviewed
    commits without a new finding.
-3. Review the focused
-   [Stage 2 design](docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md).
-   After written approval, create and review its detailed implementation plan.
-   Do not begin Stage 2 source work before both gates pass.
+3. Execute the approved
+   [Stage 2 implementation plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md)
+   task-by-task with its required Superpowers workflow.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -947,7 +947,7 @@ recorded above.
 | Order | Stage | Status | Exit decision |
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
-| 2 | Local backup and Android Auto Backup | Design written; awaiting written-spec review | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 2 | Local backup and Android Auto Backup | Plan approved; implementation authorised | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Blocked by Stage 2 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
@@ -961,10 +961,10 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Review and approve the focused Stage 2 local-backup and Android Auto Backup
-   written design.
-2. Create and review its detailed implementation plan.
-3. Obtain approval for that plan before any Stage 2 source change.
+1. Execute the approved Stage 2 local-backup and Android Auto Backup plan
+   task-by-task with its required Superpowers workflow.
+2. Run the complete Stage 2 verification and review gates.
+3. Do not begin Stage 3 until Stage 2 is implemented, verified, and reviewed.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 remains disabled until Stage 2. Existing Room, outbox, and local workspace data
@@ -1056,10 +1056,9 @@ remain untouched until their explicitly planned, verified migrations.
 
 ## Recommended next action
 
-Review the focused
-[Stage 2 local-backup and Android Auto Backup design](docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md).
-After written approval, create and review its detailed implementation plan.
-Do not begin Stage 2 source work before both gates pass.
+Execute the approved
+[Stage 2 local-backup and Android Auto Backup implementation plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md)
+task-by-task in subagent-driven mode, beginning with Task 1.
 
 Keep the protected workspace untouched and run device suites only on a sole
 disposable emulator. Preserve existing outbox data, keep Android Auto Backup
