@@ -59,3 +59,6 @@ id_ed25519
 
 # Local Claude configuration; shared project guidance remains tracked
 .claude/settings.local.json
+
+# Local Superpowers brainstorming companion sessions
+.superpowers/brainstorm/
