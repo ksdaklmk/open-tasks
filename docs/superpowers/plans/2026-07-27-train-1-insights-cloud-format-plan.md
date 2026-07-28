@@ -20,18 +20,17 @@ Tink AEAD, Android Keystore, JUnit 4, Compose UI test, Room/SQLCipher fixtures.
 
 **Backlog:** P2-F04 and P1-D02.
 
-## Execution status — paused 27 July 2026
+## Execution status — paused 28 July 2026
 
-- Train 0 and Train 1 Tasks 1.1–1.2 are complete and independently reviewed.
-- Task 1.3's initial implementation is commit `2b4df62`.
-- Task 1.3 fix round 1 is intentionally paused in an unstaged dirty tree after
-  its post-font-scale-layout More suite passed 22/22. Compact corrected visual
-  recapture, final-source App verification, commit
-  `fix: preserve live insights qualifications`, and independent re-review
-  remain.
-- Do not start Task 1.4 until Task 1.3's re-review is clean. The exact device,
-  dirty-path, evidence and resume state is authoritative in `HANDOFF.md` and
-  the ignored SDD progress ledger.
+- Train 0 and Train 1 Tasks 1.1–1.5 are complete and independently reviewed.
+- The current implementation point is Task 1.5 fix commit `ce8f5bf`; its final
+  re-review has zero open findings after two correction rounds.
+- Task 1.6 is explicitly unstarted. Resume only on the user's direction from a
+  clean-tree audit and the exact state in `HANDOFF.md` plus the ignored SDD
+  progress ledger.
+- The repository exit gate is not green: five pre-existing
+  `UnrememberedMutableState` findings remain in the Task 1.3 Insights
+  instrumented test and must be corrected before Train 1 completion.
 
 ## Global Constraints
 
@@ -197,6 +196,9 @@ git commit -m "feat: complete qualified insights metrics"
 
 ### Task 1.3: Add the accessible Insights surface
 
+**Status:** Complete through `f39af40`; independently reviewed with zero open
+findings after three correction rounds.
+
 **Files:**
 - Create:
   `feature/more/src/main/kotlin/app/opentasks/feature/more/InsightsScreen.kt`
@@ -322,19 +324,21 @@ labels. Both presentations expose the same ordered qualified data. Positive
 sub-minute durations render as non-zero and bar ratios use sub-minute
 precision.
 
-**Pause checkpoint (2026-07-27):** manual 200% QA rejected the width-only
-two-column decision because it collapsed labels into vertical characters.
-The current unstaged correction bases expansion on effective width after font
-scaling, so 200% text uses the stacked structure; its focused and full More
-device suites pass. The invalid visual RED and valid replacement expanded
-captures are retained. Compact corrected captures and the final verification,
-commit and re-review steps remain as recorded in `HANDOFF.md`.
+**Completion checkpoint (2026-07-28):** manual 200% QA rejected the width-only
+two-column decision because it collapsed labels into vertical characters. The
+reviewed correction bases expansion on effective width after font scaling, so
+200% text uses the stacked structure. Compact light-mode captures, final More
+and App verification and all three correction re-reviews are recorded in
+`HANDOFF.md`.
 
 **User acceptance correction (2026-07-28):** light mode is the required
 acceptance colour scheme for this application. Existing dark-theme support is
 retained as best-effort, but dark appearance is not a Task 1.3 release gate.
 
 ### Task 1.4: Separate and locally wrap the vault-content key
+
+**Status:** Complete through `376d35e`; independently reviewed with zero open
+findings after two correction rounds.
 
 **Files:**
 - Modify:
@@ -429,6 +433,9 @@ git commit -m "feat: add independently wrapped vault content keys"
 
 ### Task 1.5: Define canonical bounded cloud objects
 
+**Status:** Complete through `ce8f5bf`; independently reviewed with zero open
+findings after two correction rounds.
+
 **Files:**
 - Modify: `core/sync/build.gradle.kts`
 - Create:
@@ -509,7 +516,13 @@ git add core/sync
 git commit -m "feat: define bounded encrypted cloud object format"
 ```
 
+> **Pause checkpoint — 28 July 2026:** The user requested a stop after the
+> reviewed Task 1.5 boundary. Task 1.6 is unstarted. Resume only on explicit
+> direction, beginning with the recorded handoff and a clean-tree audit.
+
 ### Task 1.6: Authenticate the format and freeze golden vectors
+
+**Status:** Paused; not started.
 
 **Files:**
 - Modify:
@@ -523,6 +536,7 @@ git commit -m "feat: define bounded encrypted cloud object format"
 - Modify: `docs/architecture.md`
 - Modify: `docs/threat-model.md`
 - Modify: `DESIGN.md`
+- Modify: `PRODUCT.md`
 - Modify: `HANDOFF.md`
 
 **Interfaces:**
@@ -578,6 +592,6 @@ object bounds, and threat gates T02–T06/T11–T13.
 
 ```bash
 git add core/data core/crypto core/sync DESIGN.md HANDOFF.md \
-  docs/architecture.md docs/threat-model.md
+  PRODUCT.md docs/architecture.md docs/threat-model.md
 git commit -m "feat: freeze authenticated cloud format foundation"
 ```

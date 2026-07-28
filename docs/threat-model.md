@@ -1,6 +1,6 @@
 # Threat Model
 
-Last reviewed: 27 July 2026
+Last reviewed: 28 July 2026
 
 This document covers the implemented local-first foundation and the planned
 Drive-primary architecture. It is a release gate: any new data flow, exported
@@ -32,7 +32,7 @@ security gates.
 | Attachment content and names | Private content | Planned app-private encrypted files |
 | Local database key | Critical key material | AES-GCM envelope in private preferences |
 | Local wrapping key | Critical key material | Non-exportable Android Keystore entry |
-| Cloud vault data key | Critical key material | Tink keyset wrapped by recovery passphrase |
+| Vault-content key | Critical key material | Tink keyset independently wrapped by the recovery passphrase and a per-vault Android Keystore key |
 | Recovery passphrase | User-held secret | Memory only; never persisted |
 | Device ID, revisions and sync clocks | Sensitive metadata | Private preferences/database |
 | Drive object identifiers and account data | Sensitive metadata | Not implemented |
@@ -58,8 +58,9 @@ VaultRepository
                                            ▼
                                       Drive appDataFolder
 
-Recovery passphrase ── Argon2id ── AES-GCM unwrap ── Tink vault data key
-Android Keystore key ── AES-GCM unwrap ───────────── SQLCipher database key
+Recovery passphrase ── Argon2id ── AES-GCM unwrap ── Tink vault-content key
+Per-vault Android Keystore key ─── AES-GCM unwrap ── same content key
+Database Android Keystore key ──── AES-GCM unwrap ── SQLCipher database key
 ```
 
 The repository is the only data-write boundary. A mutation and its outbox
@@ -94,19 +95,19 @@ must not weaken platform protections.
 | ID | Threat | Implemented control | Residual risk or required gate |
 |---|---|---|---|
 | T01 | Database copied from a locked device | SQLCipher; random 256-bit database key; key wrapped by an AES-GCM Keystore key requiring an unlocked device | Rooted or compromised OS is out of scope |
-| T02 | Keystore entry lost or invalidated | Existing envelope requires the existing alias; key manager fails closed and never creates a replacement | Local-only vault is unrecoverable until cloud recovery is implemented; UI recovery flow is required before release |
-| T03 | Wrapped local key modified or partially stored | AES-GCM authentication, associated data, nonce validation and synchronous preference commit | Preferences and Keystore are not an atomic cross-store transaction; first-run interruption must remain recoverable |
+| T02 | Keystore entry lost, replaced or invalidated | Database and per-vault content-key envelopes require their existing aliases; managers fail closed and never create a replacement for stored state; failed content-key alias deletion restores the captured preference envelope before propagating failure | Local-only vault is unrecoverable until cloud recovery is implemented; UI recovery flow is required before release |
+| T03 | Wrapped local key modified or partially stored | AES-GCM authentication, versioned exact-vault associated data, strict nonce/envelope validation, synchronous preference commits and best-effort rollback to the captured prior content-key envelope | Preferences and Keystore are not an atomic cross-store transaction; a process or device loss between stores can leave an orphan alias, and first-run interruption must remain recoverable |
 | T04 | Recovery passphrase guessed offline | Argon2id with 64 MiB, three iterations, parallelism one and a random 16-byte salt | Password strength remains user-dependent; recovery UX needs strength guidance and rate-limited online flows |
-| T05 | Recovery envelope or encrypted record modified | AES-GCM/Tink authentication; format-bound associated data; tamper and golden-vector tests | Future parsers must cap input sizes before allocation |
-| T06 | Ciphertext moved between vaults, objects or chunks | Associated data binds vault ID, object ID, format version and chunk index | Every future cloud and attachment encryption call must use the canonical context |
+| T05 | Recovery envelope or encrypted record modified | AES-GCM/Tink authentication; format-bound associated data; tamper and golden-vector tests | Future decrypted-payload parsers must cap input sizes before allocation |
+| T06 | Ciphertext moved between vaults, objects or chunks | `VaultCrypto` supports canonical associated data for record identity; cloud headers now preserve exact family, versions, vault/object IDs and optional chunk identity | Task 1.6 must bind the complete `CloudHeaderIdentity` during AEAD encrypt/decrypt; every future attachment call must use the same canonical context |
 | T07 | Key bytes remain in memory | Derived keys, temporary database keys and `VaultKey` buffers are explicitly zeroed | JVM/Android copies and immutable strings cannot be guaranteed erased; passphrases must remain `CharArray` |
 | T08 | Android backup leaks vault content or keys | Backup disabled; extraction and transfer rules exclude the application root; legacy rules exclude databases, keys, vaults, attachments and key preferences | Re-test rules on supported API levels during release acceptance |
 | T09 | Logs or telemetry leak private fields | Architecture prohibits task text, account data, Drive IDs, attachment names and encryption metadata; current scan found no application logging calls | Any telemetry integration requires a separate field allow-list review |
 | T10 | Exported component mutates or leaks data | Only launcher activity is exported; reminder action/system receivers are private; reminder pending intents are immutable and carry opaque IDs; custom quick-add intent opens authenticated UI; `FileProvider` is private and limited to `cache/shared` | Add explicit validation and user confirmation when Sharesheet/import flows are implemented |
 | T11 | Drive provider reads cloud content | Planned Drive objects are encrypted locally; only `drive.appdata` scope is permitted | Drive transport and OAuth are not implemented; no cloud-security claim may be made yet |
 | T12 | Replay, duplicate delivery or reordering creates divergent state | Atomic outbox, deterministic recurrence IDs, idempotent completion, revisioned project-workflow operations, hybrid logical clocks and deterministic merge rules | End-to-end pagination, retry and multi-device tests depend on the Drive slice |
-| T13 | Malicious or incompatible cloud/import format | Version headers expose schema, crypto and minimum-reader versions; readers reject unsupported formats | Checksums, bounded decoding, quarantine and recovery UI remain to be implemented |
-| T14 | Dependency or CI workflow compromise | Minimal `google()`/`mavenCentral()` repositories, read-only CI token, no CI secrets, automated dependency/security updates, secret scanning and push protection | GitHub Actions are tag-pinned rather than commit-pinned; pin before CI receives signing or OAuth secrets |
+| T13 | Malicious or incompatible cloud/import format | Strict canonical UTF-8 v1 headers expose schema, crypto and minimum-reader versions; readers reject unsupported/non-canonical fields, malformed identity, invalid chunk tuples, checksum mismatch, trailing/truncated bytes and family-specific lengths before exposing a one-shot ciphertext buffer; allocation is bounded before read and caller-controlled streams never receive the retained verified buffer | SHA-256 detects corruption but is not authentication. Task 1.6 must authenticate the complete header identity before plaintext use; bounded payload decoders, quarantine and recovery UI remain required |
+| T14 | Dependency or CI workflow compromise | Minimal `google()`/`mavenCentral()` repositories, read-only CI token, no CI secrets, automated dependency/security updates, secret scanning and push protection; third-party Actions are pinned to reviewed commit SHAs | Review each future Action revision before changing its SHA, especially before CI receives signing or OAuth secrets |
 | T15 | Plaintext export or notification discloses content | Reminder permission is requested in context; app and channel state are checked; lock-screen visibility is private with a generic public version; alarm intents exclude task text; precise timing has an explained inexact fallback | An unlocked notification shade contains task title and due/project context by design; verify lock-screen redaction and denial/settings flows on physical devices. Widgets, CSV and sharing still require separate reviews |
 | T16 | Screenshots reveal unlocked content | No app-wide screenshot blocking, by design | Planned app-lock title privacy must provide a user-controlled concealment option |
 | T17 | Unbounded or malformed workflow edits exhaust storage or corrupt reporting | Status names are trimmed and capped at 64 characters; active statuses are capped at 20 per project; repository validation preserves at least one active status in each semantic category; archive retains assigned records | Future import and Drive decoders must enforce the same limits before allocation or merge |
@@ -118,8 +119,11 @@ must not weaken platform protections.
 
 ## Cryptographic invariants
 
-- Local database and cloud data keys are independent random 256-bit values.
-- A stored local key envelope must never cause creation of a new Keystore key.
+- Local database and vault-content keys are independent random 256-bit values.
+- The Tink vault-content key is independently wrapped for recovery and local
+  per-vault Android Keystore access; neither envelope uses the SQLCipher key.
+- A stored database or content-key envelope must never cause creation of a new
+  Keystore key.
 - Recovery envelopes use format version 1 and reject weakened Argon2 metadata.
 - Argon2id parameters are 65,536 KiB, three iterations and parallelism one.
 - AES-GCM uses 96-bit nonces and 128-bit authentication tags.
@@ -161,9 +165,10 @@ Before a production release:
 1. Implement and test recovery from reinstall, new device and Keystore loss.
 2. Complete Drive authentication, quota, pagination, corruption, replay and
    multi-device conflict tests using encrypted fixtures.
-3. Pin GitHub Actions to reviewed commit SHAs before CI receives secrets.
-4. Add bounded parsers and quarantine/recovery UX for malformed cloud and
-   import objects.
+3. Retain reviewed GitHub Actions commit-SHA pins and review each update before
+   CI receives secrets.
+4. Complete bounded decrypted-payload/import parsers and quarantine/recovery UX
+   for malformed objects; retain the implemented bounded outer cloud frame.
 5. Re-run migration fixtures from every released database and crypto format.
 6. Complete physical-device reminder lock-screen and permission acceptance;
    complete separate export, attachment, widget and app-lock privacy reviews

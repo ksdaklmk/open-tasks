@@ -253,9 +253,18 @@ new-device recovery and multi-device merge proofs runnable as unit tests.
 
 ## Security invariants
 
-- Database and cloud keys are independent random values.
+- The SQLCipher database key and Tink AES-256-GCM vault-content key are
+  independently generated random 256-bit values.
 - The local database key is wrapped by an AES-GCM Android Keystore key that is
   restricted to use after device unlock.
+- The vault-content key has two independent envelopes: an Argon2id-derived
+  recovery envelope and a local AES-GCM envelope under a deterministic
+  per-vault Android Keystore alias. Changing the recovery passphrase re-wraps
+  the same content key.
+- A stored local content-key envelope requires its existing alias. Missing,
+  replaced or invalidated aliases fail closed; persistence and alias failures
+  restore the prior preference envelope where possible and never silently
+  create a replacement content key.
 - Recovery uses Argon2id (64 MiB, 3 iterations, parallelism 1, 16-byte salt).
 - Record encryption binds vault, object, and format identifiers as associated
   data.
@@ -269,13 +278,33 @@ gates are maintained in [Threat Model](threat-model.md).
 
 ## Sync format
 
-Cloud objects expose `schemaVersion`, `cryptoVersion`, and
-`minimumReaderVersion`. Operations use hybrid logical clocks plus device ID
-tie-breaking. Scalar fields merge independently; sets use timestamped
-add/remove operations. Time-entry upsert/delete operations are ordered by
-their operation revisions; concurrent overlaps remain separate records and
-are surfaced for explicit reconciliation. Newer deletes dominate until an
-explicitly newer restore.
+The implemented v1 cloud frame is a four-byte big-endian header length,
+canonical UTF-8 JSON header, then raw ciphertext. The header has fixed property
+ordering and exposes the object family, `schemaVersion`, `cryptoVersion`,
+`minimumReaderVersion`, exact vault/object identity, ciphertext length and
+SHA-256, plus an attachment-only chunk tuple. Unknown, missing, duplicated,
+reordered, non-canonical or invalid UTF-8 fields are rejected.
+
+Decoding reads and validates the bounded header before ciphertext allocation.
+It enforces an exact total frame length, a 16 KiB header limit and ciphertext
+limits of 1 MiB for manifests, 64 MiB for snapshots, 16 MiB for operation
+segments and 4 MiB plaintext plus crypto-v1 overhead for each of at most 26
+attachment chunks. Model limits are 10,000 manifest entries, 100,000 snapshot
+records and 10,000 operations per segment. For ciphertext reads, the input
+source receives only an 8 KiB-bounded scratch buffer; the decoder retains one
+separate full-size verified ciphertext array and transfers it at most once.
+
+The SHA-256 field is a corruption check, not an authentication claim. Task 1.6
+must bind the complete `CloudHeaderIdentity` as AEAD associated data, verify
+the checksum before decryption and translate rejection to typed decode
+failures. Until that codec exists, canonical frames must not be treated as
+authenticated cloud objects.
+
+Operations use hybrid logical clocks plus device ID tie-breaking. Scalar
+fields merge independently; sets use timestamped add/remove operations.
+Time-entry upsert/delete operations are ordered by their operation revisions;
+concurrent overlaps remain separate records and are surfaced for explicit
+reconciliation. Newer deletes dominate until an explicitly newer restore.
 
 Drive transport is intentionally not wired to credentials in this foundation.
 `CloudObjectStore` and `SyncCoordinator` remain the production seams for a

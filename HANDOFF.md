@@ -2,14 +2,15 @@
 
 - Last updated: 28 July 2026
 - Branch: `main`
-- Session status: **Train 1 is active. Tasks 1.1–1.3 are complete and
-  independently reviewed; Task 1.4 is the next implementation task. GitHub
-  maintenance remains paused.**
-- Current point: `main` is at `f39af40` (`fix: defer background insights
-  projection`) and is 17 commits ahead of `origin/main`. Task 1.3 passed its
-  final re-review with zero open findings after three correction rounds. The
-  authorised replacement emulator baseline is running in expanded state,
-  light mode and 100% text from a verified no-save recovery point.
+- Session status: **Paused at the user's requested boundary after Train 1
+  Task 1.5. Tasks 1.1–1.5 are complete and independently reviewed; Task 1.6
+  has not started. GitHub maintenance remains paused.**
+- Current implementation point: `ce8f5bf` (`fix: isolate verified ciphertext
+  ownership`). Task 1.5 passed its final re-review with zero open findings
+  after two correction rounds. This documentation update is the pause
+  checkpoint. No emulator was ADB-attached during the pause audit. The named
+  authorised replacement snapshot remains present; its last verified state was
+  expanded, light mode and 100% text.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -62,8 +63,12 @@ and remain disabled. Google Identity, Drive transport, cloud recovery and Play
 Console work have not started. P0 release gates which depend on those features
 remain blocked by their listed prerequisites.
 
-Train 1 Tasks 1.1–1.3 are complete. Task 1.4 separates the vault-content key
-from the SQLCipher database key and is the next approved task.
+Train 1 Tasks 1.1–1.5 are complete. Vault-content keys are now independent of
+SQLCipher database keys and have separate recovery and per-vault Android
+Keystore wrapping. Canonical bounded cloud frames exist for manifests,
+snapshots, operation segments and attachment chunks. These are foundations
+only: the authenticated cloud codec, Drive transport and user recovery flow
+are not implemented. Task 1.6 is the next approved task when work resumes.
 
 ## Train 0 baseline checkpoint verification
 
@@ -222,9 +227,22 @@ identity above was unchanged after the module suites.
 - Room writes and outbox operations are atomic.
 - SQLCipher database with a random 256-bit key wrapped by a non-exportable,
   unlocked-device-required Android Keystore AES-GCM key.
-- Existing local envelopes fail closed if their Keystore key is lost; a new
-  key is never silently substituted.
-- Tink AES-256-GCM record encryption and Argon2id recovery envelopes.
+- Tink AES-256-GCM vault-content keys are independently generated from the
+  SQLCipher key. The same content key is wrapped separately by an Argon2id
+  recovery envelope and a per-vault Android Keystore key for local use.
+- Existing database and vault-content envelopes fail closed if their Keystore
+  key is lost, replaced or invalidated; a new key is never silently
+  substituted. Failed preference or alias operations restore the prior
+  envelope where possible and preserve the original failure.
+- Canonical v1 cloud frames use a fixed-order strict UTF-8 JSON header and raw
+  ciphertext. Decoding validates the 16 KiB header cap, per-family ciphertext
+  bounds, exact frame length, versions, attachment chunk tuple and SHA-256
+  checksum before exposing a one-shot owned ciphertext buffer.
+- The ciphertext limits are 1 MiB for manifests, 64 MiB for snapshots, 16 MiB
+  for operation segments and 4 MiB plaintext plus the fixed crypto-v1 overhead
+  for each of at most 26 attachment chunks. Payload-model caps are 10,000
+  manifest inventory entries, 100,000 snapshot records and 10,000 operations
+  per segment.
 - Golden vectors cover Argon2id output and associated-data encoding.
 - Tests cover wrong passphrase, weakened KDF metadata, ciphertext/envelope
   tamper, associated-data swapping, passphrase change, key zeroisation and
@@ -443,7 +461,7 @@ Results:
 - Source scans and `git diff --check` found no new user-visible US-English
   spellings, default-locale date formatters or whitespace errors.
 
-## Train 1 Task 1.3 completion and protected baseline
+## Train 1 Tasks 1.3–1.5 completion and protected baseline
 
 Train 1 is being executed from
 [the checked-in Train 1 plan](docs/superpowers/plans/2026-07-27-train-1-insights-cloud-format-plan.md)
@@ -480,6 +498,46 @@ Final Task 1.3 evidence:
 Light mode is the required application acceptance colour scheme. Existing dark
 theme support remains best-effort and is not a release gate.
 
+Task 1.4 completed through three independently reviewed commits:
+
+- `e2b2dfa` — `feat: add independently wrapped vault content keys`
+- `15f15f7` — `fix: harden local vault key isolation`
+- `376d35e` — `fix: preserve vault key delete failures`
+
+The final Task 1.4 boundary passed 19/19 crypto JVM tests, 22/22 Android
+Keystore tests on a sole disposable API 37 emulator and a forced 257/257-task
+crypto-plus-app debug build. Two correction rounds closed failure-atomic
+preference rollback, exact UTF-16 vault identity, fail-closed alias loss and
+replacement, delete rollback and primary-exception preservation. The protected
+workspace was then restored and its complete identity re-verified.
+
+Task 1.5 completed through three independently reviewed commits:
+
+- `7f779e3` — `feat: define bounded encrypted cloud object format`
+- `10a2390` — `fix: preserve bounded cloud identity`
+- `ce8f5bf` — `fix: isolate verified ciphertext ownership`
+
+The final Task 1.5 boundary passed 28/28 focused cloud-format tests, 39/39
+`core:sync` JVM tests, a forced 257/257-task sync-plus-app debug build, release
+assembly and a byte-for-byte audit of all four v1 fixtures. Two correction
+rounds closed lossy malformed-surrogate identity encoding, full-size buffer
+copy amplification, circular fixture expectations and a hostile-stream alias
+that could otherwise mutate ciphertext after checksum verification. For
+ciphertext reads, the final decoder passes only an 8 KiB-bounded scratch buffer
+to the source and retains a separate verified ciphertext array for one-shot
+ownership transfer.
+
+The repository-wide command
+`./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace`
+remains blocked by five pre-existing `UnrememberedMutableState` findings in
+`feature/more/src/androidTest/kotlin/app/opentasks/feature/more/InsightsScreenInstrumentedTest.kt`
+at lines 220, 277, 306, 347 and 572. Task 1.5 did not change that file. Do not
+describe the full repository gate as green until those Task 1.3 test-fixture
+lint findings are corrected and the gate is rerun. The final pause audit
+reproduced only that blocker: the command exited 1 at
+`:feature:more:lintDebug` after 12 seconds with 469 actionable tasks
+(27 executed, 2 from cache and 440 up-to-date).
+
 The Android SDK update and Android Studio run coincided with loss of the old
 snapshot identity; causation is unproven. The user authorised the fresh
 installation as the replacement protected baseline. The untouched
@@ -508,9 +566,15 @@ uninstalls `app.opentasks`. Use a sole disposable emulator started read-only
 with no snapshot load/save, then restore and re-verify the named protected
 snapshot.
 
-Before dispatching Task 1.4, retain the plan correction that adds
-`core/crypto/build.gradle.kts`: its new instrumentation test requires an
-Android test runner plus AndroidX core/JUnit/runner/rules dependencies.
+The Task 1.4 plan correction for `core/crypto/build.gradle.kts` was applied:
+its instrumentation suite has the Android test runner and AndroidX
+core/JUnit/runner/rules dependencies it requires.
+
+At the final pause audit, `adb devices -l` reported no attached device. The
+named replacement snapshot and the untouched pre-replacement recovery clone
+were both still present. Treat the recorded identity as the last verified
+protected state and restore the named snapshot before any future live-app
+acceptance.
 
 ## Previous P1/P2 pause closure verification
 
@@ -578,15 +642,16 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-Train 1 Task 1.4 is the current task. It separates the vault-content key from
-the SQLCipher database key, wraps that content key locally with a per-vault
-Android Keystore alias, and keeps recovery rewrapping independent. No Task 1.4
-source change existed when this checkpoint was written.
+There is no in-progress implementation. Work is deliberately paused at the
+user's request after the independently reviewed Task 1.5 commit `ce8f5bf`.
+Task 1.6 has not started; no authenticated cloud-object codec, new
+`core:data`/`core:crypto` dependency, Drive transport or user-facing sync flow
+should be inferred from the completed frame foundation.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 queued dependency PR checks and resolution remain paused. P2-F02 cannot
-complete until its attachment/cloud prerequisites exist. Train 1 continues
-through Tasks 1.4–1.6 before blocked Drive/provider work.
+complete until its attachment/cloud prerequisites exist. Train 1 resumes with
+Task 1.6 before blocked Drive/provider work.
 
 ## Resume instructions
 
@@ -596,18 +661,25 @@ through Tasks 1.4–1.6 before blocked Drive/provider work.
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
-2. Re-scan the working tree and preserve any user changes. Task 1.3 is complete;
-   do not amend or reopen its reviewed commits without a new finding.
-3. Continue the approved subagent-driven workflow at Task 1.4 with strict
-   test-first coverage for independent content keys and local wrapping.
-4. Run crypto instrumentation on a disposable emulator. Do not let Keystore
-   tests or App instrumentation mutate the protected workspace.
-5. Keep `P2-F02`, `P1-L05` and the blocked cloud/release gates paused unless
+2. Re-scan the working tree and preserve any user changes. Tasks 1.1–1.5 are
+   complete; do not amend or reopen their reviewed commits without a new
+   finding.
+3. Resume the approved subagent-driven workflow at Task 1.6 with strict
+   test-first coverage. Add `core:data`'s dependency on `core:crypto`, bind the
+   full canonical header identity as AEAD associated data, verify checksum
+   before decryption, translate failures to typed values and freeze independent
+   golden vectors.
+4. Before claiming the train exit gate is green, correct the five recorded
+   `UnrememberedMutableState` findings in the Task 1.3 Insights device test and
+   rerun the repository command from `CLAUDE.md`.
+5. Run any device suite on a sole disposable emulator. Do not let Keystore or
+   App instrumentation mutate the protected workspace.
+6. Keep `P2-F02`, `P1-L05` and the blocked cloud/release gates paused unless
    their listed prerequisites or the user's direction change. The P3 baseline
    developer-experience tasks are closed.
-6. Continue sequentially through Tasks 1.4, 1.5 and 1.6; review each scoped
-   commit independently before beginning the next task.
-7. Before recording the next pause or completion, run the repository gate from
+7. Complete and independently review Task 1.6 before starting any Drive or
+   provider work.
+8. Before recording the next pause or completion, run the repository gate from
    `CLAUDE.md`, affected device suites, release assembly when production code
    changed, and `git diff --check`; update this hand-off and every affected
    contract document in the same change.
@@ -650,7 +722,7 @@ even when their implementation is blocked by P1/P2 product work.
 | Order | ID | Status | Task | Depends on |
 |---:|---|---|---|---|
 | 1 | P1-D01 | Ready with credentials | Google Identity authorisation using only `drive.appdata` | OAuth client/account configuration |
-| 2 | P1-D02 | Ready | Versioned encrypted manifest, snapshots, per-device operation segments and checksum/bounded-decoder rules | Existing `core:crypto`, `core:sync`, threat model |
+| 2 | P1-D02 | Paused | Finish authenticated encryption for the completed versioned, checksummed and bounded manifest, snapshot, operation-segment and attachment-chunk frames | Train 1 Task 1.6; existing `core:crypto`, `core:sync`, threat model |
 | 3 | P1-D03 | Blocked | Drive `CloudObjectStore`, `changes.list`, pagination and resumable object transport | P1-D01, P1-D02 |
 | 4 | P1-D04 | Blocked | Outbox upload, remote download, idempotent merge, retry/backoff and visible sync health | P1-D03 |
 | 5 | P1-D05 | Blocked | Local-to-Drive migration with checksum verification and a seven-day local rollback copy | P1-D04 |
@@ -732,6 +804,20 @@ even when their implementation is blocked by P1/P2 product work.
   reconciliation into silent trimming, merging or deletion.
 - A crypto-format bump requires old-format fixtures and golden-vector review.
 - Never replace a missing Keystore key for an existing local envelope.
+- Keep SQLCipher database keys and Tink vault-content keys independently
+  generated. Recovery-passphrase changes and local Android Keystore wrapping
+  must re-wrap the same content key rather than re-encrypt content or reuse the
+  database key.
+- Cloud v1 headers remain strict canonical UTF-8 with fixed key ordering,
+  explicit version fields, exact vault/object identity and optional attachment
+  chunk identity. Validate the 16 KiB header and family-specific length/count
+  bounds before allocating or reading ciphertext.
+- A checksum detects corruption but is not authentication. Task 1.6 must bind
+  the full `CloudHeaderIdentity` as AEAD associated data and must not expose
+  plaintext or claim cloud integrity until decryption succeeds.
+- Preserve `CloudObjectFrame`'s one-shot ciphertext ownership. Ciphertext reads
+  from caller-controlled streams may use only bounded scratch storage, never
+  the retained verified ciphertext array.
 - Keep passphrases as `CharArray` and zero temporary key arrays.
 - Never log private content, account data, Drive IDs, attachment names or
   encryption metadata.
@@ -749,14 +835,15 @@ even when their implementation is blocked by P1/P2 product work.
 
 ## Recommended next action
 
-Continue Train 1 Task 1.4: create independent random vault-content keys, wrap
-them locally with per-vault Android Keystore aliases, keep recovery passphrase
-rewrapping on the same content key, zero temporary key bytes and fail closed
-when a stored alias is lost or invalidated.
+Wait for the user's explicit resume. Then continue with Train 1 Task 1.6:
+authenticate the completed canonical frames with the independent vault-content
+key, bind every header identity field as associated data, verify the checksum
+before AEAD decryption, return typed decode failures and freeze independent
+golden vectors. Correct the recorded Task 1.3 lint findings before claiming the
+train exit gate is green.
 
 `P2-F02` and therefore `P1-L05` remain blocked until the attachment/cloud
 design and `P1-D07` exist; do not weaken encrypted attachment requirements to
 start them early. Keep queued dependency PR checks and resolution paused unless
-the user explicitly resumes GitHub maintenance. Follow the approved Train 1
-order through bounded cloud formats and authenticated encrypted codecs. Do not
-attempt blocked P0 cloud/release gates before their product dependencies exist.
+the user explicitly resumes GitHub maintenance. Do not start Task 1.6, Drive or
+blocked P0 cloud/release work during this pause.

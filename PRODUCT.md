@@ -28,6 +28,20 @@ and an eventual move between local and encrypted Drive-primary storage.
 A serious project workspace with the privacy and immediacy of a local-first
 personal tool.
 
+## Current Delivery Boundary
+
+The current application remains local-only. Its encrypted workspace is fully
+useful without an account or network connection. The cloud foundation now has
+an independently generated vault-content key with separate recovery and local
+Android Keystore wrapping, plus strict bounded canonical frames for manifests,
+snapshots, operation segments and attachment chunks.
+
+Those foundations are not a user-visible sync or recovery feature. The
+authenticated cloud codec, Google Identity, Drive transport, migration,
+multi-device coordination and recovery UI remain unavailable. Product copy
+must not imply cloud backup, cross-device sync or reinstall recovery until
+those flows pass their release gates.
+
 ## Brand Personality
 
 Focused, candid, and quietly capable. The interface should feel calm under a
