@@ -6,6 +6,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,6 +25,7 @@ class CloudObjectFormatTest {
         try {
             Locale.setDefault(Locale.forLanguageTag("tr-TR"))
             goldenCases().forEach { golden ->
+                assertGoldenHeaderMatchesFrame(golden, golden.frame)
                 val encoded = CloudObjectFormat.encode(golden.header, golden.ciphertext)
 
                 assertArrayEquals(golden.frame, encoded)
@@ -34,6 +38,26 @@ class CloudObjectFormatTest {
             }
         } finally {
             Locale.setDefault(originalLocale)
+        }
+    }
+
+    @Test
+    fun goldenIdentityMutationCannotMatchIndependentExpectedMetadata() {
+        val golden = golden("manifest")
+        val mutatedHeader = golden.expectedHeaderJson.replace(
+            """"objectId":"manifest-0001"""",
+            """"objectId":"manifest-9999"""",
+        )
+        val mutatedFrame = frame(mutatedHeader.toByteArray(), golden.ciphertext)
+
+        val decoded = CloudObjectFormat.decode(
+            ByteArrayInputStream(mutatedFrame),
+            mutatedFrame.size.toLong(),
+        )
+
+        assertNotEquals(golden.header.identity, decoded.header.identity)
+        assertThrows(AssertionError::class.java) {
+            assertGoldenHeaderMatchesFrame(golden, mutatedFrame)
         }
     }
 
@@ -215,6 +239,74 @@ class CloudObjectFormatTest {
             CloudObjectFormat.decode(source, 6)
         }
         assertFalse(source.ciphertextRead)
+    }
+
+    @Test
+    fun encodeRejectsEveryUnpairedSurrogateIdentityWithoutCollapsingValues() {
+        val ciphertext = byteArrayOf(1)
+        val valid = header(CloudObjectFamily.MANIFEST, ciphertext)
+        val malformedValues = listOf(
+            "\uD800",
+            "\uDC00",
+            "vault-\uD800",
+            "vault-\uDC00",
+            "\uD800-first",
+            "\uD801-second",
+        )
+
+        malformedValues.forEach { malformed ->
+            assertThrows(IllegalArgumentException::class.java) {
+                CloudObjectFormat.encode(valid.copy(vaultId = malformed), ciphertext)
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                CloudObjectFormat.encode(valid.copy(objectId = malformed), ciphertext)
+            }
+        }
+    }
+
+    @Test
+    fun decodeRejectsEscapedUnpairedSurrogateIdentitiesBeforeCiphertextRead() {
+        val canonical = golden("manifest").expectedHeaderJson
+        val variants = listOf(
+            canonical.replace(
+                """"vaultId":"vault-alpha"""",
+                """"vaultId":"\uD800"""",
+            ),
+            canonical.replace(
+                """"vaultId":"vault-alpha"""",
+                """"vaultId":"\uDC00"""",
+            ),
+            canonical.replace(
+                """"objectId":"manifest-0001"""",
+                """"objectId":"\uD800"""",
+            ),
+            canonical.replace(
+                """"objectId":"manifest-0001"""",
+                """"objectId":"\uDC00"""",
+            ),
+        )
+
+        variants.forEach { json ->
+            assertMalformedHeaderRejectedBeforeCiphertext(json.toByteArray())
+        }
+    }
+
+    @Test
+    fun arbitraryValidUnicodeIdentityRoundTripsExactly() {
+        val ciphertext = "unicode".toByteArray()
+        val expected = header(CloudObjectFamily.MANIFEST, ciphertext).copy(
+            vaultId = "vault-\uD83D\uDD10-e\u0301-日本",
+            objectId = "object-\uD83E\uDDEA-ไทย-\uD834\uDD1E",
+        )
+
+        val encoded = CloudObjectFormat.encode(expected, ciphertext)
+        val decoded = CloudObjectFormat.decode(
+            ByteArrayInputStream(encoded),
+            encoded.size.toLong(),
+        )
+
+        assertEquals(expected, decoded.header)
+        assertArrayEquals(ciphertext, decoded.ciphertext)
     }
 
     @Test
@@ -412,6 +504,36 @@ class CloudObjectFormatTest {
         )
     }
 
+    @Test
+    fun frameTakesOwnershipAndTransfersExactBufferOnlyOnce() {
+        val owned = byteArrayOf(1, 2, 3)
+        val frame = CloudObjectFrame(
+            header(CloudObjectFamily.MANIFEST, owned),
+            owned,
+        )
+        val defensiveCopy = frame.ciphertext
+
+        assertNotSame(owned, defensiveCopy)
+        defensiveCopy.fill(0)
+        assertArrayEquals(byteArrayOf(1, 2, 3), frame.ciphertext)
+        assertSame(owned, frame.takeCiphertext())
+        assertThrows(IllegalStateException::class.java) {
+            frame.takeCiphertext()
+        }
+        assertThrows(IllegalStateException::class.java) {
+            frame.ciphertext
+        }
+    }
+
+    @Test
+    fun decodeTransfersTheExactVerifiedInputBufferWithoutCopying() {
+        val golden = golden("manifest")
+        val source = CiphertextBufferTrackingInputStream(golden.frame)
+        val decoded = CloudObjectFormat.decode(source, golden.frame.size.toLong())
+
+        assertSame(source.ciphertextTarget, decoded.takeCiphertext())
+    }
+
     private fun assertMalformedHeaderRejectedBeforeCiphertext(headerBytes: ByteArray) {
         val source = HeaderOnlyTrackingInputStream(headerBytes)
 
@@ -444,49 +566,48 @@ class CloudObjectFormatTest {
         val resource = javaClass.getResource("/cloud-format/v1/$name.json")
             ?: error("Missing golden fixture $name")
         val fixture = Json.parseToJsonElement(resource.readText()).jsonObject
+        val expectedHeaderJson = fixture.getValue("headerJson").jsonPrimitive.content
         val frame = fixture.getValue("frameHex").jsonPrimitive.content.hexToByteArray()
         val ciphertext = fixture.getValue("ciphertextHex")
             .jsonPrimitive
             .content
             .hexToByteArray()
-        val headerLength = frame.headerLength()
-        val headerJson = frame.copyOfRange(4, 4 + headerLength)
-            .toString(Charsets.UTF_8)
         val family = CloudObjectFamily.valueOf(
-            Regex(""""family":"([^"]+)"""").find(headerJson)!!.groupValues[1],
+            expectedHeaderJson.stringField("family"),
         )
-        val chunkIndex = Regex(""""chunkIndex":(null|-?\d+)""")
-            .find(headerJson)!!
-            .groupValues[1]
-            .takeUnless { it == "null" }
-            ?.toInt()
-        val chunkCount = Regex(""""chunkCount":(null|-?\d+)""")
-            .find(headerJson)!!
-            .groupValues[1]
-            .takeUnless { it == "null" }
-            ?.toInt()
+        val chunkIndex = expectedHeaderJson.nullableIntField("chunkIndex")
+        val chunkCount = expectedHeaderJson.nullableIntField("chunkCount")
+        val expectedHeader = CloudObjectHeader(
+            magic = expectedHeaderJson.stringField("magic"),
+            family = family,
+            schemaVersion = expectedHeaderJson.intField("schemaVersion"),
+            cryptoVersion = expectedHeaderJson.intField("cryptoVersion"),
+            minimumReaderVersion = expectedHeaderJson.intField("minimumReaderVersion"),
+            vaultId = expectedHeaderJson.stringField("vaultId"),
+            objectId = expectedHeaderJson.stringField("objectId"),
+            ciphertextLength = expectedHeaderJson.longField("ciphertextLength"),
+            ciphertextSha256 = expectedHeaderJson.stringField("ciphertextSha256"),
+            chunkIndex = chunkIndex,
+            chunkCount = chunkCount,
+        )
+        assertEquals(expectedHeader.ciphertextLength, ciphertext.size.toLong())
+        assertEquals(expectedHeader.ciphertextSha256, sha256(ciphertext))
         return GoldenCase(
-            header = CloudObjectHeader(
-                family = family,
-                vaultId = Regex(""""vaultId":"([^"]+)"""")
-                    .find(headerJson)!!
-                    .groupValues[1],
-                objectId = Regex(""""objectId":"([^"]+)"""")
-                    .find(headerJson)!!
-                    .groupValues[1],
-                ciphertextLength = ciphertext.size.toLong(),
-                ciphertextSha256 = sha256(ciphertext),
-                chunkIndex = chunkIndex,
-                chunkCount = chunkCount,
-            ),
+            expectedHeaderJson = expectedHeaderJson,
+            header = expectedHeader,
             ciphertext = ciphertext,
             frame = frame,
         )
     }
 
-    private fun goldenHeader(name: String): String {
-        val frame = golden(name).frame
-        return frame.copyOfRange(4, 4 + frame.headerLength()).toString(Charsets.UTF_8)
+    private fun goldenHeader(name: String): String = golden(name).expectedHeaderJson
+
+    private fun assertGoldenHeaderMatchesFrame(golden: GoldenCase, frame: ByteArray) {
+        val headerLength = frame.headerLength()
+        assertArrayEquals(
+            golden.expectedHeaderJson.toByteArray(),
+            frame.copyOfRange(4, 4 + headerLength),
+        )
     }
 
     private fun header(
@@ -520,6 +641,29 @@ class CloudObjectFormatTest {
     private fun checkedFrameLength(headerLength: Int, ciphertextLength: Long): Long =
         Math.addExact(Math.addExact(4L, headerLength.toLong()), ciphertextLength)
 
+    private fun frame(headerBytes: ByteArray, ciphertext: ByteArray): ByteArray =
+        ByteBuffer.allocate(4 + headerBytes.size + ciphertext.size)
+            .putInt(headerBytes.size)
+            .put(headerBytes)
+            .put(ciphertext)
+            .array()
+
+    private fun String.stringField(name: String): String =
+        Regex(""""$name":"([^"]*)"""").find(this)!!.groupValues[1]
+
+    private fun String.intField(name: String): Int =
+        Regex(""""$name":(-?\d+)""").find(this)!!.groupValues[1].toInt()
+
+    private fun String.longField(name: String): Long =
+        Regex(""""$name":(-?\d+)""").find(this)!!.groupValues[1].toLong()
+
+    private fun String.nullableIntField(name: String): Int? =
+        Regex(""""$name":(null|-?\d+)""")
+            .find(this)!!
+            .groupValues[1]
+            .takeUnless { it == "null" }
+            ?.toInt()
+
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
@@ -528,10 +672,26 @@ class CloudObjectFormatTest {
     private fun ByteArray.headerLength(): Int = ByteBuffer.wrap(this, 0, 4).int
 
     private data class GoldenCase(
+        val expectedHeaderJson: String,
         val header: CloudObjectHeader,
         val ciphertext: ByteArray,
         val frame: ByteArray,
     )
+
+    private class CiphertextBufferTrackingInputStream(
+        frame: ByteArray,
+    ) : ByteArrayInputStream(frame) {
+        private val ciphertextOffset = 4 + ByteBuffer.wrap(frame, 0, 4).int
+        var ciphertextTarget: ByteArray? = null
+            private set
+
+        override fun read(target: ByteArray, offset: Int, length: Int): Int {
+            if (pos == ciphertextOffset && ciphertextTarget == null) {
+                ciphertextTarget = target
+            }
+            return super.read(target, offset, length)
+        }
+    }
 
     private class HeaderOnlyTrackingInputStream(
         headerBytes: ByteArray,

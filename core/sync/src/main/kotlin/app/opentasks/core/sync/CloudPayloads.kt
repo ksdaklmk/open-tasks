@@ -48,12 +48,30 @@ data class CloudHeaderIdentity(
     val chunkCount: Int? = null,
 )
 
+/**
+ * Owns one verified ciphertext buffer.
+ *
+ * [ciphertext] returns defensive copies while ownership is retained.
+ * [takeCiphertext] transfers the exact buffer once; both access paths fail
+ * after transfer.
+ */
 class CloudObjectFrame internal constructor(
     val header: CloudObjectHeader,
     ciphertext: ByteArray,
 ) {
-    private val ciphertextBytes = ciphertext.copyOf()
+    private var ciphertextBytes: ByteArray? = ciphertext
 
     val ciphertext: ByteArray
-        get() = ciphertextBytes.copyOf()
+        get() = synchronized(this) {
+            checkNotNull(ciphertextBytes) {
+                "Ciphertext ownership has already been transferred"
+            }.copyOf()
+        }
+
+    @Synchronized
+    fun takeCiphertext(): ByteArray = checkNotNull(ciphertextBytes) {
+        "Ciphertext ownership has already been transferred"
+    }.also {
+        ciphertextBytes = null
+    }
 }

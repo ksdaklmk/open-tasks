@@ -4,6 +4,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -63,7 +64,6 @@ object CloudObjectFormat : CloudObjectFrameCodec {
 
         val headerBytes = readExact(source, headerLength, "header")
         val header = decodeCanonicalHeader(headerBytes)
-        validateHeader(header)
         val expectedLength = checkedFrameLength(headerLength, header.ciphertextLength)
         require(totalLength == expectedLength) {
             "Cloud frame length does not match its declaration"
@@ -96,14 +96,26 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         } catch (failure: Exception) {
             throw IllegalArgumentException("Cloud header is not valid JSON", failure)
         }
+        validateHeader(header)
         require(headerBytes.contentEquals(canonicalHeaderBytes(header))) {
             "Cloud header is not canonical"
         }
         return header
     }
 
-    private fun canonicalHeaderBytes(header: CloudObjectHeader): ByteArray =
-        json.encodeToString(header).toByteArray(StandardCharsets.UTF_8)
+    private fun canonicalHeaderBytes(header: CloudObjectHeader): ByteArray {
+        val text = json.encodeToString(header)
+        val encoded = try {
+            StandardCharsets.UTF_8
+                .newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .encode(CharBuffer.wrap(text))
+        } catch (failure: Exception) {
+            throw IllegalArgumentException("Cloud header cannot be encoded as UTF-8", failure)
+        }
+        return ByteArray(encoded.remaining()).also(encoded::get)
+    }
 
     private fun validateHeader(header: CloudObjectHeader) {
         require(header.magic == MAGIC) { "Unsupported cloud object magic" }
@@ -118,6 +130,8 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         }
         require(header.vaultId.isNotBlank()) { "Vault ID must not be blank" }
         require(header.objectId.isNotBlank()) { "Object ID must not be blank" }
+        requireUtf8Encodable(header.vaultId, "Vault ID")
+        requireUtf8Encodable(header.objectId, "Object ID")
         require(header.ciphertextLength > 0) { "Ciphertext length must be positive" }
         require(
             header.ciphertextLength <=
@@ -146,6 +160,18 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             require(header.chunkIndex == null && header.chunkCount == null) {
                 "Chunk metadata is attachment-only"
             }
+        }
+    }
+
+    private fun requireUtf8Encodable(value: String, label: String) {
+        try {
+            StandardCharsets.UTF_8
+                .newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .encode(CharBuffer.wrap(value))
+        } catch (failure: Exception) {
+            throw IllegalArgumentException("$label cannot be encoded as UTF-8", failure)
         }
     }
 
