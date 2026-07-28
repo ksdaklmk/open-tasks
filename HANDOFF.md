@@ -714,12 +714,11 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Complete and commit Stage 1 Task 1, this documentation-only contract reset.
-2. Begin source work with Stage 1 Task 2, **Clear the Insights
+1. Begin source work with Stage 1 Task 2, **Clear the Insights
    Instrumented-Test Lint Gate**.
-3. Complete Stage 1 Tasks 3–6 in order: typed/canonical identity, generic AEAD,
+2. Complete Stage 1 Tasks 3–6 in order: typed/canonical identity, generic AEAD,
    authenticated object codec, and independent golden vectors.
-4. Run Stage 1 exit gates and record the verified checkpoint before designing
+3. Run Stage 1 exit gates and record the verified checkpoint before designing
    or executing Stage 2.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
