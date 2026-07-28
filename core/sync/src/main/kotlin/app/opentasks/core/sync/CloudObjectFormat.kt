@@ -22,6 +22,7 @@ object CloudObjectFormat : CloudObjectFrameCodec {
     private const val CRYPTO_VERSION = 1
     private const val READER_VERSION = 1
     private const val LENGTH_PREFIX_BYTES = 4
+    private const val MAX_CIPHERTEXT_READ_BUFFER_BYTES = 8 * 1024
     private val lowercaseSha256 = Regex("[0-9a-f]{64}")
     private val json = Json {
         encodeDefaults = true
@@ -69,7 +70,7 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             "Cloud frame length does not match its declaration"
         }
 
-        val ciphertext = readExact(
+        val ciphertext = readExactOwned(
             source,
             header.ciphertextLength.toInt(),
             "ciphertext",
@@ -205,6 +206,31 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             }
         }
         return bytes
+    }
+
+    private fun readExactOwned(source: InputStream, size: Int, label: String): ByteArray {
+        val owned = ByteArray(size)
+        val scratch = ByteArray(minOf(size, MAX_CIPHERTEXT_READ_BUFFER_BYTES))
+        var offset = 0
+        while (offset < size) {
+            val requested = minOf(scratch.size, size - offset)
+            val count = source.read(scratch, 0, requested)
+            if (count < 0) {
+                throw IllegalArgumentException("Truncated cloud $label")
+            }
+            if (count == 0) {
+                val next = source.read()
+                if (next < 0) {
+                    throw IllegalArgumentException("Truncated cloud $label")
+                }
+                owned[offset] = next.toByte()
+                offset += 1
+            } else {
+                scratch.copyInto(owned, offset, 0, count)
+                offset += count
+            }
+        }
+        return owned
     }
 
     private fun sha256(bytes: ByteArray): String {

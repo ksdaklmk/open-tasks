@@ -526,12 +526,30 @@ class CloudObjectFormatTest {
     }
 
     @Test
-    fun decodeTransfersTheExactVerifiedInputBufferWithoutCopying() {
+    fun decodeNeverTransfersAnySourceRetainedReadTarget() {
+        val golden = golden("manifest")
+        val source = CiphertextBufferTrackingInputStream(golden.frame)
+        val decoded = CloudObjectFormat.decode(source, golden.frame.size.toLong())
+        val transferred = decoded.takeCiphertext()
+
+        assertTrue(source.ciphertextTargets.isNotEmpty())
+        source.ciphertextTargets.forEach { retained ->
+            assertNotSame(retained, transferred)
+        }
+    }
+
+    @Test
+    fun mutatingSourceRetainedReadTargetsCannotAlterTransferredCiphertext() {
         val golden = golden("manifest")
         val source = CiphertextBufferTrackingInputStream(golden.frame)
         val decoded = CloudObjectFormat.decode(source, golden.frame.size.toLong())
 
-        assertSame(source.ciphertextTarget, decoded.takeCiphertext())
+        assertTrue(source.ciphertextTargets.isNotEmpty())
+        source.ciphertextTargets.forEach { retained ->
+            retained.fill(0)
+        }
+
+        assertArrayEquals(golden.ciphertext, decoded.takeCiphertext())
     }
 
     private fun assertMalformedHeaderRejectedBeforeCiphertext(headerBytes: ByteArray) {
@@ -682,12 +700,11 @@ class CloudObjectFormatTest {
         frame: ByteArray,
     ) : ByteArrayInputStream(frame) {
         private val ciphertextOffset = 4 + ByteBuffer.wrap(frame, 0, 4).int
-        var ciphertextTarget: ByteArray? = null
-            private set
+        val ciphertextTargets = mutableListOf<ByteArray>()
 
         override fun read(target: ByteArray, offset: Int, length: Int): Int {
-            if (pos == ciphertextOffset && ciphertextTarget == null) {
-                ciphertextTarget = target
+            if (pos >= ciphertextOffset && ciphertextTargets.none { it === target }) {
+                ciphertextTargets += target
             }
             return super.read(target, offset, length)
         }
