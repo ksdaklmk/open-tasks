@@ -148,6 +148,12 @@ Existing record revisions may remain for local ordering, history, Undo,
 tombstones, and deterministic backup encoding. They no longer imply
 multi-device merge semantics.
 
+There is no runtime storage-mode choice. `DRIVE_PRIMARY` is removed from the
+domain and user interface. Any legacy persisted value is interpreted and
+migrated to local authority before the obsolete column or enum is removed; it
+does not start a cloud import because the released application never wrote a
+remote vault.
+
 ## Cloud setup
 
 The core application requires neither an account nor a recovery passphrase.
@@ -192,7 +198,9 @@ Backup is requested after local changes with a debounce, periodically under a
 network constraint, during risk-sensitive operations, and through **Back up
 now**. Exact scheduling intervals are an injected implementation policy rather
 than a persisted format contract; the implementation plan must select and test
-them.
+them. A new complete snapshot is required after 5,000 journal operations or
+seven days, whichever occurs first; earlier snapshots are allowed when needed
+for bounded recovery or risk-sensitive operations.
 
 A checkpoint advances only after the app:
 
@@ -241,15 +249,21 @@ If the package exceeds 24 MiB or platform backup is unavailable:
 
 The UI may report when and at which generation the package was produced. It
 must not claim Android uploaded it or report an invented system-backup time.
-Deleting app-managed Drive data does not claim to delete Android's separate
-backup dataset; the UI directs the user to system backup settings for that
-operation.
+Deleting any app-managed Drive objects does not claim to delete Android's
+separate backup dataset; the UI directs the user to system backup settings for
+that operation.
+
+A package restored by Android remains inert recovery input. It is never opened
+as the live database or activated automatically; normal passphrase,
+compatibility, integrity, staging, and writer-ownership checks still apply.
 
 ## Writer ownership and takeover
 
-The app-managed manifest contains a monotonically increasing writer epoch and
-the active writer's opaque device identity. Backup and attachment mutations
-require the current epoch and a conditional manifest revision. Reads do not.
+A minimal vault-control manifest exists whenever either cloud service is in
+use. It contains a monotonically increasing writer epoch and the active
+writer's opaque device identity. When primary backup is enabled, its backup
+inventory extends this control record. Backup and attachment mutations require
+the current epoch and a conditional control-manifest revision. Reads do not.
 
 Recovery that keeps the original vault identity must:
 
@@ -268,7 +282,9 @@ into the recovered original automatically.
 
 An offline prior device cannot learn about takeover immediately. Conditional
 provider writes still prevent it from overwriting the cloud lineage when it
-reconnects.
+reconnects. A client that has previously observed a control manifest treats a
+missing or replaced control record as ownership loss; it never recreates the
+known cloud lineage automatically.
 
 If the app-managed cloud lineage has been permanently deleted, an Auto Backup
 package may be activated only as a new vault identity after an explicit
@@ -443,10 +459,22 @@ Changing accounts is a verified cloud-store migration. It copies and verifies
 backup objects and attachment blobs before changing the binding. It never
 silently replaces the provider account.
 
-Deleting app-managed cloud data is a separate destructive action. It requires
-recovery-passphrase confirmation and explicit acknowledgement that primary
-backups and attachment content will be lost. It never implies deletion of the
-Android-managed Auto Backup dataset.
+Backup history and attachment blobs have separate destructive actions:
+
+- **Delete encrypted backup history** removes retained snapshots and journal
+  segments and disables primary backup. It keeps local structured data and
+  attachment blobs. While blobs remain, the service retains the minimal
+  writer-control record needed to prevent a second device from mutating them.
+- **Delete cloud attachment content** removes remote blob sets after explicit
+  acknowledgement that existing attachment metadata will become unavailable.
+  It keeps local structured data and encrypted backup history. This
+  user-confirmed vault-wide erasure is distinct from automatic garbage
+  collection and deliberately invalidates active blob references.
+- **Delete all app-managed cloud data** is an explicitly combined convenience
+  action, never the only available choice.
+
+Each action requires recovery-passphrase confirmation and names exactly what
+will remain. None implies deletion of the Android-managed Auto Backup dataset.
 
 ## Failure containment
 
@@ -605,6 +633,8 @@ implementation plan and review checkpoint.
   copy.
 - Backup failure does not block local work; attachment failure affects only
   the file operation.
+- Backup history and attachment blobs can be deleted independently without
+  claiming to delete Android's backup dataset.
 - A recovered device cannot create a second cloud writer for the same vault
   identity.
 - Existing local data survives the direction transition and every schema
