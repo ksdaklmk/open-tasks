@@ -536,16 +536,16 @@ ciphertext reads, the final decoder passes only an 8 KiB-bounded scratch buffer
 to the source and retains a separate verified ciphertext array for one-shot
 ownership transfer.
 
-The repository-wide command
-`./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace`
-remains blocked by five pre-existing `UnrememberedMutableState` findings in
+At the historical Task 1.5 checkpoint, the repository-wide command
+`./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace` was
+blocked by five pre-existing `UnrememberedMutableState` findings in
 `feature/more/src/androidTest/kotlin/app/opentasks/feature/more/InsightsScreenInstrumentedTest.kt`
-at lines 220, 277, 306, 347 and 572. Task 1.5 did not change that file. Do not
-describe the full repository gate as green until those Task 1.3 test-fixture
-lint findings are corrected and the gate is rerun. The final pause audit
-reproduced only that blocker: the command exited 1 at
-`:feature:more:lintDebug` after 12 seconds with 469 actionable tasks
-(27 executed, 2 from cache and 440 up-to-date).
+at lines 220, 277, 306, 347 and 572. Task 1.5 did not change that file. Its
+final pause audit reproduced only that blocker: the command exited 1 at
+`:feature:more:lintDebug` after 12 seconds with 469 actionable tasks (27
+executed, 2 from cache and 440 up-to-date). Stage 1 Task 2 subsequently
+resolved all five findings, and Task 7 reran the complete repository gate
+successfully, as recorded in the Stage 1 checkpoint below.
 
 The Android SDK update and Android Studio run coincided with loss of the old
 snapshot identity; causation is unproven. The user authorised the fresh
