@@ -12,6 +12,14 @@ import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import app.opentasks.core.data.backup.BackupCaptureDao
+import app.opentasks.core.data.backup.BackupJournalDao
+import app.opentasks.core.data.backup.BackupJournalEntity
+import app.opentasks.core.data.backup.BackupStateDao
+import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.LegacySyncOperationDao
+import app.opentasks.core.data.backup.VaultRecoveryEnvelopeDao
+import app.opentasks.core.data.backup.VaultRecoveryEnvelopeEntity
 import kotlinx.coroutines.flow.Flow
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
@@ -399,8 +407,11 @@ interface SyncOperationDao {
         SavedViewEntity::class,
         SyncOperationEntity::class,
         TombstoneEntity::class,
+        BackupJournalEntity::class,
+        BackupStateEntity::class,
+        VaultRecoveryEnvelopeEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -408,6 +419,11 @@ abstract class VaultDatabase : RoomDatabase() {
     abstract fun workspaceDao(): WorkspaceDao
     abstract fun timeEntryDao(): TimeEntryDao
     abstract fun syncOperationDao(): SyncOperationDao
+    abstract fun legacySyncOperationDao(): LegacySyncOperationDao
+    abstract fun backupJournalDao(): BackupJournalDao
+    abstract fun backupStateDao(): BackupStateDao
+    abstract fun vaultRecoveryEnvelopeDao(): VaultRecoveryEnvelopeDao
+    abstract fun backupCaptureDao(): BackupCaptureDao
 
     @Transaction
     open suspend fun upsertTaskAndAppendOperation(
@@ -462,7 +478,13 @@ abstract class VaultDatabase : RoomDatabase() {
                 databaseName,
             )
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                )
                 .build()
         }
 
@@ -623,6 +645,148 @@ abstract class VaultDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "UPDATE vaults SET schemaVersion = 5 WHERE schemaVersion < 5",
+                )
+            }
+        }
+
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val vaultIds = mutableListOf<String>()
+                db.query("SELECT id FROM vaults ORDER BY id").use { cursor ->
+                    while (cursor.moveToNext()) vaultIds += cursor.getString(0)
+                }
+                val operationCount = db.query(
+                    "SELECT COUNT(*) FROM sync_operations",
+                ).use { cursor ->
+                    check(cursor.moveToFirst())
+                    cursor.getLong(0)
+                }
+                check(operationCount == 0L || vaultIds.size == 1) {
+                    "Legacy backup operations cannot be assigned to multiple vaults"
+                }
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS backup_journal (
+                        operationId TEXT NOT NULL,
+                        vaultId TEXT NOT NULL,
+                        generation INTEGER NOT NULL,
+                        sequence INTEGER NOT NULL,
+                        payloadFormatVersion INTEGER NOT NULL,
+                        mutationKind TEXT NOT NULL,
+                        objectId TEXT NOT NULL,
+                        objectType TEXT NOT NULL,
+                        payload BLOB NOT NULL,
+                        revisionWallMillis INTEGER NOT NULL,
+                        revisionLogical INTEGER NOT NULL,
+                        sourceDeviceId TEXT NOT NULL,
+                        PRIMARY KEY(operationId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        index_backup_journal_vaultId_generation_sequence
+                    ON backup_journal(vaultId, generation, sequence)
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS backup_state (
+                        vaultId TEXT NOT NULL,
+                        currentGeneration INTEGER NOT NULL,
+                        lastVerifiedSnapshotGeneration INTEGER,
+                        currentBaseObjectId TEXT,
+                        previousBaseObjectId TEXT,
+                        latestVerifiedSegmentGeneration INTEGER,
+                        portablePackageGeneration INTEGER,
+                        portablePackageBytes INTEGER,
+                        portablePackageProducedAtEpochMillis INTEGER,
+                        packageState TEXT NOT NULL,
+                        failureCategory TEXT,
+                        recoveryEnvelopeReady INTEGER NOT NULL,
+                        legacyOutboxCoveredAtGeneration INTEGER,
+                        snapshotCreatedAtEpochMillis INTEGER,
+                        PRIMARY KEY(vaultId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS vault_recovery_envelope (
+                        vaultId TEXT NOT NULL,
+                        formatVersion INTEGER NOT NULL,
+                        kdfAlgorithm TEXT NOT NULL,
+                        memoryKiB INTEGER NOT NULL,
+                        iterations INTEGER NOT NULL,
+                        parallelism INTEGER NOT NULL,
+                        salt BLOB NOT NULL,
+                        nonce BLOB NOT NULL,
+                        wrappedKeyset BLOB NOT NULL,
+                        PRIMARY KEY(vaultId)
+                    )
+                    """.trimIndent(),
+                )
+
+                if (operationCount > 0L) {
+                    val vaultId = vaultIds.single()
+                    val statement = db.compileStatement(
+                        """
+                        INSERT INTO backup_journal (
+                            operationId, vaultId, generation, sequence,
+                            payloadFormatVersion, mutationKind, objectId, objectType,
+                            payload, revisionWallMillis, revisionLogical, sourceDeviceId
+                        ) VALUES (?, ?, ?, 0, 0, 'LEGACY', ?, ?, ?, ?, ?, ?)
+                        """.trimIndent(),
+                    )
+                    db.query(
+                        """
+                        SELECT id, deviceId, objectId, objectType, encryptedPayload,
+                               revisionWallMillis, revisionLogical
+                        FROM sync_operations
+                        ORDER BY revisionWallMillis, revisionLogical, deviceId, id
+                        """.trimIndent(),
+                    ).use { cursor ->
+                        var generation = 0L
+                        while (cursor.moveToNext()) {
+                            generation += 1
+                            statement.clearBindings()
+                            statement.bindString(1, cursor.getString(0))
+                            statement.bindString(2, vaultId)
+                            statement.bindLong(3, generation)
+                            statement.bindString(4, cursor.getString(2))
+                            statement.bindString(5, cursor.getString(3))
+                            statement.bindBlob(6, cursor.getBlob(4))
+                            statement.bindLong(7, cursor.getLong(5))
+                            statement.bindLong(8, cursor.getLong(6))
+                            statement.bindString(9, cursor.getString(1))
+                            statement.executeInsert()
+                        }
+                    }
+                }
+
+                val stateStatement = db.compileStatement(
+                    """
+                    INSERT INTO backup_state (
+                        vaultId, currentGeneration, lastVerifiedSnapshotGeneration,
+                        currentBaseObjectId, previousBaseObjectId,
+                        latestVerifiedSegmentGeneration, portablePackageGeneration,
+                        portablePackageBytes, portablePackageProducedAtEpochMillis,
+                        packageState, failureCategory, recoveryEnvelopeReady,
+                        legacyOutboxCoveredAtGeneration, snapshotCreatedAtEpochMillis
+                    ) VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                              'NOT_PREPARED', NULL, 0, NULL, NULL)
+                    """.trimIndent(),
+                )
+                vaultIds.forEach { vaultId ->
+                    stateStatement.clearBindings()
+                    stateStatement.bindString(1, vaultId)
+                    stateStatement.bindLong(2, operationCount)
+                    stateStatement.executeInsert()
+                }
+                db.execSQL(
+                    "UPDATE vaults SET storageMode = 'LOCAL', schemaVersion = 6",
                 )
             }
         }
