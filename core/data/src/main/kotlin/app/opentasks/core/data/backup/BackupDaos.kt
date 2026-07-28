@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import app.opentasks.core.data.db.SyncOperationEntity
 import app.opentasks.core.model.VaultId
 import kotlinx.coroutines.flow.Flow
@@ -79,8 +78,43 @@ interface BackupStateDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: BackupStateEntity)
 
-    @Update
-    suspend fun update(entity: BackupStateEntity)
+    @Query(
+        """
+        UPDATE backup_state SET
+            currentGeneration = :currentGeneration,
+            lastVerifiedSnapshotGeneration = :lastVerifiedSnapshotGeneration,
+            currentBaseObjectId = :currentBaseObjectId,
+            previousBaseObjectId = :previousBaseObjectId,
+            latestVerifiedSegmentGeneration = :latestVerifiedSegmentGeneration,
+            portablePackageGeneration = :portablePackageGeneration,
+            portablePackageBytes = :portablePackageBytes,
+            portablePackageProducedAtEpochMillis = :portablePackageProducedAtEpochMillis,
+            packageState = :packageState,
+            failureCategory = :failureCategory,
+            recoveryEnvelopeReady = :recoveryEnvelopeReady,
+            legacyOutboxCoveredAtGeneration = :legacyOutboxCoveredAtGeneration,
+            snapshotCreatedAtEpochMillis = :snapshotCreatedAtEpochMillis
+        WHERE vaultId = :vaultId
+            AND currentGeneration = :expectedCurrentGeneration
+        """,
+    )
+    suspend fun compareAndUpdate(
+        vaultId: String,
+        expectedCurrentGeneration: Long,
+        currentGeneration: Long,
+        lastVerifiedSnapshotGeneration: Long?,
+        currentBaseObjectId: String?,
+        previousBaseObjectId: String?,
+        latestVerifiedSegmentGeneration: Long?,
+        portablePackageGeneration: Long?,
+        portablePackageBytes: Long?,
+        portablePackageProducedAtEpochMillis: Long?,
+        packageState: String,
+        failureCategory: String?,
+        recoveryEnvelopeReady: Boolean,
+        legacyOutboxCoveredAtGeneration: Long?,
+        snapshotCreatedAtEpochMillis: Long?,
+    ): Int
 }
 
 @Dao
@@ -101,7 +135,10 @@ interface BackupCaptureDao
 interface BackupStateStore {
     fun observe(vaultId: VaultId): Flow<BackupStateEntity>
     suspend fun get(vaultId: VaultId): BackupStateEntity?
-    suspend fun update(entity: BackupStateEntity)
+    suspend fun compareAndUpdate(
+        entity: BackupStateEntity,
+        expectedCurrentGeneration: Long,
+    ): Int
 }
 
 interface RecoveryEnvelopeStore {
@@ -117,9 +154,26 @@ class RoomBackupStateStore(
 
     override suspend fun get(vaultId: VaultId): BackupStateEntity? = dao.get(vaultId.value)
 
-    override suspend fun update(entity: BackupStateEntity) {
-        dao.update(entity)
-    }
+    override suspend fun compareAndUpdate(
+        entity: BackupStateEntity,
+        expectedCurrentGeneration: Long,
+    ): Int = dao.compareAndUpdate(
+        vaultId = entity.vaultId,
+        expectedCurrentGeneration = expectedCurrentGeneration,
+        currentGeneration = entity.currentGeneration,
+        lastVerifiedSnapshotGeneration = entity.lastVerifiedSnapshotGeneration,
+        currentBaseObjectId = entity.currentBaseObjectId,
+        previousBaseObjectId = entity.previousBaseObjectId,
+        latestVerifiedSegmentGeneration = entity.latestVerifiedSegmentGeneration,
+        portablePackageGeneration = entity.portablePackageGeneration,
+        portablePackageBytes = entity.portablePackageBytes,
+        portablePackageProducedAtEpochMillis = entity.portablePackageProducedAtEpochMillis,
+        packageState = entity.packageState,
+        failureCategory = entity.failureCategory,
+        recoveryEnvelopeReady = entity.recoveryEnvelopeReady,
+        legacyOutboxCoveredAtGeneration = entity.legacyOutboxCoveredAtGeneration,
+        snapshotCreatedAtEpochMillis = entity.snapshotCreatedAtEpochMillis,
+    )
 }
 
 class RoomRecoveryEnvelopeStore(
