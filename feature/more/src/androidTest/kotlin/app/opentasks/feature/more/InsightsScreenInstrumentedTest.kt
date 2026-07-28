@@ -21,6 +21,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -131,13 +132,50 @@ class InsightsScreenInstrumentedTest {
         composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
 
         composeRule.runOnIdle { openInsights = false }
-        composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
-
-        composeRule.runOnIdle { openInsights = true }
         composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
+
         composeRule.onNodeWithTag("insights-back").performClick()
         composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
         assertFalse(openInsights)
+    }
+
+    @Test
+    fun restoredInsightsDestinationSurvivesFalseExternalRequestUntilExplicitBack() {
+        val restorationTester = StateRestorationTester(composeRule)
+        var closeCount = 0
+        restorationTester.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = emptyList(),
+                    insightsState = populatedState(),
+                    openInsights = false,
+                    onInsightsClosed = { closeCount++ },
+                    onInsightsRangeChange = {},
+                    onInsightsProjectFilter = { _, _ -> },
+                    onInsightsTagFilter = { _, _ -> },
+                    onInsightsIncludeConflictedTimeChange = {},
+                    onInsightsPresentationChange = {},
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("open-insights")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
+        assertEquals(0, closeCount)
+
+        composeRule.onNodeWithTag("insights-back").performClick()
+        composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+        assertEquals(1, closeCount)
     }
 
     @Test

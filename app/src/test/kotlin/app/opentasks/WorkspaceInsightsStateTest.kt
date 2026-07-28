@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -178,6 +179,7 @@ class WorkspaceInsightsStateTest {
         val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
         val scope = testScope()
         val state = workspaceInsightsState(workspace, provider, scope = scope)
+        state.setForegrounded(true)
 
         assertTrue(state.summary.value.overdue.isEmpty())
         assertEquals(due.plusNanos(1), provider.nextScheduledRefresh())
@@ -196,6 +198,7 @@ class WorkspaceInsightsStateTest {
         val provider = ManualInsightsTimeProvider(InsightsTimeContext(beforeMidnight, zone))
         val scope = testScope()
         val state = workspaceInsightsState(OpenTasksFixtures.snapshot, provider, scope = scope)
+        state.setForegrounded(true)
         val originalStart = state.summary.value.interval.startInclusive
 
         assertEquals(midnight, provider.nextScheduledRefresh())
@@ -215,6 +218,7 @@ class WorkspaceInsightsStateTest {
             provider,
             scope = scope,
         )
+        state.setForegrounded(true)
         val utcStart = state.summary.value.interval.startInclusive
         val recheck = now.plus(Duration.ofMinutes(15))
 
@@ -226,7 +230,7 @@ class WorkspaceInsightsStateTest {
     }
 
     @Test
-    fun resumeRefreshDetectsAZoneChangeImmediately() {
+    fun foregroundRefreshDetectsAZoneChangeImmediately() {
         val now = Instant.parse("2026-07-27T10:00:00Z")
         val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
         val scope = testScope()
@@ -234,9 +238,72 @@ class WorkspaceInsightsStateTest {
         val utcStart = state.summary.value.interval.startInclusive
 
         provider.context = InsightsTimeContext(now, ZoneId.of("Pacific/Kiritimati"))
-        state.refreshInsightsTime()
+        state.setForegrounded(true)
 
         assertTrue(state.summary.value.interval.startInclusive != utcStart)
+        scope.cancel()
+    }
+
+    @Test
+    fun schedulerIsInactiveUntilForegroundedAndCancelsWhenBackgrounded() {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val scope = testScope()
+        val state = workspaceInsightsState(
+            OpenTasksFixtures.snapshot.copy(tasks = emptyList()),
+            provider,
+            scope = scope,
+        )
+
+        assertEquals(1, provider.captureCount)
+        assertEquals(0, provider.scheduleCount)
+        assertEquals(0, provider.activeWaitCount)
+
+        state.setForegrounded(true)
+
+        assertEquals(2, provider.captureCount)
+        assertEquals(1, provider.scheduleCount)
+        assertEquals(1, provider.activeWaitCount)
+
+        state.setForegrounded(false)
+
+        assertEquals(2, provider.captureCount)
+        assertEquals(1, provider.scheduleCount)
+        assertEquals(0, provider.activeWaitCount)
+        assertEquals(1, provider.cancelledWaitCount)
+        scope.cancel()
+    }
+
+    @Test
+    fun repeatedForegroundSignalsCaptureOnceAndKeepOneScheduler() {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val scope = testScope()
+        val state = workspaceInsightsState(
+            OpenTasksFixtures.snapshot.copy(tasks = emptyList()),
+            provider,
+            scope = scope,
+        )
+        val initialStart = state.summary.value.interval.startInclusive
+        provider.context = InsightsTimeContext(
+            now.plus(Duration.ofDays(1)),
+            ZoneId.of("Pacific/Kiritimati"),
+        )
+
+        state.setForegrounded(false)
+        state.setForegrounded(true)
+        state.setForegrounded(true)
+
+        assertEquals(2, provider.captureCount)
+        assertEquals(1, provider.scheduleCount)
+        assertEquals(1, provider.activeWaitCount)
+        assertTrue(state.summary.value.interval.startInclusive != initialStart)
+
+        state.setForegrounded(false)
+        state.setForegrounded(false)
+
+        assertEquals(1, provider.cancelledWaitCount)
+        assertEquals(0, provider.activeWaitCount)
         scope.cancel()
     }
 
@@ -313,6 +380,12 @@ class WorkspaceInsightsStateTest {
         var context: InsightsTimeContext = initialContext
         var captureCount: Int = 0
             private set
+        var scheduleCount: Int = 0
+            private set
+        var activeWaitCount: Int = 0
+            private set
+        var cancelledWaitCount: Int = 0
+            private set
 
         private val scheduled = Channel<Instant>(Channel.UNLIMITED)
         private val releases = Channel<Unit>(Channel.UNLIMITED)
@@ -323,8 +396,17 @@ class WorkspaceInsightsStateTest {
         }
 
         override suspend fun awaitUntil(instant: Instant) {
-            scheduled.send(instant)
-            releases.receive()
+            scheduleCount++
+            activeWaitCount++
+            try {
+                scheduled.send(instant)
+                releases.receive()
+            } finally {
+                activeWaitCount--
+                if (!kotlin.coroutines.coroutineContext.isActive) {
+                    cancelledWaitCount++
+                }
+            }
         }
 
         suspend fun nextScheduledRefresh(): Instant = scheduled.receive()

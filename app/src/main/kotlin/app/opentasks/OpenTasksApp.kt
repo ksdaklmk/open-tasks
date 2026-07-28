@@ -262,13 +262,23 @@ fun OpenTasksApp(
 
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_RESUME) {
-                    permissionStateVersion++
-                    viewModel.refreshInsightsTime()
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> {
+                        permissionStateVersion++
+                        viewModel.setInsightsForegrounded(true)
+                    }
+                    Lifecycle.Event.ON_PAUSE -> viewModel.setInsightsForegrounded(false)
+                    else -> Unit
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
-            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            viewModel.setInsightsForegrounded(
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED),
+            )
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                viewModel.setInsightsForegrounded(false)
+            }
         }
 
         LaunchedEffect(activity) {

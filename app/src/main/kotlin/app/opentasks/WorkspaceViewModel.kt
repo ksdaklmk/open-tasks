@@ -168,8 +168,8 @@ class WorkspaceViewModel @Inject constructor(
         workspaceInsightsState.setPresentation(presentation)
     }
 
-    fun refreshInsightsTime() {
-        workspaceInsightsState.refreshInsightsTime()
+    fun setInsightsForegrounded(foregrounded: Boolean) {
+        workspaceInsightsState.setForegrounded(foregrounded)
     }
 
     fun addTask(title: String) {
@@ -432,6 +432,7 @@ internal class WorkspaceInsightsState(
         ),
     )
     private var scheduleJob: Job? = null
+    private var foregrounded = false
 
     val summary: StateFlow<InsightsSnapshot> = mutableSummary.asStateFlow()
     val uiState: StateFlow<InsightsUiState> = mutableUiState.asStateFlow()
@@ -439,10 +440,13 @@ internal class WorkspaceInsightsState(
     init {
         scope.launch {
             workspace.drop(1).collect {
-                refreshInsightsTime()
+                if (foregrounded) {
+                    refreshInsightsTime()
+                } else {
+                    reproject()
+                }
             }
         }
-        scheduleNextRefresh()
     }
 
     fun setRange(range: InsightsRange) {
@@ -470,8 +474,24 @@ internal class WorkspaceInsightsState(
         mutableUiState.value = mutableUiState.value.copy(presentation = presentation)
     }
 
-    fun refreshInsightsTime() {
+    fun setForegrounded(foregrounded: Boolean) {
+        if (this.foregrounded == foregrounded) return
+        this.foregrounded = foregrounded
+        if (foregrounded) {
+            refreshInsightsTime()
+        } else {
+            scheduleJob?.cancel()
+            scheduleJob = null
+        }
+    }
+
+    private fun refreshInsightsTime() {
         timeContext = timeProvider.capture()
+        reproject()
+        scheduleNextRefresh()
+    }
+
+    private fun reproject() {
         val currentWorkspace = workspace.value
         mutableSummary.value = calculate(currentWorkspace, InsightsSelection(), timeContext)
         mutableUiState.value = buildUiState(
@@ -480,7 +500,6 @@ internal class WorkspaceInsightsState(
             presentation = selectionState.presentation.value,
             context = timeContext,
         )
-        scheduleNextRefresh()
     }
 
     private fun refreshSelection() {
@@ -538,10 +557,12 @@ internal class WorkspaceInsightsState(
 
     private fun scheduleNextRefresh() {
         scheduleJob?.cancel()
+        scheduleJob = null
+        if (!foregrounded) return
         val nextRefresh = nextInsightsRefresh(workspace.value, timeContext)
         scheduleJob = scope.launch {
             timeProvider.awaitUntil(nextRefresh)
-            if (currentCoroutineContext().isActive) {
+            if (currentCoroutineContext().isActive && foregrounded) {
                 scheduleJob = null
                 refreshInsightsTime()
             }

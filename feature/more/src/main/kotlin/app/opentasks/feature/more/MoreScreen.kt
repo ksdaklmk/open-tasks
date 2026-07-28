@@ -107,8 +107,6 @@ fun MoreScreen(
     LaunchedEffect(openInsights) {
         if (openInsights) {
             destination = MoreDestination.INSIGHTS
-        } else if (destination == MoreDestination.INSIGHTS) {
-            destination = MoreDestination.OVERVIEW
         }
     }
     val closeInsights = {
