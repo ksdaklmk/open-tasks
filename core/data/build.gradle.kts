@@ -30,6 +30,7 @@ ksp {
 
 dependencies {
     api(project(":core:domain"))
+    implementation(project(":core:crypto"))
     implementation(project(":core:sync"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
