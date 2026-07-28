@@ -1,7 +1,7 @@
 # Local Authority, Cloud Attachments, and Backup Direction Design
 
 **Date:** 28 July 2026  
-**Status:** Interactive design approved; written review pending  
+**Status:** Approved
 **Scope:** Revised storage, backup, attachment, recovery, and delivery
 direction
 
