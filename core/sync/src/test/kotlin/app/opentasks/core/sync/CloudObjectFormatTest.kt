@@ -141,28 +141,34 @@ class CloudObjectFormatTest {
             )
             val source = HeaderOnlyTrackingInputStream(headerBytes)
 
-            assertThrows(IllegalArgumentException::class.java) {
+            val failure = assertThrows(CloudFormatException::class.java) {
                 CloudObjectFormat.decode(
                     source,
                     checkedFrameLength(headerBytes.size, declaredLength),
                 )
             }
+            assertEquals(CloudFormatFailure.LIMIT_EXCEEDED, failure.failure)
             assertFalse(source.ciphertextRead)
         }
     }
 
     @Test
     fun decodeRejectsNegativeZeroAndOverflowingCiphertextLengthsBeforeRead() {
-        listOf(-1L, 0L, Long.MAX_VALUE).forEach { declaredLength ->
+        listOf(
+            -1L to CloudFormatFailure.LENGTH_MISMATCH,
+            0L to CloudFormatFailure.LENGTH_MISMATCH,
+            Long.MAX_VALUE to CloudFormatFailure.LENGTH_MISMATCH,
+        ).forEach { (declaredLength, expectedFailure) ->
             val headerBytes = canonicalHeader(
                 ciphertextLength = declaredLength,
                 ciphertextSha256 = ZERO_SHA256,
             )
             val source = HeaderOnlyTrackingInputStream(headerBytes)
 
-            assertThrows(IllegalArgumentException::class.java) {
+            val failure = assertThrows(CloudFormatException::class.java) {
                 CloudObjectFormat.decode(source, Long.MAX_VALUE)
             }
+            assertEquals(expectedFailure, failure.failure)
             assertFalse(source.ciphertextRead)
         }
     }
@@ -170,19 +176,22 @@ class CloudObjectFormatTest {
     @Test
     fun decodeRejectsNegativeZeroOversizedAndTruncatedHeaderPrefixes() {
         val invalidPrefixes = listOf(
-            byteArrayOf(-1, -1, -1, -1),
-            byteArrayOf(0, 0, 0, 0),
-            ByteBuffer.allocate(4).putInt(CloudBounds.MAX_HEADER_BYTES + 1).array(),
-            byteArrayOf(0, 0, 1),
+            byteArrayOf(-1, -1, -1, -1) to CloudFormatFailure.MALFORMED,
+            byteArrayOf(0, 0, 0, 0) to CloudFormatFailure.MALFORMED,
+            ByteBuffer.allocate(4)
+                .putInt(CloudBounds.MAX_HEADER_BYTES + 1)
+                .array() to CloudFormatFailure.LIMIT_EXCEEDED,
+            byteArrayOf(0, 0, 1) to CloudFormatFailure.TRUNCATED,
         )
 
-        invalidPrefixes.forEach { prefix ->
-            assertThrows(IllegalArgumentException::class.java) {
+        invalidPrefixes.forEach { (prefix, expectedFailure) ->
+            val failure = assertThrows(CloudFormatException::class.java) {
                 CloudObjectFormat.decode(
                     ByteArrayInputStream(prefix),
                     prefix.size.toLong(),
                 )
             }
+            assertEquals(expectedFailure, failure.failure)
         }
     }
 
@@ -193,18 +202,20 @@ class CloudObjectFormatTest {
         val truncatedHeader = golden.frame.copyOfRange(0, headerEnd - 1)
         val truncatedCiphertext = golden.frame.copyOf(golden.frame.size - 1)
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val headerFailure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(
                 ByteArrayInputStream(truncatedHeader),
                 golden.frame.size.toLong(),
             )
         }
-        assertThrows(IllegalArgumentException::class.java) {
+        assertEquals(CloudFormatFailure.TRUNCATED, headerFailure.failure)
+        val ciphertextFailure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(
                 ByteArrayInputStream(truncatedCiphertext),
                 golden.frame.size.toLong(),
             )
         }
+        assertEquals(CloudFormatFailure.TRUNCATED, ciphertextFailure.failure)
     }
 
     @Test
@@ -213,9 +224,10 @@ class CloudObjectFormatTest {
         val headerBytes = golden.frame.copyOfRange(4, 4 + golden.frame.headerLength())
         val source = HeaderOnlyTrackingInputStream(headerBytes)
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val failure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(source, golden.frame.size.toLong() + 1)
         }
+        assertEquals(CloudFormatFailure.LENGTH_MISMATCH, failure.failure)
         assertFalse(source.ciphertextRead)
     }
 
@@ -225,9 +237,10 @@ class CloudObjectFormatTest {
         val headerBytes = golden.frame.copyOfRange(4, 4 + golden.frame.headerLength())
         val source = HeaderOnlyTrackingInputStream(headerBytes)
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val failure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(source, -1)
         }
+        assertEquals(CloudFormatFailure.LENGTH_MISMATCH, failure.failure)
         assertFalse(source.ciphertextRead)
     }
 
@@ -235,9 +248,10 @@ class CloudObjectFormatTest {
     fun decodeRejectsInvalidUtf8BeforeCiphertextRead() {
         val source = HeaderOnlyTrackingInputStream(byteArrayOf(0xC3.toByte(), 0x28))
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val failure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(source, 6)
         }
+        assertEquals(CloudFormatFailure.MALFORMED, failure.failure)
         assertFalse(source.ciphertextRead)
     }
 
@@ -332,7 +346,7 @@ class CloudObjectFormatTest {
     }
 
     @Test
-    fun decodeRejectsUnsupportedMagicVersionsAndBlankIdentifiers() {
+    fun decodeRejectsUnsupportedMagicAndVersions() {
         val canonical = goldenHeader("manifest")
         val variants = listOf(
             canonical.replace("OPEN_TASKS", "OTHER_TASKS"),
@@ -342,6 +356,20 @@ class CloudObjectFormatTest {
                 """"minimumReaderVersion":1""",
                 """"minimumReaderVersion":2""",
             ),
+        )
+
+        variants.forEach { json ->
+            assertHeaderFailureBeforeCiphertext(
+                json.toByteArray(),
+                CloudFormatFailure.UNSUPPORTED_FORMAT,
+            )
+        }
+    }
+
+    @Test
+    fun decodeRejectsBlankIdentifiersAsMalformed() {
+        val canonical = goldenHeader("manifest")
+        val variants = listOf(
             canonical.replace(""""vaultId":"vault-alpha"""", """"vaultId":" """"),
             canonical.replace(
                 """"objectId":"manifest-0001"""",
@@ -375,12 +403,13 @@ class CloudObjectFormatTest {
         val tampered = golden.frame.copyOf()
         tampered[tampered.lastIndex] = (tampered.last().toInt() xor 1).toByte()
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val failure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(
                 ByteArrayInputStream(tampered),
                 tampered.size.toLong(),
             )
         }
+        assertEquals(CloudFormatFailure.CHECKSUM_MISMATCH, failure.failure)
     }
 
     @Test
@@ -403,12 +432,13 @@ class CloudObjectFormatTest {
             )
             val source = HeaderOnlyTrackingInputStream(bytes)
 
-            assertThrows(IllegalArgumentException::class.java) {
+            val failure = assertThrows(CloudFormatException::class.java) {
                 CloudObjectFormat.decode(
                     source,
                     checkedFrameLength(bytes.size, 1),
                 )
             }
+            assertEquals(CloudFormatFailure.MALFORMED, failure.failure)
             assertFalse(source.ciphertextRead)
         }
     }
@@ -426,15 +456,42 @@ class CloudObjectFormatTest {
                     )
                     val source = HeaderOnlyTrackingInputStream(bytes)
 
-                    assertThrows(IllegalArgumentException::class.java) {
+                    val failure = assertThrows(CloudFormatException::class.java) {
                         CloudObjectFormat.decode(
                             source,
                             checkedFrameLength(bytes.size, 1),
                         )
                     }
+                    assertEquals(CloudFormatFailure.MALFORMED, failure.failure)
                     assertFalse(source.ciphertextRead)
                 }
             }
+    }
+
+    @Test
+    fun encodeIdentityDerivesHeaderMetadataAndRoundTrips() {
+        val identity = CloudHeaderIdentity(
+            family = CloudObjectFamily.ATTACHMENT_CHUNK,
+            schemaVersion = 1,
+            cryptoVersion = 1,
+            minimumReaderVersion = 1,
+            vaultId = "vault-alpha",
+            objectId = "attachment-0001-chunk-00",
+            chunkIndex = 0,
+            chunkCount = 26,
+        )
+        val ciphertext = "attachment".toByteArray()
+
+        val frame = CloudObjectFormat.encode(identity, ciphertext)
+        val decoded = CloudObjectFormat.decode(
+            ByteArrayInputStream(frame),
+            frame.size.toLong(),
+        )
+
+        assertEquals(identity, decoded.header.identity)
+        assertEquals(ciphertext.size.toLong(), decoded.header.ciphertextLength)
+        assertEquals(sha256(ciphertext), decoded.header.ciphertextSha256)
+        assertArrayEquals(ciphertext, decoded.takeCiphertext())
     }
 
     @Test
@@ -553,14 +610,25 @@ class CloudObjectFormatTest {
     }
 
     private fun assertMalformedHeaderRejectedBeforeCiphertext(headerBytes: ByteArray) {
+        assertHeaderFailureBeforeCiphertext(
+            headerBytes,
+            CloudFormatFailure.MALFORMED,
+        )
+    }
+
+    private fun assertHeaderFailureBeforeCiphertext(
+        headerBytes: ByteArray,
+        expectedFailure: CloudFormatFailure,
+    ) {
         val source = HeaderOnlyTrackingInputStream(headerBytes)
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val failure = assertThrows(CloudFormatException::class.java) {
             CloudObjectFormat.decode(
                 source,
                 checkedFrameLength(headerBytes.size, 8),
             )
         }
+        assertEquals(expectedFailure, failure.failure)
         assertFalse(source.ciphertextRead)
     }
 

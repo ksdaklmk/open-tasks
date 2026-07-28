@@ -12,15 +12,14 @@ import java.security.MessageDigest
 interface CloudObjectFrameCodec {
     fun encode(header: CloudObjectHeader, ciphertext: ByteArray): ByteArray
 
+    fun encode(identity: CloudHeaderIdentity, ciphertext: ByteArray): ByteArray
+
     fun decode(source: InputStream, totalLength: Long): CloudObjectFrame
 }
 
 @OptIn(ExperimentalSerializationApi::class)
 object CloudObjectFormat : CloudObjectFrameCodec {
     private const val MAGIC = "OPEN_TASKS"
-    private const val SCHEMA_VERSION = 1
-    private const val CRYPTO_VERSION = 1
-    private const val READER_VERSION = 1
     private const val LENGTH_PREFIX_BYTES = 4
     private const val MAX_CIPHERTEXT_READ_BUFFER_BYTES = 8 * 1024
     private val lowercaseSha256 = Regex("[0-9a-f]{64}")
@@ -34,19 +33,33 @@ object CloudObjectFormat : CloudObjectFrameCodec {
 
     override fun encode(header: CloudObjectHeader, ciphertext: ByteArray): ByteArray {
         validateHeader(header)
-        require(header.ciphertextLength == ciphertext.size.toLong()) {
-            "Ciphertext length does not match header"
+        if (header.ciphertextLength != ciphertext.size.toLong()) {
+            throw CloudFormatException(
+                CloudFormatFailure.LENGTH_MISMATCH,
+                "Ciphertext length does not match header",
+            )
         }
-        require(header.ciphertextSha256 == sha256(ciphertext)) {
-            "Ciphertext checksum does not match header"
+        if (header.ciphertextSha256 != sha256(ciphertext)) {
+            throw CloudFormatException(
+                CloudFormatFailure.CHECKSUM_MISMATCH,
+                "Ciphertext checksum does not match header",
+            )
         }
 
         val headerBytes = canonicalHeaderBytes(header)
-        require(headerBytes.size <= CloudBounds.MAX_HEADER_BYTES) {
-            "Cloud header exceeds ${CloudBounds.MAX_HEADER_BYTES} bytes"
+        if (headerBytes.size > CloudBounds.MAX_HEADER_BYTES) {
+            throw CloudFormatException(
+                CloudFormatFailure.LIMIT_EXCEEDED,
+                "Cloud header exceeds ${CloudBounds.MAX_HEADER_BYTES} bytes",
+            )
         }
         val frameLength = checkedFrameLength(headerBytes.size, header.ciphertextLength)
-        require(frameLength <= Int.MAX_VALUE) { "Cloud frame is too large" }
+        if (frameLength > Int.MAX_VALUE) {
+            throw CloudFormatException(
+                CloudFormatFailure.LIMIT_EXCEEDED,
+                "Cloud frame is too large",
+            )
+        }
 
         return ByteArray(frameLength.toInt()).also { frame ->
             ByteBuffer.wrap(frame, 0, LENGTH_PREFIX_BYTES).putInt(headerBytes.size)
@@ -55,19 +68,52 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         }
     }
 
+    override fun encode(
+        identity: CloudHeaderIdentity,
+        ciphertext: ByteArray,
+    ): ByteArray {
+        validateCloudHeaderIdentity(identity)
+        return encode(
+            CloudObjectHeader(
+                family = identity.family,
+                schemaVersion = identity.schemaVersion,
+                cryptoVersion = identity.cryptoVersion,
+                minimumReaderVersion = identity.minimumReaderVersion,
+                vaultId = identity.vaultId,
+                objectId = identity.objectId,
+                ciphertextLength = ciphertext.size.toLong(),
+                ciphertextSha256 = sha256(ciphertext),
+                chunkIndex = identity.chunkIndex,
+                chunkCount = identity.chunkCount,
+            ),
+            ciphertext,
+        )
+    }
+
     override fun decode(source: InputStream, totalLength: Long): CloudObjectFrame {
         val prefix = readExact(source, LENGTH_PREFIX_BYTES, "length prefix")
         val headerLength = ByteBuffer.wrap(prefix).int
-        require(headerLength > 0) { "Cloud header length must be positive" }
-        require(headerLength <= CloudBounds.MAX_HEADER_BYTES) {
-            "Cloud header exceeds ${CloudBounds.MAX_HEADER_BYTES} bytes"
+        if (headerLength <= 0) {
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Cloud header length must be positive",
+            )
+        }
+        if (headerLength > CloudBounds.MAX_HEADER_BYTES) {
+            throw CloudFormatException(
+                CloudFormatFailure.LIMIT_EXCEEDED,
+                "Cloud header exceeds ${CloudBounds.MAX_HEADER_BYTES} bytes",
+            )
         }
 
         val headerBytes = readExact(source, headerLength, "header")
         val header = decodeCanonicalHeader(headerBytes)
         val expectedLength = checkedFrameLength(headerLength, header.ciphertextLength)
-        require(totalLength == expectedLength) {
-            "Cloud frame length does not match its declaration"
+        if (totalLength != expectedLength) {
+            throw CloudFormatException(
+                CloudFormatFailure.LENGTH_MISMATCH,
+                "Cloud frame length does not match its declaration",
+            )
         }
 
         val ciphertext = readExactOwned(
@@ -75,8 +121,11 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             header.ciphertextLength.toInt(),
             "ciphertext",
         )
-        require(header.ciphertextSha256 == sha256(ciphertext)) {
-            "Ciphertext checksum does not match header"
+        if (header.ciphertextSha256 != sha256(ciphertext)) {
+            throw CloudFormatException(
+                CloudFormatFailure.CHECKSUM_MISMATCH,
+                "Ciphertext checksum does not match header",
+            )
         }
         return CloudObjectFrame(header, ciphertext)
     }
@@ -90,16 +139,27 @@ object CloudObjectFormat : CloudObjectFrameCodec {
                 .decode(ByteBuffer.wrap(headerBytes))
                 .toString()
         } catch (failure: Exception) {
-            throw IllegalArgumentException("Cloud header is not valid UTF-8", failure)
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Cloud header is not valid UTF-8",
+                failure,
+            )
         }
         val header = try {
             json.decodeFromString<CloudObjectHeader>(text)
         } catch (failure: Exception) {
-            throw IllegalArgumentException("Cloud header is not valid JSON", failure)
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Cloud header is not valid JSON",
+                failure,
+            )
         }
         validateHeader(header)
-        require(headerBytes.contentEquals(canonicalHeaderBytes(header))) {
-            "Cloud header is not canonical"
+        if (!headerBytes.contentEquals(canonicalHeaderBytes(header))) {
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Cloud header is not canonical",
+            )
         }
         return header
     }
@@ -113,66 +173,46 @@ object CloudObjectFormat : CloudObjectFrameCodec {
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
                 .encode(CharBuffer.wrap(text))
         } catch (failure: Exception) {
-            throw IllegalArgumentException("Cloud header cannot be encoded as UTF-8", failure)
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Cloud header cannot be encoded as UTF-8",
+                failure,
+            )
         }
         return ByteArray(encoded.remaining()).also(encoded::get)
     }
 
     private fun validateHeader(header: CloudObjectHeader) {
-        require(header.magic == MAGIC) { "Unsupported cloud object magic" }
-        require(header.schemaVersion == SCHEMA_VERSION) {
-            "Unsupported cloud schema version ${header.schemaVersion}"
+        if (header.magic != MAGIC) {
+            throw CloudFormatException(
+                CloudFormatFailure.UNSUPPORTED_FORMAT,
+                "Unsupported cloud object magic",
+            )
         }
-        require(header.cryptoVersion == CRYPTO_VERSION) {
-            "Unsupported cloud crypto version ${header.cryptoVersion}"
+        validateCloudHeaderIdentity(header.identity)
+        if (header.ciphertextLength <= 0) {
+            throw CloudFormatException(
+                CloudFormatFailure.LENGTH_MISMATCH,
+                "Ciphertext length must be positive",
+            )
         }
-        require(header.minimumReaderVersion in 1..READER_VERSION) {
-            "Unsupported minimum reader version ${header.minimumReaderVersion}"
+        if (header.ciphertextLength >= Long.MAX_VALUE - LENGTH_PREFIX_BYTES) {
+            throw CloudFormatException(
+                CloudFormatFailure.LENGTH_MISMATCH,
+                "Cloud frame length overflows",
+            )
         }
-        require(header.vaultId.isNotBlank()) { "Vault ID must not be blank" }
-        require(header.objectId.isNotBlank()) { "Object ID must not be blank" }
-        requireUtf8Encodable(header.vaultId, "Vault ID")
-        requireUtf8Encodable(header.objectId, "Object ID")
-        require(header.ciphertextLength > 0) { "Ciphertext length must be positive" }
-        require(
-            header.ciphertextLength <=
-                CloudBounds.maximumCiphertextBytes(header.family),
-        ) {
-            "Ciphertext exceeds the ${header.family} bound"
+        if (header.ciphertextLength > CloudBounds.maximumCiphertextBytes(header.family)) {
+            throw CloudFormatException(
+                CloudFormatFailure.LIMIT_EXCEEDED,
+                "Ciphertext exceeds the ${header.family} bound",
+            )
         }
-        require(lowercaseSha256.matches(header.ciphertextSha256)) {
-            "Ciphertext checksum must be lowercase SHA-256"
-        }
-
-        if (header.family == CloudObjectFamily.ATTACHMENT_CHUNK) {
-            val count = requireNotNull(header.chunkCount) {
-                "Attachment chunk count is required"
-            }
-            val index = requireNotNull(header.chunkIndex) {
-                "Attachment chunk index is required"
-            }
-            require(count in 1..CloudBounds.MAX_ATTACHMENT_CHUNKS) {
-                "Attachment chunk count is out of bounds"
-            }
-            require(index in 0 until count) {
-                "Attachment chunk index is out of bounds"
-            }
-        } else {
-            require(header.chunkIndex == null && header.chunkCount == null) {
-                "Chunk metadata is attachment-only"
-            }
-        }
-    }
-
-    private fun requireUtf8Encodable(value: String, label: String) {
-        try {
-            StandardCharsets.UTF_8
-                .newEncoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .encode(CharBuffer.wrap(value))
-        } catch (failure: Exception) {
-            throw IllegalArgumentException("$label cannot be encoded as UTF-8", failure)
+        if (!lowercaseSha256.matches(header.ciphertextSha256)) {
+            throw CloudFormatException(
+                CloudFormatFailure.MALFORMED,
+                "Ciphertext checksum must be lowercase SHA-256",
+            )
         }
     }
 
@@ -183,7 +223,11 @@ object CloudObjectFormat : CloudObjectFrameCodec {
                 ciphertextLength,
             )
         } catch (failure: ArithmeticException) {
-            throw IllegalArgumentException("Cloud frame length overflows", failure)
+            throw CloudFormatException(
+                CloudFormatFailure.LENGTH_MISMATCH,
+                "Cloud frame length overflows",
+                failure,
+            )
         }
 
     private fun readExact(source: InputStream, size: Int, label: String): ByteArray {
@@ -192,12 +236,18 @@ object CloudObjectFormat : CloudObjectFrameCodec {
         while (offset < size) {
             val count = source.read(bytes, offset, size - offset)
             if (count < 0) {
-                throw IllegalArgumentException("Truncated cloud $label")
+                throw CloudFormatException(
+                    CloudFormatFailure.TRUNCATED,
+                    "Truncated cloud $label",
+                )
             }
             if (count == 0) {
                 val next = source.read()
                 if (next < 0) {
-                    throw IllegalArgumentException("Truncated cloud $label")
+                    throw CloudFormatException(
+                        CloudFormatFailure.TRUNCATED,
+                        "Truncated cloud $label",
+                    )
                 }
                 bytes[offset] = next.toByte()
                 offset += 1
@@ -216,12 +266,18 @@ object CloudObjectFormat : CloudObjectFrameCodec {
             val requested = minOf(scratch.size, size - offset)
             val count = source.read(scratch, 0, requested)
             if (count < 0) {
-                throw IllegalArgumentException("Truncated cloud $label")
+                throw CloudFormatException(
+                    CloudFormatFailure.TRUNCATED,
+                    "Truncated cloud $label",
+                )
             }
             if (count == 0) {
                 val next = source.read()
                 if (next < 0) {
-                    throw IllegalArgumentException("Truncated cloud $label")
+                    throw CloudFormatException(
+                        CloudFormatFailure.TRUNCATED,
+                        "Truncated cloud $label",
+                    )
                 }
                 owned[offset] = next.toByte()
                 offset += 1
