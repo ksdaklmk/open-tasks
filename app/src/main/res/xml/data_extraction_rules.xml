@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
-        <exclude domain="root" path="." />
+        <include
+            domain="file"
+            path="android_backup/open_tasks_portable_v1.otb" />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="root" path="." />
+        <include
+            domain="file"
+            path="android_backup/open_tasks_portable_v1.otb" />
     </device-transfer>
 </data-extraction-rules>
