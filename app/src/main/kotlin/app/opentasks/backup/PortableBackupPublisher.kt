@@ -53,6 +53,7 @@ class PortableBackupPublisher(
                 BackupUnavailableReason.RECOVERY_ENVELOPE_UNAVAILABLE,
             )
         }
+        recoverInitialPackage(initialState)?.let { return@withLock it }
         val prepared = try {
             prepareEnvelope(passphrase)
         } catch (failure: Throwable) {
@@ -93,7 +94,11 @@ class PortableBackupPublisher(
                 }
                 AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
             } finally {
-                if (!databaseCommitComplete) packageFile.delete()
+                if (!databaseCommitComplete) {
+                    withContext(NonCancellable) {
+                        if (!packageFile.delete()) preserveUnlinkedPackage(published)
+                    }
+                }
             }
         } catch (failure: PublicationFailure) {
             recordFailure(initialState, failure.reason, failure.withdraw)
@@ -133,22 +138,30 @@ class PortableBackupPublisher(
     }
 
     suspend fun refresh(): AndroidBackupStatus = mutex.withLock {
+        val initialState = checkNotNull(stateStore.get(vaultId)) {
+            "Backup state is unavailable"
+        }
         val envelope = envelopeStore.get(vaultId)
-            ?: return@withLock recordFailure(
-                checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" },
-                BackupUnavailableReason.RECOVERY_ENVELOPE_UNAVAILABLE,
-                withdraw = false,
-            )
+            ?: return@withLock recoverInitialPackage(initialState)
+                ?: recordFailure(
+                    initialState,
+                    BackupUnavailableReason.RECOVERY_ENVELOPE_UNAVAILABLE,
+                    withdraw = false,
+                )
         try {
-            val initialState = checkNotNull(stateStore.get(vaultId)) {
-                "Backup state is unavailable"
-            }
             val shouldReconcile = initialState.packageState == PACKAGE_PREPARING ||
                 (
                     initialState.packageState == PACKAGE_READY &&
                         initialState.portablePackageGeneration == initialState.currentGeneration
                     )
-            val reconciled = if (shouldReconcile) reconcile(initialState, envelope) else null
+            val reconciled = try {
+                if (shouldReconcile) reconcile(initialState, envelope) else null
+            } catch (_: WithdrawalFailure) {
+                return@withLock recordFailedWithdrawal(
+                    state = initialState,
+                    priorVerified = false,
+                )
+            }
             if (
                 reconciled != null &&
                 reconciled.portablePackageGeneration == reconciled.currentGeneration
@@ -191,6 +204,116 @@ class PortableBackupPublisher(
         }
     }
 
+    private suspend fun preserveUnlinkedPackage(published: VerifiedPortableBackup) {
+        val current = try {
+            stateStore.get(vaultId)
+        } catch (_: Throwable) {
+            null
+        } ?: return
+        val tracking = packageState(current, published).copy(
+            packageState = PACKAGE_PREPARING,
+            failureCategory = BackupUnavailableReason.FILE_IO.name,
+            recoveryEnvelopeReady = false,
+        )
+        try {
+            stateStore.compareAndUpdate(tracking, current.currentGeneration)
+        } catch (_: Throwable) {
+            // The eligible package remains discoverable and every entry point retries recovery.
+        }
+    }
+
+    private suspend fun recoverInitialPackage(
+        state: BackupStateEntity,
+    ): AndroidBackupStatus? {
+        val packageLength = packageFile.length()
+        if (state.recoveryEnvelopeReady || packageLength <= 0) return null
+        val trackingState = if (state.packageState == PACKAGE_PREPARING) {
+            state
+        } else {
+            state.copy(
+                packageState = PACKAGE_PREPARING,
+                failureCategory = null,
+            )
+        }
+        if (
+            trackingState != state &&
+            stateStore.compareAndUpdate(trackingState, state.currentGeneration) != 1
+        ) {
+            return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+        }
+        val key = try {
+            contentKeyStore.openExisting(vaultId)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return AndroidBackupStatus.Unavailable(
+                BackupUnavailableReason.ENCODING_OR_CRYPTO,
+            )
+        }
+        val verified = try {
+            packageFile.openRead().use { source ->
+                codec.verifyComplete(source, packageLength, key)
+            }
+        } catch (_: IOException) {
+            return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return AndroidBackupStatus.Unavailable(
+                BackupUnavailableReason.VERIFICATION_FAILED,
+            )
+        } finally {
+            key.close()
+        }
+        if (
+            verified.vaultId != vaultId.value ||
+            verified.generation > trackingState.currentGeneration
+        ) {
+            return AndroidBackupStatus.Unavailable(
+                BackupUnavailableReason.VERIFICATION_FAILED,
+            )
+        }
+        val recoveredEnvelope = try {
+            val header = packageFile.openRead().use { source ->
+                codec.readBootstrap(source, packageLength)
+            }
+            RecoveryEnvelopeCodec.fromPayload(header.recoveryEnvelope)
+        } catch (_: IOException) {
+            return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return AndroidBackupStatus.Unavailable(
+                BackupUnavailableReason.VERIFICATION_FAILED,
+            )
+        }
+        try {
+            if (envelopeDigest(recoveredEnvelope) != verified.recoveryEnvelopeSha256) {
+                return AndroidBackupStatus.Unavailable(
+                    BackupUnavailableReason.VERIFICATION_FAILED,
+                )
+            }
+            val readyState = packageState(trackingState, verified).copy(
+                recoveryEnvelopeReady = true,
+            )
+            val committed = try {
+                envelopeStore.commitInitial(
+                    vaultId = vaultId,
+                    envelope = recoveredEnvelope,
+                    state = readyState,
+                    expectedCurrentGeneration = trackingState.currentGeneration,
+                )
+            } catch (failure: Throwable) {
+                failure.rethrowCancellation()
+                false
+            }
+            return if (committed) {
+                status(readyState)
+            } else {
+                AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+            }
+        } finally {
+            recoveredEnvelope.clear()
+        }
+    }
+
     private suspend fun reconcile(
         state: BackupStateEntity,
         envelope: VaultKeyEnvelope,
@@ -218,7 +341,7 @@ class PortableBackupPublisher(
             return null
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            packageFile.delete()
+            if (!packageFile.delete()) throw WithdrawalFailure()
             return null
         } finally {
             key.close()
@@ -233,7 +356,7 @@ class PortableBackupPublisher(
             verified.generation > state.currentGeneration ||
             verified.recoveryEnvelopeSha256 != envelopeDigest
         ) {
-            packageFile.delete()
+            if (!packageFile.delete()) throw WithdrawalFailure()
             return null
         }
         val reconciled = packageState(state, verified).copy(recoveryEnvelopeReady = true)
@@ -273,7 +396,6 @@ class PortableBackupPublisher(
                     key = key,
                 )
             } catch (_: PortablePackageTooLargeException) {
-                packageFile.delete()
                 throw PublicationFailure(
                     BackupUnavailableReason.PACKAGE_TOO_LARGE,
                     withdraw = true,
@@ -283,7 +405,6 @@ class PortableBackupPublisher(
                 throw PublicationFailure(BackupUnavailableReason.ENCODING_OR_CRYPTO)
             }
             if (packageBytes.size.toLong() > BackupPolicy.MAX_PORTABLE_PACKAGE_BYTES) {
-                packageFile.delete()
                 throw PublicationFailure(
                     BackupUnavailableReason.PACKAGE_TOO_LARGE,
                     withdraw = true,
@@ -366,6 +487,15 @@ class PortableBackupPublisher(
         reason: BackupUnavailableReason,
         withdraw: Boolean,
     ): AndroidBackupStatus {
+        if (withdraw && !packageFile.delete()) {
+            return recordFailedWithdrawal(
+                state = state,
+                priorVerified = reason == BackupUnavailableReason.PACKAGE_TOO_LARGE &&
+                    state.portablePackageGeneration != null &&
+                    state.portablePackageBytes != null &&
+                    state.portablePackageProducedAtEpochMillis != null,
+            )
+        }
         val hasPrior = !withdraw &&
             state.portablePackageGeneration != null &&
             state.portablePackageBytes != null &&
@@ -379,7 +509,6 @@ class PortableBackupPublisher(
         } else if (!state.recoveryEnvelopeReady && reason == BackupUnavailableReason.FILE_IO) {
             state
         } else {
-            if (withdraw) packageFile.delete()
             state.copy(
                 portablePackageGeneration = null,
                 portablePackageBytes = null,
@@ -399,6 +528,24 @@ class PortableBackupPublisher(
             AndroidBackupStatus.UpdatePending(packageInfo(updated))
         } else {
             AndroidBackupStatus.Unavailable(reason)
+        }
+    }
+
+    private suspend fun recordFailedWithdrawal(
+        state: BackupStateEntity,
+        priorVerified: Boolean,
+    ): AndroidBackupStatus {
+        val updated = state.copy(
+            packageState = if (priorVerified) PACKAGE_UPDATE_PENDING else PACKAGE_PREPARING,
+            failureCategory = BackupUnavailableReason.FILE_IO.name,
+        )
+        if (updated != state) {
+            stateStore.compareAndUpdate(updated, state.currentGeneration)
+        }
+        return if (priorVerified) {
+            AndroidBackupStatus.UpdatePending(packageInfo(updated))
+        } else {
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
         }
     }
 
@@ -457,6 +604,8 @@ class PortableBackupPublisher(
         val reason: BackupUnavailableReason,
         val withdraw: Boolean = false,
     ) : RuntimeException()
+
+    private class WithdrawalFailure : RuntimeException()
 
     private companion object {
         const val PACKAGE_NOT_PREPARED = "NOT_PREPARED"

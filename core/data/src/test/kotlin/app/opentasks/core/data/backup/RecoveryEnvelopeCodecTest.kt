@@ -146,6 +146,16 @@ class RecoveryEnvelopeCodecTest {
         assertArrayEquals(ByteArray(invalid.size), invalid)
     }
 
+    @Test
+    fun rejectedExistingInitialEnvelopeEntityClearsMaterializedSecrets() {
+        val entity = RecoveryEnvelopeCodec.toEntity(VaultId("vault-1"), fixtureEnvelope())
+
+        assertFalse(acceptInitialEnvelopeWhenAbsent(entity))
+        assertArrayEquals(ByteArray(entity.salt.size), entity.salt)
+        assertArrayEquals(ByteArray(entity.nonce.size), entity.nonce)
+        assertArrayEquals(ByteArray(entity.wrappedKeyset.size), entity.wrappedKeyset)
+    }
+
     private fun fixtureEnvelope(): VaultKeyEnvelope =
         VaultKeyEnvelope(
             formatVersion = 1,

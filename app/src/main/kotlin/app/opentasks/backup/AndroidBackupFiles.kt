@@ -65,10 +65,13 @@ class AndroidAtomicPackageFile(
         if (activeStream != null) writeCandidate.length() else file.length()
 
     override fun delete(): Boolean {
-        val existed = file.exists() || File("${file.path}.bak").exists()
+        val backup = File("${file.path}.bak")
+        val candidate = File("${file.path}.new")
+        val existed = file.exists() || backup.exists() || candidate.exists()
         atomicFile.delete()
+        candidate.delete()
         activeStream = null
-        return !existed || (!file.exists() && !File("${file.path}.bak").exists())
+        return !existed || (!file.exists() && !backup.exists() && !candidate.exists())
     }
 }
 

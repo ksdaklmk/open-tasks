@@ -645,7 +645,9 @@ class RoomRecoveryEnvelopeStore(
         require(state.vaultId == vaultId.value) { "Backup state belongs to another vault" }
         val envelopeDao = database.vaultRecoveryEnvelopeDao()
         val stateDao = database.backupStateDao()
-        if (envelopeDao.get(vaultId.value) != null) return@withTransaction false
+        if (!acceptInitialEnvelopeWhenAbsent(envelopeDao.get(vaultId.value))) {
+            return@withTransaction false
+        }
         val current = stateDao.get(vaultId.value) ?: return@withTransaction false
         if (
             current.currentGeneration != expectedCurrentGeneration ||
@@ -686,4 +688,14 @@ class RoomRecoveryEnvelopeStore(
             entity.wrappedKeyset.fill(0)
         }
     }
+}
+
+internal fun acceptInitialEnvelopeWhenAbsent(
+    existing: VaultRecoveryEnvelopeEntity?,
+): Boolean {
+    if (existing == null) return true
+    existing.salt.fill(0)
+    existing.nonce.fill(0)
+    existing.wrappedKeyset.fill(0)
+    return false
 }

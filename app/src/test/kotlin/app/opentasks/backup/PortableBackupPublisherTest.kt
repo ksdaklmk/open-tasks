@@ -298,6 +298,32 @@ class PortableBackupPublisherTest {
     }
 
     @Test
+    fun initialRollbackDeleteFailurePreservesRecoverablePackageTracking() {
+        val stateStore = FakeStateStore(state())
+        val envelopeStore = FakeEnvelopeStore(mutableListOf()).also {
+            it.failInitialCommit = true
+        }
+        val file = FakeAtomicPackageFile().also { it.failDelete = true }
+
+        val status = runBlocking {
+            publisher(
+                stateStore = stateStore,
+                envelopeStore = envelopeStore,
+                file = file,
+            ).prepare("passphrase".toCharArray())
+        }
+
+        assertEquals(
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
+            status,
+        )
+        assertArrayEquals("package:7".toByteArray(), file.finalBytes)
+        assertEquals("PREPARING", stateStore.current.packageState)
+        assertEquals(7L, stateStore.current.portablePackageGeneration)
+        assertFalse(stateStore.current.recoveryEnvelopeReady)
+    }
+
+    @Test
     fun initialStateReadFailureAfterFileCommitDeletesNewFileAndLeavesSetupUnprepared() {
         val stateStore = FakeStateStore(state()).also { it.failGetAtCall = 2 }
         val file = FakeAtomicPackageFile()
@@ -365,6 +391,61 @@ class PortableBackupPublisherTest {
         assertTrue(envelopeStore.envelope != null)
         assertEquals("READY", stateStore.current.packageState)
         assertTrue(stateStore.current.recoveryEnvelopeReady)
+    }
+
+    @Test
+    fun prepareAndRefreshReconcileAuthenticatedInitialPackageAfterProcessDeath() {
+        listOf("prepare", "refresh").forEach { operation ->
+            val stateStore = FakeStateStore(state())
+            val envelopeStore = FakeEnvelopeStore(mutableListOf())
+            val file = FakeAtomicPackageFile("package:7".toByteArray())
+            val publisher = publisher(
+                stateStore = stateStore,
+                envelopeStore = envelopeStore,
+                file = file,
+                failIfEnvelopePrepared = true,
+                failIfCaptured = true,
+            )
+
+            val status = runBlocking {
+                if (operation == "prepare") {
+                    publisher.prepare("unused passphrase".toCharArray())
+                } else {
+                    publisher.refresh()
+                }
+            }
+
+            assertTrue("$operation status", status is AndroidBackupStatus.Ready)
+            assertArrayEquals("$operation file", "package:7".toByteArray(), file.finalBytes)
+            assertTrue("$operation envelope", envelopeStore.envelope != null)
+            assertEquals("$operation state", "READY", stateStore.current.packageState)
+            assertTrue("$operation readiness", stateStore.current.recoveryEnvelopeReady)
+        }
+    }
+
+    @Test
+    fun unverifiableUnlinkedInitialPackageRemainsEligibleAndTracked() = runBlocking {
+        val stateStore = FakeStateStore(state())
+        val file = FakeAtomicPackageFile("unknown".toByteArray())
+        val codec = FakePortableCodec().also { it.failVerify = true }
+
+        val status = publisher(
+            stateStore = stateStore,
+            envelopeStore = FakeEnvelopeStore(mutableListOf()),
+            file = file,
+            codec = codec,
+            failIfEnvelopePrepared = true,
+            failIfCaptured = true,
+        ).prepare("unused passphrase".toCharArray())
+
+        assertEquals(
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.VERIFICATION_FAILED),
+            status,
+        )
+        assertArrayEquals("unknown".toByteArray(), file.finalBytes)
+        assertEquals("PREPARING", stateStore.current.packageState)
+        assertNull(stateStore.current.portablePackageGeneration)
+        assertFalse(stateStore.current.recoveryEnvelopeReady)
     }
 
     @Test
@@ -509,6 +590,56 @@ class PortableBackupPublisherTest {
         assertFalse(persistent.contains("/private/path"))
         assertFalse(persistent.contains("checksum"))
         assertFalse(persistent.contains("deadbeef"))
+    }
+
+    @Test
+    fun failedRequiredWithdrawalsKeepEligibleBytesLinkedAndSurfaceFileIo() = runBlocking {
+        listOf("oversized", "corrupt").forEach { failurePoint ->
+            val stateStore = FakeStateStore(
+                state(
+                    generation = 8,
+                    packageGeneration = 7,
+                    packageState = if (failurePoint == "corrupt") "PREPARING" else "READY",
+                    envelopeReady = true,
+                ),
+            )
+            val original = if (failurePoint == "corrupt") {
+                "corrupt".toByteArray()
+            } else {
+                "package:7".toByteArray()
+            }
+            val file = FakeAtomicPackageFile(original.copyOf()).also {
+                it.failDelete = true
+            }
+            val codec = FakePortableCodec().also {
+                it.failTooLarge = failurePoint == "oversized"
+                if (failurePoint == "corrupt") {
+                    it.verificationFailure = IllegalArgumentException("private corrupt bytes")
+                }
+            }
+
+            val status = publisher(
+                stateStore = stateStore,
+                envelopeStore = FakeEnvelopeStore(mutableListOf(), envelope()),
+                file = file,
+                codec = codec,
+                captureGeneration = 8,
+            ).refresh()
+
+            assertArrayEquals("$failurePoint file", original, file.finalBytes)
+            assertEquals("$failurePoint generation", 7L, stateStore.current.portablePackageGeneration)
+            assertEquals("$failurePoint reason", "FILE_IO", stateStore.current.failureCategory)
+            if (failurePoint == "oversized") {
+                assertTrue(status is AndroidBackupStatus.UpdatePending)
+                assertEquals("UPDATE_PENDING", stateStore.current.packageState)
+            } else {
+                assertEquals(
+                    AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
+                    status,
+                )
+                assertEquals("PREPARING", stateStore.current.packageState)
+            }
+        }
     }
 
     private fun publisher(
@@ -690,8 +821,28 @@ class PortableBackupPublisherTest {
         override fun readBootstrap(
             source: InputStream,
             totalLength: Long,
-        ): PortableBootstrapHeaderV1 =
-            throw AssertionError("Publisher uses complete verification")
+        ): PortableBootstrapHeaderV1 {
+            val generation = source.readBytes()
+                .toString(Charsets.UTF_8)
+                .substringAfter("package:")
+                .toLong()
+            val recoveryEnvelope = envelope()
+            return try {
+                PortableBootstrapHeaderV1(
+                    vaultId = VAULT_ID.value,
+                    generation = generation,
+                    producedAtEpochMillis = PRODUCED_AT,
+                    recoveryEnvelope = RecoveryEnvelopeCodec.toPayload(recoveryEnvelope),
+                    manifestFrameLength = 1,
+                    manifestFrameSha256 = "0".repeat(64),
+                    snapshotFrameLength = 1,
+                    snapshotFrameSha256 = "0".repeat(64),
+                    totalPackageLength = totalLength,
+                )
+            } finally {
+                recoveryEnvelope.clear()
+            }
+        }
 
         override fun verifyComplete(
             source: InputStream,
@@ -722,6 +873,7 @@ class PortableBackupPublisherTest {
         var failWrite = false
         var failFlush = false
         var failFinish = false
+        var failDelete = false
         var failOpenReadAtCall: Int? = null
         var afterFinish: () -> Unit = {}
         private var prior: ByteArray? = null
@@ -767,6 +919,7 @@ class PortableBackupPublisherTest {
         override fun length(): Long = (active?.bytes() ?: finalBytes)?.size?.toLong() ?: 0
 
         override fun delete(): Boolean {
+            if (failDelete) return false
             finalBytes = null
             active = null
             prior = null
