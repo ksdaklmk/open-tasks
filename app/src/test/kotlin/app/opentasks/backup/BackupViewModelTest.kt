@@ -14,13 +14,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackupViewModelTest {
     @Test
-    fun statusIsPassedThroughUnchanged() {
+    fun idleSourceStatusIsPassedThroughUnchanged() {
         val source = FakeStatusSource(
             AndroidBackupStatus.Unavailable(BackupUnavailableReason.VERIFICATION_FAILED),
         )
@@ -31,9 +30,70 @@ class BackupViewModelTest {
             retryPackage = {},
         )
 
-        assertSame(source.status, viewModel.status)
-        source.status.value = AndroidBackupStatus.Preparing
+        assertEquals(source.status.value, viewModel.status.value)
+        source.status.value = AndroidBackupStatus.Ready(PACKAGE_INFO)
+        assertTrue(
+            waitUntil {
+                viewModel.status.value == AndroidBackupStatus.Ready(PACKAGE_INFO)
+            },
+        )
+    }
+
+    @Test
+    fun preparePublishesPreparingImmediatelyAndBlocksDuplicateSetup() {
+        val calls = AtomicInteger()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val viewModel = viewModel(
+            preparePackage = {
+                calls.incrementAndGet()
+                entered.countDown()
+                release.await(5, TimeUnit.SECONDS)
+                AndroidBackupStatus.Ready(PACKAGE_INFO)
+            },
+        )
+
+        viewModel.prepare("correct horse")
+
         assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        viewModel.prepare("another valid passphrase")
+        assertEquals(1, calls.get())
+        assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
+        release.countDown()
+    }
+
+    @Test
+    fun returnedBoundedUnavailableIsSurfacedWhenSourceRemainsIdle() {
+        val unavailable =
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.ENCODING_OR_CRYPTO)
+        val viewModel = viewModel(
+            preparePackage = { unavailable },
+        )
+
+        viewModel.prepare("correct horse")
+
+        assertTrue(waitUntil { viewModel.status.value == unavailable })
+    }
+
+    @Test
+    fun successfulResultReconcilesWithSourceThenResumesSourcePassthrough() {
+        val source = FakeStatusSource(AndroidBackupStatus.NotPrepared)
+        val ready = AndroidBackupStatus.Ready(PACKAGE_INFO)
+        val viewModel = BackupViewModel(
+            statusSource = source,
+            preparePackage = { ready },
+            retryPackage = {},
+        )
+
+        viewModel.prepare("correct horse")
+        assertTrue(waitUntil { viewModel.status.value == ready })
+
+        source.status.value = ready
+        assertTrue(waitUntil { viewModel.status.value == ready })
+        val pending = AndroidBackupStatus.UpdatePending(UPDATE_PACKAGE_INFO)
+        source.status.value = pending
+        assertTrue(waitUntil { viewModel.status.value == pending })
     }
 
     @Test
@@ -158,6 +218,30 @@ class BackupViewModelTest {
     }
 
     @Test
+    fun prepareCanRunAgainAfterPreviousPublisherCallCompletes() {
+        val calls = AtomicInteger()
+        val unavailable =
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.ENCODING_OR_CRYPTO)
+        val viewModel = viewModel(
+            preparePackage = {
+                if (calls.incrementAndGet() == 1) {
+                    unavailable
+                } else {
+                    AndroidBackupStatus.NotPrepared
+                }
+            },
+        )
+
+        viewModel.prepare("correct horse")
+        assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
+        assertTrue(waitUntil { viewModel.status.value == unavailable })
+
+        viewModel.prepare("another valid passphrase")
+
+        assertTrue(waitUntil { calls.get() == 2 })
+    }
+
+    @Test
     fun retryDelegatesOnlyToTheLocalRuntime() {
         val retries = AtomicInteger()
         val viewModel = BackupViewModel(
@@ -209,6 +293,9 @@ class BackupViewModelTest {
             currentGeneration = BackupGeneration(7),
             byteCount = 12_345,
             producedAt = Instant.parse("2026-02-14T10:05:00Z"),
+        )
+        val UPDATE_PACKAGE_INFO = PACKAGE_INFO.copy(
+            currentGeneration = BackupGeneration(8),
         )
     }
 }

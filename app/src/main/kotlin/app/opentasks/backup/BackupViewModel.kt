@@ -7,16 +7,18 @@ import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.RecoveryPassphraseValidation
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 @HiltViewModel
 class BackupViewModel internal constructor(
-    statusSource: AndroidBackupStatusSource,
+    private val statusSource: AndroidBackupStatusSource,
     private val preparePackage: suspend (CharArray) -> AndroidBackupStatus,
     private val retryPackage: () -> Unit,
 ) : ViewModel() {
@@ -31,35 +33,60 @@ class BackupViewModel internal constructor(
         retryPackage = runtime::retry,
     )
 
-    val status: StateFlow<AndroidBackupStatus> = statusSource.status
-    private val preparing = AtomicBoolean()
+    private val operationLock = Any()
+    private val presentedStatus = MutableStateFlow(statusSource.status.value)
+    private var operation: PreparationOperation? = null
+    val status: StateFlow<AndroidBackupStatus> = presentedStatus.asStateFlow()
+
+    init {
+        viewModelScope.launch(Dispatchers.Default) {
+            statusSource.status.collect(::acceptSourceStatus)
+        }
+    }
 
     fun prepare(passphrase: String) {
-        if (status.value is AndroidBackupStatus.Preparing) return
         if (RecoveryPassphrasePolicy.validate(passphrase, passphrase) !is
             RecoveryPassphraseValidation.Valid
         ) {
             return
         }
-        if (!preparing.compareAndSet(false, true)) return
+        val started = synchronized(operationLock) {
+            val activeOperation = operation
+            if (
+                (activeOperation != null && activeOperation.result == null) ||
+                presentedStatus.value is AndroidBackupStatus.Preparing
+            ) {
+                false
+            } else {
+                operation = PreparationOperation(
+                    sourceAtStart = statusSource.status.value,
+                )
+                presentedStatus.value = AndroidBackupStatus.Preparing
+                true
+            }
+        }
+        if (!started) return
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 if (RecoveryPassphrasePolicy.validate(passphrase, passphrase) !is
                     RecoveryPassphraseValidation.Valid
                 ) {
+                    clearOperation()
                     return@launch
                 }
                 val mutablePassphrase = passphrase.toCharArray()
-                try {
+                val result = try {
                     preparePackage(mutablePassphrase)
                 } finally {
                     mutablePassphrase.fill('\u0000')
                 }
+                publishResult(result)
             } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
+                clearOperation()
+                if (failure is CancellationException) {
+                    throw failure
+                }
                 // The publisher persists only a bounded AndroidBackupStatus reason.
-            } finally {
-                preparing.set(false)
             }
         }
     }
@@ -67,4 +94,48 @@ class BackupViewModel internal constructor(
     fun retry() {
         retryPackage()
     }
+
+    private fun acceptSourceStatus(sourceStatus: AndroidBackupStatus) {
+        synchronized(operationLock) {
+            val activeOperation = operation
+            if (activeOperation == null) {
+                presentedStatus.value = sourceStatus
+            } else if (
+                activeOperation.result != null &&
+                (
+                    sourceStatus == activeOperation.result ||
+                        sourceStatus != activeOperation.sourceAtStart
+                    )
+            ) {
+                operation = null
+                presentedStatus.value = sourceStatus
+            }
+        }
+    }
+
+    private fun publishResult(result: AndroidBackupStatus) {
+        synchronized(operationLock) {
+            val activeOperation = operation ?: return
+            val sourceStatus = statusSource.status.value
+            if (sourceStatus == result || sourceStatus != activeOperation.sourceAtStart) {
+                operation = null
+                presentedStatus.value = sourceStatus
+            } else {
+                operation = activeOperation.copy(result = result)
+                presentedStatus.value = result
+            }
+        }
+    }
+
+    private fun clearOperation() {
+        synchronized(operationLock) {
+            operation = null
+            presentedStatus.value = statusSource.status.value
+        }
+    }
+
+    private data class PreparationOperation(
+        val sourceAtStart: AndroidBackupStatus,
+        val result: AndroidBackupStatus? = null,
+    )
 }

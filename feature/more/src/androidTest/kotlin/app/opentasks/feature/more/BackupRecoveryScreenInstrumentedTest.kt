@@ -1,6 +1,7 @@
 package app.opentasks.feature.more
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -430,6 +431,57 @@ class BackupRecoveryScreenInstrumentedTest {
             composeRule.onNodeWithTag("backup-system-settings")
                 .performScrollTo()
                 .assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun compactLargeTextKeepsFocusedPassphraseSheetActionsScrollReachable() {
+        val fontScale = mutableStateOf(1.3f)
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale.value),
+            ) {
+                OpenTasksTheme {
+                    Box(
+                        Modifier
+                            .width(320.dp)
+                            .height(520.dp),
+                    ) {
+                        TestScreen(AndroidBackupStatus.NotPrepared)
+                    }
+                }
+            }
+        }
+
+        listOf(1.3f, 2f).forEachIndexed { index, caseFontScale ->
+            composeRule.runOnIdle {
+                fontScale.value = caseFontScale
+            }
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("backup-prepare")
+                .performScrollTo()
+                .performClick()
+            val passphrase = composeRule.onNodeWithTag("backup-passphrase")
+            passphrase.performClick()
+            passphrase.performTextInput("masked")
+            passphrase.assertIsFocused()
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            composeRule.onNodeWithTag("backup-confirmation")
+                .performScrollTo()
+                .assertIsDisplayed()
+            composeRule.onNodeWithTag("backup-cancel")
+                .performScrollTo()
+                .assertIsDisplayed()
+            composeRule.onNodeWithTag("backup-submit")
+                .performScrollTo()
+                .assertIsDisplayed()
+            if (index == 0) {
+                composeRule.onNodeWithTag("backup-cancel")
+                    .performScrollTo()
+                    .performClick()
+                composeRule.waitForIdle()
+            }
         }
     }
 
