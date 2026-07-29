@@ -257,9 +257,7 @@ class PortableBackupPublisher(
             return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            return AndroidBackupStatus.Unavailable(
-                BackupUnavailableReason.VERIFICATION_FAILED,
-            )
+            return withdrawInvalidInitialPackage(trackingState)
         } finally {
             key.close()
         }
@@ -267,9 +265,7 @@ class PortableBackupPublisher(
             verified.vaultId != vaultId.value ||
             verified.generation > trackingState.currentGeneration
         ) {
-            return AndroidBackupStatus.Unavailable(
-                BackupUnavailableReason.VERIFICATION_FAILED,
-            )
+            return withdrawInvalidInitialPackage(trackingState)
         }
         val recoveredEnvelope = try {
             val header = packageFile.openRead().use { source ->
@@ -280,15 +276,11 @@ class PortableBackupPublisher(
             return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            return AndroidBackupStatus.Unavailable(
-                BackupUnavailableReason.VERIFICATION_FAILED,
-            )
+            return withdrawInvalidInitialPackage(trackingState)
         }
         try {
             if (envelopeDigest(recoveredEnvelope) != verified.recoveryEnvelopeSha256) {
-                return AndroidBackupStatus.Unavailable(
-                    BackupUnavailableReason.VERIFICATION_FAILED,
-                )
+                return withdrawInvalidInitialPackage(trackingState)
             }
             val readyState = packageState(trackingState, verified).copy(
                 recoveryEnvelopeReady = true,
@@ -313,6 +305,14 @@ class PortableBackupPublisher(
             recoveredEnvelope.clear()
         }
     }
+
+    private suspend fun withdrawInvalidInitialPackage(
+        state: BackupStateEntity,
+    ): AndroidBackupStatus = recordFailure(
+        state = state,
+        reason = BackupUnavailableReason.VERIFICATION_FAILED,
+        withdraw = true,
+    )
 
     private suspend fun reconcile(
         state: BackupStateEntity,

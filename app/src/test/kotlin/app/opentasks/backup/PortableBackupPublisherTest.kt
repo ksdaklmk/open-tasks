@@ -424,28 +424,65 @@ class PortableBackupPublisherTest {
     }
 
     @Test
-    fun unverifiableUnlinkedInitialPackageRemainsEligibleAndTracked() = runBlocking {
-        val stateStore = FakeStateStore(state())
-        val file = FakeAtomicPackageFile("unknown".toByteArray())
-        val codec = FakePortableCodec().also { it.failVerify = true }
+    fun unverifiableUnlinkedInitialPackageIsWithdrawnOrTrackedOnDeleteFailure() = runBlocking {
+        listOf("prepare", "refresh").forEach { operation ->
+            listOf(false, true).forEach { deleteFails ->
+                val stateStore = FakeStateStore(state())
+                val file = FakeAtomicPackageFile("tampered".toByteArray()).also {
+                    it.failDelete = deleteFails
+                }
+                val codec = FakePortableCodec().also {
+                    it.verificationFailure = IllegalArgumentException(
+                        "private /path checksum=cafe ciphertext=deadbeef",
+                    )
+                }
+                val publisher = publisher(
+                    stateStore = stateStore,
+                    envelopeStore = FakeEnvelopeStore(mutableListOf()),
+                    file = file,
+                    codec = codec,
+                    failIfEnvelopePrepared = true,
+                    failIfCaptured = true,
+                )
 
-        val status = publisher(
-            stateStore = stateStore,
-            envelopeStore = FakeEnvelopeStore(mutableListOf()),
-            file = file,
-            codec = codec,
-            failIfEnvelopePrepared = true,
-            failIfCaptured = true,
-        ).prepare("unused passphrase".toCharArray())
+                val status = if (operation == "prepare") {
+                    publisher.prepare("unused passphrase".toCharArray())
+                } else {
+                    publisher.refresh()
+                }
 
-        assertEquals(
-            AndroidBackupStatus.Unavailable(BackupUnavailableReason.VERIFICATION_FAILED),
-            status,
-        )
-        assertArrayEquals("unknown".toByteArray(), file.finalBytes)
-        assertEquals("PREPARING", stateStore.current.packageState)
-        assertNull(stateStore.current.portablePackageGeneration)
-        assertFalse(stateStore.current.recoveryEnvelopeReady)
+                if (deleteFails) {
+                    assertEquals(
+                        "$operation failed-delete status",
+                        AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
+                        status,
+                    )
+                    assertArrayEquals(
+                        "$operation failed-delete file",
+                        "tampered".toByteArray(),
+                        file.finalBytes,
+                    )
+                    assertEquals("PREPARING", stateStore.current.packageState)
+                    assertEquals("FILE_IO", stateStore.current.failureCategory)
+                } else {
+                    assertEquals(
+                        "$operation status",
+                        AndroidBackupStatus.Unavailable(
+                            BackupUnavailableReason.VERIFICATION_FAILED,
+                        ),
+                        status,
+                    )
+                    assertNull("$operation file", file.finalBytes)
+                    assertEquals("NOT_PREPARED", stateStore.current.packageState)
+                    assertNull(stateStore.current.failureCategory)
+                }
+                assertNull(stateStore.current.portablePackageGeneration)
+                assertFalse(stateStore.current.recoveryEnvelopeReady)
+                assertFalse(stateStore.current.toString().contains("private /path"))
+                assertFalse(stateStore.current.toString().contains("checksum"))
+                assertFalse(stateStore.current.toString().contains("ciphertext"))
+            }
+        }
     }
 
     @Test
