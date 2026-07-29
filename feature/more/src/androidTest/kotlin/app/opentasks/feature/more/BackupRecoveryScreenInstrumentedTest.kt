@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
@@ -17,7 +18,7 @@ import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTextExactly
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,6 +29,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -94,7 +96,10 @@ class BackupRecoveryScreenInstrumentedTest {
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
 
-        composeRule.onNodeWithText("Recovery passphrase").assertIsDisplayed()
+        composeRule.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading) and
+                hasTextExactly("Recovery passphrase"),
+        ).assertIsDisplayed()
         composeRule.onNodeWithTag("backup-passphrase")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         composeRule.onNodeWithTag("backup-confirmation")
@@ -169,13 +174,18 @@ class BackupRecoveryScreenInstrumentedTest {
             BackupUnavailableReason.FILE_IO to
                 ("The local package file is unavailable." to true),
         )
-
-        cases.forEach { (reason, expected) ->
-            composeRule.setContent {
-                OpenTasksTheme {
-                    TestScreen(AndroidBackupStatus.Unavailable(reason))
-                }
+        val reason = mutableStateOf(cases.first().first)
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestScreen(AndroidBackupStatus.Unavailable(reason.value))
             }
+        }
+
+        cases.forEach { (caseReason, expected) ->
+            composeRule.runOnIdle {
+                reason.value = caseReason
+            }
+            composeRule.waitForIdle()
 
             composeRule.onNodeWithText("Package unavailable").assertIsDisplayed()
             composeRule.onNodeWithText(expected.first).assertIsDisplayed()
@@ -189,20 +199,26 @@ class BackupRecoveryScreenInstrumentedTest {
 
     @Test
     fun restoredPackageIsInertAndOffersNoActivationOrDiscard() {
-        listOf(
+        val cases = listOf(
             RestoredPackageCondition.PRESERVED to
                 "An Android backup package was preserved in the recovery inbox. " +
                 "Recovery activation is not available yet.",
             RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT to
                 "An incompatible or corrupt Android backup package was preserved in the " +
                 "recovery inbox. Recovery activation is not available yet.",
-        ).forEach { (condition, copy) ->
-            composeRule.setContent {
-                OpenTasksTheme {
-                    TestScreen(AndroidBackupStatus.RestoredPackageDetected(condition))
-                }
+        )
+        val condition = mutableStateOf(cases.first().first)
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestScreen(AndroidBackupStatus.RestoredPackageDetected(condition.value))
             }
+        }
 
+        cases.forEach { (caseCondition, copy) ->
+            composeRule.runOnIdle {
+                condition.value = caseCondition
+            }
+            composeRule.waitForIdle()
             composeRule.onNodeWithText("Restored package detected").assertIsDisplayed()
             composeRule.onNodeWithText(copy).assertIsDisplayed()
             composeRule.onNodeWithText("Restore").assertDoesNotExist()
@@ -284,8 +300,12 @@ class BackupRecoveryScreenInstrumentedTest {
         restorationTester.emulateSavedInstanceStateRestore()
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
 
-        composeRule.onNodeWithTag("backup-passphrase").assertTextEquals("")
-        composeRule.onNodeWithTag("backup-confirmation").assertTextEquals("")
+        val emptyInput = SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText,
+            AnnotatedString(""),
+        )
+        composeRule.onNodeWithTag("backup-passphrase").assert(emptyInput)
+        composeRule.onNodeWithTag("backup-confirmation").assert(emptyInput)
     }
 
     @Test
@@ -378,24 +398,34 @@ class BackupRecoveryScreenInstrumentedTest {
 
     @Test
     fun compactAndExpandedWidthsRemainUsableAtLargeTextScales() {
-        listOf(
+        val cases = listOf(
             Triple(320.dp, 1.3f, AndroidBackupStatus.NotPrepared),
             Triple(320.dp, 2f, AndroidBackupStatus.Ready(PACKAGE_INFO)),
             Triple(840.dp, 2f, AndroidBackupStatus.UpdatePending(PACKAGE_INFO)),
-        ).forEach { (width, fontScale, status) ->
-            composeRule.setContent {
-                val density = LocalDensity.current
-                CompositionLocalProvider(
-                    LocalDensity provides Density(density.density, fontScale),
-                ) {
-                    OpenTasksTheme {
-                        Box(Modifier.width(width)) {
-                            TestScreen(status)
-                        }
+        )
+        val width = mutableStateOf(cases.first().first)
+        val fontScale = mutableStateOf(cases.first().second)
+        val status = mutableStateOf<AndroidBackupStatus>(cases.first().third)
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale.value),
+            ) {
+                OpenTasksTheme {
+                    Box(Modifier.width(width.value)) {
+                        TestScreen(status.value)
                     }
                 }
             }
+        }
 
+        cases.forEach { (caseWidth, caseFontScale, caseStatus) ->
+            composeRule.runOnIdle {
+                width.value = caseWidth
+                fontScale.value = caseFontScale
+                status.value = caseStatus
+            }
+            composeRule.waitForIdle()
             composeRule.onNodeWithTag("backup-screen").assertIsDisplayed()
             composeRule.onNodeWithTag("backup-system-settings")
                 .performScrollTo()
