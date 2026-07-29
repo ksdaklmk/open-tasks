@@ -43,20 +43,27 @@ and ordered backup-journal rows atomically. Strict snapshot/segment payloads,
 consistent capture, and verified encrypted current/previous local recovery
 objects are implemented under the no-backup directory.
 
-Those foundations are not yet a user-visible backup or recovery feature. The
-local coordinator is constructed for future runtime use but is not activated;
-no prepared/persisted recovery envelope or portable package exists. Google
-Identity, Drive transport, Android Auto Backup, writer takeover, cloud
-attachments, and recovery UI remain unavailable. Android backup is still
-disabled. Product copy must not imply cloud backup, attachment availability,
-or reinstall recovery until those flows pass their release gates.
+Stage 2 now activates the local coordinator, persists a verified recovery
+envelope, and atomically publishes one verified portable package no larger
+than 24 MiB. Android Auto Backup and device transfer are enabled for the exact
+package path only; Room, WAL/SHM, preferences, keys, credentials, cache, local
+staging, and attachment bytes remain excluded. More exposes locally provable
+package readiness, pending, unavailable, and inert restored-package states.
+It never claims that Android uploaded the package or invents a platform backup
+time.
+
+Google Identity, Drive transport, app-managed cloud backup, recovery
+activation, writer takeover, remote merge, and cloud attachments remain
+unavailable. A restored Android package is preserved as inert input for Stage
+3. Product copy must not imply cloud upload, attachment availability, or
+reinstall recovery until those later flows pass their release gates.
 
 ## Approved future contract
 
 - Structured workspace data remains local in Room during normal use.
 - App-managed encrypted backup preserves structured data for recovery.
-- Android Auto Backup supplements that guarantee with one strictly
-  whitelisted portable encrypted package.
+- Android Auto Backup supplements that future guarantee with the implemented
+  strictly whitelisted portable encrypted package.
 - Attachment metadata remains local structured data, while attachment bytes
   are durable only in the cloud attachment service.
 - Each backed-up vault has one active writer. Recovery on another device is an

@@ -1,10 +1,40 @@
 # Stage 2 Local Backup and Android Auto Backup Design
 
 **Date:** 28 July 2026
-**Status:** Approved
+**Status:** Implemented and verified
 **Scope:** Local backup generations, backup-journal migration, verified local
 backup objects, one portable encrypted package, Android Auto Backup allow-list,
 and minimal package status
+
+## Implementation checkpoint
+
+Tasks 1–9 implemented the complete approved scope through `a4069c7`. The fresh
+Stage 2 exit gates passed 371 JVM tests with all 547 debug/lint/assembly tasks
+executed, 122 connected tests with all 387 device-gate tasks executed, and all
+441 release tasks including R8 and resource shrinking. Deterministic v1
+fixtures regenerated without a diff.
+
+The disposable API 37 acceptance run produced and re-read an authenticated
+30,479-byte generation-zero package at the exact eligible path
+`files/android_backup/open_tasks_portable_v1.otb`. Packaged-rule tests prove
+that it is the sole Android cloud-backup/device-transfer include. Setup, masked
+non-saveable passphrases, local Ready facts, no-upload copy, compact/expanded
+fold states, and 100%, 130%, and 200% text passed. Restored packages remain
+inert and expose no activation action.
+
+The emulator's local transport lacked the encryption capability required by
+the cloud-backup rule and rejected the package, so it produced no valid app
+dataset token. No uninstall or restore was attempted without that prerequisite.
+Actual encrypted Google-account transport upload and restore therefore remain
+the explicit external qualification gate; local package readiness is not
+evidence of upload.
+
+The protected v5 workspace was upgraded in place without uninstall, clear
+data, instrumentation, or `bmgr`. Its package identity, database inode
+identities, visible records, projects, and active timer survived migration and
+cold restart. Reloading the named no-save snapshot restored its exact original
+identity and 1.0 saved font scale. Stage 3 brainstorming and design is the sole
+next action; no provider or recovery-activation work entered Stage 2.
 
 ## Decision
 

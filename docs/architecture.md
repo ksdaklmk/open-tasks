@@ -50,12 +50,14 @@ RecoveryCoordinator
 ```
 
 `BackupCoordinator`, strict snapshot/segment codecs, consistent Room capture,
-and `LocalBackupObjectStore` are implemented in `core:data`. The production
-runtime bundle constructs them but deliberately does not start requests; Task 8
-owns application scope, debounce, and triggering. The portable publisher,
-provider stores, attachment coordinator, and recovery path remain approved but
-unimplemented. The internal `AuthenticatedCloudObjectCodec` shown at their
-encryption boundary is implemented in `core:data`.
+and `LocalBackupObjectStore` are implemented in `core:data`. The application
+runtime starts one process-scoped coordinator, coalesces journal changes, and
+resumes pending work. `PortableBackupPublisher`, verified recovery-envelope
+setup, exact Android backup eligibility, and restored-package quarantine are
+implemented in `app`. Provider stores, the attachment coordinator, and the
+recovery path remain approved but unimplemented. The internal
+`AuthenticatedCloudObjectCodec` shown at their encryption boundary is
+implemented in `core:data`.
 `RecoveryCoordinator` will be the only component allowed to reconstruct Room
 from backup data or a restored portable package. `BackupCoordinator`,
 `PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
@@ -318,11 +320,11 @@ a product or release dependency.
 - Record encryption binds vault, object, and format identifiers as associated
   data.
 - Recovery passphrases are never persisted.
-- Android backup is currently disabled. Remaining Stage 2 work may enable
-  Android Auto Backup only for one strictly whitelisted portable encrypted
-  package; databases,
-  WAL/SHM, preferences, keys, credentials, cache, and attachment bytes remain
-  excluded.
+- Android Auto Backup and device transfer include only the exact portable
+  encrypted package in the `file` domain at application-relative path
+  `android_backup/open_tasks_portable_v1.otb`. Databases, WAL/SHM, preferences,
+  keys, credentials, cache, local recovery staging, and attachment bytes
+  remain excluded.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
   attachment names, or encryption metadata.
 
@@ -354,9 +356,10 @@ implemented provider-independent codec in `core:data` binds the complete
 `CloudHeaderIdentity` as AEAD associated data, verifies length and checksum
 before decryption, and translates untrusted frame and authentication rejection
 to typed failures. Strict snapshot/operation payload codecs and the verified
-local recovery-object coordinator now consume it. Provider transport, portable
-package publication, restore activation, scheduling, and product-visible
-backup or attachment flows are not implemented.
+local recovery-object coordinator now consume it. Portable-package
+publication, runtime scheduling, and local package status are implemented.
+Provider transport, restore activation, and product-visible app-managed backup
+or attachment flows are not implemented.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry

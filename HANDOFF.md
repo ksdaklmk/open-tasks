@@ -2,27 +2,30 @@
 
 - Last updated: 29 July 2026
 - Branch: `main`
-- Session status: **Paused at the user's request after Stage 2 Task 5. Stage 2
-  Tasks 1–5 are implemented, committed, verified, and independently reviewed;
-  Tasks 6–10 have not started. Room v6 is the sole live authority with atomic
-  local generations and ordered backup-journal rows. Strict snapshot/segment
-  payloads, consistent capture, verified encrypted local recovery objects, and
-  the local coordinator foundation are complete. The coordinator is exposed
-  for later application runtime wiring but is not activated. Android Auto
-  Backup remains disabled; no prepared/persisted recovery envelope, portable
-  package, restore path, provider, or attachment transport exists. Resume with
-  Stage 2 Task 6.
-  Train 1 Tasks 1.1–1.5 and Stage 1 remain complete and independently
-  reviewed. GitHub maintenance remains paused.**
-- Current implementation point: `2a72670` (`feat: verify and retain local
-  recovery objects`) completes Stage 2 Task 5. The preceding Stage 2 source
-  commits are recorded in the paused checkpoint below. The approved design is
+- Session status: **Stage 2 is implemented and verified for every
+  repository-controlled gate. Room v6 remains the sole live authority, with
+  atomic local generations, verified recovery objects, a prepared recovery
+  envelope, one authenticated portable package, exact Android backup/device-
+  transfer eligibility, inert restored-package intake, and locally truthful
+  More status. Encrypted Google-account transport upload/restore is an
+  explicit external qualification gate; local readiness is not an upload
+  claim. No provider, WorkManager, recovery activation, writer takeover,
+  remote merge, or attachment transport exists. The sole next action is
+  focused Stage 3 brainstorming and design. Train 1 Tasks 1.1–1.5 and Stage 1
+  remain complete and independently reviewed. GitHub maintenance remains
+  paused.**
+- Current source implementation point: `a4069c7` (`fix: allow initial backup
+  re-preparation`) completes the Stage 2 source chain through Task 9. The
+  pending Task 10 documentation commit records the fresh exit gates and
+  checkpoint below. The implemented design is
   `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`
-  and the live execution plan is
+  and the completed execution plan is
   `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`.
-  The protected `task13_fixround1_replacement_20260728_055359` snapshot remains
-  untouched; Stage 2 connected tests used only the audited disposable
-  API 37 foldable and final ADB state is empty.
+  The protected `task13_fixround1_replacement_20260728_055359` snapshot was
+  audited with snapshot saving disabled, upgraded in place without
+  instrumentation or destructive package operations, then reloaded and
+  restored exactly. Stage 2 connected tests and `bmgr` used only the audited
+  disposable API 37 foldable. Final ADB state is empty.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -72,12 +75,11 @@ checks and resolution remain paused. A blocking `PreToolUse` guard rejects raw
 Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
-and remain disabled. Google Identity, Drive transport, portable/Android
-backup, recovery UI, cloud attachments and Play Console work have not started.
-The local journal, payload, recovery-object store, and coordinator foundation
-is implemented but not application-triggered or user-visible. Android backup
-remains disabled. Release gates which depend on those features remain blocked
-by their listed prerequisites.
+and remain disabled. Stage 2 local backup and the supplementary Android
+package are implemented and user-visible in More. Google Identity, Drive
+transport, recovery activation, writer takeover, cloud attachments and Play
+Console work have not started. Release gates which depend on those later
+features remain blocked by their listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
 independent of SQLCipher database keys and have separate recovery and per-vault
@@ -85,15 +87,16 @@ Android Keystore wrapping. Canonical bounded cloud frames exist for manifests,
 snapshots, operation segments and attachment chunks. The authenticated
 provider-independent codec binds their complete identity as AEAD associated
 data and has independent deterministic vectors for all four families. Stage 2
-Tasks 1–5 now add the local backup journal, strict snapshot/segment payloads,
-consistent capture, and verified local recovery objects. Drive transport, a
-portable package, user recovery, and attachments are not implemented. The
-historical Train 1 Task 1.6 is superseded.
+adds the local backup journal, strict snapshot/segment payloads, consistent
+capture, verified local recovery objects, recovery-envelope preparation, the
+portable package, runtime activation, exact Android eligibility, inert
+restored input, and status UI. Drive transport, user recovery activation, and
+attachments are not implemented. The historical Train 1 Task 1.6 is
+superseded.
 
-## Stage 2 paused checkpoint — Tasks 1–5
+## Stage 2 implemented and verified checkpoint — Tasks 1–10
 
-The approved subagent-driven execution ran directly on `main` and is paused
-before Task 6:
+The approved subagent-driven execution ran directly on `main`:
 
 | Task | Result | Commit(s) |
 |---:|---|---|
@@ -102,36 +105,76 @@ before Task 6:
 | 3 | Journalled accepted local mutations under one atomic generation; removed active legacy outbox writes | `3a8520c`, `313047e` |
 | 4 | Froze strict canonical snapshot/segment payload v1, golden fixtures, and vault-scoped consistent capture | `8f74219`, `f2b3a92`, `6811f3c` |
 | 5 | Added crash-safe local recovery-object lifecycle, authenticated readback coordinator, checkpoint, retention, threshold, failure, cancellation, and coalescing behavior | `2a72670` |
+| 6 | Prepared, verified, persisted, and failure-hardened the recovery envelope without replacing the existing content key | `99c9905`, `492a84b` |
+| 7 | Added the bounded authenticated portable-package codec and crash-safe atomic publisher | `d89c0c1`, `4dea896`, `c9ca105` |
+| 8 | Activated runtime coordination, exact Android allow-list, and inert restored-package intake | `92fc531`, `970bcde`, `0c8baf9` |
+| 9 | Added adaptive More status/setup UI with masked non-saveable passphrase handling and bounded retry states | `79da8c2`, `26fc840`, `21bf211`, `a4069c7` |
+| 10 | Ran the complete exit, Android transport, UI, protected-workspace, and release gates and reconciled active contracts | This checkpoint |
 
-Important Task 5 lifecycle boundary: `LocalVaultRepositoryFactory.createRuntime`
-constructs and exposes the repository and local coordinator, but current
-`AppModule` still uses `create()`. This is intentional. Task 8 owns application
-scope, debounce, request triggering, and DI activation; no backup work should
-start before then.
+Fresh Stage 2 exit evidence:
 
-Fresh checkpoint evidence:
-
-- Initial full baseline at approved plan commit `cc816ab`:
-  `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace`
-  passed (547 actionable tasks).
-- Task 4 controller gate: all 116 Data JVM tests passed; focused real-Room
-  capture passed 8/8 on the sole audited disposable API 37 foldable.
-- Task 5 controller gate after `2a72670`:
-  `./gradlew :core:data:testDebugUnitTest --stacktrace --rerun-tasks` passed
-  all 139 Data JVM tests with all 57 tasks executed. The new store/coordinator
-  classes account for 23 focused tests. `git diff --check` passed.
-- Migration and repository device suites used only the disposable
-  `Pixel_10_Pro_Fold` launched read-only with no snapshot load/save. Final ADB
-  state is empty. The protected replacement snapshot was not attached to,
-  instrumented, cleared, uninstalled, or overwritten.
-- Independent task review has no open Critical or Important findings. Deferred
-  Minors remain in the ignored SDD ledger and are not reasons to reopen the
-  completed tasks.
-
-Tasks 6–10 remain unstarted. Task 6 prepares and verifies the recovery
-envelope. Tasks 7–10 then own the portable package, exact Android allow-list
-and runtime activation, UI/status, and final verification/documentation.
-Android Auto Backup is still disabled.
+- Deterministic source scans found only intentional v5 `DRIVE_PRIMARY`
+  migration fixtures and a negative Compose assertion that **Backed up** does
+  not appear. The Stage 2 v1 fixture generator produced no diff.
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+  --rerun-tasks` passed with 547/547 tasks executed and 371/371 JVM tests:
+  App 87, Crypto 27, Data 161, Domain 44, and Sync 52.
+- The sole connected target was the disposable `Pixel_10_Pro_Fold`, API 37 /
+  Android 17, opened, 390 dpi, started with `-read-only`,
+  `-no-snapshot-save`, `-no-snapshot-load`, and `-no-window`. Its inherited
+  2.0 font scale was changed only in the disposable overlay to the suite's
+  1.0 baseline.
+- The forced connected command passed 387/387 Gradle tasks and 122/122 tests:
+  Crypto 28, Data 46, App 5, and More 43. This covers content-key failure
+  modes, v5→v6 migration and encrypted restart, packaged eligibility,
+  restored input, process recreation, and the complete More suite.
+- Normal disposable UI setup produced and verified a 30,479-byte generation-0
+  package with file evidence
+  `573729:30479:files/android_backup/open_tasks_portable_v1.otb`. The
+  passphrase fields were masked. Ready copy reported only local generation,
+  bytes, and production time and made no upload claim. Visual acceptance
+  passed at 100%, 130%, and 200% text in expanded, half-opened, and
+  compact/closed postures.
+- Packaged extraction rules and device tests prove that the package path is the
+  sole eligible include. A separate ordinary `files/profileInstalled` file
+  existed but was not eligible. Room, WAL/SHM, preferences, keys, credentials,
+  cache, local staging, and attachment bytes remain excluded.
+- Backup Manager was enabled on disposable state. The Google transport
+  destination reported **Add a backup account now**. The selected debug-only
+  local transport lacked the encryption capability required by the
+  cloud-backup rule and rejected the package with full-data error `-1002`; no
+  valid app dataset token existed. The uninstall/restore sequence therefore
+  did not run. Actual encrypted Google transport upload/restore remains
+  external qualification, and no upload or restore success is inferred.
+- `./gradlew :app:assembleRelease --stacktrace --rerun-tasks` passed with
+  441/441 tasks executed, including R8, resource shrinking, release packaging,
+  and `:app:assembleRelease`.
+- The named protected snapshot loads correctly only in its recorded hidden-Qt
+  graphics posture with `-snapshot`, `-no-snapshot-save`, and
+  `-qt-hide-window`. Two earlier renderer-mismatched starts fell back to cold
+  state and were stopped before any install or data operation. The accepted
+  load completed in 1.193 seconds.
+- The protected snapshot's saved baseline is font scale 1.0, not the unsaved
+  later 2.0 runtime value previously recorded. Before installation its exact
+  identity was UID `10232`, first install `2026-07-28 05:53:59`, CE inode
+  `549494`, database/WAL/SHM inodes `567204`/`567205`/`567234`, and sizes
+  `4096`/`379072`/`32768`.
+- The debug APK installed in place with `adb install -r`; no uninstall, clear
+  data, instrumentation, or `bmgr` touched protected state. SQLCipher opened
+  without a migration/runtime failure. `Reconcile July invoices`,
+  `Finish launch proposal`, `Transcribe research interviews`, their projects,
+  and the active timer remained visible across force-stop/cold relaunch.
+  Package identity and all inodes stayed exact; the migrated WAL grew to
+  `436752`. More showed generation-zero v6 initial backup state. Deterministic
+  migration coverage plus this protected continuity prove legacy-row
+  preservation without unsafe direct SQL inspection of the encrypted database.
+- Reloading the named snapshot restored the exact original `TEST_ONLY`,
+  no-`ALLOW_BACKUP` package flags, 379,072-byte WAL, package identity, and
+  CE/database/WAL/SHM inodes. Both shutdowns ignored snapshot save. Final ADB
+  and emulator process state were empty.
+- Independent Task 1–9 reviews have no open Critical or Important findings.
+  Deferred Minors remain in the ignored SDD ledger and do not reopen these
+  completed boundaries.
 
 ## Train 0 baseline checkpoint verification
 
@@ -640,9 +683,9 @@ core/JUnit/runner/rules dependencies it requires.
 
 At that historical pause audit, `adb devices -l` reported no attached device.
 The named replacement snapshot and the untouched pre-replacement recovery
-clone were both still present. The restored 2.0-font-scale state recorded in
-the Stage 1 checkpoint below supersedes this historical 1.0 identity and is
-the authoritative current protected-state record.
+clone were both still present. A later Stage 1 runtime session observed font
+scale 2.0, but snapshot saving was disabled. The Stage 2 exit audit has now
+proved that the named snapshot's saved baseline remains 1.0.
 
 ## Stage 1 authenticated object foundation checkpoint
 
@@ -735,11 +778,11 @@ The disposable emulator was stopped without snapshot save. The protected
 snapshot `task13_fixround1_replacement_20260728_055359` was restored with
 `-no-snapshot-save`. Its AVD/API, UID, install time, light mode, opened posture,
 CE inode and database/WAL/SHM inodes matched the pre-suite audit exactly.
-The restored snapshot currently reports font scale `2.0`; this differs from
-the older handoff text that described its last verified visual state as 100%,
-but does not change its exact package or encrypted-data identity. No protected
-install, uninstall, data clear or instrumentation occurred; the exact
-protected workspace identity remained unchanged.
+That runtime session reported font scale `2.0`; it was not saved. The Stage 2
+exit audit later reloaded the named snapshot and proved its saved font scale is
+`1.0`. No protected install, uninstall, data clear or instrumentation occurred
+in this historical Stage 1 session; the exact protected workspace identity
+remained unchanged.
 
 The independent fixture generator was rerun and
 `git diff --exit-code -- core/data/src/test/resources/cloud-format/v1-authenticated`
@@ -864,8 +907,8 @@ as implemented in `core:data`, composed from `core:sync` framing/identity and
 `core:crypto` generic AEAD. It does not claim provider transport, separate
 backup/blob services, recovery, scheduling, Android Auto Backup, or
 product-visible backup/attachment flows. `AttachmentBlobStore` is the active
-blob contract name. Android backup remains disabled and supplementary future
-Stage 2 work.
+blob contract name. At that Stage 1 checkpoint Android backup remained
+disabled and supplementary future Stage 2 work.
 
 The source/terminology scans found no placeholder, logging, provider/private
 fixture, stale codec-status/ownership or obsolete blob-store contract name.
@@ -876,10 +919,11 @@ extraction or backup rules. No ADB, connected test, install, uninstall, data
 clear or other device command ran in this correction wave; the protected state
 was untouched. The ignored SDD progress ledger was not edited.
 
-The current protected AVD snapshot carries 200% global text. This is the
-authoritative protected-state record, not a correction blocker. Any future
-device suite that assumes a 100% baseline must verify its disposable overlay
-before running; the product's dedicated 200%-text acceptance remains covered.
+That correction wave observed 200% global text in an unsaved protected runtime
+session. The Stage 2 exit audit proves the named snapshot itself retains its
+1.0 saved baseline. Any future device suite must still verify its disposable
+overlay before running; the product's dedicated 200%-text acceptance remains
+covered.
 
 At this Stage 1 checkpoint, the next recommended action was to design and plan
 Stage 2. That design and its detailed implementation plan have since received
@@ -949,41 +993,43 @@ including `:app:minifyReleaseWithR8`,
 `:app:optimizeReleaseResources` and `:app:assembleRelease`. The release
 configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
-## Current in-progress work
+## Current programme boundary
 
-There is no uncommitted source implementation. Work is deliberately **Paused**
-after Stage 2 Task 5 at `2a72670`. Tasks 1–5 are complete and reviewed; Task 6
-has not started. The implemented local coordinator/store foundation is not
-application-triggered and must not be described as shipped backup. No portable
-package, Drive transport, recovery, Android Auto Backup, or attachment flow
-should be inferred from this checkpoint.
+There is no uncommitted source implementation. Stage 2 is implemented,
+verified, and reviewed through its task boundaries. The local coordinator and
+portable Android package are shipped source features, but package readiness is
+only a local fact. Drive transport, recovery activation, writer takeover,
+remote merge, and attachment transport remain absent.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
-queued dependency PR checks and resolution remain paused. No later-stage
-source change outside the approved Stage 2 plan is authorised. Resume at Task
-6 of the approved Stage 2 plan.
+queued dependency PR checks and resolution remain paused. No Stage 3 source
+change is authorised until focused brainstorming, design, and implementation
+planning are reviewed and approved.
 
 ## Resume instructions
 
 1. Read this file first, the
-   [Stage 2 plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md),
-   its ignored SDD progress ledger at
-   `.superpowers/sdd/2026-07-29-stage-2-local-backup-android-auto-backup-plan/progress.md`,
+   completed
+   [Stage 2 design](docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md),
+   the
+   [production programme](docs/superpowers/plans/2026-07-27-open-tasks-production-master-plan.md),
    then
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
-   1.1–1.5, Stage 1, and Stage 2 Tasks 1–5 are complete; do not amend or reopen
-   their reviewed commits without a new verified finding.
-3. Resume the approved Stage 2 implementation plan at **Task 6: Prepare a
-   Verified Recovery Envelope**, using its required Superpowers workflow.
+   1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
+   reviewed commits without a new verified finding.
+3. Begin focused Stage 3 brainstorming and design. Do not write provider,
+   recovery, writer-epoch, or remote-retention source before the new design and
+   implementation plan are approved.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
-5. Preserve the read-only legacy outbox and local data. Android Auto Backup
-   stays disabled until the remaining Stage 2 allow-list and acceptance gates
-   pass, and no provider work starts before Stage 3.
+5. Preserve the read-only legacy outbox, Room v6 local authority, exact Android
+   package allow-list, inert restored-package inbox, and local no-upload copy.
+   Treat encrypted Google transport backup/restore as external evidence until
+   it is actually qualified.
 6. Follow the six-stage dependency chain; historical Train 1–6 plans are
    evidence or replanning inputs, not executable contracts.
 7. Before recording the next pause or completion, run the repository gate from
@@ -1001,8 +1047,8 @@ recorded above.
 | Order | Stage | Status | Exit decision |
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
-| 2 | Local backup and Android Auto Backup | Paused after Task 5; Tasks 6–10 remain | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
-| 3 | App-managed backup and recovery takeover | Blocked by Stage 2 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
+| 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 3 | App-managed backup and recovery takeover | Ready for brainstorming and design | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
@@ -1015,15 +1061,15 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Resume the approved Stage 2 local-backup and Android Auto Backup plan at
-   Task 6; Tasks 1–5 are complete.
-2. Run the complete Stage 2 verification and review gates.
-3. Do not begin Stage 3 until Stage 2 is implemented, verified, and reviewed.
+1. Brainstorm and design Stage 3 app-managed backup and recovery takeover
+   against the completed Stage 2 boundary.
+2. Review and approve the Stage 3 design and detailed implementation plan.
+3. Only then begin Stage 3 source work.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
-remains disabled until the remaining Stage 2 allow-list and acceptance gates
-pass. Existing Room, legacy outbox, and local workspace data remain protected
-by their explicitly planned, verified migrations.
+and device transfer retain the verified exact-file allow-list. Existing Room,
+legacy outbox, local package, and workspace data remain protected by their
+explicitly planned, verified boundaries.
 
 ## Architecture and security rules for the next agent
 
@@ -1096,6 +1142,17 @@ by their explicitly planned, verified migrations.
   the retained verified ciphertext array. Clear scratch in `finally` and clear
   partial or checksum-rejected ciphertext before ownership transfer.
 - Keep passphrases as `CharArray` and zero temporary key arrays.
+- Keep one process-scoped local backup coordinator. It may checkpoint only
+  after authenticated strict readback and source comparison; failure never
+  blocks local editing or advances the verified checkpoint.
+- Keep the recovery envelope bound to the existing content key and the
+  portable package capped at 24 MiB. Package readiness reports local
+  generation, bytes, and production time only.
+- Android backup and device transfer may include only the `file`-domain
+  application-relative path
+  `android_backup/open_tasks_portable_v1.otb`. Restored or unknown input moves
+  to the no-backup inbox, remains inert, and exposes no activation action
+  before Stage 3.
 - Never log private content, account data, Drive IDs, attachment names or
   encryption metadata.
 - Future Drive code receives encrypted objects only and requests only
@@ -1112,12 +1169,13 @@ by their explicitly planned, verified migrations.
 
 ## Recommended next action
 
-Resume the approved
-[Stage 2 local-backup and Android Auto Backup implementation plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md)
-in subagent-driven mode at Task 6.
+Run focused Stage 3 brainstorming and design for app-managed encrypted backup,
+retention, recovery takeover, writer epochs, and stale-writer rejection.
+Preserve Room as the sole live structured-data authority and treat the Stage 2
+Android package as supplementary recovery input, not upload evidence.
 
-Keep the protected workspace untouched and run device suites only on a sole
-disposable emulator. Preserve existing outbox data, keep Android Auto Backup
-disabled until the remaining Stage 2 gates pass, and keep queued dependency PR
-checks and resolution paused unless the user explicitly resumes GitHub
-maintenance.
+Keep the protected workspace safe and run future device suites only on a sole
+audited disposable emulator unless a new in-place procedure is explicitly
+approved. Preserve existing outbox data and the exact Android package
+allow-list. Keep queued dependency PR checks and resolution paused unless the
+user explicitly resumes GitHub maintenance.

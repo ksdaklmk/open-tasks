@@ -162,8 +162,16 @@ loading, error, and empty states where relevant.
 
 ## Backup & recovery
 
-These are approved future surfaces, not current implementation. More will gain
-**Backup & recovery** with four independent sections:
+More now includes the Stage 2 **Backup & recovery** surface for the Android
+backup package. It supports Not prepared, Preparing, Ready, Update pending,
+Unavailable, and Restored package detected states. Setup explains that Android
+backup is supplementary, that the recovery passphrase cannot be recovered,
+and that local package readiness is not an upload claim. Passphrase and
+confirmation fields are masked, non-saveable, and cleared after submission.
+Ready shows local production time, generation, current generation, and bytes.
+A restored package stays inert and exposes no recovery or activation action.
+
+The later programme retains four independent concerns:
 
 - **Encrypted app backup** — enabled state, last verified time, pending
   generation, failure category, retry, and **Back up now**.
@@ -176,12 +184,14 @@ These are approved future surfaces, not current implementation. More will gain
 
 Backup, attachment, and active-device states use text and iconography and
 remain distinct. Local task editing stays available when backup or attachment
-transport is offline or failing. Android Auto Backup remains disabled until
-Stage 2 supplies and verifies its strict portable-package allow-list.
+transport is offline or failing. Android Auto Backup and device transfer now
+use the verified exact-file allow-list; the interface still cannot infer
+platform upload or restore success.
 
-Home may show backup attention only after backup is configured and blocked or
-meaningfully overdue. The threshold is future injected product policy, not a
-format or current UI claim.
+No backup indicator is present on Home. A future app-managed backup may show
+attention only after it is configured and blocked or meaningfully overdue.
+The threshold remains future injected product policy, not a format or current
+UI claim.
 
 ## Language and locale
 

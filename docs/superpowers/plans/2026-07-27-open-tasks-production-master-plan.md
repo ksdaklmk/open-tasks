@@ -12,8 +12,10 @@ encrypted workspace.
 **Authority:** The approved decision record is
 [Local Authority, Cloud Attachments, and Backup Direction Design](../specs/2026-07-28-local-authority-cloud-attachments-backup-design.md).
 Encrypted Room is the sole live structured-data authority. Backup, Android
-Auto Backup, Drive transport, recovery UI, and attachments remain incomplete
-and are not user-visible or operational at this checkpoint.
+Auto Backup, Drive transport, recovery UI, and attachments remain governed by
+the dependency-ordered programme. Stage 2 local backup and its supplementary
+Android package are now implemented; provider backup, recovery activation, and
+attachments remain later-stage work.
 
 **Tech Stack:** Kotlin 2.3.21, Android Gradle Plugin 9.3.1, Java 17 on JDK 21,
 Compose BOM 2026.06.00, Navigation 3, Material 3 Adaptive, Hilt, coroutines,
@@ -27,17 +29,17 @@ Macrobenchmark, JUnit 4, Compose UI test v2, and GitHub Actions.
 - Stage 1 is complete and verified. Its implemented internal foundation
   includes the authenticated provider-independent object codec in `core:data`,
   with canonical framing in `core:sync` and generic AEAD in `core:crypto`.
-- Stage 2 Tasks 1–5 are complete through `2a72670`. Room v6 now has an atomic
-  local generation journal, strict snapshot/segment payloads, consistent
-  capture, verified no-backup current/previous/segment storage, and a
-  constructed but not yet application-triggered local backup coordinator.
-- Stage 2 is paused before Task 6. Recovery-envelope preparation, the portable
-  package, application runtime/DI activation, Android allow-list, UI, and exit
-  gates remain Tasks 6–10.
+- Stage 2 is implemented and verified through Task 10. Room v6 has an atomic
+  local generation journal, strict snapshot/segment payloads, verified
+  no-backup current/previous/segment storage, runtime coordination, a verified
+  recovery envelope, and one atomically published portable package.
 - Existing v5 rows and `sync_operations` data were preserved by the additive
   migration; the legacy table is now read-only.
-- Android Auto Backup remains disabled until the remaining Stage 2 allow-list
-  and acceptance gates pass.
+- Android Auto Backup and device transfer include only the exact portable
+  package. Local readiness makes no upload claim; encrypted Google-account
+  transport upload/restore remains external qualification.
+- The only next programme action is focused Stage 3 brainstorming and design.
+  No Stage 3 provider or recovery source work is authorised from this plan.
 - GitHub dependency maintenance remains paused.
 
 ## Global constraints
@@ -114,12 +116,13 @@ actions.
 ### Stage 2 — Local backup and Android Auto Backup
 
 - `BackupJournal`, Room v6 migration, mutation journalling, strict payloads,
-  consistent capture, and the verified local `BackupCoordinator` are complete.
-- Add `PortableBackupPublisher` for one atomically replaced package no larger
-  than 24 MiB.
-- Enable Android Auto Backup only after extraction/include rules prove that
-  Room, WAL, SHM, preferences, keys, credentials, cache, and attachment bytes
-  remain excluded.
+  consistent capture, runtime activation, and the verified local
+  `BackupCoordinator` are complete.
+- `PortableBackupPublisher` atomically replaces one authenticated package no
+  larger than 24 MiB and preserves restored packages as inert input.
+- Android Auto Backup and device-transfer extraction rules include only that
+  exact package; Room, WAL/SHM, preferences, keys, credentials, cache, local
+  staging, and attachment bytes remain excluded.
 
 ### Stage 3 — App-managed backup and recovery takeover
 
@@ -173,12 +176,13 @@ actions.
   `core:crypto` AEAD in the implemented `AuthenticatedCloudObjectCodec`.
   It now also owns backup-journal persistence, strict snapshot/segment payloads,
   consistent capture, verified local recovery objects, and the local
-  `BackupCoordinator`. Later tasks add provider transports, portable-package
-  files, attachment cache, and recovery staging.
-- `app` owns Hilt, ViewModels, `BackupCoordinator` lifecycle activation,
-  `PortableBackupPublisher`, `AttachmentBlobCoordinator`,
-  `RecoveryCoordinator`, activity-result APIs, permissions, authorisation,
-  intents, navigation binding, and process-lifecycle locking.
+  `BackupCoordinator`. Later stages add provider transports, attachment cache,
+  and recovery staging.
+- `app` owns Hilt, ViewModels, the implemented `BackupCoordinator` lifecycle,
+  `PortableBackupPublisher`, recovery-envelope orchestration, restored-package
+  intake, and status UI binding. It will later own
+  `AttachmentBlobCoordinator`, `RecoveryCoordinator`, activity-result APIs,
+  authorisation, and provider process-lifecycle locking.
 
 ## Shared verification gates
 

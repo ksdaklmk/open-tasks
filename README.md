@@ -78,11 +78,15 @@ workspace slice:
   recovery objects under `noBackupFilesDir`.
 - A single-flight local backup coordinator that performs authenticated
   readback and source comparison before checkpointing, retains recovery bases,
-  and leaves local editing/journal rows intact on failure. Its application
-  trigger remains intentionally deferred.
+  and leaves local editing/journal rows intact on failure. Application
+  lifecycle wiring now coalesces journal changes and resumes pending work.
+- A verified recovery-passphrase envelope and atomically replaced portable
+  package no larger than 24 MiB. More reports only local package facts and
+  preserves Android-restored packages as inert Stage 3 recovery input.
 - Hilt application wiring, Navigation 3, Material 3 Adaptive, edge-to-edge,
-  predictive Back, Android backup disabled, and notification permission
-  discipline.
+  predictive Back, notification permission discipline, and exact Android
+  backup/device-transfer rules that include only
+  `android_backup/open_tasks_portable_v1.otb`.
 - Process restoration for the top-level route, selected task/project, task
   filters, list/editor scroll, quick-add/search and editor drafts. Active
   timers resume from their encrypted Room time entry and original start time.
@@ -95,12 +99,14 @@ implementation history, and dependency-ordered backlog. Train 0 committed the
 verified P1/P2 baseline, and Train 1 Tasks 1.1–1.5 remain accepted historical
 evidence.
 
-The local journal, payload, recovery-object store, and coordinator foundation
-are implemented, but backup is not yet a shipped feature: the coordinator is
-not activated by application lifecycle wiring, no portable package or
-prepared/persisted recovery envelope exists, and no recovery UI is present.
-Google authorisation and Drive transport are not connected, Android Auto Backup
-remains disabled, and attachments are not operational.
+Stage 2 local backup and the supplementary Android package are implemented.
+Room remains the sole live authority; local generations produce authenticated,
+verified recovery objects and one prepared portable package. Android Auto
+Backup and device transfer may copy only that exact encrypted file. Package
+readiness does not prove an Android upload, and a real encrypted Google
+transport upload/restore remains external qualification. Google authorisation,
+Drive transport, restore activation, writer takeover, remote merge, and
+attachments are not operational.
 
 The runnable app is deliberately a foundation slice, not the completed
 six-stage release. Encrypted task CRUD and core-field editing, project
@@ -111,9 +117,9 @@ project workflows persist through the encrypted Room store. Transient route,
 selection, filter, scroll and draft context is also restored without
 overwriting unsaved editor text on the first repository emission. Stage 2 has
 copied the preserved legacy outbox into local backup-journal format without
-deleting the original rows. Portable/Android backup, Drive transport, recovery,
-attachments, widgets, import/export, the remaining More subfeatures, and Play
-release operations are future milestones.
+deleting the original rows. Drive transport, recovery activation, attachments,
+widgets, import/export, the remaining More subfeatures, and Play release
+operations are future milestones.
 
 ## Build
 
