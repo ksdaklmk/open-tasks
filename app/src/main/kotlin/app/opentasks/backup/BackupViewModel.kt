@@ -16,6 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
+data class BackupPresentation(
+    val status: AndroidBackupStatus,
+    val canReprepareInitialPackage: Boolean = false,
+)
+
 @HiltViewModel
 class BackupViewModel internal constructor(
     private val statusSource: AndroidBackupStatusSource,
@@ -34,9 +39,11 @@ class BackupViewModel internal constructor(
     )
 
     private val operationLock = Any()
-    private val presentedStatus = MutableStateFlow(statusSource.status.value)
+    private val presented = MutableStateFlow(
+        BackupPresentation(statusSource.status.value),
+    )
     private var operation: PreparationOperation? = null
-    val status: StateFlow<AndroidBackupStatus> = presentedStatus.asStateFlow()
+    val presentation: StateFlow<BackupPresentation> = presented.asStateFlow()
 
     init {
         viewModelScope.launch(Dispatchers.Default) {
@@ -54,14 +61,14 @@ class BackupViewModel internal constructor(
             val activeOperation = operation
             if (
                 (activeOperation != null && activeOperation.result == null) ||
-                presentedStatus.value is AndroidBackupStatus.Preparing
+                presented.value.status is AndroidBackupStatus.Preparing
             ) {
                 false
             } else {
                 operation = PreparationOperation(
                     sourceAtStart = statusSource.status.value,
                 )
-                presentedStatus.value = AndroidBackupStatus.Preparing
+                presented.value = BackupPresentation(AndroidBackupStatus.Preparing)
                 true
             }
         }
@@ -99,7 +106,7 @@ class BackupViewModel internal constructor(
         synchronized(operationLock) {
             val activeOperation = operation
             if (activeOperation == null) {
-                presentedStatus.value = sourceStatus
+                presented.value = BackupPresentation(sourceStatus)
             } else if (
                 activeOperation.result != null &&
                 (
@@ -108,7 +115,7 @@ class BackupViewModel internal constructor(
                     )
             ) {
                 operation = null
-                presentedStatus.value = sourceStatus
+                presented.value = BackupPresentation(sourceStatus)
             }
         }
     }
@@ -119,10 +126,16 @@ class BackupViewModel internal constructor(
             val sourceStatus = statusSource.status.value
             if (sourceStatus == result || sourceStatus != activeOperation.sourceAtStart) {
                 operation = null
-                presentedStatus.value = sourceStatus
+                presented.value = BackupPresentation(sourceStatus)
             } else {
                 operation = activeOperation.copy(result = result)
-                presentedStatus.value = result
+                presented.value = BackupPresentation(
+                    status = result,
+                    canReprepareInitialPackage =
+                        activeOperation.sourceAtStart is AndroidBackupStatus.NotPrepared &&
+                            sourceStatus is AndroidBackupStatus.NotPrepared &&
+                            result is AndroidBackupStatus.Unavailable,
+                )
             }
         }
     }
@@ -130,7 +143,7 @@ class BackupViewModel internal constructor(
     private fun clearOperation() {
         synchronized(operationLock) {
             operation = null
-            presentedStatus.value = statusSource.status.value
+            presented.value = BackupPresentation(statusSource.status.value)
         }
     }
 

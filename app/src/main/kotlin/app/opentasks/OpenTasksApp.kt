@@ -174,7 +174,7 @@ fun OpenTasksApp(
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
-        val backupStatus by backupViewModel.status.collectAsStateWithLifecycle()
+        val backupPresentation by backupViewModel.presentation.collectAsStateWithLifecycle()
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
@@ -740,7 +740,9 @@ fun OpenTasksApp(
                                             DomainCommand.DeleteTemplate(templateId),
                                         )
                                     },
-                                    backupStatus = backupStatus,
+                                    backupStatus = backupPresentation.status,
+                                    canReprepareInitialBackup =
+                                        backupPresentation.canReprepareInitialPackage,
                                     validateBackupPassphrase =
                                         RecoveryPassphrasePolicy::validate,
                                     onPrepareBackup = backupViewModel::prepare,

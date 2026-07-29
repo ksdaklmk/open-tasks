@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -30,11 +31,11 @@ class BackupViewModelTest {
             retryPackage = {},
         )
 
-        assertEquals(source.status.value, viewModel.status.value)
+        assertEquals(source.status.value, viewModel.presentation.value.status)
         source.status.value = AndroidBackupStatus.Ready(PACKAGE_INFO)
         assertTrue(
             waitUntil {
-                viewModel.status.value == AndroidBackupStatus.Ready(PACKAGE_INFO)
+                viewModel.presentation.value.status == AndroidBackupStatus.Ready(PACKAGE_INFO)
             },
         )
     }
@@ -55,11 +56,11 @@ class BackupViewModelTest {
 
         viewModel.prepare("correct horse")
 
-        assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
+        assertEquals(AndroidBackupStatus.Preparing, viewModel.presentation.value.status)
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         viewModel.prepare("another valid passphrase")
         assertEquals(1, calls.get())
-        assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
+        assertEquals(AndroidBackupStatus.Preparing, viewModel.presentation.value.status)
         release.countDown()
     }
 
@@ -73,7 +74,48 @@ class BackupViewModelTest {
 
         viewModel.prepare("correct horse")
 
-        assertTrue(waitUntil { viewModel.status.value == unavailable })
+        assertTrue(waitUntil { viewModel.presentation.value.status == unavailable })
+    }
+
+    @Test
+    fun everyReturnedInitialFailureExposesTransientReprepareProvenance() {
+        enumValues<BackupUnavailableReason>().forEach { reason ->
+            val unavailable = AndroidBackupStatus.Unavailable(reason)
+            val viewModel = viewModel(
+                preparePackage = { unavailable },
+            )
+
+            viewModel.prepare("correct horse")
+
+            assertTrue(
+                waitUntil {
+                    viewModel.presentation.value == BackupPresentation(
+                        status = unavailable,
+                        canReprepareInitialPackage = true,
+                    )
+                },
+            )
+        }
+    }
+
+    @Test
+    fun durableUnavailableSourceNeverExposesTransientReprepareProvenance() {
+        enumValues<BackupUnavailableReason>().forEach { reason ->
+            val unavailable = AndroidBackupStatus.Unavailable(reason)
+            val viewModel = BackupViewModel(
+                statusSource = FakeStatusSource(unavailable),
+                preparePackage = { AndroidBackupStatus.NotPrepared },
+                retryPackage = {},
+            )
+
+            assertEquals(
+                BackupPresentation(
+                    status = unavailable,
+                    canReprepareInitialPackage = false,
+                ),
+                viewModel.presentation.value,
+            )
+        }
     }
 
     @Test
@@ -87,13 +129,13 @@ class BackupViewModelTest {
         )
 
         viewModel.prepare("correct horse")
-        assertTrue(waitUntil { viewModel.status.value == ready })
+        assertTrue(waitUntil { viewModel.presentation.value.status == ready })
 
         source.status.value = ready
-        assertTrue(waitUntil { viewModel.status.value == ready })
+        assertTrue(waitUntil { viewModel.presentation.value.status == ready })
         val pending = AndroidBackupStatus.UpdatePending(UPDATE_PACKAGE_INFO)
         source.status.value = pending
-        assertTrue(waitUntil { viewModel.status.value == pending })
+        assertTrue(waitUntil { viewModel.presentation.value.status == pending })
     }
 
     @Test
@@ -172,7 +214,41 @@ class BackupViewModelTest {
 
         assertTrue(called.await(5, TimeUnit.SECONDS))
         assertTrue(waitUntil { supplied.get().all { it == '\u0000' } })
-        assertEquals(AndroidBackupStatus.NotPrepared, viewModel.status.value)
+        assertEquals(
+            AndroidBackupStatus.NotPrepared,
+            viewModel.presentation.value.status,
+        )
+    }
+
+    @Test
+    fun cancellationClearsMutableInputAndReturnsPresentationToLatestSource() {
+        val supplied = AtomicReference<CharArray>()
+        val source = FakeStatusSource(AndroidBackupStatus.NotPrepared)
+        val latest = AndroidBackupStatus.Ready(PACKAGE_INFO)
+        val called = CountDownLatch(1)
+        val viewModel = BackupViewModel(
+            statusSource = source,
+            preparePackage = { passphrase ->
+                supplied.set(passphrase)
+                source.status.value = latest
+                called.countDown()
+                throw CancellationException("cancel test publication")
+            },
+            retryPackage = {},
+        )
+
+        viewModel.prepare("correct horse")
+
+        assertTrue(called.await(5, TimeUnit.SECONDS))
+        assertTrue(waitUntil { supplied.get().all { it == '\u0000' } })
+        assertTrue(
+            waitUntil {
+                viewModel.presentation.value == BackupPresentation(
+                    status = latest,
+                    canReprepareInitialPackage = false,
+                )
+            },
+        )
     }
 
     @Test
@@ -233,12 +309,52 @@ class BackupViewModelTest {
         )
 
         viewModel.prepare("correct horse")
-        assertEquals(AndroidBackupStatus.Preparing, viewModel.status.value)
-        assertTrue(waitUntil { viewModel.status.value == unavailable })
+        assertEquals(AndroidBackupStatus.Preparing, viewModel.presentation.value.status)
+        assertTrue(waitUntil { viewModel.presentation.value.status == unavailable })
 
         viewModel.prepare("another valid passphrase")
 
         assertTrue(waitUntil { calls.get() == 2 })
+    }
+
+    @Test
+    fun transientFailureResubmitPublishesPreparingAndRemainsSingleFlight() {
+        val calls = AtomicInteger()
+        val enteredRetry = CountDownLatch(1)
+        val releaseRetry = CountDownLatch(1)
+        val unavailable =
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.PACKAGE_TOO_LARGE)
+        val viewModel = viewModel(
+            preparePackage = {
+                if (calls.incrementAndGet() == 1) {
+                    unavailable
+                } else {
+                    enteredRetry.countDown()
+                    releaseRetry.await(5, TimeUnit.SECONDS)
+                    AndroidBackupStatus.NotPrepared
+                }
+            },
+        )
+        viewModel.prepare("correct horse")
+        assertTrue(
+            waitUntil {
+                viewModel.presentation.value.canReprepareInitialPackage
+            },
+        )
+
+        viewModel.prepare("another valid passphrase")
+
+        assertEquals(
+            BackupPresentation(
+                status = AndroidBackupStatus.Preparing,
+                canReprepareInitialPackage = false,
+            ),
+            viewModel.presentation.value,
+        )
+        assertTrue(enteredRetry.await(5, TimeUnit.SECONDS))
+        viewModel.prepare("third valid passphrase")
+        assertEquals(2, calls.get())
+        releaseRetry.countDown()
     }
 
     @Test
@@ -257,7 +373,7 @@ class BackupViewModelTest {
         assertEquals(1, retries.get())
         assertEquals(
             AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
-            viewModel.status.value,
+            viewModel.presentation.value.status,
         )
     }
 

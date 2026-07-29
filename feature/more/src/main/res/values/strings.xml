@@ -105,6 +105,7 @@
     <string name="backup_unavailable_encoding">The package could not be encoded or encrypted.</string>
     <string name="backup_unavailable_verification">The package could not be verified.</string>
     <string name="backup_unavailable_file">The local package file is unavailable.</string>
+    <string name="backup_reprepare_action">Prepare again</string>
     <string name="backup_retry_action">Retry</string>
     <string name="backup_restored_title">Restored package detected</string>
     <string name="backup_restored_preserved">An Android backup package was preserved in the recovery inbox. Recovery activation is not available yet.</string>

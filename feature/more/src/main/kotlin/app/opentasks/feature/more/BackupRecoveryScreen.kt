@@ -70,6 +70,7 @@ import java.util.Locale
 @Composable
 fun BackupRecoveryScreen(
     status: AndroidBackupStatus,
+    canReprepareInitialPackage: Boolean = false,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -132,6 +133,7 @@ fun BackupRecoveryScreen(
                 Spacer(Modifier.height(12.dp))
                 BackupStatusContent(
                     status = status,
+                    canReprepareInitialPackage = canReprepareInitialPackage,
                     onPrepare = { showPassphraseSheet = true },
                     onRetry = onRetry,
                 )
@@ -175,6 +177,7 @@ fun BackupRecoveryScreen(
 @Composable
 private fun BackupStatusContent(
     status: AndroidBackupStatus,
+    canReprepareInitialPackage: Boolean,
     onPrepare: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -227,7 +230,18 @@ private fun BackupStatusContent(
                 icon = { StatusIcon(Icons.Rounded.ErrorOutline) },
                 title = stringResource(R.string.backup_unavailable_title),
                 body = unavailableReason(status.reason),
-                action = if (canRetry) {
+                action = if (canReprepareInitialPackage) {
+                    {
+                        TextButton(
+                            onClick = onPrepare,
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("backup-reprepare"),
+                        ) {
+                            Text(stringResource(R.string.backup_reprepare_action))
+                        }
+                    }
+                } else if (canRetry) {
                     {
                         TextButton(
                             onClick = onRetry,

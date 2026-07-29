@@ -103,6 +103,7 @@ fun MoreScreen(
     onUseTemplate: (TemplateId, String, LocalDate) -> Unit = { _, _, _ -> },
     onDeleteTemplate: (TemplateId) -> Unit = {},
     backupStatus: AndroidBackupStatus = AndroidBackupStatus.NotPrepared,
+    canReprepareInitialBackup: Boolean = false,
     validateBackupPassphrase: (
         passphrase: String,
         confirmation: String,
@@ -183,6 +184,7 @@ fun MoreScreen(
             BackHandler { destination = MoreDestination.OVERVIEW }
             BackupRecoveryScreen(
                 status = backupStatus,
+                canReprepareInitialPackage = canReprepareInitialBackup,
                 validatePassphrase = validateBackupPassphrase,
                 onPrepare = onPrepareBackup,
                 onRetry = onRetryBackup,

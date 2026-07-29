@@ -78,6 +78,38 @@ class BackupRecoveryScreenInstrumentedTest {
     }
 
     @Test
+    fun moreForwardsTransientInitialFailureToSecureReprepareAction() {
+        val runtimeRetries = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = emptyList(),
+                    backupStatus = AndroidBackupStatus.Unavailable(
+                        BackupUnavailableReason.FILE_IO,
+                    ),
+                    canReprepareInitialBackup = true,
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                    onRetryBackup = { runtimeRetries.incrementAndGet() },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("open-backup-recovery").performClick()
+        composeRule.onNodeWithTag("backup-retry").assertDoesNotExist()
+        composeRule.onNodeWithTag("backup-reprepare")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("backup-passphrase")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        composeRule.onNodeWithTag("backup-confirmation")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        assertEquals(0, runtimeRetries.get())
+    }
+
+    @Test
     fun notPreparedExplainsSupplementaryPackageAndOpensSecurePreparation() {
         composeRule.setContent {
             OpenTasksTheme {
@@ -190,12 +222,126 @@ class BackupRecoveryScreenInstrumentedTest {
 
             composeRule.onNodeWithText("Package unavailable").assertIsDisplayed()
             composeRule.onNodeWithText(expected.first).assertIsDisplayed()
+            composeRule.onNodeWithTag("backup-reprepare").assertDoesNotExist()
             if (expected.second) {
                 composeRule.onNodeWithTag("backup-retry").assertIsDisplayed()
             } else {
                 composeRule.onNodeWithTag("backup-retry").assertDoesNotExist()
             }
         }
+    }
+
+    @Test
+    fun everyTransientInitialFailureOffersSecureReprepareInsteadOfRuntimeRetry() {
+        val reason = mutableStateOf(BackupUnavailableReason.PACKAGE_TOO_LARGE)
+        val runtimeRetries = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestScreen(
+                    status = AndroidBackupStatus.Unavailable(reason.value),
+                    canReprepareInitialPackage = true,
+                    onRetry = { runtimeRetries.incrementAndGet() },
+                )
+            }
+        }
+        val emptyInput = SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText,
+            AnnotatedString(""),
+        )
+
+        enumValues<BackupUnavailableReason>().forEach { caseReason ->
+            composeRule.runOnIdle {
+                reason.value = caseReason
+            }
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithTag("backup-retry").assertDoesNotExist()
+            composeRule.onNodeWithTag("backup-reprepare")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
+            composeRule.onNodeWithTag("backup-passphrase")
+                .assert(emptyInput)
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            composeRule.onNodeWithTag("backup-confirmation")
+                .assert(emptyInput)
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            composeRule.onNodeWithTag("backup-cancel")
+                .performScrollTo()
+                .performClick()
+        }
+
+        assertEquals(0, runtimeRetries.get())
+    }
+
+    @Test
+    fun transientReprepareSheetIsNotRestoredAndReopensEmpty() {
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            OpenTasksTheme {
+                TestScreen(
+                    status = AndroidBackupStatus.Unavailable(
+                        BackupUnavailableReason.VERIFICATION_FAILED,
+                    ),
+                    canReprepareInitialPackage = true,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("backup-reprepare").performScrollTo().performClick()
+        composeRule.onNodeWithTag("backup-passphrase").performTextInput("private phrase")
+        composeRule.onNodeWithTag("backup-confirmation").performTextInput("private phrase")
+
+        restorationTester.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithTag("backup-passphrase").assertDoesNotExist()
+        composeRule.onNodeWithTag("backup-reprepare").performScrollTo().performClick()
+
+        val emptyInput = SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText,
+            AnnotatedString(""),
+        )
+        composeRule.onNodeWithTag("backup-passphrase")
+            .assert(emptyInput)
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        composeRule.onNodeWithTag("backup-confirmation")
+            .assert(emptyInput)
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+    }
+
+    @Test
+    fun transientReprepareSubmissionMovesUiToPreparingWithoutRuntimeRetry() {
+        val status = mutableStateOf<AndroidBackupStatus>(
+            AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
+        )
+        val canReprepare = mutableStateOf(true)
+        val prepareCalls = AtomicInteger()
+        val runtimeRetries = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestScreen(
+                    status = status.value,
+                    canReprepareInitialPackage = canReprepare.value,
+                    onPrepare = {
+                        prepareCalls.incrementAndGet()
+                        canReprepare.value = false
+                        status.value = AndroidBackupStatus.Preparing
+                    },
+                    onRetry = { runtimeRetries.incrementAndGet() },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("backup-reprepare").performScrollTo().performClick()
+        composeRule.onNodeWithTag("backup-passphrase").performTextInput("correct horse")
+        composeRule.onNodeWithTag("backup-confirmation").performTextInput("correct horse")
+        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
+
+        composeRule.onNodeWithText("Preparing package").assertIsDisplayed()
+        composeRule.onNodeWithTag("backup-reprepare").assertDoesNotExist()
+        composeRule.onNodeWithTag("backup-retry").assertDoesNotExist()
+        composeRule.onNodeWithTag("backup-passphrase").assertDoesNotExist()
+        assertEquals(1, prepareCalls.get())
+        assertEquals(0, runtimeRetries.get())
     }
 
     @Test
@@ -488,6 +634,7 @@ class BackupRecoveryScreenInstrumentedTest {
     @androidx.compose.runtime.Composable
     private fun TestScreen(
         status: AndroidBackupStatus,
+        canReprepareInitialPackage: Boolean = false,
         validatePassphrase: (String, String) -> RecoveryPassphraseValidation = { _, _ ->
             RecoveryPassphraseValidation.Valid
         },
@@ -498,6 +645,7 @@ class BackupRecoveryScreenInstrumentedTest {
     ) {
         BackupRecoveryScreen(
             status = status,
+            canReprepareInitialPackage = canReprepareInitialPackage,
             validatePassphrase = validatePassphrase,
             onPrepare = onPrepare,
             onRetry = onRetry,
