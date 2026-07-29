@@ -145,6 +145,72 @@ class RoomBackupCaptureSourceInstrumentedTest {
         }
     }
 
+    @Test
+    fun dependencyWhoseEndpointsBelongToDifferentVaultsIsRejected() {
+        runBlocking {
+            seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+            seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+        }
+        insertDependency(
+            taskId = "task-alpha",
+            dependsOnTaskId = "prerequisite-beta",
+            scope = "cross-vault",
+        )
+
+        listOf("vault-alpha", "vault-beta").forEach { vaultId ->
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    RoomBackupCaptureSource(database, VaultId(vaultId)).capture()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun taskTagWhoseEndpointsBelongToDifferentVaultsIsRejected() {
+        runBlocking {
+            seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+            seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+        }
+        insertTaskTag(
+            taskId = "task-alpha",
+            tagId = "tag-beta",
+            scope = "cross-vault",
+        )
+
+        listOf("vault-alpha", "vault-beta").forEach { vaultId ->
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    RoomBackupCaptureSource(database, VaultId(vaultId)).capture()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun crossVaultRelationsOutsideRequestedVaultAreIgnored() = runBlocking {
+        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+        seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+        seedVaultGraph(scope = "gamma", vaultId = "vault-gamma", generation = 13)
+        insertDependency(
+            taskId = "task-alpha",
+            dependsOnTaskId = "prerequisite-beta",
+            scope = "cross-vault",
+        )
+        insertTaskTag(
+            taskId = "task-alpha",
+            tagId = "tag-beta",
+            scope = "cross-vault",
+        )
+
+        val capture = RoomBackupCaptureSource(
+            database = database,
+            vaultId = VaultId("vault-gamma"),
+        ).capture()
+
+        assertEquals(expectedIdentities("gamma"), capture.identitySets())
+    }
+
     private suspend fun seedVaultGraph(
         scope: String,
         vaultId: String,
@@ -272,29 +338,14 @@ class RoomBackupCaptureSourceInstrumentedTest {
             "completed" to 0,
             "rank" to "a0",
         )
-        insert(
-            "task_dependencies",
-            "taskId" to taskId,
-            "dependsOnTaskId" to prerequisiteId,
-            "revisionWallMillis" to 1L,
-            "revisionLogical" to 0,
-            "revisionDeviceId" to "device-$scope",
-        )
+        insertDependency(taskId, prerequisiteId, scope)
         insert(
             "tags",
             "id" to "tag-$scope",
             "workspaceId" to workspaceId,
             "name" to "Tag $scope",
         )
-        insert(
-            "task_tags",
-            "taskId" to taskId,
-            "tagId" to "tag-$scope",
-            "present" to 1,
-            "revisionWallMillis" to 1L,
-            "revisionLogical" to 0,
-            "revisionDeviceId" to "device-$scope",
-        )
+        insertTaskTag(taskId, "tag-$scope", scope)
         insert(
             "reminders",
             "id" to "reminder:$taskId",
@@ -421,6 +472,37 @@ class RoomBackupCaptureSourceInstrumentedTest {
                 deletedIdentity = listOf(id),
             ),
         )
+
+    private fun insertDependency(
+        taskId: String,
+        dependsOnTaskId: String,
+        scope: String,
+    ) {
+        insert(
+            "task_dependencies",
+            "taskId" to taskId,
+            "dependsOnTaskId" to dependsOnTaskId,
+            "revisionWallMillis" to 1L,
+            "revisionLogical" to 0,
+            "revisionDeviceId" to "device-$scope",
+        )
+    }
+
+    private fun insertTaskTag(
+        taskId: String,
+        tagId: String,
+        scope: String,
+    ) {
+        insert(
+            "task_tags",
+            "taskId" to taskId,
+            "tagId" to tagId,
+            "present" to 1,
+            "revisionWallMillis" to 1L,
+            "revisionLogical" to 0,
+            "revisionDeviceId" to "device-$scope",
+        )
+    }
 
     private fun insertTask(
         id: String,

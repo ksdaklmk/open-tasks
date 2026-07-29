@@ -245,6 +245,23 @@ interface BackupCaptureDao {
 
     @Query(
         """
+        SELECT COUNT(*) FROM task_dependencies AS dependency
+        INNER JOIN tasks AS task ON task.id = dependency.taskId
+        INNER JOIN workspaces AS taskWorkspace ON taskWorkspace.id = task.workspaceId
+        INNER JOIN tasks AS prerequisite ON prerequisite.id = dependency.dependsOnTaskId
+        INNER JOIN workspaces AS prerequisiteWorkspace
+            ON prerequisiteWorkspace.id = prerequisite.workspaceId
+        WHERE taskWorkspace.vaultId != prerequisiteWorkspace.vaultId
+            AND (
+                taskWorkspace.vaultId = :vaultId
+                OR prerequisiteWorkspace.vaultId = :vaultId
+            )
+        """,
+    )
+    suspend fun crossVaultTaskDependencyCount(vaultId: String): Int
+
+    @Query(
+        """
         SELECT tag.* FROM tags AS tag
         INNER JOIN workspaces AS workspace ON workspace.id = tag.workspaceId
         WHERE workspace.vaultId = :vaultId
@@ -265,6 +282,22 @@ interface BackupCaptureDao {
         """,
     )
     suspend fun taskTags(vaultId: String): List<TaskTagEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM task_tags AS relation
+        INNER JOIN tasks AS task ON task.id = relation.taskId
+        INNER JOIN workspaces AS taskWorkspace ON taskWorkspace.id = task.workspaceId
+        INNER JOIN tags AS tag ON tag.id = relation.tagId
+        INNER JOIN workspaces AS tagWorkspace ON tagWorkspace.id = tag.workspaceId
+        WHERE taskWorkspace.vaultId != tagWorkspace.vaultId
+            AND (
+                taskWorkspace.vaultId = :vaultId
+                OR tagWorkspace.vaultId = :vaultId
+            )
+        """,
+    )
+    suspend fun crossVaultTaskTagCount(vaultId: String): Int
 
     @Query(
         """
@@ -448,6 +481,12 @@ interface BackupCaptureDao {
 
 internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRecordV1> =
     buildList {
+        require(crossVaultTaskDependencyCount(vaultId) == 0) {
+            "Task dependency crosses vaults"
+        }
+        require(crossVaultTaskTagCount(vaultId) == 0) {
+            "Task tag crosses vaults"
+        }
         require(unassignableActivityEntryCount() == 0) {
             "Activity entry cannot be assigned to a vault"
         }
