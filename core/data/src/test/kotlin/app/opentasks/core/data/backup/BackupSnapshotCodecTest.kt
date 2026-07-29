@@ -499,6 +499,24 @@ class BackupSnapshotCodecTest {
         }
         assertArrayEquals(ByteArray(invalidOwned.size), invalidOwned)
     }
+
+    @Test
+    fun oversizedCallerIsRejectedBeforeOwnershipCopyAndRemainsUnchanged() {
+        val source = ByteArray(BackupSnapshotCodec.MAX_PLAINTEXT_BYTES + 1) {
+            0x5a.toByte()
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupSnapshotCodec.decodeCallerPreserving(source) {
+                throw AssertionError("Oversized snapshot requested an ownership copy")
+            }
+        }
+        assertTrue(source.all { it == 0x5a.toByte() })
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupSnapshotCodec.decode(source)
+        }
+        assertTrue(source.all { it == 0x5a.toByte() })
+    }
 }
 
 internal object BackupPayloadTestFixtures {

@@ -93,7 +93,17 @@ interface BackupSnapshotCodec {
         }
 
         override fun decode(source: ByteArray): BackupSnapshotPayloadV1 =
-            decodeOwned(source.copyOf())
+            decodeCallerPreserving(source) { it.copyOf() }
+
+        internal fun decodeCallerPreserving(
+            source: ByteArray,
+            ownershipCopy: (ByteArray) -> ByteArray,
+        ): BackupSnapshotPayloadV1 {
+            require(source.size <= MAX_PLAINTEXT_BYTES) {
+                "Backup snapshot exceeds $MAX_PLAINTEXT_BYTES bytes"
+            }
+            return decodeOwned(ownershipCopy(source))
+        }
 
         override fun decodeOwned(source: ByteArray): BackupSnapshotPayloadV1 {
             try {
@@ -137,6 +147,9 @@ interface BackupOperationSegmentCodec {
             entries: List<BackupJournalEntity>,
         ): BackupOperationSegmentPayloadV1 {
             require(entries.isNotEmpty()) { "Backup segment requires entries" }
+            require(entries.size <= CloudBounds.MAX_OPERATIONS_PER_SEGMENT) {
+                "Backup segment exceeds ${CloudBounds.MAX_OPERATIONS_PER_SEGMENT} entries"
+            }
             val mapped = entries.map { entity ->
                 require(entity.vaultId == vaultId.value) {
                     "Journal entry belongs to another vault"
@@ -184,7 +197,17 @@ interface BackupOperationSegmentCodec {
         }
 
         override fun decode(source: ByteArray): BackupOperationSegmentPayloadV1 =
-            decodeOwned(source.copyOf())
+            decodeCallerPreserving(source) { it.copyOf() }
+
+        internal fun decodeCallerPreserving(
+            source: ByteArray,
+            ownershipCopy: (ByteArray) -> ByteArray,
+        ): BackupOperationSegmentPayloadV1 {
+            require(source.size <= MAX_PLAINTEXT_BYTES) {
+                "Backup operation segment exceeds $MAX_PLAINTEXT_BYTES bytes"
+            }
+            return decodeOwned(ownershipCopy(source))
+        }
 
         override fun decodeOwned(source: ByteArray): BackupOperationSegmentPayloadV1 {
             try {
@@ -316,18 +339,21 @@ private fun validateWorkflows(
     projectIds: Set<String>,
     statuses: Collection<BackupRecordV1>,
 ) {
-    val scopes = projectIds.map<String, String?> { it } + listOf(null)
     val grouped = statuses.groupBy { it.value("projectId") }
     require(grouped.keys.all { it == null || it in projectIds }) {
         "Workflow status has an invalid scope"
     }
-    scopes.forEach { scope ->
-        val workflow = grouped[scope].orEmpty()
+    grouped.values.forEach { workflow ->
         require(workflow.map { it.requiredValue("rank") }.distinct().size == workflow.size) {
             "Workflow ranks must be unique"
         }
         val active = workflow.filter { it.value("archivedAtEpochMillis") == null }
         require(active.size <= 20) { "Workflow exceeds 20 active statuses" }
+    }
+    projectIds.forEach { projectId ->
+        val active = grouped[projectId]
+            .orEmpty()
+            .filter { it.value("archivedAtEpochMillis") == null }
         SemanticStatus.entries.forEach { semantic ->
             require(active.any { it.requiredValue("semanticStatus") == semantic.name }) {
                 "Workflow is missing active ${semantic.name} status"

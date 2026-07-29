@@ -155,75 +155,323 @@ interface BackupCaptureDao {
     @Query("SELECT * FROM workspaces WHERE vaultId = :vaultId ORDER BY id")
     suspend fun workspaces(vaultId: String): List<WorkspaceEntity>
 
-    @Query("SELECT * FROM members ORDER BY id")
-    suspend fun members(): List<MemberEntity>
+    @Query(
+        """
+        SELECT member.* FROM members AS member
+        WHERE EXISTS (
+            SELECT 1 FROM workspaces AS workspace
+            WHERE workspace.ownerId = member.id AND workspace.vaultId = :vaultId
+        )
+        ORDER BY member.id
+        """,
+    )
+    suspend fun members(vaultId: String): List<MemberEntity>
 
-    @Query("SELECT * FROM projects ORDER BY id")
-    suspend fun projects(): List<ProjectEntity>
+    @Query(
+        """
+        SELECT project.* FROM projects AS project
+        INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY project.id
+        """,
+    )
+    suspend fun projects(vaultId: String): List<ProjectEntity>
 
-    @Query("SELECT * FROM workflow_statuses ORDER BY id")
-    suspend fun workflowStatuses(): List<WorkflowStatusEntity>
+    @Query(
+        """
+        SELECT status.* FROM workflow_statuses AS status
+        WHERE EXISTS (
+            SELECT 1 FROM projects AS project
+            INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
+            WHERE project.id = status.projectId AND workspace.vaultId = :vaultId
+        ) OR (
+            status.projectId IS NULL AND EXISTS (
+                SELECT 1 FROM tasks AS task
+                INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+                WHERE task.statusId = status.id AND workspace.vaultId = :vaultId
+            )
+        )
+        ORDER BY status.id
+        """,
+    )
+    suspend fun workflowStatuses(vaultId: String): List<WorkflowStatusEntity>
 
-    @Query("SELECT * FROM milestones ORDER BY id")
-    suspend fun milestones(): List<MilestoneEntity>
+    @Query(
+        """
+        SELECT milestone.* FROM milestones AS milestone
+        INNER JOIN projects AS project ON project.id = milestone.projectId
+        INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY milestone.id
+        """,
+    )
+    suspend fun milestones(vaultId: String): List<MilestoneEntity>
 
-    @Query("SELECT * FROM tasks ORDER BY id")
-    suspend fun tasks(): List<TaskEntity>
+    @Query(
+        """
+        SELECT task.* FROM tasks AS task
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY task.id
+        """,
+    )
+    suspend fun tasks(vaultId: String): List<TaskEntity>
 
-    @Query("SELECT * FROM checklist_items ORDER BY id")
-    suspend fun checklistItems(): List<ChecklistItemEntity>
+    @Query(
+        """
+        SELECT item.* FROM checklist_items AS item
+        INNER JOIN tasks AS task ON task.id = item.taskId
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY item.id
+        """,
+    )
+    suspend fun checklistItems(vaultId: String): List<ChecklistItemEntity>
 
-    @Query("SELECT * FROM task_dependencies ORDER BY taskId, dependsOnTaskId")
-    suspend fun taskDependencies(): List<TaskDependencyEntity>
+    @Query(
+        """
+        SELECT dependency.* FROM task_dependencies AS dependency
+        INNER JOIN tasks AS task ON task.id = dependency.taskId
+        INNER JOIN workspaces AS taskWorkspace ON taskWorkspace.id = task.workspaceId
+        INNER JOIN tasks AS prerequisite ON prerequisite.id = dependency.dependsOnTaskId
+        INNER JOIN workspaces AS prerequisiteWorkspace
+            ON prerequisiteWorkspace.id = prerequisite.workspaceId
+        WHERE taskWorkspace.vaultId = :vaultId
+            AND prerequisiteWorkspace.vaultId = :vaultId
+        ORDER BY dependency.taskId, dependency.dependsOnTaskId
+        """,
+    )
+    suspend fun taskDependencies(vaultId: String): List<TaskDependencyEntity>
 
-    @Query("SELECT * FROM tags ORDER BY id")
-    suspend fun tags(): List<TagEntity>
+    @Query(
+        """
+        SELECT tag.* FROM tags AS tag
+        INNER JOIN workspaces AS workspace ON workspace.id = tag.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY tag.id
+        """,
+    )
+    suspend fun tags(vaultId: String): List<TagEntity>
 
-    @Query("SELECT * FROM task_tags ORDER BY taskId, tagId")
-    suspend fun taskTags(): List<TaskTagEntity>
+    @Query(
+        """
+        SELECT relation.* FROM task_tags AS relation
+        INNER JOIN tasks AS task ON task.id = relation.taskId
+        INNER JOIN workspaces AS taskWorkspace ON taskWorkspace.id = task.workspaceId
+        INNER JOIN tags AS tag ON tag.id = relation.tagId
+        INNER JOIN workspaces AS tagWorkspace ON tagWorkspace.id = tag.workspaceId
+        WHERE taskWorkspace.vaultId = :vaultId AND tagWorkspace.vaultId = :vaultId
+        ORDER BY relation.taskId, relation.tagId
+        """,
+    )
+    suspend fun taskTags(vaultId: String): List<TaskTagEntity>
 
-    @Query("SELECT * FROM reminders ORDER BY id")
-    suspend fun reminders(): List<ReminderEntity>
+    @Query(
+        """
+        SELECT reminder.* FROM reminders AS reminder
+        INNER JOIN tasks AS task ON task.id = reminder.taskId
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY reminder.id
+        """,
+    )
+    suspend fun reminders(vaultId: String): List<ReminderEntity>
 
-    @Query("SELECT * FROM attachments ORDER BY id")
-    suspend fun attachments(): List<AttachmentEntity>
+    @Query(
+        """
+        SELECT attachment.* FROM attachments AS attachment
+        INNER JOIN tasks AS task ON task.id = attachment.taskId
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY attachment.id
+        """,
+    )
+    suspend fun attachments(vaultId: String): List<AttachmentEntity>
 
-    @Query("SELECT * FROM activity_entries ORDER BY id")
-    suspend fun activityEntries(): List<ActivityEntryEntity>
+    @Query(
+        """
+        SELECT activity.* FROM activity_entries AS activity
+        WHERE (
+            activity.taskId IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM tasks AS task
+                INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+                WHERE task.id = activity.taskId AND workspace.vaultId = :vaultId
+            )
+            AND (
+                activity.projectId IS NULL OR EXISTS (
+                    SELECT 1 FROM projects AS project
+                    INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
+                    WHERE project.id = activity.projectId AND workspace.vaultId = :vaultId
+                )
+            )
+        ) OR (
+            activity.taskId IS NULL
+            AND activity.projectId IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM projects AS project
+                INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
+                WHERE project.id = activity.projectId AND workspace.vaultId = :vaultId
+            )
+        ) OR (
+            activity.taskId IS NULL
+            AND activity.projectId IS NULL
+            AND (
+                SELECT COUNT(DISTINCT owner.vaultId)
+                FROM backup_journal AS owner
+                WHERE owner.objectId = activity.id
+                    AND owner.objectType = 'ACTIVITY_ENTRY'
+            ) = 1
+            AND EXISTS (
+                SELECT 1 FROM backup_journal AS journal
+                WHERE journal.vaultId = :vaultId
+                    AND journal.objectId = activity.id
+                    AND journal.objectType = 'ACTIVITY_ENTRY'
+            )
+        )
+        ORDER BY activity.id
+        """,
+    )
+    suspend fun activityEntries(vaultId: String): List<ActivityEntryEntity>
 
-    @Query("SELECT * FROM time_entries ORDER BY id")
-    suspend fun timeEntries(): List<TimeEntryEntity>
+    @Query(
+        """
+        SELECT entry.* FROM time_entries AS entry
+        INNER JOIN tasks AS task ON task.id = entry.taskId
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY entry.id
+        """,
+    )
+    suspend fun timeEntries(vaultId: String): List<TimeEntryEntity>
 
-    @Query("SELECT * FROM templates ORDER BY id")
-    suspend fun templates(): List<TemplateEntity>
+    @Query(
+        """
+        SELECT template.* FROM templates AS template
+        INNER JOIN workspaces AS workspace ON workspace.id = template.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY template.id
+        """,
+    )
+    suspend fun templates(vaultId: String): List<TemplateEntity>
 
-    @Query("SELECT * FROM saved_views ORDER BY id")
-    suspend fun savedViews(): List<SavedViewEntity>
+    @Query(
+        """
+        SELECT savedView.* FROM saved_views AS savedView
+        INNER JOIN workspaces AS workspace ON workspace.id = savedView.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY savedView.id
+        """,
+    )
+    suspend fun savedViews(vaultId: String): List<SavedViewEntity>
 
-    @Query("SELECT * FROM tombstones ORDER BY objectId, objectType")
-    suspend fun tombstones(): List<TombstoneEntity>
+    @Query(
+        """
+        SELECT tombstone.* FROM tombstones AS tombstone
+        WHERE (
+            SELECT COUNT(DISTINCT owner.vaultId)
+            FROM backup_journal AS owner
+            WHERE owner.objectId = tombstone.objectId
+                AND (
+                    UPPER(owner.objectType) = UPPER(tombstone.objectType)
+                    OR LOWER(owner.objectType) = LOWER(tombstone.objectType) || '.purge'
+                )
+        ) = 1
+        AND EXISTS (
+            SELECT 1 FROM backup_journal AS journal
+            WHERE journal.vaultId = :vaultId
+                AND journal.objectId = tombstone.objectId
+                AND (
+                    UPPER(journal.objectType) = UPPER(tombstone.objectType)
+                    OR LOWER(journal.objectType) = LOWER(tombstone.objectType) || '.purge'
+                )
+        )
+        ORDER BY tombstone.objectId, tombstone.objectType
+        """,
+    )
+    suspend fun tombstones(vaultId: String): List<TombstoneEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM activity_entries AS activity
+        WHERE (
+            activity.taskId IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM tasks AS task WHERE task.id = activity.taskId)
+        ) OR (
+            activity.projectId IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM projects AS project WHERE project.id = activity.projectId
+            )
+        ) OR (
+            activity.taskId IS NOT NULL
+            AND activity.projectId IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM tasks AS task
+                INNER JOIN workspaces AS taskWorkspace
+                    ON taskWorkspace.id = task.workspaceId
+                INNER JOIN projects AS project ON project.id = activity.projectId
+                INNER JOIN workspaces AS projectWorkspace
+                    ON projectWorkspace.id = project.workspaceId
+                WHERE task.id = activity.taskId
+                    AND taskWorkspace.vaultId = projectWorkspace.vaultId
+            )
+        ) OR (
+            activity.taskId IS NULL
+            AND activity.projectId IS NULL
+            AND (
+                SELECT COUNT(DISTINCT journal.vaultId)
+                FROM backup_journal AS journal
+                WHERE journal.objectId = activity.id
+                    AND journal.objectType = 'ACTIVITY_ENTRY'
+            ) != 1
+        )
+        """,
+    )
+    suspend fun unassignableActivityEntryCount(): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM tombstones AS tombstone
+        WHERE (
+            SELECT COUNT(DISTINCT journal.vaultId)
+            FROM backup_journal AS journal
+            WHERE journal.objectId = tombstone.objectId
+                AND (
+                    UPPER(journal.objectType) = UPPER(tombstone.objectType)
+                    OR LOWER(journal.objectType) = LOWER(tombstone.objectType) || '.purge'
+                )
+        ) != 1
+        """,
+    )
+    suspend fun unassignableTombstoneCount(): Int
 }
 
 internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRecordV1> =
     buildList {
+        require(unassignableActivityEntryCount() == 0) {
+            "Activity entry cannot be assigned to a vault"
+        }
+        require(unassignableTombstoneCount() == 0) {
+            "Tombstone cannot be assigned to a vault"
+        }
         vaults(vaultId).mapTo(this) { it.toBackupRecordV1() }
         workspaces(vaultId).mapTo(this) { it.toBackupRecordV1() }
-        members().mapTo(this) { it.toBackupRecordV1() }
-        projects().mapTo(this) { it.toBackupRecordV1() }
-        workflowStatuses().mapTo(this) { it.toBackupRecordV1() }
-        milestones().mapTo(this) { it.toBackupRecordV1() }
-        tasks().mapTo(this) { it.toBackupRecordV1() }
-        checklistItems().mapTo(this) { it.toBackupRecordV1() }
-        taskDependencies().mapTo(this) { it.toBackupRecordV1() }
-        tags().mapTo(this) { it.toBackupRecordV1() }
-        taskTags().mapTo(this) { it.toBackupRecordV1() }
-        reminders().mapTo(this) { it.toBackupRecordV1() }
-        attachments().mapTo(this) { it.toBackupRecordV1() }
-        activityEntries().mapTo(this) { it.toBackupRecordV1() }
-        timeEntries().mapTo(this) { it.toBackupRecordV1() }
-        templates().mapTo(this) { it.toBackupRecordV1() }
-        savedViews().mapTo(this) { it.toBackupRecordV1() }
-        tombstones().mapTo(this) { it.toBackupRecordV1() }
+        members(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        projects(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        workflowStatuses(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        milestones(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        tasks(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        checklistItems(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        taskDependencies(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        tags(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        taskTags(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        reminders(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        attachments(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        activityEntries(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        timeEntries(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        templates(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        savedViews(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        tombstones(vaultId).mapTo(this) { it.toBackupRecordV1() }
     }
 
 interface BackupStateStore {

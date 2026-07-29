@@ -6,6 +6,7 @@ import app.opentasks.core.model.VaultId
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
 
@@ -143,6 +144,23 @@ class BackupOperationSegmentCodecTest {
             BackupOperationSegmentCodec.fromJournalEntries(
                 VaultId("vault-alpha"),
                 journal,
+            )
+        }
+    }
+
+    @Test
+    fun oversizedJournalCallerIsRejectedBeforeItsFirstEntryIsRead() {
+        val unreadableEntries = object : AbstractList<BackupJournalEntity>() {
+            override val size: Int = 10_001
+
+            override fun get(index: Int): BackupJournalEntity =
+                throw EmbeddedJournalEntryWasRead()
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupOperationSegmentCodec.fromJournalEntries(
+                VaultId("vault-alpha"),
+                unreadableEntries,
             )
         }
     }
@@ -370,6 +388,24 @@ class BackupOperationSegmentCodecTest {
         assertArrayEquals(ByteArray(invalidOwned.size), invalidOwned)
     }
 
+    @Test
+    fun oversizedCallerIsRejectedBeforeOwnershipCopyAndRemainsUnchanged() {
+        val source = ByteArray(BackupOperationSegmentCodec.MAX_PLAINTEXT_BYTES + 1) {
+            0x5a.toByte()
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupOperationSegmentCodec.decodeCallerPreserving(source) {
+                throw AssertionError("Oversized segment requested an ownership copy")
+            }
+        }
+        assertTrue(source.all { it == 0x5a.toByte() })
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupOperationSegmentCodec.decode(source)
+        }
+        assertTrue(source.all { it == 0x5a.toByte() })
+    }
+
     private fun journalEntry(
         operationId: String,
         generation: Long,
@@ -492,4 +528,6 @@ class BackupOperationSegmentCodecTest {
             1 -> 2
             else -> 3
         }
+
+    private class EmbeddedJournalEntryWasRead : RuntimeException()
 }
