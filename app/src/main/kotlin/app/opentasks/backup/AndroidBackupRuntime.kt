@@ -36,7 +36,8 @@ class DefaultAndroidBackupRuntime(
     private val requestLocalBackup: suspend () -> Unit,
     private val observeBackupState: () -> Flow<BackupStateEntity>,
     private val envelopeAvailable: suspend () -> Boolean,
-    private val recordStatus: suspend (AndroidBackupStatus) -> Unit,
+    private val recordStatus:
+        suspend (AndroidBackupStatus.RestoredPackageDetected) -> Boolean,
     private val restoredPublicationBlocked: suspend () -> Boolean,
     private val refreshPortablePackage: suspend () -> Unit,
     private val debounceMillis: Long = DEFAULT_DEBOUNCE_MILLIS,
@@ -85,14 +86,7 @@ class DefaultAndroidBackupRuntime(
                 )
             else -> null
         }
-        if (detectedStatus != null) {
-            try {
-                recordStatus(detectedStatus)
-            } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
-                // Current-process publication remains blocked even if persistence failed.
-            }
-        }
+        var statusRecorded = detectedStatus == null || tryRecordStatus(detectedStatus)
         val blockedByIntake = detectedStatus != null
         val blockedByPersistedStatus = try {
             restoredPublicationBlocked()
@@ -110,6 +104,9 @@ class DefaultAndroidBackupRuntime(
         debounced.collect { state ->
             if (!firstGeneration) requestLocalBackup()
             firstGeneration = false
+            if (!statusRecorded && detectedStatus != null) {
+                statusRecorded = tryRecordStatus(detectedStatus)
+            }
             if (
                 !publicationBlocked &&
                 state.recoveryEnvelopeReady &&
@@ -118,6 +115,16 @@ class DefaultAndroidBackupRuntime(
                 refreshPortablePackage()
             }
         }
+    }
+
+    private suspend fun tryRecordStatus(
+        status: AndroidBackupStatus.RestoredPackageDetected,
+    ): Boolean = try {
+        recordStatus(status)
+    } catch (failure: Throwable) {
+        if (failure is CancellationException) throw failure
+        // Current-process publication remains blocked while a later state can retry.
+        false
     }
 
     private suspend fun bootstrapKeyOnce(): Boolean {
@@ -156,16 +163,22 @@ internal suspend fun recordRestoredPackageStatus(
     stateStore: BackupStateStore,
     vaultId: VaultId,
     status: AndroidBackupStatus.RestoredPackageDetected,
-) {
+): Boolean {
     repeat(STATUS_UPDATE_ATTEMPTS) {
-        val state = stateStore.get(vaultId) ?: return
+        val state = stateStore.get(vaultId) ?: return false
+        if (
+            state.packageState == PACKAGE_RESTORED_DETECTED &&
+            state.failureCategory == status.condition.name
+        ) {
+            return true
+        }
         val detected = state.copy(
             packageState = PACKAGE_RESTORED_DETECTED,
             failureCategory = status.condition.name,
         )
-        if (stateStore.compareAndUpdate(detected, state.currentGeneration) == 1) return
+        if (stateStore.compareAndUpdate(detected, state.currentGeneration) == 1) return true
     }
-    error("Restored package status changed during persistence")
+    return false
 }
 
 internal suspend fun restoredPackagePublicationBlocked(

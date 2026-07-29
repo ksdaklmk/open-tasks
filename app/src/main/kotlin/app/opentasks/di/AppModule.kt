@@ -27,7 +27,6 @@ import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.VaultRepository
-import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
 import dagger.Module
@@ -208,13 +207,11 @@ object AppModule {
             } ?: false
         },
         recordStatus = { status ->
-            if (status is AndroidBackupStatus.RestoredPackageDetected) {
-                recordRestoredPackageStatus(
-                    stateStore = runtime.backupStateStore,
-                    vaultId = runtime.vaultId,
-                    status = status,
-                )
-            }
+            recordRestoredPackageStatus(
+                stateStore = runtime.backupStateStore,
+                vaultId = runtime.vaultId,
+                status = status,
+            )
         },
         restoredPublicationBlocked = {
             restoredPackagePublicationBlocked(
