@@ -176,6 +176,35 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
     }
 
     @Test
+    fun openExistingNoncanonicalBase64ClearsDecodedBufferWithoutGenerating() {
+        AndroidVaultContentKeyStore(context).getOrCreate(firstVault).close()
+        assertTrue(
+            preferences().edit()
+                .putString(nonceKey(firstVault), "/x==")
+                .commit(),
+        )
+        val trackingCrypto = CreateTrackingVaultCrypto()
+        val capturingBase64 = CapturingBase64Boundary()
+        val store = AndroidVaultContentKeyStore(
+            context = context,
+            crypto = trackingCrypto,
+            commitBoundary = SharedPreferencesCommitBoundary,
+            wrappingKeyBoundary = AndroidKeystoreWrappingKeyBoundary(),
+            base64Boundary = capturingBase64,
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            store.openExisting(firstVault)
+        }
+
+        assertEquals(0, trackingCrypto.createCount)
+        assertArrayEquals(
+            ByteArray(checkNotNull(capturingBase64.lastDecoded).size),
+            capturingBase64.lastDecoded,
+        )
+    }
+
+    @Test
     fun getOrCreateRetainsTheSingleAllowedBootstrap() {
         val trackingCrypto = CreateTrackingVaultCrypto()
         val store = AndroidVaultContentKeyStore(context, trackingCrypto)
@@ -817,6 +846,17 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
             createCount += 1
             return delegate.createKey()
         }
+    }
+
+    private class CapturingBase64Boundary(
+        private val delegate: LocalEnvelopeBase64Boundary =
+            AndroidLocalEnvelopeBase64Boundary,
+    ) : LocalEnvelopeBase64Boundary by delegate {
+        var lastDecoded: ByteArray? = null
+            private set
+
+        override fun decode(encoded: String): ByteArray =
+            delegate.decode(encoded).also { lastDecoded = it }
     }
 
     private data class OpenCorruption(

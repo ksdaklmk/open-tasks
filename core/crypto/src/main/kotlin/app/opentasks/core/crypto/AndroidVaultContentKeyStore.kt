@@ -21,6 +21,49 @@ internal data object SharedPreferencesCommitBoundary : PreferenceCommitBoundary 
     override fun commit(editor: SharedPreferences.Editor): Boolean = editor.commit()
 }
 
+internal interface LocalEnvelopeBase64Boundary {
+    fun encode(bytes: ByteArray): String
+
+    fun decode(encoded: String): ByteArray
+}
+
+internal data object AndroidLocalEnvelopeBase64Boundary : LocalEnvelopeBase64Boundary {
+    override fun encode(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+    override fun decode(encoded: String): ByteArray =
+        Base64.decode(encoded, Base64.NO_WRAP)
+}
+
+internal fun decodeCanonicalLocalEnvelopeBase64(
+    encoded: String,
+    boundary: LocalEnvelopeBase64Boundary,
+): ByteArray {
+    val decoded = try {
+        boundary.decode(encoded)
+    } catch (failure: IllegalArgumentException) {
+        throw IllegalStateException(
+            "The local vault-content key envelope is invalid",
+            failure,
+        )
+    }
+    return try {
+        check(boundary.encode(decoded) == encoded) {
+            "The local vault-content key envelope is invalid"
+        }
+        decoded
+    } catch (failure: Throwable) {
+        decoded.fill(0)
+        if (failure is IllegalArgumentException) {
+            throw IllegalStateException(
+                "The local vault-content key envelope is invalid",
+                failure,
+            )
+        }
+        throw failure
+    }
+}
+
 internal interface WrappingKeyBoundary {
     fun containsAlias(alias: String): Boolean
 
@@ -137,6 +180,8 @@ class AndroidVaultContentKeyStore internal constructor(
     private val crypto: VaultCrypto,
     private val commitBoundary: PreferenceCommitBoundary,
     private val wrappingKeyBoundary: WrappingKeyBoundary,
+    private val base64Boundary: LocalEnvelopeBase64Boundary =
+        AndroidLocalEnvelopeBase64Boundary,
 ) : VaultContentKeyStore {
     constructor(
         context: Context,
@@ -146,6 +191,7 @@ class AndroidVaultContentKeyStore internal constructor(
         crypto = crypto,
         commitBoundary = SharedPreferencesCommitBoundary,
         wrappingKeyBoundary = AndroidKeystoreWrappingKeyBoundary(),
+        base64Boundary = AndroidLocalEnvelopeBase64Boundary,
     )
 
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -421,21 +467,10 @@ class AndroidVaultContentKeyStore internal constructor(
         "$CIPHERTEXT_PREFERENCE_PREFIX${LocalVaultIdentityEncoding.digest(vaultId)}"
 
     private fun ByteArray.encodeBase64(): String =
-        Base64.encodeToString(this, Base64.NO_WRAP)
+        base64Boundary.encode(this)
 
     private fun String.decodeBase64(): ByteArray =
-        try {
-            Base64.decode(this, Base64.NO_WRAP).also { decoded ->
-                check(Base64.encodeToString(decoded, Base64.NO_WRAP) == this) {
-                    "The local vault-content key envelope is invalid"
-                }
-            }
-        } catch (failure: IllegalArgumentException) {
-            throw IllegalStateException(
-                "The local vault-content key envelope is invalid",
-                failure,
-            )
-        }
+        decodeCanonicalLocalEnvelopeBase64(this, base64Boundary)
 
     private sealed interface StoredEnvelope {
         data object Absent : StoredEnvelope
