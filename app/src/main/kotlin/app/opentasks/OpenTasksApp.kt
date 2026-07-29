@@ -81,8 +81,10 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
+import app.opentasks.backup.BackupViewModel
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
@@ -168,9 +170,11 @@ fun OpenTasksApp(
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
     viewModel: WorkspaceViewModel = viewModel(),
+    backupViewModel: BackupViewModel = viewModel(),
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+        val backupStatus by backupViewModel.status.collectAsStateWithLifecycle()
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
@@ -234,6 +238,10 @@ fun OpenTasksApp(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                     .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName),
             )
+        }
+
+        fun openSystemSettings() {
+            activity.startActivity(Intent(Settings.ACTION_SETTINGS))
         }
 
         fun enableNotifications() {
@@ -732,6 +740,12 @@ fun OpenTasksApp(
                                             DomainCommand.DeleteTemplate(templateId),
                                         )
                                     },
+                                    backupStatus = backupStatus,
+                                    validateBackupPassphrase =
+                                        RecoveryPassphrasePolicy::validate,
+                                    onPrepareBackup = backupViewModel::prepare,
+                                    onRetryBackup = backupViewModel::retry,
+                                    onOpenSystemSettings = ::openSystemSettings,
                                 )
                             }
                         },

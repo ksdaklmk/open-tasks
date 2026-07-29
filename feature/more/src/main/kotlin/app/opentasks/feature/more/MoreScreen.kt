@@ -64,10 +64,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.SectionHeader
-import app.opentasks.core.model.Project
-import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.InsightsRange
 import app.opentasks.core.model.InsightsSnapshot
+import app.opentasks.core.model.Project
+import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.RecoveryPassphraseValidation
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -100,6 +102,16 @@ fun MoreScreen(
     onPermanentlyDeleteTask: (TaskId) -> Unit,
     onUseTemplate: (TemplateId, String, LocalDate) -> Unit = { _, _, _ -> },
     onDeleteTemplate: (TemplateId) -> Unit = {},
+    backupStatus: AndroidBackupStatus = AndroidBackupStatus.NotPrepared,
+    validateBackupPassphrase: (
+        passphrase: String,
+        confirmation: String,
+    ) -> RecoveryPassphraseValidation = { _, _ ->
+        RecoveryPassphraseValidation.TooShort
+    },
+    onPrepareBackup: (String) -> Unit = {},
+    onRetryBackup: () -> Unit = {},
+    onOpenSystemSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -163,6 +175,19 @@ fun MoreScreen(
                 onBack = { destination = MoreDestination.OVERVIEW },
                 onUseTemplate = onUseTemplate,
                 onDeleteTemplate = onDeleteTemplate,
+                modifier = modifier,
+            )
+            return
+        }
+        MoreDestination.BACKUP_RECOVERY -> {
+            BackHandler { destination = MoreDestination.OVERVIEW }
+            BackupRecoveryScreen(
+                status = backupStatus,
+                validatePassphrase = validateBackupPassphrase,
+                onPrepare = onPrepareBackup,
+                onRetry = onRetryBackup,
+                onOpenSystemSettings = onOpenSystemSettings,
+                onBack = { destination = MoreDestination.OVERVIEW },
                 modifier = modifier,
             )
             return
@@ -240,7 +265,10 @@ fun MoreScreen(
             )
             DestinationRow(
                 Icons.Rounded.Lock,
-                "Privacy & recovery",
+                stringResource(R.string.backup_recovery_title),
+                supportingText = backupStatusSummary(backupStatus),
+                onClick = { destination = MoreDestination.BACKUP_RECOVERY },
+                modifier = Modifier.testTag("open-backup-recovery"),
             )
         }
     }
@@ -959,4 +987,24 @@ private enum class MoreDestination {
     ARCHIVE,
     TRASH,
     TEMPLATES,
+    BACKUP_RECOVERY,
+}
+
+@Composable
+private fun backupStatusSummary(status: AndroidBackupStatus): String = when (status) {
+    AndroidBackupStatus.NotPrepared ->
+        stringResource(R.string.backup_not_prepared_summary)
+    AndroidBackupStatus.Preparing ->
+        stringResource(R.string.backup_preparing_summary)
+    is AndroidBackupStatus.Ready ->
+        stringResource(
+            R.string.backup_ready_summary,
+            status.packageInfo.packageGeneration.value,
+        )
+    is AndroidBackupStatus.UpdatePending ->
+        stringResource(R.string.backup_update_pending_summary)
+    is AndroidBackupStatus.Unavailable ->
+        stringResource(R.string.backup_unavailable_summary)
+    is AndroidBackupStatus.RestoredPackageDetected ->
+        stringResource(R.string.backup_restored_summary)
 }
