@@ -15,9 +15,9 @@
   remain complete and independently reviewed. GitHub maintenance remains
   paused.**
 - Current source implementation point: `a4069c7` (`fix: allow initial backup
-  re-preparation`) completes the Stage 2 source chain through Task 9. The
-  pending Task 10 documentation commit records the fresh exit gates and
-  checkpoint below. The implemented design is
+  re-preparation`) completes the Stage 2 source chain through Task 9. The Task
+  10 documentation commit `9d6eb39` records the fresh exit gates and checkpoint
+  below. The implemented design is
   `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`
   and the completed execution plan is
   `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`.
@@ -927,7 +927,8 @@ covered.
 
 At this Stage 1 checkpoint, the next recommended action was to design and plan
 Stage 2. That design and its detailed implementation plan have since received
-written approval. Execute the plan task-by-task from the current checkpoint.
+written approval. The approved Stage 2 plan was subsequently executed and is
+now complete.
 
 ## Previous P1/P2 pause closure verification
 
