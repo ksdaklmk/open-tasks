@@ -1,4 +1,7 @@
-import { createHash } from "node:crypto";
+import {
+  createCipheriv,
+  createHash,
+} from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -404,6 +407,177 @@ function writeFixture(name, payload) {
   );
 }
 
+const portableKey = Buffer.from(
+  "000102030405060708090a0b0c0d0e0f" +
+    "101112131415161718191a1b1c1d1e1f",
+  "hex",
+);
+const tinkPrefix = Buffer.from("010000002a", "hex");
+const portableProducedAt = 1754000000000;
+const recoveryEnvelope = {
+  formatVersion: 1,
+  kdfAlgorithm: "ARGON2ID",
+  memoryKiB: 65536,
+  iterations: 3,
+  parallelism: 1,
+  saltBase64: "AAECAwQFBgcICQoLDA0ODw",
+  nonceBase64: "EBESExQVFhcYGRob",
+  wrappedKeysetBase64: "HB0eHyAhIiM",
+};
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function prefixedUtf8(value) {
+  const bytes = Buffer.from(value, "utf8");
+  const prefix = Buffer.alloc(4);
+  prefix.writeUInt32BE(bytes.length);
+  return Buffer.concat([prefix, bytes]);
+}
+
+function cloudAssociatedData(family, objectId) {
+  return Buffer.concat([
+    "open-tasks:cloud-header-identity:v1",
+    family,
+    "1",
+    "1",
+    "1",
+    "vault-alpha",
+    objectId,
+    "",
+    "",
+  ].map(prefixedUtf8));
+}
+
+function authenticatedFrame(family, objectId, nonce, plaintext) {
+  const cipher = createCipheriv("aes-256-gcm", portableKey, nonce);
+  cipher.setAAD(cloudAssociatedData(family, objectId));
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext),
+    cipher.final(),
+  ]);
+  const ciphertext = Buffer.concat([
+    tinkPrefix,
+    nonce,
+    encrypted,
+    cipher.getAuthTag(),
+  ]);
+  const header = {
+    magic: "OPEN_TASKS",
+    family,
+    schemaVersion: 1,
+    cryptoVersion: 1,
+    minimumReaderVersion: 1,
+    vaultId: "vault-alpha",
+    objectId,
+    ciphertextLength: ciphertext.length,
+    ciphertextSha256: sha256(ciphertext),
+    chunkIndex: null,
+    chunkCount: null,
+  };
+  const headerBytes = Buffer.from(JSON.stringify(header), "utf8");
+  const headerLength = Buffer.alloc(4);
+  headerLength.writeUInt32BE(headerBytes.length);
+  return Buffer.concat([headerLength, headerBytes, ciphertext]);
+}
+
+function portableRecordCounts() {
+  const counts = new Map(familyOrder.map((family) => [family, 0]));
+  for (const item of snapshot.records) {
+    counts.set(item.family, counts.get(item.family) + 1);
+  }
+  return familyOrder.map((family) => ({
+    family,
+    count: counts.get(family),
+  }));
+}
+
+function writePortableFixture() {
+  const snapshotJson = JSON.stringify(snapshot);
+  const snapshotFrame = authenticatedFrame(
+    "SNAPSHOT",
+    `snapshot:${snapshot.coveredGeneration}`,
+    Buffer.from("202122232425262728292a2b", "hex"),
+    Buffer.from(snapshotJson, "utf8"),
+  );
+  const recoveryEnvelopeJson = JSON.stringify(recoveryEnvelope);
+  const manifest = {
+    packageVersion: 1,
+    minimumReaderVersion: 1,
+    vaultId: "vault-alpha",
+    generation: snapshot.coveredGeneration,
+    producedAtEpochMillis: portableProducedAt,
+    recoveryEnvelopeSha256: sha256(Buffer.from(recoveryEnvelopeJson, "utf8")),
+    snapshotObjectId: `snapshot:${snapshot.coveredGeneration}`,
+    snapshotFrameLength: snapshotFrame.length,
+    snapshotFrameSha256: sha256(snapshotFrame),
+    recordCounts: portableRecordCounts(),
+  };
+  const manifestJson = JSON.stringify(manifest);
+  const manifestFrame = authenticatedFrame(
+    "MANIFEST",
+    `portable-manifest:${snapshot.coveredGeneration}`,
+    Buffer.from("101112131415161718191a1b", "hex"),
+    Buffer.from(manifestJson, "utf8"),
+  );
+  let bootstrap = {
+    magic: "OPEN_TASKS_PORTABLE",
+    packageVersion: 1,
+    minimumReaderVersion: 1,
+    vaultId: "vault-alpha",
+    generation: snapshot.coveredGeneration,
+    producedAtEpochMillis: portableProducedAt,
+    recoveryEnvelope,
+    manifestFrameLength: manifestFrame.length,
+    manifestFrameSha256: sha256(manifestFrame),
+    snapshotFrameLength: snapshotFrame.length,
+    snapshotFrameSha256: sha256(snapshotFrame),
+    totalPackageLength: 0,
+  };
+  for (let pass = 0; pass < 8; pass += 1) {
+    const length = Buffer.byteLength(JSON.stringify(bootstrap), "utf8");
+    bootstrap = {
+      ...bootstrap,
+      totalPackageLength: 4 + length + manifestFrame.length +
+        snapshotFrame.length,
+    };
+  }
+  const bootstrapJson = JSON.stringify(bootstrap);
+  const bootstrapBytes = Buffer.from(bootstrapJson, "utf8");
+  const bootstrapLength = Buffer.alloc(4);
+  bootstrapLength.writeUInt32BE(bootstrapBytes.length);
+  const packageBytes = Buffer.concat([
+    bootstrapLength,
+    bootstrapBytes,
+    manifestFrame,
+    snapshotFrame,
+  ]);
+  if (packageBytes.length !== bootstrap.totalPackageLength) {
+    throw new Error("Portable fixture length did not stabilise");
+  }
+  const fixture = {
+    keyHex: portableKey.toString("hex"),
+    manifestNonceHex: "101112131415161718191a1b",
+    snapshotNonceHex: "202122232425262728292a2b",
+    bootstrapJson,
+    manifestJson,
+    snapshotJson,
+    recoveryEnvelopeSha256: manifest.recoveryEnvelopeSha256,
+    manifestFrameSha256: bootstrap.manifestFrameSha256,
+    snapshotFrameSha256: bootstrap.snapshotFrameSha256,
+    packageSha256: sha256(packageBytes),
+    manifestFrameHex: manifestFrame.toString("hex"),
+    snapshotFrameHex: snapshotFrame.toString("hex"),
+    packageHex: packageBytes.toString("hex"),
+  };
+  writeFileSync(
+    join(outputDirectory, "portable-package.json"),
+    `${JSON.stringify(fixture, null, 2)}\n`,
+  );
+}
+
 mkdirSync(outputDirectory, { recursive: true });
 writeFixture("snapshot", snapshot);
 writeFixture("operation-segment", segment);
+writePortableFixture();

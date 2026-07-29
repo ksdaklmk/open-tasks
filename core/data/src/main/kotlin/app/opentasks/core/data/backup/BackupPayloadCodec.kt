@@ -65,6 +65,15 @@ object BackupPayloadIdentities {
 interface BackupSnapshotCodec {
     fun fromCapture(capture: StructuredBackupCapture): BackupSnapshotPayloadV1
     fun encode(payload: BackupSnapshotPayloadV1): ByteArray
+    fun encodeBounded(
+        payload: BackupSnapshotPayloadV1,
+        maximumBytes: Int,
+    ): ByteArray = encode(payload).also { encoded ->
+        if (encoded.size > maximumBytes) {
+            encoded.fill(0)
+            throw BackupPayloadTooLargeException("snapshot", maximumBytes)
+        }
+    }
     fun decode(source: ByteArray): BackupSnapshotPayloadV1
     fun decodeOwned(source: ByteArray): BackupSnapshotPayloadV1
 
@@ -78,7 +87,16 @@ interface BackupSnapshotCodec {
                 records = capture.records.toList(),
             )
 
-        override fun encode(payload: BackupSnapshotPayloadV1): ByteArray {
+        override fun encode(payload: BackupSnapshotPayloadV1): ByteArray =
+            encodeBounded(payload, MAX_PLAINTEXT_BYTES)
+
+        override fun encodeBounded(
+            payload: BackupSnapshotPayloadV1,
+            maximumBytes: Int,
+        ): ByteArray {
+            require(maximumBytes in 1..MAX_PLAINTEXT_BYTES) {
+                "Backup snapshot byte bound is invalid"
+            }
             require(payload.records.size <= CloudBounds.MAX_RECORDS_PER_SNAPSHOT) {
                 "Backup snapshot exceeds ${CloudBounds.MAX_RECORDS_PER_SNAPSHOT} records"
             }
@@ -87,7 +105,7 @@ interface BackupSnapshotCodec {
             return StrictBackupPayloadJson.encode(
                 serializer = BackupSnapshotPayloadV1.serializer(),
                 value = canonical,
-                maximumBytes = MAX_PLAINTEXT_BYTES,
+                maximumBytes = maximumBytes,
                 label = "snapshot",
             )
         }
@@ -128,6 +146,11 @@ interface BackupSnapshotCodec {
         }
     }
 }
+
+class BackupPayloadTooLargeException(
+    label: String,
+    maximumBytes: Int,
+) : IllegalArgumentException("Backup $label exceeds $maximumBytes bytes")
 
 interface BackupOperationSegmentCodec {
     fun fromJournalEntries(
@@ -771,8 +794,8 @@ private class BoundedBackupPayloadOutput(
     }
 
     private fun ensureCapacity(additionalBytes: Int) {
-        require(count <= maximumBytes - additionalBytes) {
-            "Backup $label exceeds $maximumBytes bytes"
+        if (additionalBytes > maximumBytes - count) {
+            throw BackupPayloadTooLargeException(label, maximumBytes)
         }
         val required = count + additionalBytes
         if (required <= buffer.size) return

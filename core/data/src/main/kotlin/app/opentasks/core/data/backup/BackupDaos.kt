@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.withTransaction
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
@@ -21,6 +22,7 @@ import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
 import app.opentasks.core.data.db.TimeEntryEntity
 import app.opentasks.core.data.db.TombstoneEntity
+import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.data.db.VaultEntity
 import app.opentasks.core.data.db.WorkflowStatusEntity
 import app.opentasks.core.data.db.WorkspaceEntity
@@ -543,6 +545,12 @@ interface RecoveryEnvelopeStore {
     suspend fun get(vaultId: VaultId): VaultKeyEnvelope?
     suspend fun upsert(vaultId: VaultId, envelope: VaultKeyEnvelope)
     suspend fun delete(vaultId: VaultId)
+    suspend fun commitInitial(
+        vaultId: VaultId,
+        envelope: VaultKeyEnvelope,
+        state: BackupStateEntity,
+        expectedCurrentGeneration: Long,
+    ): Boolean
 }
 
 class RoomBackupStateStore(
@@ -597,10 +605,10 @@ class RoomBackupJournalStore(
 }
 
 class RoomRecoveryEnvelopeStore(
-    private val dao: VaultRecoveryEnvelopeDao,
+    private val database: VaultDatabase,
 ) : RecoveryEnvelopeStore {
     override suspend fun get(vaultId: VaultId): VaultKeyEnvelope? {
-        val entity = dao.get(vaultId.value) ?: return null
+        val entity = database.vaultRecoveryEnvelopeDao().get(vaultId.value) ?: return null
         return try {
             RecoveryEnvelopeCodec.fromEntity(entity)
         } finally {
@@ -616,7 +624,7 @@ class RoomRecoveryEnvelopeStore(
     ) {
         val entity = RecoveryEnvelopeCodec.toEntity(vaultId, envelope)
         try {
-            dao.upsert(entity)
+            database.vaultRecoveryEnvelopeDao().upsert(entity)
         } finally {
             entity.salt.fill(0)
             entity.nonce.fill(0)
@@ -625,6 +633,57 @@ class RoomRecoveryEnvelopeStore(
     }
 
     override suspend fun delete(vaultId: VaultId) {
-        dao.delete(vaultId.value)
+        database.vaultRecoveryEnvelopeDao().delete(vaultId.value)
+    }
+
+    override suspend fun commitInitial(
+        vaultId: VaultId,
+        envelope: VaultKeyEnvelope,
+        state: BackupStateEntity,
+        expectedCurrentGeneration: Long,
+    ): Boolean = database.withTransaction {
+        require(state.vaultId == vaultId.value) { "Backup state belongs to another vault" }
+        val envelopeDao = database.vaultRecoveryEnvelopeDao()
+        val stateDao = database.backupStateDao()
+        if (envelopeDao.get(vaultId.value) != null) return@withTransaction false
+        val current = stateDao.get(vaultId.value) ?: return@withTransaction false
+        if (
+            current.currentGeneration != expectedCurrentGeneration ||
+            current.recoveryEnvelopeReady
+        ) {
+            return@withTransaction false
+        }
+        val entity = RecoveryEnvelopeCodec.toEntity(vaultId, envelope)
+        try {
+            envelopeDao.upsert(entity)
+            check(
+                stateDao.compareAndUpdate(
+                    vaultId = state.vaultId,
+                    expectedCurrentGeneration = expectedCurrentGeneration,
+                    currentGeneration = state.currentGeneration,
+                    lastVerifiedSnapshotGeneration = state.lastVerifiedSnapshotGeneration,
+                    currentBaseObjectId = state.currentBaseObjectId,
+                    previousBaseObjectId = state.previousBaseObjectId,
+                    latestVerifiedSegmentGeneration = state.latestVerifiedSegmentGeneration,
+                    portablePackageGeneration = state.portablePackageGeneration,
+                    portablePackageBytes = state.portablePackageBytes,
+                    portablePackageProducedAtEpochMillis =
+                        state.portablePackageProducedAtEpochMillis,
+                    packageState = state.packageState,
+                    failureCategory = state.failureCategory,
+                    recoveryEnvelopeReady = state.recoveryEnvelopeReady,
+                    legacyOutboxCoveredAtGeneration =
+                        state.legacyOutboxCoveredAtGeneration,
+                    snapshotCreatedAtEpochMillis = state.snapshotCreatedAtEpochMillis,
+                ) == 1,
+            ) {
+                "Backup state changed during initial package commit"
+            }
+            true
+        } finally {
+            entity.salt.fill(0)
+            entity.nonce.fill(0)
+            entity.wrappedKeyset.fill(0)
+        }
     }
 }
