@@ -2,30 +2,31 @@
 
 - Last updated: 29 July 2026
 - Branch: `main`
-- Session status: **Stage 2 is implemented and verified for every
-  repository-controlled gate. Room v6 remains the sole live authority, with
-  atomic local generations, verified recovery objects, a prepared recovery
-  envelope, one authenticated portable package, exact Android backup/device-
-  transfer eligibility, inert restored-package intake, and locally truthful
-  More status. Encrypted Google-account transport upload/restore is an
-  explicit external qualification gate; local readiness is not an upload
-  claim. No provider, WorkManager, recovery activation, writer takeover,
-  remote merge, or attachment transport exists. The sole next action is
-  focused Stage 3 brainstorming and design. Train 1 Tasks 1.1–1.5 and Stage 1
-  remain complete and independently reviewed. GitHub maintenance remains
-  paused.**
-- Current source implementation point: `a4069c7` (`fix: allow initial backup
-  re-preparation`) completes the Stage 2 source chain through Task 9. The Task
-  10 documentation commit `9d6eb39` records the fresh exit gates and checkpoint
-  below. The implemented design is
+- Session status: **Paused at the user's request during the single Stage 2
+  final-review correction wave. `ccffefb` is the last committed source
+  checkpoint; this handoff-only pause checkpoint does not include the dirty
+  Kotlin correction. The broad review after Task 10 found three Critical and
+  six Important defects, so the earlier repository-controlled completion
+  claim is superseded until the correction wave, fresh gates, connected
+  verification, and scoped re-review finish. A substantial TDD correction is
+  preserved uncommitted in the working tree. No command is in flight and all
+  correction agents are stopped. Do not begin Stage 3. Train 1 Tasks 1.1–1.5
+  and Stage 1 remain complete and independently reviewed. GitHub maintenance
+  remains paused.**
+- Current source implementation point: `ccffefb` (`docs: correct stage 2
+  handoff status`) is the last committed base. The dirty working tree contains
+  the paused final-review correction across app backup runtime/intake/
+  publication and core-data backup state/capture/coordinator code plus their
+  tests. It is neither committed nor fully verified. Resume from
+  `.superpowers/sdd/2026-07-29-stage-2-local-backup-android-auto-backup-plan/final-review-fix-brief.md`
+  and its adjacent `final-review-fix-report.md`; do not restart from the Task
+  10 baseline. The implemented design remains
   `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`
-  and the completed execution plan is
+  and the active execution plan is
   `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`.
-  The protected `task13_fixround1_replacement_20260728_055359` snapshot was
-  audited with snapshot saving disabled, upgraded in place without
-  instrumentation or destructive package operations, then reloaded and
-  restored exactly. Stage 2 connected tests and `bmgr` used only the audited
-  disposable API 37 foldable. Final ADB state is empty.
+  The correction agent used no ADB or emulator. The prior protected-snapshot,
+  disposable connected, Android transport, and UI evidence below remains
+  historical Task 10 evidence, but it does not verify the dirty correction.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -86,15 +87,86 @@ independent of SQLCipher database keys and have separate recovery and per-vault
 Android Keystore wrapping. Canonical bounded cloud frames exist for manifests,
 snapshots, operation segments and attachment chunks. The authenticated
 provider-independent codec binds their complete identity as AEAD associated
-data and has independent deterministic vectors for all four families. Stage 2
-adds the local backup journal, strict snapshot/segment payloads, consistent
-capture, verified local recovery objects, recovery-envelope preparation, the
-portable package, runtime activation, exact Android eligibility, inert
-restored input, and status UI. Drive transport, user recovery activation, and
-attachments are not implemented. The historical Train 1 Task 1.6 is
-superseded.
+data and has independent deterministic vectors for all four families. Stage
+2's committed Task 1–10 baseline adds the local backup journal, strict
+snapshot/segment payloads, consistent capture, verified local recovery
+objects, recovery-envelope preparation, the portable package, runtime
+activation, exact Android eligibility, inert restored input, and status UI.
+Its final review exposed correctness defects now being corrected in the paused
+dirty working tree. Drive transport, user recovery activation, and attachments
+are not implemented. The historical Train 1 Task 1.6 is superseded.
 
-## Stage 2 implemented and verified checkpoint — Tasks 1–10
+## Stage 2 final-review correction pause checkpoint — 29 July 2026
+
+The broad final review of `cc816ab..ccffefb` returned **Not Ready** with three
+Critical and six Important findings:
+
+- routine backup work could create a replacement content key;
+- complete snapshots could omit unused Inbox workflow statuses;
+- same-generation whole-row backup-state writes could erase fields owned by
+  other writers;
+- initial local crash output could be quarantined as Android-restored input;
+- Retry was inert while the production state flow remained active;
+- the durable recovery inbox was not treated as startup truth;
+- transient intake I/O could delete a valid linked package;
+- threshold selection materialised an unbounded journal backlog; and
+- generation advancement could leave a stale package labelled Ready.
+
+The paused correction currently implements, under new regression coverage:
+existing-key-only coordinator access, complete Inbox capture validation,
+bounded journal counting, schema-v6 latest-row mutation, atomic
+Ready-to-Update-Pending generation advancement, crash-aware intake and
+publication, active-loop Retry, durable inbox blocking, transient-I/O
+retention, guarded bootstrap authority, and direct publisher blocking.
+
+Exact pause state:
+
+- The source correction remains based on `ccffefb`; no correction commit
+  exists. This handoff-only pause checkpoint does not include Kotlin changes.
+- Eighteen tracked Kotlin source/test files are modified. The new
+  `ContentKeyBootstrapPolicy.kt` and `ContentKeyBootstrapPolicyTest.kt` are
+  untracked. The untracked `.kotlin/` directory was generated during
+  correction compilation. The user-owned untracked `artifacts/` directory
+  remains untouched and must stay untouched.
+- The latest completed compile command passed:
+  `./gradlew :core:data:compileDebugKotlin :app:compileDebugKotlin
+  :core:data:compileDebugUnitTestKotlin :app:compileDebugUnitTestKotlin
+  --stacktrace`.
+- An earlier focused unit slice and affected Android-test source compilation
+  passed, but both predate the newest hardening edits.
+- The latest focused RED,
+  `AndroidBackupRuntimeTest.durableInboxStatusPersistsAfterStateSeedEvenWhenKeyBootstrapIsBlocked`,
+  failed 1/1 as intended. Its production correction was added but not rerun.
+  The preceding three-test abandoned-Preparing/stale-retry slice failed 3/3 as
+  intended; its corrections also have not been rerun.
+- `git diff --check` passed at the pause. No Gradle invocation was active when
+  the agent stopped. No ADB, emulator, `bmgr`, uninstall, or data-clear action
+  occurred during the correction wave.
+
+Known remaining work before any completion claim:
+
+1. Add a regression for the committed baseline's legacy initial-crash residue:
+   a valid final file may coexist with `NOT_PREPARED`, while the current
+   `isInitialCrashCandidate()` accepts only `PREPARING`.
+2. Correct that case, then rerun the newest focused app/data tests and affected
+   Android-test compilation. The first focused resume command is:
+   `./gradlew :app:testDebugUnitTest --tests
+   'app.opentasks.backup.RestoredPackageIntakeTest.restartReconcilesInitialLocalFileCommitBeforeEnvelopeDatabaseCommit'
+   --stacktrace`.
+3. Strengthen real-Room recovery-envelope-versus-coordinator concurrency
+   coverage and make in-memory fake state mutation serialization match Room.
+4. Run the fresh full host, release, fixture, diff, and controller-reserved
+   disposable connected gates; commit coherent corrections; update this
+   handoff with exact counts; then perform the one scoped final re-review.
+
+Encrypted Google-account transport upload/restore remains the same external
+qualification gate. The paused work does not add any provider, WorkManager,
+recovery activation, writer takeover, remote merge, or attachment transport.
+
+## Stage 2 Task 1–10 historical verification checkpoint
+
+This checkpoint records the committed baseline before the final review. It is
+historical evidence, not a completion claim for the paused dirty correction.
 
 The approved subagent-driven execution ran directly on `main`:
 
