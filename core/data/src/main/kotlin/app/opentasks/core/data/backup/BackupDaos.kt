@@ -522,6 +522,22 @@ interface BackupStateStore {
     ): Int
 }
 
+interface BackupJournalStore {
+    suspend fun after(
+        vaultId: VaultId,
+        generation: Long,
+        limit: Int,
+    ): List<BackupJournalEntity>
+
+    suspend fun countAfter(vaultId: VaultId, generation: Long): Int
+
+    suspend fun between(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+    ): List<BackupJournalEntity>
+}
+
 interface RecoveryEnvelopeStore {
     suspend fun get(vaultId: VaultId): VaultRecoveryEnvelopeEntity?
     suspend fun upsert(entity: VaultRecoveryEnvelopeEntity)
@@ -555,6 +571,28 @@ class RoomBackupStateStore(
         legacyOutboxCoveredAtGeneration = entity.legacyOutboxCoveredAtGeneration,
         snapshotCreatedAtEpochMillis = entity.snapshotCreatedAtEpochMillis,
     )
+}
+
+class RoomBackupJournalStore(
+    private val dao: BackupJournalDao,
+) : BackupJournalStore {
+    override suspend fun after(
+        vaultId: VaultId,
+        generation: Long,
+        limit: Int,
+    ): List<BackupJournalEntity> = dao.after(vaultId.value, generation, limit)
+
+    override suspend fun countAfter(vaultId: VaultId, generation: Long): Int =
+        dao.countAfter(vaultId.value, generation)
+
+    override suspend fun between(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+    ): List<BackupJournalEntity> {
+        if (throughGeneration <= afterGeneration) return emptyList()
+        return dao.between(vaultId.value, afterGeneration + 1, throughGeneration)
+    }
 }
 
 class RoomRecoveryEnvelopeStore(
