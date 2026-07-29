@@ -85,6 +85,111 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
     }
 
     @Test
+    fun openExistingAbsentEnvelopeFailsWithoutCreatingPreferenceAliasOrContentKey() {
+        val trackingCrypto = CreateTrackingVaultCrypto()
+
+        val failure = assertThrows(IllegalStateException::class.java) {
+            AndroidVaultContentKeyStore(context, trackingCrypto).openExisting(firstVault)
+        }
+
+        assertTrue(failure.message?.contains("has not been initialised") == true)
+        assertEquals(0, trackingCrypto.createCount)
+        assertFalse(preferences().contains(nonceKey(firstVault)))
+        assertFalse(preferences().contains(ciphertextKey(firstVault)))
+        assertNull(keyStore().getKey(aliasFor(firstVault), null))
+    }
+
+    @Test
+    fun openExistingReopensTheEstablishedContentKeyWithoutGenerating() {
+        val original = AndroidVaultContentKeyStore(context).getOrCreate(firstVault)
+        val trackingCrypto = CreateTrackingVaultCrypto()
+
+        val reopened =
+            AndroidVaultContentKeyStore(context, trackingCrypto).openExisting(firstVault)
+
+        assertEquals(0, trackingCrypto.createCount)
+        assertArrayEquals(original.serializedKeyset, reopened.serializedKeyset)
+        original.close()
+        reopened.close()
+    }
+
+    @Test
+    fun openExistingCorruptionAndMissingAliasNeverGenerateAContentKey() {
+        val corruptions = listOf(
+            OpenCorruption(
+                expectedFailure = IllegalStateException::class.java,
+                mutate = { editor -> editor.remove(nonceKey(firstVault)) },
+            ),
+            OpenCorruption(
+                expectedFailure = IllegalStateException::class.java,
+                mutate = { editor -> editor.putString(nonceKey(firstVault), "%") },
+            ),
+            OpenCorruption(
+                expectedFailure = IllegalStateException::class.java,
+                mutate = { editor ->
+                    editor.putString(
+                        nonceKey(firstVault),
+                        Base64.encodeToString(ByteArray(11), Base64.NO_WRAP),
+                    )
+                },
+            ),
+            OpenCorruption(
+                expectedFailure = GeneralSecurityException::class.java,
+                mutate = { editor ->
+                    val ciphertext =
+                        checkNotNull(preferences().getString(ciphertextKey(firstVault), null))
+                    val tampered = Base64.decode(ciphertext, Base64.NO_WRAP).also { bytes ->
+                        bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
+                    }
+                    editor.putString(
+                        ciphertextKey(firstVault),
+                        Base64.encodeToString(tampered, Base64.NO_WRAP),
+                    )
+                    tampered.fill(0)
+                },
+            ),
+        )
+
+        corruptions.forEach { corruption ->
+            clearTestState()
+            AndroidVaultContentKeyStore(context).getOrCreate(firstVault).close()
+            assertTrue(preferences().edit().also(corruption.mutate).commit())
+            val trackingCrypto = CreateTrackingVaultCrypto()
+
+            val failure = runCatching {
+                AndroidVaultContentKeyStore(context, trackingCrypto).openExisting(firstVault)
+            }.exceptionOrNull()
+
+            assertTrue(corruption.expectedFailure.isInstance(failure))
+            assertEquals(0, trackingCrypto.createCount)
+        }
+
+        clearTestState()
+        AndroidVaultContentKeyStore(context).getOrCreate(firstVault).close()
+        keyStore().deleteEntry(aliasFor(firstVault))
+        val trackingCrypto = CreateTrackingVaultCrypto()
+        assertThrows(IllegalStateException::class.java) {
+            AndroidVaultContentKeyStore(context, trackingCrypto).openExisting(firstVault)
+        }
+        assertEquals(0, trackingCrypto.createCount)
+        assertNull(keyStore().getKey(aliasFor(firstVault), null))
+    }
+
+    @Test
+    fun getOrCreateRetainsTheSingleAllowedBootstrap() {
+        val trackingCrypto = CreateTrackingVaultCrypto()
+        val store = AndroidVaultContentKeyStore(context, trackingCrypto)
+
+        val first = store.getOrCreate(firstVault)
+        val reopened = store.openExisting(firstVault)
+
+        assertEquals(1, trackingCrypto.createCount)
+        assertArrayEquals(first.serializedKeyset, reopened.serializedKeyset)
+        first.close()
+        reopened.close()
+    }
+
+    @Test
     fun replacePersistsTheSuppliedKeyWithoutClosingIt() {
         val crypto = TinkVaultCrypto()
         AndroidVaultContentKeyStore(context).getOrCreate(firstVault).close()
@@ -548,6 +653,45 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
         keysets.forEach { it.fill(0) }
     }
 
+    @Test
+    fun concurrentOpensNeverReplaceTheEstablishedContentKey() {
+        val original = AndroidVaultContentKeyStore(context).getOrCreate(firstVault)
+        val expected = original.serializedKeyset.copyOf()
+        original.close()
+        val start = CountDownLatch(1)
+        val complete = CountDownLatch(CONCURRENT_MANAGER_COUNT)
+        val keysets = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val failures = Collections.synchronizedList(mutableListOf<Throwable>())
+        repeat(CONCURRENT_MANAGER_COUNT) {
+            Thread {
+                try {
+                    start.await()
+                    val trackingCrypto = CreateTrackingVaultCrypto()
+                    val key = AndroidVaultContentKeyStore(context, trackingCrypto)
+                        .openExisting(firstVault)
+                    check(trackingCrypto.createCount == 0)
+                    keysets += key.serializedKeyset.copyOf()
+                    key.close()
+                } catch (failure: Throwable) {
+                    failures += failure
+                } finally {
+                    complete.countDown()
+                }
+            }.start()
+        }
+
+        start.countDown()
+
+        assertTrue(complete.await(10, TimeUnit.SECONDS))
+        assertTrue(failures.isEmpty())
+        assertEquals(CONCURRENT_MANAGER_COUNT, keysets.size)
+        keysets.forEach { keyset ->
+            assertArrayEquals(expected, keyset)
+            keyset.fill(0)
+        }
+        expected.fill(0)
+    }
+
     private fun clearTestState() {
         context.deleteSharedPreferences(PREFERENCES_NAME)
         keyStore().deleteEntry(aliasFor(firstVault))
@@ -674,6 +818,11 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
             return delegate.createKey()
         }
     }
+
+    private data class OpenCorruption(
+        val expectedFailure: Class<out Throwable>,
+        val mutate: (SharedPreferences.Editor) -> Unit,
+    )
 
     private class ExpectedCommitFailure : RuntimeException()
 

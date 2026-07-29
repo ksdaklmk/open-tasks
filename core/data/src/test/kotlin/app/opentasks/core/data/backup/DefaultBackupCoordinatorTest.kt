@@ -866,6 +866,9 @@ private class InMemoryVaultContentKeyStore(
 
     override fun getOrCreate(vaultId: VaultId): VaultKey = crypto.createKey().also(issued::add)
 
+    override fun openExisting(vaultId: VaultId): VaultKey =
+        error("Backup coordinator tests bootstrap through getOrCreate")
+
     override fun replace(vaultId: VaultId, key: VaultKey) {
         issued += key
     }

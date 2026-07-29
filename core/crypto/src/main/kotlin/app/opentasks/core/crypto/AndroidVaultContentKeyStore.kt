@@ -89,15 +89,23 @@ internal object LocalVaultIdentityEncoding {
     }
 
     fun digest(vaultId: VaultId): String {
-        val digest = MessageDigest.getInstance(DIGEST_ALGORITHM)
-            .digest(identityBytes(vaultId))
-        return CharArray(digest.size * 2).also { encoded ->
-            digest.forEachIndexed { index, byte ->
-                val value = byte.toInt() and 0xff
-                encoded[index * 2] = HEX_DIGITS[value ushr 4]
-                encoded[index * 2 + 1] = HEX_DIGITS[value and 0x0f]
-            }
-        }.concatToString()
+        val identity = identityBytes(vaultId)
+        val digest = try {
+            MessageDigest.getInstance(DIGEST_ALGORITHM).digest(identity)
+        } finally {
+            identity.fill(0)
+        }
+        return try {
+            CharArray(digest.size * 2).also { encoded ->
+                digest.forEachIndexed { index, byte ->
+                    val value = byte.toInt() and 0xff
+                    encoded[index * 2] = HEX_DIGITS[value ushr 4]
+                    encoded[index * 2 + 1] = HEX_DIGITS[value and 0x0f]
+                }
+            }.concatToString()
+        } finally {
+            digest.fill(0)
+        }
     }
 
     fun associatedData(vaultId: VaultId): ByteArray {
@@ -112,6 +120,7 @@ internal object LocalVaultIdentityEncoding {
         result[lengthOffset + 2] = (identity.size ushr 8).toByte()
         result[lengthOffset + 3] = identity.size.toByte()
         identity.copyInto(result, destinationOffset = lengthOffset + IDENTITY_LENGTH_BYTES)
+        identity.fill(0)
         return result
     }
 
@@ -148,14 +157,24 @@ class AndroidVaultContentKeyStore internal constructor(
         val prior = readPreferenceState(vaultId)
         when (val stored = prior.toStoredEnvelope()) {
             StoredEnvelope.Absent -> createAndPersist(vaultId, prior)
-            is StoredEnvelope.Complete -> unwrap(vaultId, stored)
+            is StoredEnvelope.Complete -> unwrapAndClear(vaultId, stored)
         }
     }
+
+    override fun openExisting(vaultId: VaultId): VaultKey =
+        synchronized(PROCESS_LOCK) {
+            when (val stored = readPreferenceState(vaultId).toStoredEnvelope()) {
+                StoredEnvelope.Absent ->
+                    error("The local vault-content key has not been initialised")
+                is StoredEnvelope.Complete -> unwrapAndClear(vaultId, stored)
+            }
+        }
 
     override fun replace(vaultId: VaultId, key: VaultKey) = synchronized(PROCESS_LOCK) {
         val prior = readPreferenceState(vaultId)
         val storedEnvelope = prior.toStoredEnvelope()
         val requireExistingAlias = storedEnvelope is StoredEnvelope.Complete
+        storedEnvelope.clear()
         val alias = aliasFor(vaultId)
         val aliasExisted = wrappingKeyBoundary.containsAlias(alias)
         try {
@@ -238,10 +257,16 @@ class AndroidVaultContentKeyStore internal constructor(
         check(nonce != null && ciphertext != null) {
             "The local vault-content key envelope is incomplete"
         }
-        return StoredEnvelope.Complete(
-            nonce = nonce.decodeBase64(),
-            ciphertext = ciphertext.decodeBase64(),
-        )
+        val decodedNonce = nonce.decodeBase64()
+        return try {
+            StoredEnvelope.Complete(
+                nonce = decodedNonce,
+                ciphertext = ciphertext.decodeBase64(),
+            )
+        } catch (failure: Throwable) {
+            decodedNonce.fill(0)
+            throw failure
+        }
     }
 
     private fun wrap(
@@ -250,6 +275,7 @@ class AndroidVaultContentKeyStore internal constructor(
         requireExistingAlias: Boolean,
     ): WrappedKey {
         val plaintext = key.copySerializedKeyset()
+        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId)
         return try {
             val cipher = Cipher.getInstance(AES_GCM).apply {
                 init(
@@ -259,16 +285,27 @@ class AndroidVaultContentKeyStore internal constructor(
                         requireExistingAlias,
                     ),
                 )
-                updateAAD(LocalVaultIdentityEncoding.associatedData(vaultId))
+                updateAAD(associatedData)
             }
             WrappedKey(
                 nonce = cipher.iv.copyOf(),
                 ciphertext = cipher.doFinal(plaintext),
             )
         } finally {
+            associatedData.fill(0)
             plaintext.fill(0)
         }
     }
+
+    private fun unwrapAndClear(
+        vaultId: VaultId,
+        stored: StoredEnvelope.Complete,
+    ): VaultKey =
+        try {
+            unwrap(vaultId, stored)
+        } finally {
+            stored.clear()
+        }
 
     private fun unwrap(
         vaultId: VaultId,
@@ -277,17 +314,22 @@ class AndroidVaultContentKeyStore internal constructor(
         check(stored.nonce.size == GCM_NONCE_BYTES) {
             "The local vault-content key nonce is invalid"
         }
-        val plaintext = Cipher.getInstance(AES_GCM).run {
-            init(
-                Cipher.DECRYPT_MODE,
-                wrappingKeyBoundary.getOrCreate(
-                    aliasFor(vaultId),
-                    requireExisting = true,
-                ),
-                GCMParameterSpec(GCM_TAG_BITS, stored.nonce),
-            )
-            updateAAD(LocalVaultIdentityEncoding.associatedData(vaultId))
-            doFinal(stored.ciphertext)
+        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId)
+        val plaintext = try {
+            Cipher.getInstance(AES_GCM).run {
+                init(
+                    Cipher.DECRYPT_MODE,
+                    wrappingKeyBoundary.getOrCreate(
+                        aliasFor(vaultId),
+                        requireExisting = true,
+                    ),
+                    GCMParameterSpec(GCM_TAG_BITS, stored.nonce),
+                )
+                updateAAD(associatedData)
+                doFinal(stored.ciphertext)
+            }
+        } finally {
+            associatedData.fill(0)
         }
         return VaultKey(plaintext)
     }
@@ -297,17 +339,22 @@ class AndroidVaultContentKeyStore internal constructor(
         wrapped: WrappedKey,
         prior: PreferenceState,
     ) {
-        commitOrRollback(
-            vaultId = vaultId,
-            prior = prior,
-            editor = preferences.edit()
-                .putString(noncePreferenceKey(vaultId), wrapped.nonce.encodeBase64())
-                .putString(
-                    ciphertextPreferenceKey(vaultId),
-                    wrapped.ciphertext.encodeBase64(),
-                ),
-            failureMessage = "Unable to persist the local vault-content key envelope",
-        )
+        try {
+            commitOrRollback(
+                vaultId = vaultId,
+                prior = prior,
+                editor = preferences.edit()
+                    .putString(noncePreferenceKey(vaultId), wrapped.nonce.encodeBase64())
+                    .putString(
+                        ciphertextPreferenceKey(vaultId),
+                        wrapped.ciphertext.encodeBase64(),
+                    ),
+                failureMessage = "Unable to persist the local vault-content key envelope",
+            )
+        } finally {
+            wrapped.nonce.fill(0)
+            wrapped.ciphertext.fill(0)
+        }
     }
 
     private fun commitOrRollback(
@@ -397,6 +444,13 @@ class AndroidVaultContentKeyStore internal constructor(
             val nonce: ByteArray,
             val ciphertext: ByteArray,
         ) : StoredEnvelope
+    }
+
+    private fun StoredEnvelope.clear() {
+        if (this is StoredEnvelope.Complete) {
+            nonce.fill(0)
+            ciphertext.fill(0)
+        }
     }
 
     private data class WrappedKey(

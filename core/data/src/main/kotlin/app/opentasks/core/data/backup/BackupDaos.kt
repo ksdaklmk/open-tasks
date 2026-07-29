@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
@@ -539,8 +540,8 @@ interface BackupJournalStore {
 }
 
 interface RecoveryEnvelopeStore {
-    suspend fun get(vaultId: VaultId): VaultRecoveryEnvelopeEntity?
-    suspend fun upsert(entity: VaultRecoveryEnvelopeEntity)
+    suspend fun get(vaultId: VaultId): VaultKeyEnvelope?
+    suspend fun upsert(vaultId: VaultId, envelope: VaultKeyEnvelope)
     suspend fun delete(vaultId: VaultId)
 }
 
@@ -598,11 +599,29 @@ class RoomBackupJournalStore(
 class RoomRecoveryEnvelopeStore(
     private val dao: VaultRecoveryEnvelopeDao,
 ) : RecoveryEnvelopeStore {
-    override suspend fun get(vaultId: VaultId): VaultRecoveryEnvelopeEntity? =
-        dao.get(vaultId.value)
+    override suspend fun get(vaultId: VaultId): VaultKeyEnvelope? {
+        val entity = dao.get(vaultId.value) ?: return null
+        return try {
+            RecoveryEnvelopeCodec.fromEntity(entity)
+        } finally {
+            entity.salt.fill(0)
+            entity.nonce.fill(0)
+            entity.wrappedKeyset.fill(0)
+        }
+    }
 
-    override suspend fun upsert(entity: VaultRecoveryEnvelopeEntity) {
-        dao.upsert(entity)
+    override suspend fun upsert(
+        vaultId: VaultId,
+        envelope: VaultKeyEnvelope,
+    ) {
+        val entity = RecoveryEnvelopeCodec.toEntity(vaultId, envelope)
+        try {
+            dao.upsert(entity)
+        } finally {
+            entity.salt.fill(0)
+            entity.nonce.fill(0)
+            entity.wrappedKeyset.fill(0)
+        }
     }
 
     override suspend fun delete(vaultId: VaultId) {
