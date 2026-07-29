@@ -13,7 +13,7 @@ import app.opentasks.core.model.RestoredPackageCondition
 import app.opentasks.core.model.VaultId
 import java.io.File
 import java.nio.file.Files
-import java.nio.file.StandardCopyOption
+import java.nio.file.Path
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 
@@ -37,7 +37,8 @@ class RestoredPackageIntake(
     private val envelopeStore: RecoveryEnvelopeStore,
     private val contentKeyStore: VaultContentKeyStore,
     private val codec: PortablePackageCodec,
-    private val moveAtomicallyNoReplace: (File, File) -> Boolean = ::atomicMoveNoReplace,
+    private val moveAtomicallyNoReplace: (File, File) -> Boolean =
+        SameFileSystemNoReplaceMover::move,
 ) {
     suspend fun inspect(): RestoredPackageIntakeResult {
         val packageLength = packageFile.length()
@@ -76,8 +77,13 @@ class RestoredPackageIntake(
             return preserve(RestoredPackageCondition.PRESERVED)
         }
 
+        val key = try {
+            contentKeyStore.openExisting(vaultId)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return RestoredPackageIntakeResult.PreservationBlocked
+        }
         val verified = try {
-            val key = contentKeyStore.openExisting(vaultId)
             try {
                 packageFile.openRead().use {
                     codec.verifyComplete(it, packageLength, key)
@@ -207,23 +213,37 @@ class RestoredPackageIntake(
         const val PACKAGE_READY = "READY"
         const val PACKAGE_UPDATE_PENDING = "UPDATE_PENDING"
         const val HEX = "0123456789abcdef"
+    }
+}
 
-        fun atomicMoveNoReplace(source: File, target: File): Boolean {
-            if (target.exists()) return false
-            if (target.parentFile?.mkdirs() == false && target.parentFile?.isDirectory != true) {
-                return false
-            }
-            return try {
-                Files.move(
-                    source.toPath(),
-                    target.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                )
+internal class SameFileSystemNoReplaceMover(
+    private val createLink: (Path, Path) -> Unit = { target, source ->
+        Files.createLink(target, source)
+    },
+    private val deleteSource: (Path) -> Unit = Files::delete,
+) {
+    fun moveNoReplace(source: File, target: File): Boolean {
+        if (target.parentFile?.mkdirs() == false && target.parentFile?.isDirectory != true) {
+            return false
+        }
+        return try {
+            createLink(target.toPath(), source.toPath())
+            try {
+                deleteSource(source.toPath())
                 true
             } catch (_: Throwable) {
                 false
             }
+        } catch (_: Throwable) {
+            false
         }
+    }
+
+    companion object {
+        private val default = SameFileSystemNoReplaceMover()
+
+        fun move(source: File, target: File): Boolean =
+            default.moveNoReplace(source, target)
     }
 }
 

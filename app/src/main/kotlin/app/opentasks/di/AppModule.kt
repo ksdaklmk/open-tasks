@@ -5,9 +5,12 @@ import app.opentasks.backup.AndroidAtomicPackageFile
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.DefaultAndroidBackupRuntime
+import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
 import app.opentasks.backup.RestoredPackageIntake
+import app.opentasks.backup.recordRestoredPackageStatus
+import app.opentasks.backup.restoredPackagePublicationBlocked
 import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.TinkVaultCrypto
 import app.opentasks.core.crypto.VaultContentKeyStore
@@ -20,9 +23,11 @@ import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
 import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PortablePackageCodec
 import app.opentasks.core.domain.BackupCoordinator
+import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
 import dagger.Module
@@ -83,6 +88,11 @@ object AppModule {
     fun provideAndroidBackupFiles(
         @ApplicationContext context: Context,
     ): AndroidBackupFiles = AndroidBackupFiles(context)
+
+    @Provides
+    @Singleton
+    fun provideBackupApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Provides
     @Singleton
@@ -150,16 +160,40 @@ object AppModule {
     @Provides
     @Singleton
     fun provideAndroidBackupRuntime(
+        scope: CoroutineScope,
         runtime: LocalVaultRuntime,
         intake: RestoredPackageIntake,
         contentKeyStore: VaultContentKeyStore,
         coordinator: BackupCoordinator,
         publisher: PortableBackupPublisher,
     ): AndroidBackupRuntime = DefaultAndroidBackupRuntime(
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        scope = scope,
         restoredPackageIntake = intake::inspect,
-        bootstrapContentKey = {
-            contentKeyStore.getOrCreate(runtime.vaultId).close()
+        bootstrapContentKey = bootstrap@{
+            val state = try {
+                runtime.backupStateStore.get(runtime.vaultId)
+            } catch (_: Throwable) {
+                return@bootstrap false
+            }
+            val envelope = try {
+                runtime.recoveryEnvelopeStore.get(runtime.vaultId)
+            } catch (_: Throwable) {
+                return@bootstrap false
+            }
+            try {
+                if (state?.recoveryEnvelopeReady == true || envelope != null) {
+                    contentKeyStore.openExisting(runtime.vaultId).close()
+                } else {
+                    contentKeyStore.getOrCreate(runtime.vaultId).close()
+                }
+                true
+            } catch (_: Throwable) {
+                false
+            } finally {
+                envelope?.kdf?.salt?.fill(0)
+                envelope?.nonce?.fill(0)
+                envelope?.wrappedKeyset?.fill(0)
+            }
         },
         requestLocalBackup = coordinator::request,
         observeBackupState = {
@@ -173,9 +207,36 @@ object AppModule {
                 true
             } ?: false
         },
+        recordStatus = { status ->
+            if (status is AndroidBackupStatus.RestoredPackageDetected) {
+                recordRestoredPackageStatus(
+                    stateStore = runtime.backupStateStore,
+                    vaultId = runtime.vaultId,
+                    status = status,
+                )
+            }
+        },
+        restoredPublicationBlocked = {
+            restoredPackagePublicationBlocked(
+                stateStore = runtime.backupStateStore,
+                vaultId = runtime.vaultId,
+            )
+        },
         refreshPortablePackage = {
             publisher.refresh()
             Unit
+        },
+    )
+
+    @Provides
+    @Singleton
+    fun provideAndroidBackupStatusSource(
+        scope: CoroutineScope,
+        runtime: LocalVaultRuntime,
+    ): AndroidBackupStatusSource = PersistedAndroidBackupStatusSource(
+        scope = scope,
+        observeBackupState = {
+            runtime.backupStateStore.observe(runtime.vaultId)
         },
     )
 }

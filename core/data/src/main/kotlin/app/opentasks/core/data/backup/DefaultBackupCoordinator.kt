@@ -181,7 +181,9 @@ class DefaultBackupCoordinator(
             currentBaseObjectId = objectId,
             previousBaseObjectId = state.currentBaseObjectId,
             latestVerifiedSegmentGeneration = capture.generation.value,
-            failureCategory = null,
+            failureCategory = latest.failureCategory.takeIf {
+                latest.packageState == PACKAGE_RESTORED_DETECTED
+            },
             legacyOutboxCoveredAtGeneration = capture.generation.value,
             snapshotCreatedAtEpochMillis = now().toEpochMilli(),
         )
@@ -238,7 +240,9 @@ class DefaultBackupCoordinator(
             val latest = checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
             val updated = latest.copy(
                 latestVerifiedSegmentGeneration = payload.lastGeneration,
-                failureCategory = null,
+                failureCategory = latest.failureCategory.takeIf {
+                    latest.packageState == PACKAGE_RESTORED_DETECTED
+                },
             )
             check(stateStore.compareAndUpdate(updated, latest.currentGeneration) == 1) {
                 "Backup state changed before segment checkpoint"
@@ -347,5 +351,6 @@ class DefaultBackupCoordinator(
 
     private companion object {
         const val MAX_SEGMENT_ENTRIES = 5_000
+        const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"
     }
 }

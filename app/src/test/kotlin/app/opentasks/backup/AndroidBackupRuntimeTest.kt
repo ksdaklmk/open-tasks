@@ -1,7 +1,9 @@
 package app.opentasks.backup
 
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.RestoredPackageCondition
+import app.opentasks.core.model.VaultId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -9,7 +11,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -27,7 +32,10 @@ class AndroidBackupRuntimeTest {
                 events += "intake"
                 RestoredPackageIntakeResult.NoPackage
             },
-            bootstrapKey = { events += "key" },
+            bootstrapKey = {
+                events += "key"
+                true
+            },
             requestCoordinator = { events += "coordinator" },
             observeStates = {
                 events += "observe"
@@ -56,7 +64,10 @@ class AndroidBackupRuntimeTest {
         val firstRequest = CountDownLatch(1)
         val retryRequest = CountDownLatch(1)
         val fixture = runtime(
-            bootstrapKey = { keyBootstraps += 1 },
+            bootstrapKey = {
+                keyBootstraps += 1
+                true
+            },
             requestCoordinator = {
                 coordinatorRequests += 1
                 if (coordinatorRequests == 1) firstRequest.countDown() else retryRequest.countDown()
@@ -85,6 +96,7 @@ class AndroidBackupRuntimeTest {
         val fixture = runtime(
             bootstrapKey = {
                 keyBootstraps += 1
+                true
             },
             requestCoordinator = { Unit },
             observeStates = {
@@ -135,19 +147,16 @@ class AndroidBackupRuntimeTest {
 
     @Test
     fun retryResumesIncompleteStateAfterIsolatedStartupFailure() {
-        var intakeCalls = 0
         var coordinatorRequests = 0
         val completed = CountDownLatch(1)
         val states = MutableSharedFlow<BackupStateEntity>(replay = 1)
         states.tryEmit(state())
         val fixture = runtime(
-            intake = {
-                intakeCalls += 1
-                if (intakeCalls == 1) throw IllegalStateException("interrupted startup")
-                RestoredPackageIntakeResult.NoPackage
-            },
             requestCoordinator = {
                 coordinatorRequests += 1
+                if (coordinatorRequests == 1) {
+                    throw IllegalStateException("interrupted coordinator")
+                }
                 completed.countDown()
             },
             observeStates = { states },
@@ -158,52 +167,176 @@ class AndroidBackupRuntimeTest {
         fixture.runtime.retry()
 
         assertTrue(completed.await(2, TimeUnit.SECONDS))
-        assertEquals(2, intakeCalls)
-        assertEquals(1, coordinatorRequests)
+        assertEquals(2, coordinatorRequests)
         fixture.close()
     }
 
     @Test
-    fun preservationBlockPreventsKeyCoordinatorAndPublisherWork() {
-        var keyCalls = 0
-        var coordinatorCalls = 0
+    fun preservationBlockRunsLocalStartupInOrderButPreventsPublisherReplacement() {
+        val events = mutableListOf<String>()
         var publisherCalls = 0
+        val observed = CountDownLatch(1)
         val fixture = runtime(
             intake = {
+                events += "intake"
                 RestoredPackageIntakeResult.PreservationBlocked
             },
-            bootstrapKey = { keyCalls += 1 },
-            requestCoordinator = { coordinatorCalls += 1 },
+            bootstrapKey = {
+                events += "key"
+                true
+            },
+            requestCoordinator = { events += "coordinator" },
+            observeStates = {
+                events += "observe"
+                observed.countDown()
+                flowOf(state(envelopeReady = true))
+            },
             refreshPublisher = { publisherCalls += 1 },
         )
 
         fixture.runtime.start()
-        Thread.sleep(80)
+        assertTrue(observed.await(2, TimeUnit.SECONDS))
+        Thread.sleep(50)
 
-        assertEquals(0, keyCalls)
-        assertEquals(0, coordinatorCalls)
+        assertEquals(listOf("intake", "key", "coordinator", "observe"), events)
         assertEquals(0, publisherCalls)
         fixture.close()
     }
 
     @Test
-    fun preservedUnknownPackageDoesNotActivateItAndAllowsFreshLocalPublication() {
-        val published = CountDownLatch(1)
+    fun preservedUnknownPackageRecordsBoundedStatusAndBlocksPublisherOnly() {
+        val recorded = mutableListOf<AndroidBackupStatus>()
+        val coordinator = CountDownLatch(1)
+        var publisherCalls = 0
         val fixture = runtime(
             intake = {
                 RestoredPackageIntakeResult.Preserved(RestoredPackageCondition.PRESERVED)
             },
-            refreshPublisher = { published.countDown() },
+            recordStatus = { recorded += it },
+            requestCoordinator = { coordinator.countDown() },
+            refreshPublisher = { publisherCalls += 1 },
             observeStates = {
-                MutableSharedFlow<BackupStateEntity>(replay = 1).also {
-                    it.tryEmit(state(envelopeReady = true))
-                }
+                flowOf(state(envelopeReady = true))
             },
         )
 
         fixture.runtime.start()
+        assertTrue(coordinator.await(2, TimeUnit.SECONDS))
+        Thread.sleep(50)
 
-        assertTrue(published.await(2, TimeUnit.SECONDS))
+        assertEquals(
+            listOf(
+                AndroidBackupStatus.RestoredPackageDetected(
+                    RestoredPackageCondition.PRESERVED,
+                ),
+            ),
+            recorded,
+        )
+        assertEquals(0, publisherCalls)
+        fixture.close()
+    }
+
+    @Test
+    fun persistedRestoredStatusBlocksPublisherAcrossRestartAndIsExposed() = runBlocking {
+        val store = FakeStateStore(
+            state(
+                envelopeReady = true,
+                packageState = "RESTORED_PACKAGE_DETECTED",
+                failureCategory = "INCOMPATIBLE_OR_CORRUPT",
+            ),
+        )
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val source = PersistedAndroidBackupStatusSource(
+            scope = scope,
+            observeBackupState = { store.observe(VaultId("vault-primary")) },
+        )
+        val exposed = withTimeout(2_000) {
+            source.status.first { it is AndroidBackupStatus.RestoredPackageDetected }
+        }
+        var publisherCalls = 0
+        val observed = CountDownLatch(1)
+        val fixture = runtime(
+            observeStates = {
+                observed.countDown()
+                store.observe(VaultId("vault-primary"))
+            },
+            restoredPublicationBlocked = { true },
+            refreshPublisher = { publisherCalls += 1 },
+        )
+
+        fixture.runtime.start()
+        assertTrue(observed.await(2, TimeUnit.SECONDS))
+        Thread.sleep(50)
+
+        assertEquals(
+            AndroidBackupStatus.RestoredPackageDetected(
+                RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT,
+            ),
+            exposed,
+        )
+        assertEquals(0, publisherCalls)
+        fixture.close()
+        scope.cancel()
+    }
+
+    @Test
+    fun restoredStatusWriterPersistsOnlyBoundedPrivateClassification() = runBlocking {
+        val store = FakeStateStore(state(envelopeReady = true))
+
+        recordRestoredPackageStatus(
+            stateStore = store,
+            vaultId = VaultId("vault-primary"),
+            status = AndroidBackupStatus.RestoredPackageDetected(
+                RestoredPackageCondition.PRESERVED,
+            ),
+        )
+
+        assertEquals("RESTORED_PACKAGE_DETECTED", store.value.packageState)
+        assertEquals("PRESERVED", store.value.failureCategory)
+        assertEquals(7L, store.value.currentGeneration)
+        assertEquals(null, store.value.portablePackageGeneration)
+    }
+
+    @Test
+    fun guardedContentKeyFailureStopsBackupWithoutCreatingReplacement() {
+        var coordinatorCalls = 0
+        var observationCalls = 0
+        var publisherCalls = 0
+        val fixture = runtime(
+            bootstrapKey = { false },
+            requestCoordinator = { coordinatorCalls += 1 },
+            observeStates = {
+                observationCalls += 1
+                flowOf(state(envelopeReady = true))
+            },
+            refreshPublisher = { publisherCalls += 1 },
+        )
+
+        fixture.runtime.start()
+        Thread.sleep(50)
+
+        assertEquals(0, coordinatorCalls)
+        assertEquals(0, observationCalls)
+        assertEquals(0, publisherCalls)
+        fixture.close()
+    }
+
+    @Test
+    fun intakeFailureStillStartsLocalCoordinatorAndBlocksPublisher() {
+        val coordinator = CountDownLatch(1)
+        var publisherCalls = 0
+        val fixture = runtime(
+            intake = { throw IllegalStateException("intake failed") },
+            requestCoordinator = { coordinator.countDown() },
+            observeStates = { flowOf(state(envelopeReady = true)) },
+            refreshPublisher = { publisherCalls += 1 },
+        )
+
+        fixture.runtime.start()
+        assertTrue(coordinator.await(2, TimeUnit.SECONDS))
+        Thread.sleep(50)
+
+        assertEquals(0, publisherCalls)
         fixture.close()
     }
 
@@ -211,12 +344,14 @@ class AndroidBackupRuntimeTest {
         intake: suspend () -> RestoredPackageIntakeResult = {
             RestoredPackageIntakeResult.NoPackage
         },
-        bootstrapKey: () -> Unit = {},
+        bootstrapKey: suspend () -> Boolean = { true },
         requestCoordinator: suspend () -> Unit = {},
         observeStates: () -> kotlinx.coroutines.flow.Flow<BackupStateEntity> = {
             MutableSharedFlow(replay = 1)
         },
         envelopeAvailable: suspend () -> Boolean = { true },
+        recordStatus: suspend (AndroidBackupStatus) -> Unit = {},
+        restoredPublicationBlocked: suspend () -> Boolean = { false },
         refreshPublisher: suspend () -> Unit = {},
         debounceMillis: Long = 0,
     ): RuntimeFixture {
@@ -229,6 +364,8 @@ class AndroidBackupRuntimeTest {
                 requestLocalBackup = requestCoordinator,
                 observeBackupState = observeStates,
                 envelopeAvailable = envelopeAvailable,
+                recordStatus = recordStatus,
+                restoredPublicationBlocked = restoredPublicationBlocked,
                 refreshPortablePackage = refreshPublisher,
                 debounceMillis = debounceMillis,
             ),
@@ -247,6 +384,8 @@ class AndroidBackupRuntimeTest {
         fun state(
             generation: Long = 7,
             envelopeReady: Boolean = false,
+            packageState: String = "NOT_PREPARED",
+            failureCategory: String? = null,
         ) = BackupStateEntity(
             vaultId = "vault-primary",
             currentGeneration = generation,
@@ -257,11 +396,30 @@ class AndroidBackupRuntimeTest {
             portablePackageGeneration = null,
             portablePackageBytes = null,
             portablePackageProducedAtEpochMillis = null,
-            packageState = "NOT_PREPARED",
-            failureCategory = null,
+            packageState = packageState,
+            failureCategory = failureCategory,
             recoveryEnvelopeReady = envelopeReady,
             legacyOutboxCoveredAtGeneration = generation,
             snapshotCreatedAtEpochMillis = 1234,
         )
+    }
+
+    private class FakeStateStore(initial: BackupStateEntity) :
+        app.opentasks.core.data.backup.BackupStateStore {
+        private val flow = kotlinx.coroutines.flow.MutableStateFlow(initial)
+        val value: BackupStateEntity
+            get() = flow.value
+
+        override fun observe(vaultId: VaultId) = flow
+        override suspend fun get(vaultId: VaultId) = flow.value
+
+        override suspend fun compareAndUpdate(
+            entity: BackupStateEntity,
+            expectedCurrentGeneration: Long,
+        ): Int {
+            if (flow.value.currentGeneration != expectedCurrentGeneration) return 0
+            flow.value = entity
+            return 1
+        }
     }
 }

@@ -82,6 +82,42 @@ class DefaultBackupCoordinatorTest {
     }
 
     @Test
+    fun localCheckpointPreservesRestoredPackageClassification() = runBlocking {
+        val root = Files.createTempDirectory("backup-coordinator-restored-state").toFile()
+        val fixture = BackupPayloadTestFixtures.snapshot()
+        val capture = StructuredBackupCapture(
+            vaultId = VaultId(fixture.vaultId),
+            generation = BackupGeneration(fixture.coveredGeneration),
+            records = fixture.records,
+        )
+        val state = InMemoryBackupStateStore(
+            defaultState(capture).copy(
+                packageState = "RESTORED_PACKAGE_DETECTED",
+                failureCategory = "PRESERVED",
+            ),
+        )
+        val crypto = TinkVaultCrypto()
+        val keyStore = InMemoryVaultContentKeyStore(crypto)
+        try {
+            DefaultBackupCoordinator(
+                vaultId = capture.vaultId,
+                captureSource = { capture },
+                stateStore = state,
+                journalStore = InMemoryBackupJournalStore(emptyList()),
+                objectStore = DefaultLocalBackupObjectStore(root),
+                authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(crypto),
+                contentKeyStore = keyStore,
+            ).request()
+
+            assertEquals("RESTORED_PACKAGE_DETECTED", state.value.packageState)
+            assertEquals("PRESERVED", state.value.failureCategory)
+        } finally {
+            keyStore.close()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun coordinatorSelectsOnlyTheCompleteRangeUpToItsCapturedGeneration() = runBlocking {
         val fixture = BackupPayloadTestFixtures.snapshot()
         val capture = StructuredBackupCapture(

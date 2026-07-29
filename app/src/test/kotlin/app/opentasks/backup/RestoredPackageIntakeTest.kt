@@ -21,6 +21,8 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -79,6 +81,22 @@ class RestoredPackageIntakeTest {
         assertFalse(fixture.eligible.exists())
         assertFalse(fixture.inbox.exists())
         assertEquals(1, fixture.codec.completeVerificationCount)
+    }
+
+    @Test
+    fun missingExistingContentKeyKeepsLinkedEligiblePackageAndFailsClosed() = runBlocking {
+        val fixture = fixture()
+        val original = fixture.eligible.readBytes()
+        fixture.keyStore.openFailure = IllegalStateException("local key alias is unavailable")
+
+        assertEquals(
+            RestoredPackageIntakeResult.PreservationBlocked,
+            fixture.intake.inspect(),
+        )
+        assertArrayEquals(original, fixture.eligible.readBytes())
+        assertFalse(fixture.inbox.exists())
+        assertEquals(1, fixture.keyStore.openCount)
+        assertEquals(0, fixture.codec.completeVerificationCount)
     }
 
     @Test
@@ -158,11 +176,56 @@ class RestoredPackageIntakeTest {
         assertEquals(0, fixture.codec.completeVerificationCount)
     }
 
+    @Test
+    fun concurrentNoReplacePreservationNeverOverwritesInbox() {
+        val directory = Files.createTempDirectory("restored-intake-race").toFile()
+        val first = File(directory, "first.otb").also { it.writeText("first") }
+        val second = File(directory, "second.otb").also { it.writeText("second") }
+        val inbox = File(directory, "incoming.otb")
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val done = CountDownLatch(2)
+        val results = java.util.Collections.synchronizedList(mutableListOf<Boolean>())
+
+        listOf(first, second).forEach { source ->
+            Thread {
+                ready.countDown()
+                start.await()
+                results += SameFileSystemNoReplaceMover.move(source, inbox)
+                done.countDown()
+            }.start()
+        }
+        assertTrue(ready.await(2, TimeUnit.SECONDS))
+        start.countDown()
+        assertTrue(done.await(2, TimeUnit.SECONDS))
+
+        assertEquals(1, results.count { it })
+        assertTrue(inbox.readText() in setOf("first", "second"))
+        val remaining = listOf(first, second).filter(File::exists)
+        assertEquals(1, remaining.size)
+        assertTrue(remaining.single().readText() in setOf("first", "second"))
+        assertTrue(remaining.single().readText() != inbox.readText())
+    }
+
+    @Test
+    fun failedSourceDeleteAfterAtomicNoReplaceCreatePreservesEligibleSource() {
+        val directory = Files.createTempDirectory("restored-intake-delete").toFile()
+        val source = File(directory, "eligible.otb").also { it.writeText("eligible") }
+        val inbox = File(directory, "incoming.otb")
+        val mover = SameFileSystemNoReplaceMover(
+            deleteSource = { throw java.io.IOException("delete failed") },
+        )
+
+        assertFalse(mover.moveNoReplace(source, inbox))
+        assertEquals("eligible", source.readText())
+        assertEquals("eligible", inbox.readText())
+    }
+
     private fun fixture(
         fileBytes: ByteArray? = "eligible-package".toByteArray(),
         state: BackupStateEntity? = state(),
         header: PortableBootstrapHeaderV1 = header(),
-        moveAtomicallyNoReplace: (File, File) -> Boolean = ::atomicMoveNoReplace,
+        moveAtomicallyNoReplace: ((File, File) -> Boolean)? = null,
     ): IntakeFixture {
         val directory = Files.createTempDirectory("restored-intake").toFile()
         val eligible = File(directory, "files/android_backup/open_tasks_portable_v1.otb")
@@ -190,7 +253,8 @@ class RestoredPackageIntakeTest {
                 envelopeStore = envelopeStore,
                 contentKeyStore = keyStore,
                 codec = codec,
-                moveAtomicallyNoReplace = moveAtomicallyNoReplace,
+                moveAtomicallyNoReplace = moveAtomicallyNoReplace
+                    ?: SameFileSystemNoReplaceMover::move,
             ),
         )
     }
@@ -249,11 +313,13 @@ class RestoredPackageIntakeTest {
 
     private class RecordingKeyStore : VaultContentKeyStore {
         var openCount = 0
+        var openFailure: Throwable? = null
 
         override fun getOrCreate(vaultId: VaultId): VaultKey = key()
 
         override fun openExisting(vaultId: VaultId): VaultKey {
             openCount += 1
+            openFailure?.let { throw it }
             return key()
         }
 
@@ -381,18 +447,6 @@ class RestoredPackageIntakeTest {
                 envelope.nonce.fill(0)
                 envelope.wrappedKeyset.fill(0)
             }
-        }
-
-        fun atomicMoveNoReplace(source: File, target: File): Boolean = try {
-            checkNotNull(target.parentFile).mkdirs()
-            Files.move(
-                source.toPath(),
-                target.toPath(),
-                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-            )
-            true
-        } catch (_: Throwable) {
-            false
         }
     }
 }
