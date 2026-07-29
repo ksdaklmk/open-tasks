@@ -12,8 +12,8 @@ encrypted workspace.
 **Authority:** The approved decision record is
 [Local Authority, Cloud Attachments, and Backup Direction Design](../specs/2026-07-28-local-authority-cloud-attachments-backup-design.md).
 Encrypted Room is the sole live structured-data authority. Backup, Android
-Auto Backup, Drive transport, recovery UI, and attachments are approved future
-work and are not operational at this checkpoint.
+Auto Backup, Drive transport, recovery UI, and attachments remain incomplete
+and are not user-visible or operational at this checkpoint.
 
 **Tech Stack:** Kotlin 2.3.21, Android Gradle Plugin 9.3.1, Java 17 on JDK 21,
 Compose BOM 2026.06.00, Navigation 3, Material 3 Adaptive, Hilt, coroutines,
@@ -27,11 +27,17 @@ Macrobenchmark, JUnit 4, Compose UI test v2, and GitHub Actions.
 - Stage 1 is complete and verified. Its implemented internal foundation
   includes the authenticated provider-independent object codec in `core:data`,
   with canonical framing in `core:sync` and generic AEAD in `core:crypto`.
-- No Stage 2 source change has started. Provider transport, backup/blob
-  services, recovery, scheduling, and product-visible backup or attachment
-  features remain unimplemented.
-- Existing Room, outbox, and other local data remain untouched.
-- Android Auto Backup remains disabled until Stage 2.
+- Stage 2 Tasks 1–5 are complete through `2a72670`. Room v6 now has an atomic
+  local generation journal, strict snapshot/segment payloads, consistent
+  capture, verified no-backup current/previous/segment storage, and a
+  constructed but not yet application-triggered local backup coordinator.
+- Stage 2 is paused before Task 6. Recovery-envelope preparation, the portable
+  package, application runtime/DI activation, Android allow-list, UI, and exit
+  gates remain Tasks 6–10.
+- Existing v5 rows and `sync_operations` data were preserved by the additive
+  migration; the legacy table is now read-only.
+- Android Auto Backup remains disabled until the remaining Stage 2 allow-list
+  and acceptance gates pass.
 - GitHub dependency maintenance remains paused.
 
 ## Global constraints
@@ -48,8 +54,7 @@ Macrobenchmark, JUnit 4, Compose UI test v2, and GitHub Actions.
 - Route every durable product mutation through a typed `DomainCommand` and
   `VaultRepository.execute`.
 - Commit each structured mutation and its backup-journal entry atomically.
-  Until Stage 2 migrates that representation, preserve existing outbox rows and
-  behaviour.
+  Preserve existing outbox rows as read-only legacy evidence.
 - Keep `InMemoryVaultRepository` aligned with encrypted Room through the shared
   contract suite.
 - Only `RecoveryCoordinator` may reconstruct Room from a backup or portable
@@ -108,9 +113,8 @@ actions.
 
 ### Stage 2 — Local backup and Android Auto Backup
 
-- Introduce `BackupJournal` semantics without losing existing outbox data.
-- Add `BackupCoordinator` for consistent local snapshots, journal segments,
-  verification, generation checkpoints, and retention inputs.
+- `BackupJournal`, Room v6 migration, mutation journalling, strict payloads,
+  consistent capture, and the verified local `BackupCoordinator` are complete.
 - Add `PortableBackupPublisher` for one atomically replaced package no larger
   than 24 MiB.
 - Enable Android Auto Backup only after extraction/include rules prove that
@@ -167,9 +171,11 @@ actions.
   wrapping, passphrase recovery envelopes, and generic AEAD.
 - `core:data` owns Room and SQLCipher and composes `core:sync` framing with
   `core:crypto` AEAD in the implemented `AuthenticatedCloudObjectCodec`.
-  Later stages add backup-journal persistence, WorkManager, provider
-  transports, portable-package files, attachment cache, and recovery staging.
-- `app` owns Hilt, ViewModels, `BackupCoordinator`,
+  It now also owns backup-journal persistence, strict snapshot/segment payloads,
+  consistent capture, verified local recovery objects, and the local
+  `BackupCoordinator`. Later tasks add provider transports, portable-package
+  files, attachment cache, and recovery staging.
+- `app` owns Hilt, ViewModels, `BackupCoordinator` lifecycle activation,
   `PortableBackupPublisher`, `AttachmentBlobCoordinator`,
   `RecoveryCoordinator`, activity-result APIs, permissions, authorisation,
   intents, navigation binding, and process-lifecycle locking.

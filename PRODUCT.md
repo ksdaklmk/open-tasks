@@ -38,14 +38,18 @@ Android Keystore wrapping, plus strict bounded canonical frames for manifests,
 snapshots, operation segments and attachment chunks. The implemented internal
 authenticated object codec binds each frame's complete identity as AEAD
 associated data, verifies its checksum before decryption, and returns typed
-untrusted-object failures.
+untrusted-object failures. Room v6 now also records accepted local generations
+and ordered backup-journal rows atomically. Strict snapshot/segment payloads,
+consistent capture, and verified encrypted current/previous local recovery
+objects are implemented under the no-backup directory.
 
-Those foundations are not a user-visible backup or recovery feature. Google
-Identity, Drive transport, app-managed backup, Android Auto Backup, writer
-takeover, cloud attachments, and recovery UI remain unavailable. Android
-backup is still disabled. Product copy must not imply cloud backup, attachment
-availability, or reinstall recovery until those flows pass their release
-gates.
+Those foundations are not yet a user-visible backup or recovery feature. The
+local coordinator is constructed for future runtime use but is not activated;
+no prepared/persisted recovery envelope or portable package exists. Google
+Identity, Drive transport, Android Auto Backup, writer takeover, cloud
+attachments, and recovery UI remain unavailable. Android backup is still
+disabled. Product copy must not imply cloud backup, attachment availability,
+or reinstall recovery until those flows pass their release gates.
 
 ## Approved future contract
 

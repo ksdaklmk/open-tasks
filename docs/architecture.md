@@ -11,17 +11,18 @@ structured-data authority. Normal operation has no runtime authority mode and
 no cloud-to-Room record path.
 
 Every write is represented by a `DomainCommand`. The Room implementation
-updates records and appends an outbox operation in one transaction. The current
-foundation seeds the sample workspace into SQLCipher once, then treats Room as
-the authority for task, timer/time-entry, Bin, search, and outbox state.
-Existing outbox rows remain untouched during Stage 1.
+updates records and appends ordered backup-journal entries in one transaction.
+The current foundation seeds the sample workspace into SQLCipher once, then
+treats Room as the authority for task, timer/time-entry, Bin, search, and
+backup-journal state.
+Room v6 now also assigns one local generation to each mutation-bearing accepted
+command and appends its ordered `BackupJournal` rows in the same transaction.
+The journal is a local backup record, not a remote merge log. The additive
+v5→v6 migration preserves every existing outbox row, copies deterministic
+legacy format-0 journal entries, and leaves `sync_operations` read-only until a
+verified complete baseline records coverage.
 
-Stage 2 will narrow that outbox responsibility into `BackupJournal`: an atomic
-record of local generations that need backup, not a remote merge log. The
-migration must preserve every existing row until a verified complete baseline
-backup covers it.
-
-The approved future service boundaries are:
+The approved service boundaries are:
 
 ```text
 VaultRepository
@@ -32,7 +33,7 @@ VaultRepository
 BackupCoordinator
     ├── reads consistent snapshots and journal generations
     ├── encrypts through AuthenticatedCloudObjectCodec
-    └── writes BackupObjectStore
+    └── writes verified LocalBackupObjectStore current/previous/segments
 
 PortableBackupPublisher
     └── atomically publishes one Auto Backup-eligible encrypted package
@@ -48,9 +49,13 @@ RecoveryCoordinator
     └── atomically activates the staged vault
 ```
 
-The coordinators, stores, portable publisher and recovery path are approved,
-not implemented. The internal `AuthenticatedCloudObjectCodec` shown at their
-future encryption boundary is implemented in `core:data`.
+`BackupCoordinator`, strict snapshot/segment codecs, consistent Room capture,
+and `LocalBackupObjectStore` are implemented in `core:data`. The production
+runtime bundle constructs them but deliberately does not start requests; Task 8
+owns application scope, debounce, and triggering. The portable publisher,
+provider stores, attachment coordinator, and recovery path remain approved but
+unimplemented. The internal `AuthenticatedCloudObjectCodec` shown at their
+encryption boundary is implemented in `core:data`.
 `RecoveryCoordinator` will be the only component allowed to reconstruct Room
 from backup data or a restored portable package. `BackupCoordinator`,
 `PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
@@ -69,7 +74,7 @@ snapshot. Each accepted update returns the prior values as an undo command.
 Checklist and tag edits use granular commands rather than replacing a complete
 relation set. Room reads current checklist and tag rows inside the serialized
 write path, advances the owning task revision, mutates the relation, and
-appends its outbox operation in one transaction. This preserves rapid
+appends its backup-journal entry in one transaction. This preserves rapid
 independent taps and produces exact add/remove/edit Undo commands. Creating a
 tag writes the reusable tag record and its initial task membership atomically.
 
@@ -77,7 +82,7 @@ Workflow statuses are first-class Room records exposed in
 `WorkspaceSnapshot`. Every project owns an independent ordered workflow;
 Inbox uses the same model with a `null` project scope. New projects receive
 Backlog, Planned, Started, Blocked and Completed categories in the same
-transaction as the project and their separate outbox operations. Status names
+transaction as the project and their separate backup-journal entries. Status names
 and order are custom, while the semantic reporting category is immutable.
 Create, rename, move, archive and restore are typed repository commands with
 exact repository-produced Undo. A project may have at most 20 active statuses
@@ -97,8 +102,8 @@ Recurring tasks persist both the user-authored rule and internal series
 metadata: a stable series ID, original wall-clock anchor, and occurrence
 index. Completion derives the next deterministic occurrence from the original
 anchor so month-end schedules do not drift and local times survive DST. The
-current completion and generated occurrence are written with separate outbox
-operations in one Room transaction. If the current task has a reminder, the
+current completion and generated occurrence are written with separate
+backup-journal entries in one Room transaction. If the current task has a reminder, the
 next occurrence inherits its due-relative lead time and delivery precision in
 that transaction. Completion Undo reopens the current task, tombstones only
 the generated occurrence and emits the generated reminder deletion. Room
@@ -120,9 +125,9 @@ Deleting a milestone clears every assigned task membership and appends the
 milestone deletion plus each revised task operation in one Room transaction.
 The repository-produced Undo restores the milestone and only the captured
 project-matching memberships. Schema v4 adds milestone revision fields through
-a non-destructive v3→v4 migration. Task outbox payload v5 includes start and due
-moments plus milestone identity, so a future backup segment cannot silently
-lose scheduling or membership.
+a non-destructive v3→v4 migration. The canonical task backup payload includes
+start and due moments plus milestone identity, so a backup segment cannot
+silently lose scheduling or membership.
 
 Project templates are immutable, revisioned snapshots captured from an active
 project. A capture includes project summary and due date; every active workflow
@@ -138,14 +143,14 @@ second-of-day and zone ID, so choosing a new anchor date preserves wall-clock
 intent across DST. Instantiation derives every child identifier
 deterministically from the new project ID and source key, remaps relations, and
 writes the project, workflow, milestones, any new tags, tasks, relations and
-their independent outbox operations in one transaction.
+their independent backup-journal entries in one transaction.
 
 A workspace is capped at 100 templates and each template at 500 tasks and a
 2 MiB versioned payload. The strict decoder validates identifier and text
 lengths, semantic workflow coverage, collection bounds, zone IDs, date ranges,
 unique ranks/keys and acyclic parent/dependency graphs before instantiation.
-Local payload bytes are protected by SQLCipher at rest; the upsert outbox
-payload is self-contained so a future encrypted backup segment can preserve
+Local payload bytes are protected by SQLCipher at rest; the canonical upsert
+backup payload is self-contained so an encrypted backup segment can preserve
 the template without relying on a local database row. Schema v5 adds template
 revision fields through a non-destructive v4→v5 migration. Capture and delete
 provide repository-produced Undo; creating a project from a template follows
@@ -154,10 +159,10 @@ the existing non-Undoable project-creation contract.
 Task dependencies are directed task-to-task relations. `SetTaskDependency`
 adds or removes one relation through the repository, caps each task at 100
 links and rejects self-links or any edge which would make the graph cyclic.
-The relation write, revised task record and task outbox operation are one Room
-transaction; repository-produced Undo applies the exact inverse relation.
-Task outbox payload v5 carries the complete sorted dependency-ID set as well as
-start, due and milestone identity.
+The relation write, revised task record and task backup-journal entry are one
+Room transaction; repository-produced Undo applies the exact inverse relation.
+The canonical task backup payload carries the complete sorted dependency-ID
+set as well as start, due and milestone identity.
 
 `dependencyIds` preserves every active link, including completed
 prerequisites. `blockedBy` is a derived view containing only linked tasks which
@@ -173,7 +178,7 @@ repository.
 Each task has at most one durable reminder, addressed by the deterministic
 `reminder:<task-id>` identifier and exposed through `WorkspaceSnapshot`.
 Task-editor saves treat the task and reminder as one validated replacement:
-Room writes both records and their independent outbox operations in one
+Room writes both records and their independent backup-journal entries in one
 transaction, while repository-produced Undo restores both prior values.
 `SetTaskReminder` is the granular path used by notification actions such as
 Snooze. Permanent task purge removes the reminder and queues its deletion in
@@ -210,7 +215,7 @@ derived from its original instant rather than UI state. Manual add, edit,
 delete and exact restore are typed repository commands. They require an
 existing non-Bin task, a strictly positive interval, a note of at most 500
 characters and at most 10,000 entries per task. Each accepted Room mutation
-and its time-entry outbox operation commit atomically; add, edit and delete
+and its time-entry backup-journal entry commit atomically; add, edit and delete
 return repository-produced Undo.
 
 Overlaps are preserved rather than silently truncating recorded work. The
@@ -220,20 +225,22 @@ snapshot. The task editor shows both an inline warning and a complete
 time-entry review sheet; editing or deleting either completed entry resolves
 the warning. Running entries remain read-only until their timer is stopped.
 This also keeps overlapping local records visible without inventing or
-discarding duration. Time-entry outbox payload v2 carries the entry ID,
-task ID, source device, start/end instants and a delimiter-safe encoded note;
-future backup publication must encrypt the containing operation before upload.
+discarding duration. The canonical time-entry backup payload carries the entry
+ID, task ID, source device, start/end instants and a delimiter-safe encoded
+note; future backup publication must encrypt the containing operation before
+upload.
 
 Moving a task to the Bin stops its timer in the same transaction, and restore
 clears only the deletion timestamp. Expired Bin content is purged on repository
 startup. An explicit
 permanent delete removes task relations, appends relation deletion operations
-where required, and appends a task tombstone/outbox operation atomically; the
+where required, and appends a task tombstone backup-journal entry atomically; the
 UI requires a confirmation because this command has no Undo.
 
 Project Workbench edits use complete, validated project updates. Room reads the
-latest project revision, writes the project row, and appends its outbox operation
-atomically. The previous project value becomes an exact Undo command. Selected
+latest project revision, writes the project row, and appends its
+backup-journal entry atomically. The previous project value becomes an exact
+Undo command. Selected
 project identity lives in `SavedStateHandle`, while compact and expanded
 windows render the same repository state as one-pane or list/detail workbenches.
 
@@ -266,14 +273,14 @@ vault-encryption format.
 
 Project creation assigns the ID before execution so successful creation can
 open the new workbench without a name-based lookup. Its project row, five
-default workflow rows and six independent outbox operations are one
+default workflow rows and six independent backup-journal entries are one
 transaction. Active project names are case-insensitively unique. Archive and
-Restore update only the project's timestamped lifecycle field and append an
-outbox operation atomically; assigned tasks, workflow, milestones, and history
-never move or disappear. Home, Projects, and project search exclude archived
-projects. Task context still resolves archived project names, but new task
-assignment and workflow editing are restricted to active projects until the
-project is restored.
+Restore update only the project's timestamped lifecycle field and append a
+backup-journal entry atomically; assigned tasks, workflow, milestones, and
+history never move or disappear. Home, Projects, and project search exclude
+archived projects. Task context still resolves archived project names, but new
+task assignment and workflow editing are restricted to active projects until
+the project is restored.
 
 ## Module boundaries
 
@@ -311,8 +318,9 @@ a product or release dependency.
 - Record encryption binds vault, object, and format identifiers as associated
   data.
 - Recovery passphrases are never persisted.
-- Android backup is currently disabled. Stage 2 may enable Android Auto Backup
-  only for one strictly whitelisted portable encrypted package; databases,
+- Android backup is currently disabled. Remaining Stage 2 work may enable
+  Android Auto Backup only for one strictly whitelisted portable encrypted
+  package; databases,
   WAL/SHM, preferences, keys, credentials, cache, and attachment bytes remain
   excluded.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
@@ -345,9 +353,10 @@ The SHA-256 field is a corruption check, not an authentication claim. The
 implemented provider-independent codec in `core:data` binds the complete
 `CloudHeaderIdentity` as AEAD associated data, verifies length and checksum
 before decryption, and translates untrusted frame and authentication rejection
-to typed failures. It is an internal authenticated-object foundation only:
-provider transport, backup/blob services, payload recovery, scheduling, and
-product-visible backup or attachment flows are not implemented.
+to typed failures. Strict snapshot/operation payload codecs and the verified
+local recovery-object coordinator now consume it. Provider transport, portable
+package publication, restore activation, scheduling, and product-visible
+backup or attachment flows are not implemented.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry

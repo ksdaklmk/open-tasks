@@ -1,6 +1,6 @@
 # Threat Model
 
-Last reviewed: 28 July 2026
+Last reviewed: 29 July 2026
 
 This document covers the implemented local-authority foundation and the
 approved backup, recovery-takeover, and cloud-attachment programme. It is a
@@ -21,15 +21,19 @@ attachment data. The security objectives, in order, are:
    vault.
 
 The current application has one structured-data authority: encrypted Room.
-Google Identity, Drive transport, app-managed backup, writer takeover,
-attachment transfer, and recovery UI are not connected. Android backup remains
-disabled by manifest and extraction rules.
+Room v6, local generation journalling, strict snapshot/segment payloads, and a
+verified encrypted no-backup recovery-object pipeline are implemented. The
+application does not trigger that coordinator yet. Google Identity, Drive
+transport, portable backup, writer takeover, attachment transfer, and recovery
+UI are not connected. Android backup remains disabled by manifest and
+extraction rules.
 
-Stage 2 plans a deliberately narrower mitigation: enable Android Auto Backup
-only for one atomically replaced portable encrypted package, at most 24 MiB,
-while continuing to exclude Room, WAL, SHM, preferences, Keystore material,
-credentials, device identity, cache, and attachment bytes. That mitigation is
-not implemented and must not be presented as current protection.
+Remaining Stage 2 work plans a deliberately narrower mitigation: enable
+Android Auto Backup only for one atomically replaced portable encrypted
+package, at most 24 MiB, while continuing to exclude Room, WAL, SHM,
+preferences, Keystore material, credentials, device identity, cache, and
+attachment bytes. That mitigation is not implemented and must not be presented
+as current protection.
 
 ## Assets
 
@@ -39,7 +43,7 @@ not implemented and must not be presented as current protection.
 | Unsaved editor, quick-add and search text plus UI identifiers | Private transient content and sensitive metadata | Android saved-instance-state bundle |
 | Attachment metadata and opaque blob references | Private content and metadata | Planned Room records and structured backups |
 | Attachment bytes | Private content | Planned encrypted attachment blob service; temporary bounded cache only |
-| Backup snapshots and journal segments | Private content | Planned encrypted backup object namespace |
+| Backup snapshots and journal segments | Private content | Implemented encrypted local objects under `noBackupFilesDir/backup/v1`; provider namespace remains Stage 3 |
 | Portable backup package | Private encrypted recovery input | Planned single Auto Backup-eligible app file |
 | Local database key | Critical key material | AES-GCM envelope in private preferences |
 | Local wrapping key | Critical key material | Non-exportable Android Keystore entry |
@@ -61,12 +65,12 @@ app command dispatch
 VaultRepository
     ├── SQLCipher Room transaction ─────── sole live authority
     ├── opaque reminder IDs ───────────── Android AlarmManager
-    └── atomic BackupJournal entry ────── planned Stage 2 representation
+    └── atomic BackupJournal entry ────── implemented local generation record
 
-BackupCoordinator ── AuthenticatedCloudObjectCodec ── BackupObjectStore
-PortableBackupPublisher ───────────────────────────── portable package
-AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
-RecoveryCoordinator ── staged verification/takeover ── replacement Room vault
+BackupCoordinator ── AuthenticatedCloudObjectCodec ── LocalBackupObjectStore
+Planned PortableBackupPublisher ───────────────────── portable package
+Planned AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
+Planned RecoveryCoordinator ─ staged verification/takeover ─ replacement Room vault
 
 Recovery passphrase ── Argon2id ── AES-GCM unwrap ── vault-content key
 Per-vault Keystore key ─────────── AES-GCM unwrap ── same content key
@@ -74,8 +78,10 @@ Database Keystore key ──────────── AES-GCM unwrap ──
 ```
 
 `VaultRepository` is the only normal structured-data write boundary. A mutation
-and its journal representation must commit atomically. Existing outbox rows
-remain untouched until Stage 2 verifies their migration.
+and its journal representation commit atomically. The additive v5→v6 migration
+preserves existing outbox rows and copies deterministic legacy journal entries;
+the legacy table is read-only and its coverage marker advances only after a
+verified complete baseline.
 
 Normal provider flows may handle encrypted objects and limited routing
 metadata but cannot mutate Room records. Only `RecoveryCoordinator` may
@@ -123,7 +129,7 @@ fails safely where practical and must not weaken platform protections.
 | T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded canonical outer frames, checksum-before-AEAD, complete identity authentication, typed failures, family limits, and one-shot ciphertext ownership exist | Stage 3 must stage and fully verify records, relations, tombstones, and references before activation |
 | T14 | Stale writer overwrites a recovered lineage or mutates blob state | No cloud writer exists today | Stage 3 requires monotonically increasing epochs, conditional control-manifest updates, ownership-loss handling, and offline prior-device reconnect tests |
 | T15 | Missing/replaced control record recreates a known lineage | No cloud control record exists today | A client that observed control state must treat absence/replacement as ownership loss and never recreate automatically |
-| T16 | Backup retention deletes the only recoverable base | No backup retention is operational | Keep current and previous verified complete snapshots plus the segments required by either; verify recovery before pruning |
+| T16 | Backup retention deletes the only recoverable base | Local object promotion is atomic; checkpoint follows authenticated strict readback; current/previous bases and required segments are retained; injected write/move/checkpoint failures preserve prior bytes | The application runtime is not activated and portable/provider recovery still requires later-stage verification |
 | T17 | Attachment blob is deleted while live or retained recovery metadata references it | No attachment transport is operational | Stage 4 requires verified tombstone backup, at least 30-day retention, and zero active/retained inventory references before collection |
 | T18 | Hostile attachment input exhausts disk or memory | Attachments are not operational | Stage 4 caps intake at 100 MiB, chunks at 4 MiB, bounds working storage, verifies every published chunk, and cleans abandoned provisional/share files |
 | T19 | Missing or damaged attachment bytes corrupt structured work | Room remains authoritative and attachments are not operational | Future UI keeps metadata, marks the file unavailable, and never disables task editing or invents content |
@@ -174,9 +180,10 @@ compatibility tests and a fresh threat-model review.
 
 Before production release:
 
-1. Retain independent verification of the implemented authenticated
-   provider-independent object codec, and add family-specific bounded plaintext
-   decoders before backup or recovery consumes plaintext.
+1. Retain independent verification of the authenticated provider-independent
+   object codec and implemented bounded snapshot/operation decoders; add
+   equivalent bounded decoders for every later portable/provider family before
+   recovery consumes plaintext.
 2. Prove app-managed backup verification, current/previous snapshot fallback,
    retention, corruption handling, and independent destructive actions.
 3. Prove Android Auto Backup includes only the eligible portable package and

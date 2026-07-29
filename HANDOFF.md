@@ -2,25 +2,27 @@
 
 - Last updated: 29 July 2026
 - Branch: `main`
-- Session status: **Stage 1 direction reset and authenticated object
-  foundation are complete and verified. The focused Stage 2 local-backup and
-  Android Auto Backup design is approved and written at
-  `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`;
-  its detailed test-driven plan is written at
-  `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`
-  and is reviewed and approved. Stage 2 source execution is now authorised in
-  the approved subagent-driven mode; no Stage 2 source work has started yet.
-  Train 1 Tasks 1.1–1.5 remain complete and independently reviewed. GitHub
-  maintenance remains paused.**
-- Current implementation point: `21c33bc` (`fix: clear rejected cloud
-  ciphertext buffers`) is the Stage 1 final-review implementation correction.
-  The local-authority direction was approved in `6e3c816` (`docs: define local
-  authority and cloud attachment direction`) and clarified in `ebdc6b0`
-  (`docs: clarify backup and blob lifecycle boundaries`). The Stage 1 plan is
-  `7a54bd2` (`docs: plan local authority stage 1 foundation`). The Stage 1
-  checkpoint below records every source commit and fresh exit gate. The named
-  authorised replacement snapshot remains present and was restored after the
-  disposable-emulator suites.
+- Session status: **Paused at the user's request after Stage 2 Task 5. Stage 2
+  Tasks 1–5 are implemented, committed, verified, and independently reviewed;
+  Tasks 6–10 have not started. Room v6 is the sole live authority with atomic
+  local generations and ordered backup-journal rows. Strict snapshot/segment
+  payloads, consistent capture, verified encrypted local recovery objects, and
+  the local coordinator foundation are complete. The coordinator is exposed
+  for later application runtime wiring but is not activated. Android Auto
+  Backup remains disabled; no prepared/persisted recovery envelope, portable
+  package, restore path, provider, or attachment transport exists. Resume with
+  Stage 2 Task 6.
+  Train 1 Tasks 1.1–1.5 and Stage 1 remain complete and independently
+  reviewed. GitHub maintenance remains paused.**
+- Current implementation point: `2a72670` (`feat: verify and retain local
+  recovery objects`) completes Stage 2 Task 5. The preceding Stage 2 source
+  commits are recorded in the paused checkpoint below. The approved design is
+  `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`
+  and the live execution plan is
+  `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`.
+  The protected `task13_fixround1_replacement_20260728_055359` snapshot remains
+  untouched; Stage 2 connected tests used only the audited disposable
+  API 37 foldable and final ADB state is empty.
 
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
@@ -38,7 +40,7 @@ redaction, task deep links, Snooze and Complete actions are implemented.
 Workflow add, rename, reorder, archive and restore preserve immutable reporting
 categories and assigned tasks.
 Milestone create/edit/complete/reopen/delete and project-scoped task membership
-are implemented with atomic outbox writes and exact Undo. Task dependency
+are implemented with atomic backup-journal writes and exact Undo. Task dependency
 editing, cycle rejection, dynamic blocking and named completion warnings are
 also implemented. Schedule now derives real selected-day and Monday–Sunday
 views from task dates and reminders, with an open-only unscheduled tray.
@@ -52,7 +54,7 @@ preserved and surfaced for review so double-counted work is never hidden. The
 P0 hardening slice and P1-L01 through P1-L04 plus P1-L06 and P1-L07 product
 slices are complete and verified. P2-F01 adds versioned reusable project
 templates with relative zoned dates, deterministic relation remapping,
-encrypted Room persistence and atomic outbox writes. Qualified workspace
+encrypted Room persistence and atomic backup-journal writes. Qualified workspace
 Insights now cover completion, overdue work, estimate/actual time, project/tag
 time and milestone health with accessible table/text alternatives. The
 application is fixed to UK English with UK spelling, day–month dates, 24-hour
@@ -70,20 +72,66 @@ checks and resolution remain paused. A blocking `PreToolUse` guard rejects raw
 Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
-and remain disabled. Google Identity, Drive transport, app-managed backup,
-Android Auto Backup, recovery UI, cloud attachments and Play Console work have
-not started. Android backup remains disabled. Release gates which depend on
-those features remain blocked by their listed prerequisites.
+and remain disabled. Google Identity, Drive transport, portable/Android
+backup, recovery UI, cloud attachments and Play Console work have not started.
+The local journal, payload, recovery-object store, and coordinator foundation
+is implemented but not application-triggered or user-visible. Android backup
+remains disabled. Release gates which depend on those features remain blocked
+by their listed prerequisites.
 
-Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are now independent of
-SQLCipher database keys and have separate recovery and per-vault Android
-Keystore wrapping. Canonical bounded cloud frames exist for manifests,
+Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
+independent of SQLCipher database keys and have separate recovery and per-vault
+Android Keystore wrapping. Canonical bounded cloud frames exist for manifests,
 snapshots, operation segments and attachment chunks. The authenticated
 provider-independent codec binds their complete identity as AEAD associated
-data and has independent deterministic vectors for all four families. These
-remain foundations only: backup, Drive transport, user recovery and
-attachments are not implemented. The historical Train 1 Task 1.6 is
-superseded.
+data and has independent deterministic vectors for all four families. Stage 2
+Tasks 1–5 now add the local backup journal, strict snapshot/segment payloads,
+consistent capture, and verified local recovery objects. Drive transport, a
+portable package, user recovery, and attachments are not implemented. The
+historical Train 1 Task 1.6 is superseded.
+
+## Stage 2 paused checkpoint — Tasks 1–5
+
+The approved subagent-driven execution ran directly on `main` and is paused
+before Task 6:
+
+| Task | Result | Commit(s) |
+|---:|---|---|
+| 1 | Replaced product sync-facing contracts with local backup models, policy, and coordinator boundaries | `b579e9e` |
+| 2 | Added additive Room v6 backup journal/state/envelope schema and preserved deterministic v5 legacy rows | `ebab71f`, `66e535f` |
+| 3 | Journalled accepted local mutations under one atomic generation; removed active legacy outbox writes | `3a8520c`, `313047e` |
+| 4 | Froze strict canonical snapshot/segment payload v1, golden fixtures, and vault-scoped consistent capture | `8f74219`, `f2b3a92`, `6811f3c` |
+| 5 | Added crash-safe local recovery-object lifecycle, authenticated readback coordinator, checkpoint, retention, threshold, failure, cancellation, and coalescing behavior | `2a72670` |
+
+Important Task 5 lifecycle boundary: `LocalVaultRepositoryFactory.createRuntime`
+constructs and exposes the repository and local coordinator, but current
+`AppModule` still uses `create()`. This is intentional. Task 8 owns application
+scope, debounce, request triggering, and DI activation; no backup work should
+start before then.
+
+Fresh checkpoint evidence:
+
+- Initial full baseline at approved plan commit `cc816ab`:
+  `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace`
+  passed (547 actionable tasks).
+- Task 4 controller gate: all 116 Data JVM tests passed; focused real-Room
+  capture passed 8/8 on the sole audited disposable API 37 foldable.
+- Task 5 controller gate after `2a72670`:
+  `./gradlew :core:data:testDebugUnitTest --stacktrace --rerun-tasks` passed
+  all 139 Data JVM tests with all 57 tasks executed. The new store/coordinator
+  classes account for 23 focused tests. `git diff --check` passed.
+- Migration and repository device suites used only the disposable
+  `Pixel_10_Pro_Fold` launched read-only with no snapshot load/save. Final ADB
+  state is empty. The protected replacement snapshot was not attached to,
+  instrumented, cleared, uninstalled, or overwritten.
+- Independent task review has no open Critical or Important findings. Deferred
+  Minors remain in the ignored SDD ledger and are not reasons to reopen the
+  completed tasks.
+
+Tasks 6–10 remain unstarted. Task 6 prepares and verifies the recovery
+envelope. Tasks 7–10 then own the portable package, exact Android allow-list
+and runtime activation, UI/status, and final verification/documentation.
+Android Auto Backup is still disabled.
 
 ## Train 0 baseline checkpoint verification
 
@@ -174,7 +222,7 @@ identity above was unchanged after the module suites.
   workflow, open milestones and open task structure. Using a template shifts
   local/zoned dates from a chosen anchor, resets progress, remaps parent,
   milestone, tag, checklist and dependency relationships, and creates all
-  records plus outbox operations atomically.
+  records plus backup-journal entries atomically.
 - Blocked completion is enforced by the repository and confirmed consistently
   from every implemented completion path. The confirmation names unfinished
   prerequisites, while reminder notifications omit unsafe Complete actions.
@@ -202,16 +250,17 @@ identity above was unchanged after the module suites.
 - DST-safe wall-clock scheduling, non-drifting month-end scheduling and
   deterministic occurrence IDs.
 - Completion and next-occurrence creation are one Room transaction with
-  separate outbox operations.
+  separate backup-journal entries.
 - Repeated completion or redelivery creates exactly one next occurrence.
 - Completion Undo reopens the original and removes only the generated
   occurrence.
 - Editing a generated occurrence and undoing that edit restores its exact
   recurrence rule, due time, series ID, anchor and occurrence index.
-- Room v1→v2, v2→v3, v3→v4 and v4→v5 migrations are non-destructive and
+- Room v1→v2, v2→v3, v3→v4, v4→v5 and v5→v6 migrations are non-destructive and
   preserve encrypted data; v3 creates project/Inbox workflows and remaps
   existing task statuses, v4 adds milestone revisions and v5 adds template
-  revisions.
+  revisions; v6 adds local backup journal/state/envelope tables and preserves
+  every legacy outbox row.
 - On-device Compose coverage exercises every cadence, interval editing,
   multiple weekdays, count ending, 200% text, 48 dp targets and keyboard
   activation.
@@ -219,8 +268,8 @@ identity above was unchanged after the module suites.
 ### Reminders and notifications
 
 - One persisted due-relative reminder per task with deterministic identity.
-- Task and reminder editor changes, Undo and independent outbox operations are
-  committed atomically.
+- Task and reminder editor changes, Undo and independent backup-journal entries
+  are committed atomically.
 - Flexible delivery uses an idle-safe inexact alarm. Precise delivery uses an
   exact alarm only while Android special access is granted and falls back
   safely if access is absent or revoked.
@@ -239,7 +288,8 @@ identity above was unchanged after the module suites.
 ### Data, cryptography and sync foundations
 
 - Every write is a typed `DomainCommand` executed by `VaultRepository`.
-- Room writes and outbox operations are atomic.
+- Room writes and ordered backup-journal entries are atomic; the legacy outbox
+  is read-only.
 - SQLCipher database with a random 256-bit key wrapped by a non-exportable,
   unlocked-device-required Android Keystore AES-GCM key.
 - Tink AES-256-GCM vault-content keys are independently generated from the
@@ -273,7 +323,8 @@ identity above was unchanged after the module suites.
   the local rows and outbox; damaged template rows can still be deleted safely.
 - Time-entry add, update, delete and restore use the same typed-command and
   exact-Undo contract in both repositories. Room commits each record change and
-  its revisioned, delimiter-safe time-entry outbox v2 operation atomically.
+  its ordered backup-journal entry atomically; the legacy outbox remains
+  read-only migration input.
   Workspace snapshots derive the running timer, full history and representative
   overlap conflicts from the same persisted stream.
 
@@ -900,36 +951,39 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 ## Current in-progress work
 
-There is no in-progress implementation. Stage 1 is complete through final-review
-implementation correction `21c33bc`; its authenticated provider-independent
-object codec and four independent vectors passed the checkpoint above. No
-backup, Drive transport, recovery, Android Auto Backup or attachment flow
-should be inferred from this foundation.
+There is no uncommitted source implementation. Work is deliberately **Paused**
+after Stage 2 Task 5 at `2a72670`. Tasks 1–5 are complete and reviewed; Task 6
+has not started. The implemented local coordinator/store foundation is not
+application-triggered and must not be described as shipped backup. No portable
+package, Drive transport, recovery, Android Auto Backup, or attachment flow
+should be inferred from this checkpoint.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 queued dependency PR checks and resolution remain paused. No later-stage
-source change outside the approved Stage 2 plan is authorised. The Stage 2
-design and detailed implementation plan have written approval.
+source change outside the approved Stage 2 plan is authorised. Resume at Task
+6 of the approved Stage 2 plan.
 
 ## Resume instructions
 
 1. Read this file first, the
-   [Stage 1 plan](docs/superpowers/plans/2026-07-28-stage-1-direction-reset-authenticated-object-foundation-plan.md),
-   its ignored SDD progress ledger, then
+   [Stage 2 plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md),
+   its ignored SDD progress ledger at
+   `.superpowers/sdd/2026-07-29-stage-2-local-backup-android-auto-backup-plan/progress.md`,
+   then
    [docs/architecture.md](docs/architecture.md),
    [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
    [PRODUCT.md](PRODUCT.md).
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
-   1.1–1.5 and Stage 1 are complete; do not amend or reopen their reviewed
-   commits without a new finding.
-3. Execute the approved
-   [Stage 2 implementation plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md)
-   task-by-task with its required Superpowers workflow.
+   1.1–1.5, Stage 1, and Stage 2 Tasks 1–5 are complete; do not amend or reopen
+   their reviewed commits without a new verified finding.
+3. Resume the approved Stage 2 implementation plan at **Task 6: Prepare a
+   Verified Recovery Envelope**, using its required Superpowers workflow.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
-5. Preserve existing outbox and local data. Android Auto Backup stays disabled
-   until Stage 2, and no provider work starts before Stage 3.
+5. Preserve the read-only legacy outbox and local data. Android Auto Backup
+   stays disabled until the remaining Stage 2 allow-list and acceptance gates
+   pass, and no provider work starts before Stage 3.
 6. Follow the six-stage dependency chain; historical Train 1–6 plans are
    evidence or replanning inputs, not executable contracts.
 7. Before recording the next pause or completion, run the repository gate from
@@ -947,7 +1001,7 @@ recorded above.
 | Order | Stage | Status | Exit decision |
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
-| 2 | Local backup and Android Auto Backup | Plan approved; implementation authorised | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
+| 2 | Local backup and Android Auto Backup | Paused after Task 5; Tasks 6–10 remain | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Blocked by Stage 2 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
@@ -961,14 +1015,15 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Execute the approved Stage 2 local-backup and Android Auto Backup plan
-   task-by-task with its required Superpowers workflow.
+1. Resume the approved Stage 2 local-backup and Android Auto Backup plan at
+   Task 6; Tasks 1–5 are complete.
 2. Run the complete Stage 2 verification and review gates.
 3. Do not begin Stage 3 until Stage 2 is implemented, verified, and reviewed.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
-remains disabled until Stage 2. Existing Room, outbox, and local workspace data
-remain untouched until their explicitly planned, verified migrations.
+remains disabled until the remaining Stage 2 allow-list and acceptance gates
+pass. Existing Room, legacy outbox, and local workspace data remain protected
+by their explicitly planned, verified migrations.
 
 ## Architecture and security rules for the next agent
 
@@ -976,7 +1031,8 @@ remain untouched until their explicitly planned, verified migrations.
   [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
   [PRODUCT.md](PRODUCT.md) before changing the corresponding contract.
 - Every write must remain a `DomainCommand` through `VaultRepository`.
-- Mutations and their outbox operations must remain one transaction.
+- Mutations and their ordered backup-journal entries must remain one
+  transaction. The legacy outbox is read-only.
 - Undo is repository-produced; never reconstruct it in UI code.
 - Keep `InMemoryVaultRepository` behaviour aligned with
   `RoomVaultRepository`.
@@ -989,7 +1045,7 @@ remain untouched until their explicitly planned, verified migrations.
   500-task, 100-year and 2 MiB limits; validate bounded self-contained payloads
   and acyclic parent/dependency graphs before use. Instantiation must retain
   wall-clock zone intent, derive relation IDs from the new project ID and
-  commit every new record/outbox operation atomically.
+  commit every new record/journal entry atomically.
 - Workflow status writes stay project/Inbox scoped, preserve immutable
   semantic categories and retain at least one active status per category.
   Moving a task between projects maps by semantic category; Undo restores the
@@ -997,12 +1053,12 @@ remain untouched until their explicitly planned, verified migrations.
 - Milestones stay project-scoped, retain revision metadata and enforce 120
   character names, case-insensitive project uniqueness and a 100-row project
   cap. Deletion and membership restoration must remain atomic with every
-  affected task outbox operation.
+  affected task journal entry.
 - Dependency links stay distinct from derived blocking state: `dependencyIds`
   is the durable relation set and `blockedBy` contains only unfinished linked
   tasks. All writes use `SetTaskDependency`, enforce the 100-link cap and
-  reject self/transitive cycles before the task, relation and v5 outbox state
-  are committed atomically.
+  reject self/transitive cycles before the task, relation and backup-journal
+  state are committed atomically.
 - Every completion entry point must route through the same repository gate.
   UI confirmation is an acknowledgement, not an authority bypass, and
   notifications must continue to omit Complete for blocked tasks.
@@ -1015,7 +1071,7 @@ remain untouched until their explicitly planned, verified migrations.
   passphrases, keys, attachments or vault payloads in saved-instance state, and
   never let the initial repository emission overwrite a restored draft.
 - Time entries are first-class records. Keep add/update/delete/restore as
-  repository commands with exact Undo and atomic outbox writes; enforce a
+  repository commands with exact Undo and atomic journal writes; enforce a
   positive interval, 500-character notes and 10,000 entries per task. Running
   entries are timer-owned and cannot be edited or deleted. Preserve overlapping
   records, reconcile them with the deterministic linear sweep and keep the
@@ -1056,11 +1112,12 @@ remain untouched until their explicitly planned, verified migrations.
 
 ## Recommended next action
 
-Execute the approved
+Resume the approved
 [Stage 2 local-backup and Android Auto Backup implementation plan](docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md)
-task-by-task in subagent-driven mode, beginning with Task 1.
+in subagent-driven mode at Task 6.
 
 Keep the protected workspace untouched and run device suites only on a sole
 disposable emulator. Preserve existing outbox data, keep Android Auto Backup
-disabled until Stage 2, and keep queued dependency PR checks and resolution
-paused unless the user explicitly resumes GitHub maintenance.
+disabled until the remaining Stage 2 gates pass, and keep queued dependency PR
+checks and resolution paused unless the user explicitly resumes GitHub
+maintenance.

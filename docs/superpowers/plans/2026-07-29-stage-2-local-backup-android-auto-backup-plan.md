@@ -23,6 +23,30 @@ Bouncy Castle 1.84, kotlinx.serialization 1.9.0, Android `AtomicFile`,
 JUnit 4, Compose UI test v2, and Node.js built-in `crypto` for independent
 format fixtures.
 
+## Execution checkpoint — paused after Task 5
+
+Tasks 1–5 are implemented, committed, verified, and independently reviewed.
+The current source checkpoint is `2a72670` (`feat: verify and retain local
+recovery objects`).
+
+- Tasks 1–3 replaced product sync contracts with local backup contracts,
+  migrated encrypted Room to v6 without losing v5/outbox data, and made
+  accepted local mutations append ordered generation journal rows atomically.
+- Task 4 froze strict canonical snapshot and operation-segment payload v1
+  formats and one-transaction Room capture.
+- Task 5 added verified current/previous/segment storage under the injected
+  no-backup root and a single-flight coordinator with authenticated readback,
+  checkpoint, retention, failure, cancellation, threshold, and coalescing
+  coverage.
+- `LocalVaultRepositoryFactory.createRuntime()` constructs and exposes the
+  repository and coordinator but intentionally does not start work. Task 8
+  still owns application scope, debounce, triggering, and DI activation.
+- Tasks 6–10 have not started. Android Auto Backup remains disabled and no
+  portable package, recovery envelope, restore activation, provider, or
+  attachment transport exists.
+
+Resume with Task 6. Do not reopen Tasks 1–5 without a new verified finding.
+
 ## Global Constraints
 
 - Work directly on `main`; do not create a branch, worktree, or pull request.
@@ -286,7 +310,7 @@ interface AndroidBackupStatusSource {
 }
 ```
 
-- [ ] **Step 1: Write failing policy and model tests**
+- [x] **Step 1: Write failing policy and model tests**
 
 Create tests that assert:
 
@@ -335,7 +359,7 @@ Also assert non-negative `BackupGeneration`, the exact 24 MiB constant, the
 `16 MiB - 33` segment plaintext constant, deterministic segment splitting by
 generation/sequence, and retention of only current/previous recovery bases.
 
-- [ ] **Step 2: Run the focused test to verify RED**
+- [x] **Step 2: Run the focused test to verify RED**
 
 Run:
 
@@ -347,7 +371,7 @@ Run:
 Expected: compilation fails because the backup contracts and policies do not
 exist.
 
-- [ ] **Step 3: Add the feature-safe status models and pure policies**
+- [x] **Step 3: Add the feature-safe status models and pure policies**
 
 Implement the interfaces listed above. Use:
 
@@ -375,7 +399,7 @@ object BackupPolicy {
 `ConfirmationMismatch`. It must not call `trim`, `lowercase`, or Unicode
 normalisation.
 
-- [ ] **Step 4: Remove unused product sync surfaces**
+- [x] **Step 4: Remove unused product sync surfaces**
 
 Make these exact removals:
 
@@ -397,7 +421,7 @@ Make these exact removals:
 
 Keep the physical `SyncOperationEntity` and table for Task 2.
 
-- [ ] **Step 5: Run affected model/domain/UI compilation and tests**
+- [x] **Step 5: Run affected model/domain/UI compilation and tests**
 
 Run:
 
@@ -413,7 +437,7 @@ Run:
 Expected: PASS, including `BackupPolicyTest`, with no remaining Kotlin
 reference to the removed product sync types.
 
-- [ ] **Step 6: Verify the legacy-type scan**
+- [x] **Step 6: Verify the legacy-type scan**
 
 Run:
 
@@ -426,7 +450,7 @@ rg -n \
 Expected: no matches. `SyncOperationEntity` remains intentionally outside
 this expression.
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add CLAUDE.md core/model core/domain core/designsystem feature/home \
@@ -521,7 +545,7 @@ data class VaultRecoveryEnvelopeEntity(
   `BackupStateDao`, `VaultRecoveryEnvelopeDao`, and read-only
   `BackupCaptureDao`.
 
-- [ ] **Step 1: Add Room migration-test support**
+- [x] **Step 1: Add Room migration-test support**
 
 Add:
 
@@ -535,7 +559,7 @@ and:
 androidTestImplementation(libs.room.testing)
 ```
 
-- [ ] **Step 2: Write the failing v5→v6 migration tests**
+- [x] **Step 2: Write the failing v5→v6 migration tests**
 
 Use `MigrationTestHelper` with the exported v5 schema. Insert:
 
@@ -572,7 +596,7 @@ source-device IDs with the pre-migration fixture. Also test:
   state rows; and
 - all three new tables match Room's exported v6 schema.
 
-- [ ] **Step 3: Run the migration test to verify RED**
+- [x] **Step 3: Run the migration test to verify RED**
 
 After auditing that exactly one disposable device is attached, run:
 
@@ -586,7 +610,7 @@ app.opentasks.core.data.VaultDatabaseMigrationInstrumentedTest \
 Expected: compilation fails because v6 entities and `MIGRATION_5_6` do not
 exist.
 
-- [ ] **Step 4: Add v6 entities, DAOs, and read-only legacy access**
+- [x] **Step 4: Add v6 entities, DAOs, and read-only legacy access**
 
 Keep `SyncOperationEntity` mapped to `sync_operations`, but expose only:
 
@@ -660,7 +684,7 @@ Implement `RoomBackupStateStore` and `RoomRecoveryEnvelopeStore` as thin
 adapters over these DAOs in `BackupDaos.kt`; later app code consumes only the
 store interfaces.
 
-- [ ] **Step 5: Implement `MIGRATION_5_6`**
+- [x] **Step 5: Implement `MIGRATION_5_6`**
 
 Perform these operations in Room's migration transaction:
 
@@ -695,7 +719,7 @@ mutation kind `LEGACY`. Insert one `backup_state` row per vault, normalise
 `vaults.storageMode` to `LOCAL`, and set `schemaVersion = 6`. Do not update or
 delete any legacy operation.
 
-- [ ] **Step 6: Register v6 and generate the exported schema**
+- [x] **Step 6: Register v6 and generate the exported schema**
 
 Set `VaultDatabase.version = 6`, add all three entities/DAOs, and register
 `MIGRATION_5_6` after `MIGRATION_4_5`. Run:
@@ -708,7 +732,7 @@ Set `VaultDatabase.version = 6`, add all three entities/DAOs, and register
 Expected: PASS and
 `core/data/schemas/app.opentasks.core.data.db.VaultDatabase/6.json` exists.
 
-- [ ] **Step 7: Rerun migration and encrypted restart coverage**
+- [x] **Step 7: Rerun migration and encrypted restart coverage**
 
 Run the focused migration class from Step 3, then:
 
@@ -723,7 +747,7 @@ Expected: both commands PASS on the sole disposable device. Existing
 encrypted restart, template, recurrence, reminder, and time-entry tests remain
 green.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add gradle/libs.versions.toml core/data/build.gradle.kts \
@@ -835,7 +859,7 @@ Exactly one of `record` or `(deletedFamily, deletedIdentity)` is populated.
 Non-null scalar values use canonical decimal/boolean/string text; `BYTES`
 uses unpadded Base64; `NULL` has a null `value`.
 
-- [ ] **Step 1: Write strict mutation-codec RED tests**
+- [x] **Step 1: Write strict mutation-codec RED tests**
 
 Cover:
 
@@ -857,7 +881,7 @@ require(source.contentEquals(encode(decoded))) {
 }
 ```
 
-- [ ] **Step 2: Run mutation-codec tests to verify RED**
+- [x] **Step 2: Run mutation-codec tests to verify RED**
 
 Run:
 
@@ -868,7 +892,7 @@ Run:
 
 Expected: compilation fails because the v1 mutation codec does not exist.
 
-- [ ] **Step 3: Implement the record schema and mutation codec**
+- [x] **Step 3: Implement the record schema and mutation codec**
 
 Define exact ordered field schemas for these Room-backed families:
 
@@ -904,7 +928,7 @@ Validate field count, field names/types, identity agreement, identifier and
 string bounds, enum values, date/zone syntax, non-negative counts/sizes, and
 revision values before returning decoded content.
 
-- [ ] **Step 4: Write atomic generation RED tests**
+- [x] **Step 4: Write atomic generation RED tests**
 
 Add instrumented tests that prove:
 
@@ -935,7 +959,7 @@ Cover:
 Add matching in-memory tests for one-row, multi-row, rejected, idempotent, and
 rollback semantics.
 
-- [ ] **Step 5: Run atomicity tests to verify RED**
+- [x] **Step 5: Run atomicity tests to verify RED**
 
 Run the in-memory class:
 
@@ -956,7 +980,7 @@ app.opentasks.core.data.RoomVaultRepositoryInstrumentedTest \
 Expected: new assertions fail because commands still write the legacy outbox
 and do not allocate v6 generations.
 
-- [ ] **Step 6: Centralise one lazy journal session per command**
+- [x] **Step 6: Centralise one lazy journal session per command**
 
 Wrap Room command dispatch as:
 
@@ -992,7 +1016,7 @@ gets a deletion marker unless a tombstone's documented cascade is the only
 recovery event. Project/template creation emits every inserted row. Workflow
 reorder emits both changed statuses.
 
-- [ ] **Step 7: Align the in-memory journal**
+- [x] **Step 7: Align the in-memory journal**
 
 Give `InMemoryVaultRepository` an internal
 `InMemoryBackupJournal` dependency. It must:
@@ -1007,7 +1031,7 @@ Give `InMemoryVaultRepository` an internal
 Keep this test seam internal to `core:data`; do not expose journal internals to
 feature modules.
 
-- [ ] **Step 8: Prove the legacy table is read-only**
+- [x] **Step 8: Prove the legacy table is read-only**
 
 Run:
 
@@ -1020,7 +1044,7 @@ rg -n \
 Expected: no runtime write path. The only permitted legacy references are its
 entity, read-only audit DAO, and `MIGRATION_5_6` source query.
 
-- [ ] **Step 9: Run complete Data tests**
+- [x] **Step 9: Run complete Data tests**
 
 Run:
 
@@ -1031,7 +1055,7 @@ Run:
 Expected: PASS for mutation codec, in-memory journal, existing repository
 behaviour, authenticated objects, templates, and mappers.
 
-- [ ] **Step 10: Commit Task 3**
+- [x] **Step 10: Commit Task 3**
 
 ```bash
 git add core/data/src/main core/data/src/test \
@@ -1112,7 +1136,7 @@ data class StructuredBackupCapture(
   where immutable entity copies and `currentGeneration` are read in one short
   Room transaction and encoding happens after it returns.
 
-- [ ] **Step 1: Write complete snapshot RED tests**
+- [x] **Step 1: Write complete snapshot RED tests**
 
 Build a fixture containing at least one record from all 18 backup families.
 Assert:
@@ -1132,7 +1156,7 @@ Assert:
 - invalid attachment metadata without reading attachment bytes; and
 - invalid UTF-8 and future versions.
 
-- [ ] **Step 2: Write operation-segment RED tests**
+- [x] **Step 2: Write operation-segment RED tests**
 
 Assert generation/sequence order, inclusive range agreement, unique operation
 IDs, payload canonicality, 10,000-entry acceptance, 10,001 rejection,
@@ -1152,7 +1176,7 @@ assertEquals(
 Reject a segment containing `payloadFormatVersion = 0`; legacy entries are
 covered by the initial baseline and never become post-base deltas.
 
-- [ ] **Step 3: Run both codec tests to verify RED**
+- [x] **Step 3: Run both codec tests to verify RED**
 
 Run:
 
@@ -1166,7 +1190,7 @@ Run:
 Expected: compilation fails because snapshot/segment codecs and capture DTOs
 do not exist.
 
-- [ ] **Step 4: Implement exact consistent Room capture**
+- [x] **Step 4: Implement exact consistent Room capture**
 
 Add ordered `SELECT *` queries for every backup family. Use primary-key order;
 for composite identities use every key column. `RoomBackupCaptureSource`
@@ -1188,7 +1212,7 @@ ordered query results to immutable `BackupRecordV1` values. Do not use
 `WorkspaceSnapshot`, flows, encoded Room entities, journal rows, state rows,
 key preferences, credentials, cache, or attachment files.
 
-- [ ] **Step 5: Implement strict canonical payload codecs**
+- [x] **Step 5: Implement strict canonical payload codecs**
 
 Use a shared strict UTF-8 decoder configured with
 `CodingErrorAction.REPORT`. Configure `Json` with defaults, explicit nulls,
@@ -1199,7 +1223,7 @@ Snapshot validation must build identity maps and validate every relation
 without mutating input. Segment validation must decode each embedded local
 mutation payload and compare its object identity to the enclosing entry.
 
-- [ ] **Step 6: Generate independent v1 fixtures**
+- [x] **Step 6: Generate independent v1 fixtures**
 
 The Node script must use only built-in `crypto`, `fs`, and `path`. It writes
 canonical snapshot and segment plaintext independently of Kotlin, including
@@ -1214,7 +1238,7 @@ node scripts/generate-stage2-backup-v1-fixtures.mjs
 Then make `BackupPayloadGoldenTest` load both resources and assert exact bytes,
 identity, counts, and digests.
 
-- [ ] **Step 7: Run payload and independent-vector tests**
+- [x] **Step 7: Run payload and independent-vector tests**
 
 Run:
 
@@ -1237,7 +1261,7 @@ git diff --exit-code -- core/data/src/test/resources/backup-format/v1
 
 Expected: both commands exit `0`.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add scripts/generate-stage2-backup-v1-fixtures.mjs \
@@ -1303,7 +1327,7 @@ interface LocalBackupObjectStore {
 The production store receives only an injected
 `noBackupFilesDir/backup/v1` root. It never derives Android paths itself.
 
-- [ ] **Step 1: Write local-object lifecycle RED tests**
+- [x] **Step 1: Write local-object lifecycle RED tests**
 
 Use a fresh temporary directory per test. Assert:
 
@@ -1327,7 +1351,7 @@ backup/v1/
     staging/
 ```
 
-- [ ] **Step 2: Write coordinator RED tests**
+- [x] **Step 2: Write coordinator RED tests**
 
 Use real `TinkVaultCrypto`, `DefaultAuthenticatedCloudObjectCodec`, strict
 payload codecs, an in-memory capture/journal/state source, and a temporary
@@ -1348,7 +1372,7 @@ object store. Assert:
 - cancellation clears owned arrays and leaves state unchanged; and
 - local edit/journal operations remain available after backup failure.
 
-- [ ] **Step 3: Run lifecycle/coordinator tests to verify RED**
+- [x] **Step 3: Run lifecycle/coordinator tests to verify RED**
 
 Run:
 
@@ -1362,7 +1386,7 @@ Run:
 Expected: compilation fails because the local store and coordinator do not
 exist.
 
-- [ ] **Step 4: Implement atomic local-object storage**
+- [x] **Step 4: Implement atomic local-object storage**
 
 Validate every object ID against:
 
@@ -1376,7 +1400,7 @@ move within the same filesystem using `ATOMIC_MOVE` and `REPLACE_EXISTING`.
 If atomic move is unavailable, fail with typed local file I/O; do not silently
 fall back to a non-atomic replacement.
 
-- [ ] **Step 5: Implement encrypt-readback-verify-checkpoint ordering**
+- [x] **Step 5: Implement encrypt-readback-verify-checkpoint ordering**
 
 For snapshots:
 
@@ -1408,7 +1432,7 @@ and source counts. Only then commit the file and state checkpoint.
 Segments follow the same sequence and compare every operation ID,
 generation/sequence tuple, and payload byte before checkpoint advancement.
 
-- [ ] **Step 6: Add single-flight coalescing**
+- [x] **Step 6: Add single-flight coalescing**
 
 Use one `Mutex` and a pending flag:
 
@@ -1435,7 +1459,7 @@ override suspend fun request() {
 The application supplies the coroutine scope and debounce in Task 8. This
 coordinator has no WorkManager or network dependency.
 
-- [ ] **Step 7: Run complete local-backup tests**
+- [x] **Step 7: Run complete local-backup tests**
 
 Run:
 
@@ -1446,7 +1470,7 @@ Run:
 Expected: PASS, including Stage 1 authenticated-object vectors and all new
 snapshot, segment, store, and coordinator coverage.
 
-- [ ] **Step 8: Commit Task 5**
+- [x] **Step 8: Commit Task 5**
 
 ```bash
 git add core/data/src/main/kotlin/app/opentasks/core/data/backup \

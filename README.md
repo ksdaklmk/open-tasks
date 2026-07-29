@@ -59,8 +59,8 @@ workspace slice:
   sample-workspace seed.
 - Domain rules for workflows, recurrence, deterministic occurrences,
   dependencies, project progress, Bin retention, and time reconciliation.
-- Room schema and SQLCipher database factory with atomic task/outbox and
-  timer/time-entry outbox transactions.
+- Room schema and SQLCipher database factory with atomic task, timer, and
+  time-entry backup-journal transactions.
 - Task-scoped manual time entry with exact add/edit/delete Undo, bounded notes,
   persisted history and explicit overlap review rather than silent duration
   loss.
@@ -70,6 +70,16 @@ workspace slice:
 - Provider-independent bounded cloud-object frames and an authenticated codec
   that binds complete object identity, plus legacy hybrid logical clock and
   merge primitives retained as well-tested internal foundations.
+- Additive encrypted Room v6 backup generations: accepted local mutations
+  append ordered canonical journal rows in the same transaction, while every
+  legacy outbox row remains preserved in the now read-only legacy table.
+- Strict complete-snapshot and operation-segment payload v1 codecs, consistent
+  one-transaction capture, and verified encrypted current/previous/segment
+  recovery objects under `noBackupFilesDir`.
+- A single-flight local backup coordinator that performs authenticated
+  readback and source comparison before checkpointing, retains recovery bases,
+  and leaves local editing/journal rows intact on failure. Its application
+  trigger remains intentionally deferred.
 - Hilt application wiring, Navigation 3, Material 3 Adaptive, edge-to-edge,
   predictive Back, Android backup disabled, and notification permission
   discipline.
@@ -85,24 +95,25 @@ implementation history, and dependency-ordered backlog. Train 0 committed the
 verified P1/P2 baseline, and Train 1 Tasks 1.1–1.5 remain accepted historical
 evidence.
 
-Encrypted app-managed backup, supplementary Android Auto Backup, recovery
-takeover, and cloud-only attachment bytes are approved future work. None is
-shipped: Google authorisation and Drive transport are not connected, Android
-Auto Backup remains disabled, recovery UI is absent, and attachments are not
-operational.
+The local journal, payload, recovery-object store, and coordinator foundation
+are implemented, but backup is not yet a shipped feature: the coordinator is
+not activated by application lifecycle wiring, no portable package or
+prepared/persisted recovery envelope exists, and no recovery UI is present.
+Google authorisation and Drive transport are not connected, Android Auto Backup
+remains disabled, and attachments are not operational.
 
 The runnable app is deliberately a foundation slice, not the completed
 six-stage release. Encrypted task CRUD and core-field editing, project
 workbench editing, project creation and Archive/Restore, Bin/restore
-commands, search, timers, manual time history, and the local outbox now persist
-across process restarts. Recurrence rules, series metadata, reminders and
+commands, search, timers, manual time history, and the local backup journal now
+persist across process restarts. Recurrence rules, series metadata, reminders and
 project workflows persist through the encrypted Room store. Transient route,
 selection, filter, scroll and draft context is also restored without
-overwriting unsaved editor text on the first repository emission. The current
-outbox data remains untouched until Stage 2 deliberately migrates it to backup
-journal semantics. Backup, Drive transport, recovery, attachments, widgets,
-import/export, the remaining More subfeatures, and Play release operations are
-future milestones.
+overwriting unsaved editor text on the first repository emission. Stage 2 has
+copied the preserved legacy outbox into local backup-journal format without
+deleting the original rows. Portable/Android backup, Drive transport, recovery,
+attachments, widgets, import/export, the remaining More subfeatures, and Play
+release operations are future milestones.
 
 ## Build
 
