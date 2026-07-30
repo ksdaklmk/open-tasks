@@ -17,11 +17,23 @@ Instrumented tests need a device. CI runs them on API 36 and 37; use the same
 command locally for device-specific diagnosis:
 
 ```bash
-./gradlew :core:data:connectedDebugAndroidTest :feature:tasks:connectedDebugAndroidTest \
-  :feature:projects:connectedDebugAndroidTest :feature:more:connectedDebugAndroidTest
+./gradlew :app:connectedDebugAndroidTest :core:data:connectedDebugAndroidTest \
+  :feature:tasks:connectedDebugAndroidTest :feature:projects:connectedDebugAndroidTest \
+  :feature:schedule:connectedDebugAndroidTest :feature:more:connectedDebugAndroidTest
 ```
 
-Do not uninstall the app or wipe emulator data — the emulator holds a workspace already migrated v1→v2.
+`:app:connectedDebugAndroidTest` uninstalls `app.opentasks`. Run connected
+suites only against a sole disposable ADB target started with `-read-only
+-no-snapshot-load -no-snapshot-save`, never against the normal emulator.
+
+Do not uninstall the app or wipe emulator data — the `Pixel_10_Pro_Fold` AVD
+holds a protected workspace migrated v1→v6 plus the signed-in Google account
+the Stage 3 credentialed gate needs (Google's Authorization API fails with
+`INTERNAL_ERROR` 8 on a device with no account).
+
+CI also runs `:app:assembleRelease` as a separate job. Never combine
+`lintDebug` and `assembleRelease` in one Gradle invocation — AGP lint can
+race KSP while release Hilt sources are generated.
 
 ## Gradle
 
@@ -53,17 +65,20 @@ Do not uninstall the app or wipe emulator data — the emulator holds a workspac
 - Zero database key arrays after use (`key.fill(0)` in a `finally`), as `LocalVaultRepositoryFactory` does.
 - Recovery uses Argon2id (64 MiB, 3 iterations, parallelism 1, 16-byte salt); passphrases are never persisted.
 - Logs and telemetry must never contain task text, account details, Drive IDs, attachment names, or encryption metadata.
-- Drive transport is deliberately not wired to credentials. Future cloud work
-  must keep encrypted Room as the sole live structured-data authority, add no
-  bidirectional sync path, encrypt objects locally through the provider-neutral
-  authenticated codec, and use separate `BackupObjectStore` and
-  `AttachmentBlobStore` boundaries. The `core:sync` framing types are internal
-  provider-independent foundations; they must not direct new provider, backup,
-  or blob work. Provider transport belongs no earlier than Stage 3.
+- Stage 3 Drive transport is create-only. `CreateOnlyDriveTransport` /
+  `HttpCreateOnlyDriveTransport` use only the `drive.appdata` scope and
+  immutable creates: no update/PATCH path and no ETag, If-Match, or
+  provider-revision concepts (Drive supplies no strong HTTP revision; the
+  mutable-control design was abandoned for that reason). Credentialed access
+  exists only in the debug-only, non-exported qualification activity. Future
+  cloud work must keep encrypted Room as the sole live structured-data
+  authority, add no bidirectional sync path, encrypt objects locally through
+  the provider-neutral authenticated codec, and use separate
+  `BackupObjectStore` and `AttachmentBlobStore` boundaries.
 
 ## Style
 
-- Colors are authored as OKLCH via `oklch(...)` in `:core:designsystem`. Never introduce hex color literals.
+- Colors are authored as OKLCH via `oklch(...)` in `:core:designsystem`. Never introduce hex color literals. A `PreToolUse` hook blocks `.kt` writes containing `Color(0x` outside `core/designsystem`.
 - Spacing uses the 4 dp scale (4, 8, 12, 16, 24, 32, 48, 64). Typography uses Material roles only — no ad-hoc sizes in feature code. Dynamic Color is disabled.
 - No formatter is configured by choice; `kotlin.code.style=official` plus IDE reformat is the authority. Follow the existing conventions: trailing commas in multi-line lists, wrap near 100 chars, explicit imports (no wildcards), underscores in numeric literals, per-declaration `@OptIn`.
 - New UI copy goes in `res/values/strings.xml` and is read with `stringResource` (existing screens hardcode literals; do not follow that).
@@ -79,5 +94,7 @@ Do not uninstall the app or wipe emulator data — the emulator holds a workspac
 
 - Commit straight to `main`; no branch or PR ceremony.
 - No secrets or env vars are needed for local development. There is no signing config — release builds are unsigned.
+- GitHub Actions `uses:` references stay SHA-pinned;
+  `scripts/verify-actions-workflow.sh` enforces this and the CI matrix shape.
 
 Module-specific instructions can go in a subdirectory `CLAUDE.md` (e.g. `core/data/CLAUDE.md`); it loads automatically when working there. Ask if you want one.
