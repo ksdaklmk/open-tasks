@@ -19,6 +19,12 @@ import app.opentasks.core.data.backup.BackupMutationDao
 import app.opentasks.core.data.backup.BackupStateDao
 import app.opentasks.core.data.backup.BackupStateEntity
 import app.opentasks.core.data.backup.LegacySyncOperationDao
+import app.opentasks.core.data.backup.RemoteBackupConfigDao
+import app.opentasks.core.data.backup.RemoteBackupConfigEntity
+import app.opentasks.core.data.backup.RemoteBackupObjectDao
+import app.opentasks.core.data.backup.RemoteBackupObjectEntity
+import app.opentasks.core.data.backup.RemoteBackupOperationDao
+import app.opentasks.core.data.backup.RemoteBackupOperationEntity
 import app.opentasks.core.data.backup.VaultRecoveryEnvelopeDao
 import app.opentasks.core.data.backup.VaultRecoveryEnvelopeEntity
 import kotlinx.coroutines.flow.Flow
@@ -383,8 +389,11 @@ interface TimeEntryDao {
         BackupJournalEntity::class,
         BackupStateEntity::class,
         VaultRecoveryEnvelopeEntity::class,
+        RemoteBackupConfigEntity::class,
+        RemoteBackupObjectEntity::class,
+        RemoteBackupOperationEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -397,6 +406,9 @@ abstract class VaultDatabase : RoomDatabase() {
     abstract fun backupStateDao(): BackupStateDao
     abstract fun vaultRecoveryEnvelopeDao(): VaultRecoveryEnvelopeDao
     abstract fun backupCaptureDao(): BackupCaptureDao
+    abstract fun remoteBackupConfigDao(): RemoteBackupConfigDao
+    abstract fun remoteBackupObjectDao(): RemoteBackupObjectDao
+    abstract fun remoteBackupOperationDao(): RemoteBackupOperationDao
 
     @Transaction
     open suspend fun purgeTask(
@@ -435,6 +447,7 @@ abstract class VaultDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
+                    MIGRATION_6_7,
                 )
                 .build()
         }
@@ -738,6 +751,133 @@ abstract class VaultDatabase : RoomDatabase() {
                 }
                 db.execSQL(
                     "UPDATE vaults SET storageMode = 'LOCAL', schemaVersion = 6",
+                )
+            }
+        }
+
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS remote_backup_config (
+                        lineageId TEXT NOT NULL,
+                        vaultId TEXT NOT NULL,
+                        rootClaimProviderFileId TEXT NOT NULL,
+                        accountBindingDigest BLOB NOT NULL,
+                        lifecycle TEXT NOT NULL,
+                        activeDeviceId TEXT,
+                        writerEpoch INTEGER,
+                        ownershipClaimProviderFileId TEXT,
+                        ownershipClaimId TEXT,
+                        ownershipClaimSha256 TEXT,
+                        nextSuccessorProviderFileId TEXT,
+                        currentPublicationProviderFileId TEXT,
+                        currentPublicationId TEXT,
+                        currentPublicationSha256 TEXT,
+                        previousPublicationProviderFileId TEXT,
+                        previousPublicationId TEXT,
+                        previousPublicationSha256 TEXT,
+                        publicationSequence INTEGER,
+                        lastVerifiedGeneration INTEGER,
+                        lastVerifiedAtEpochMillis INTEGER,
+                        recoveryCredentialGeneration INTEGER NOT NULL,
+                        failureCategory TEXT,
+                        stateVersion INTEGER NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(lineageId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_config_vaultId
+                        ON remote_backup_config(vaultId)
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_config_lifecycle
+                        ON remote_backup_config(lifecycle)
+                    """.trimIndent(),
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS remote_backup_object (
+                        lineageId TEXT NOT NULL,
+                        logicalObjectId TEXT NOT NULL,
+                        providerFileId TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        writerEpoch INTEGER NOT NULL,
+                        ownerDeviceId TEXT NOT NULL,
+                        operationId TEXT NOT NULL,
+                        firstGeneration INTEGER NOT NULL,
+                        lastGeneration INTEGER NOT NULL,
+                        frameLength INTEGER NOT NULL,
+                        frameSha256 TEXT NOT NULL,
+                        lifecycle TEXT NOT NULL,
+                        resumableSessionUri TEXT,
+                        uploadedBytes INTEGER NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        verifiedAtEpochMillis INTEGER,
+                        PRIMARY KEY(lineageId, logicalObjectId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        index_remote_backup_object_providerFileId
+                    ON remote_backup_object(providerFileId)
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_object_operationId
+                        ON remote_backup_object(operationId)
+                    """.trimIndent(),
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS remote_backup_operation (
+                        operationId TEXT NOT NULL,
+                        lineageId TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        targetEpoch INTEGER,
+                        targetGeneration INTEGER,
+                        candidateClaimProviderFileId TEXT,
+                        candidatePublicationProviderFileId TEXT,
+                        stateBytes BLOB NOT NULL,
+                        startedAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(operationId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_operation_lineageId
+                        ON remote_backup_operation(lineageId)
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_operation_kind
+                        ON remote_backup_operation(kind)
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_remote_backup_operation_phase
+                        ON remote_backup_operation(phase)
+                    """.trimIndent(),
+                )
+
+                db.execSQL(
+                    "UPDATE vaults SET schemaVersion = 7 WHERE schemaVersion < 7",
                 )
             }
         }

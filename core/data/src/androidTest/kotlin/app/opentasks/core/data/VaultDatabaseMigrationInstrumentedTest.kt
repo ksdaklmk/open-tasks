@@ -1,6 +1,7 @@
 package app.opentasks.core.data
 
 import android.content.Context
+import android.database.Cursor
 import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
@@ -214,6 +215,393 @@ class VaultDatabaseMigrationInstrumentedTest {
             }
         }
     }
+
+    @Test
+    fun migrate6To7PreservesStage2AndLegacyBytes() {
+        val databaseName = databaseNameV6("preserved")
+        lateinit var beforeTableNames: List<String>
+        lateinit var before: Map<String, List<List<Any?>>>
+        createV6(databaseName).use { database ->
+            seedVersion6Fixture(database)
+            beforeTableNames = database.tableNames()
+            before = database.captureVersion6Bytes()
+        }
+
+        val migrated = migrateTo7(databaseName)
+
+        assertEquals(before, migrated.capturePreservedBytes())
+        assertEquals(0, migrated.longValue("SELECT COUNT(*) FROM remote_backup_config"))
+        assertEquals(0, migrated.longValue("SELECT COUNT(*) FROM remote_backup_object"))
+        assertEquals(0, migrated.longValue("SELECT COUNT(*) FROM remote_backup_operation"))
+        assertEquals(
+            (
+                beforeTableNames + listOf(
+                    "remote_backup_config",
+                    "remote_backup_object",
+                    "remote_backup_operation",
+                )
+                ).sorted(),
+            migrated.tableNames(),
+        )
+        assertEquals(
+            7L,
+            migrated.longValue("SELECT schemaVersion FROM vaults WHERE id = 'vault-a'"),
+        )
+        migrated.close()
+    }
+
+    @Test
+    fun migrate6To7CreatesRemoteTablesMatchingExportedSchema() {
+        val databaseName = databaseNameV6("remote-schema")
+        createV6(databaseName).use { database ->
+            insertVaultV6(database, id = "vault-a")
+        }
+
+        migrateTo7(databaseName).use { migrated ->
+            migrated.query(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                    AND name IN (
+                        'remote_backup_config',
+                        'remote_backup_object',
+                        'remote_backup_operation'
+                    )
+                ORDER BY name
+                """.trimIndent(),
+            ).use { cursor ->
+                val tableNames = buildList {
+                    while (cursor.moveToNext()) add(cursor.getString(0))
+                }
+                assertEquals(
+                    listOf(
+                        "remote_backup_config",
+                        "remote_backup_object",
+                        "remote_backup_operation",
+                    ),
+                    tableNames,
+                )
+            }
+        }
+    }
+
+    private fun databaseNameV6(suffix: String): String =
+        "vault-v6-v7-$suffix.db".also(databaseNames::add)
+
+    private fun createV6(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.createDatabase(databaseName, 6)
+
+    private fun migrateTo7(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.runMigrationsAndValidate(
+            databaseName,
+            7,
+            true,
+            VaultDatabase.MIGRATION_6_7,
+        )
+
+    private fun insertVaultV6(database: SupportSQLiteDatabase, id: String) {
+        database.execSQL(
+            """
+            INSERT INTO vaults (
+                id, storageMode, createdAtEpochMillis, schemaVersion,
+                cryptoVersion, minimumReaderVersion
+            ) VALUES (?, 'LOCAL', 1000, 6, 1, 1)
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    /**
+     * Populates one row in every v6 user table, every Stage 2 backup table,
+     * the recovery envelope, and legacy `sync_operations` so
+     * [migrate6To7PreservesStage2AndLegacyBytes] can prove the migration
+     * changes no existing column or byte.
+     */
+    private fun seedVersion6Fixture(database: SupportSQLiteDatabase) {
+        insertVaultV6(database, id = "vault-a")
+        database.execSQL(
+            """
+            INSERT INTO workspaces (id, vaultId, ownerId, name)
+            VALUES ('workspace-a', 'vault-a', 'member-a', 'Workspace A')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            "INSERT INTO members (id, displayName) VALUES ('member-a', 'Member A')",
+        )
+        database.execSQL(
+            """
+            INSERT INTO projects (
+                id, workspaceId, name, summary, health, dueDate, completedTasks,
+                totalTasks, archivedAtEpochMillis, revisionWallMillis, revisionLogical,
+                revisionDeviceId
+            ) VALUES (
+                'project-a', 'workspace-a', 'Project A', 'Summary', 'ON_TRACK', NULL, 1,
+                2, NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO workflow_statuses (
+                id, projectId, name, semanticStatus, rank, archivedAtEpochMillis,
+                revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES (
+                'workflow-a', 'project-a', 'Todo', 'TODO', 'a0', NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO milestones (
+                id, projectId, name, dueDate, completedAtEpochMillis,
+                revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES ('milestone-a', 'project-a', 'Milestone A', NULL, NULL, 10, 1, 'device-a')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO tasks (
+                id, workspaceId, projectId, parentTaskId, statusId, semanticStatus,
+                title, descriptionCiphertext, priority, startEpochMillis, startZoneId,
+                dueEpochMillis, dueZoneId, recurrenceFrequency, recurrenceInterval,
+                recurrenceWeekdays, recurrenceCount, recurrenceEndDate,
+                recurrenceSeriesId, recurrenceAnchorEpochMillis, recurrenceAnchorZoneId,
+                recurrenceOccurrenceIndex, estimateSeconds, milestoneId,
+                completedAtEpochMillis, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'task-a', 'workspace-a', 'project-a', NULL, 'workflow-a', 'TODO',
+                'Task A', ?, 'MEDIUM', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, 'milestone-a', NULL, NULL, 10, 1,
+                'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x01, 0x02, 0x03)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO tasks (
+                id, workspaceId, projectId, parentTaskId, statusId, semanticStatus,
+                title, descriptionCiphertext, priority, startEpochMillis, startZoneId,
+                dueEpochMillis, dueZoneId, recurrenceFrequency, recurrenceInterval,
+                recurrenceWeekdays, recurrenceCount, recurrenceEndDate,
+                recurrenceSeriesId, recurrenceAnchorEpochMillis, recurrenceAnchorZoneId,
+                recurrenceOccurrenceIndex, estimateSeconds, milestoneId,
+                completedAtEpochMillis, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'task-b', 'workspace-a', 'project-a', NULL, 'workflow-a', 'TODO',
+                'Task B', ?, 'LOW', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 11, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x0a)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO checklist_items (id, taskId, text, completed, rank)
+            VALUES ('checklist-a', 'task-a', 'Step 1', 0, 'a0')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO task_dependencies (
+                taskId, dependsOnTaskId, revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES ('task-a', 'task-b', 10, 1, 'device-a')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            "INSERT INTO tags (id, workspaceId, name) VALUES ('tag-a', 'workspace-a', 'Urgent')",
+        )
+        database.execSQL(
+            """
+            INSERT INTO task_tags (
+                taskId, tagId, present, revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES ('task-a', 'tag-a', 1, 10, 1, 'device-a')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO reminders (id, taskId, triggerAtEpochMillis, zoneId, precise)
+            VALUES ('reminder-a', 'task-a', 5000, 'UTC', 1)
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount, contentHash,
+                keepOffline
+            ) VALUES ('attachment-a', 'task-a', ?, 'image/png', 10, 'hash-a', 0)
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x04, 0x05)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO activity_entries (
+                id, taskId, projectId, kind, bodyCiphertext, createdAtEpochMillis
+            ) VALUES ('activity-a', 'task-a', NULL, 'CREATED', ?, 10)
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x06)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO time_entries (
+                id, taskId, deviceId, startedAtEpochMillis, stoppedAtEpochMillis,
+                noteCiphertext
+            ) VALUES ('time-a', 'task-a', 'device-a', 10, 20, ?)
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x07)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO templates (
+                id, workspaceId, name, encryptedPayload, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES ('template-a', 'workspace-a', 'Template A', ?, 10, 1, 'device-a')
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x08)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO saved_views (id, workspaceId, name, encryptedQuery)
+            VALUES ('saved-view-a', 'workspace-a', 'My View', ?)
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x09)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO tombstones (
+                objectId, objectType, deletedAtEpochMillis, purgeAfterEpochMillis,
+                revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES ('task-c', 'TASK', 10, 20, 10, 1, 'device-a')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO sync_operations (
+                id, deviceId, objectId, objectType, encryptedPayload,
+                revisionWallMillis, revisionLogical, uploadedAtEpochMillis
+            ) VALUES ('sync-a', 'device-a', 'task-a', 'TASK', ?, 10, 1, NULL)
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x0b)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO backup_journal (
+                operationId, vaultId, generation, sequence, payloadFormatVersion,
+                mutationKind, objectId, objectType, payload, revisionWallMillis,
+                revisionLogical, sourceDeviceId
+            ) VALUES (
+                'journal-a', 'vault-a', 1, 0, 0, 'UPSERT', 'task-a', 'TASK', ?, 10, 1,
+                'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x0c)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO backup_state (
+                vaultId, currentGeneration, lastVerifiedSnapshotGeneration,
+                currentBaseObjectId, previousBaseObjectId, latestVerifiedSegmentGeneration,
+                portablePackageGeneration, portablePackageBytes,
+                portablePackageProducedAtEpochMillis, packageState, failureCategory,
+                recoveryEnvelopeReady, legacyOutboxCoveredAtGeneration,
+                snapshotCreatedAtEpochMillis
+            ) VALUES (
+                'vault-a', 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'NOT_PREPARED',
+                NULL, 0, NULL, NULL
+            )
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO vault_recovery_envelope (
+                vaultId, formatVersion, kdfAlgorithm, memoryKiB, iterations,
+                parallelism, salt, nonce, wrappedKeyset
+            ) VALUES ('vault-a', 1, 'ARGON2ID', 65536, 3, 1, ?, ?, ?)
+            """.trimIndent(),
+            arrayOf<Any?>(
+                ByteArray(16) { it.toByte() },
+                ByteArray(12) { (it + 1).toByte() },
+                ByteArray(32) { (it + 2).toByte() },
+            ),
+        )
+    }
+
+    private val preservedTables = listOf(
+        "workspaces",
+        "members",
+        "projects",
+        "workflow_statuses",
+        "milestones",
+        "tasks",
+        "checklist_items",
+        "task_dependencies",
+        "tags",
+        "task_tags",
+        "reminders",
+        "attachments",
+        "activity_entries",
+        "time_entries",
+        "templates",
+        "saved_views",
+        "tombstones",
+        "sync_operations",
+        "backup_journal",
+        "backup_state",
+        "vault_recovery_envelope",
+    )
+
+    private fun SupportSQLiteDatabase.captureVersion6Bytes(): Map<String, List<List<Any?>>> =
+        buildMap {
+            put(
+                "vaults",
+                captureRows(
+                    """
+                    SELECT id, storageMode, createdAtEpochMillis, cryptoVersion,
+                           minimumReaderVersion
+                    FROM vaults ORDER BY id
+                    """.trimIndent(),
+                ),
+            )
+            preservedTables.forEach { table ->
+                put(table, captureRows("SELECT * FROM $table ORDER BY rowid"))
+            }
+        }
+
+    private fun SupportSQLiteDatabase.capturePreservedBytes(): Map<String, List<List<Any?>>> =
+        captureVersion6Bytes()
+
+    private fun SupportSQLiteDatabase.captureRows(sql: String): List<List<Any?>> =
+        query(sql).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        (0 until cursor.columnCount).map { index ->
+                            when (cursor.getType(index)) {
+                                Cursor.FIELD_TYPE_NULL -> null
+                                Cursor.FIELD_TYPE_INTEGER -> cursor.getLong(index)
+                                Cursor.FIELD_TYPE_FLOAT -> cursor.getDouble(index)
+                                Cursor.FIELD_TYPE_STRING -> cursor.getString(index)
+                                Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(index).toList()
+                                else -> error("Unsupported cursor column type")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+    private fun SupportSQLiteDatabase.tableNames(): List<String> =
+        query(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'room_%'
+            ORDER BY name
+            """.trimIndent(),
+        ).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+        }
 
     private fun databaseName(suffix: String): String =
         "vault-v5-v6-$suffix.db".also(databaseNames::add)
