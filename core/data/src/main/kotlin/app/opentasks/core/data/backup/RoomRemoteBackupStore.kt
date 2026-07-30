@@ -30,18 +30,15 @@ import kotlinx.coroutines.flow.map
 /**
  * Transaction-backed Room persistence for create-only remote backup state.
  *
- * [RemoteBackupConfigEntity] does not carry an independent generation for
- * [RemoteBackupConfiguration.previousPublication] (only one
- * `lastVerifiedGeneration` column exists for the row). A publication is only
- * ever adopted as `currentPublication` once it has been locally verified, so
- * `currentPublication.generation` always equals `lastVerifiedGeneration` and
- * round-trips exactly; that invariant is enforced on every write. The
- * `previousPublication.generation` this store returns is a best-effort
- * approximation reusing the same `lastVerifiedGeneration` value — the
- * superseded publication's own generation is not retained by this table. Its
- * identity (`providerId`/`logicalId`/`sha256`) and sequence (exactly one less
- * than the current sequence, a create-only protocol invariant) round-trip
- * exactly.
+ * A publication is only ever adopted as `currentPublication` once it has
+ * been locally verified, so `currentPublication.generation` always equals
+ * `lastVerifiedGeneration`; that invariant is enforced on every write.
+ * `previousPublication` — identity, sequence (exactly one less than the
+ * current sequence, a create-only protocol invariant), and its own
+ * `previousPublicationGeneration` column — round-trips exactly; the
+ * protocol only guarantees `current.generation >= previous.generation`, so
+ * the previous publication's generation is never assumed to equal the
+ * current one.
  */
 class RoomRemoteBackupStore(
     private val database: VaultDatabase,
@@ -120,6 +117,7 @@ class RoomRemoteBackupStore(
                 previousPublicationProviderFileId = entity.previousPublicationProviderFileId,
                 previousPublicationId = entity.previousPublicationId,
                 previousPublicationSha256 = entity.previousPublicationSha256,
+                previousPublicationGeneration = entity.previousPublicationGeneration,
                 publicationSequence = entity.publicationSequence,
                 lastVerifiedGeneration = entity.lastVerifiedGeneration,
                 lastVerifiedAtEpochMillis = entity.lastVerifiedAtEpochMillis,
@@ -300,6 +298,7 @@ private fun RemoteBackupConfiguration.toEntity(
         previousPublicationProviderFileId = previous?.providerId?.value,
         previousPublicationId = previous?.logicalId?.value,
         previousPublicationSha256 = previous?.sha256?.value,
+        previousPublicationGeneration = previous?.generation?.value,
         publicationSequence = current?.sequence?.value,
         lastVerifiedGeneration = lastVerifiedGeneration?.value,
         lastVerifiedAtEpochMillis = lastVerifiedAt?.toEpochMilli(),
@@ -340,9 +339,7 @@ private fun RemoteBackupConfigEntity.toDomain(): RemoteBackupConfiguration {
             logicalId = PublicationId.parse(requireNotNull(previousPublicationId)),
             sha256 = Sha256Digest.of(requireNotNull(previousPublicationSha256)),
             sequence = PublicationSequence(requireNotNull(publicationSequence) - 1),
-            // Best-effort: this table retains only one verified generation per row. See
-            // the RoomRemoteBackupStore class doc.
-            generation = BackupGeneration(requireNotNull(lastVerifiedGeneration)),
+            generation = BackupGeneration(requireNotNull(previousPublicationGeneration)),
         )
     } else {
         null

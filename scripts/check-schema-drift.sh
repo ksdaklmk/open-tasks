@@ -19,9 +19,19 @@ if [[ -z "$latest_version" ]]; then
     echo "No versioned schema files found in $schema_dir" >&2
     exit 1
 fi
-rm -f "$schema_dir/$latest_version.json"
+latest_file="$schema_dir/$latest_version.json"
+rm -f "$latest_file"
 
-(cd "$repo_root" && ./gradlew :core:data:kspDebugKotlin --rerun-tasks)
+# A Gradle (tool) failure here is not a drift verdict: no comparison has happened yet.
+# Restore the deleted top-version file from the backup so the working tree is left
+# exactly as it was found, and so a later run doesn't mistake the next-lower version
+# for "current" and delete a frozen historical schema instead.
+if ! (cd "$repo_root" && ./gradlew :core:data:kspDebugKotlin --rerun-tasks); then
+    echo "check-schema-drift: Gradle failed regenerating $latest_version.json;" \
+        "restoring it from backup (not a drift result)." >&2
+    cp "$backup_dir/$latest_version.json" "$latest_file"
+    exit 1
+fi
 
 status=0
 

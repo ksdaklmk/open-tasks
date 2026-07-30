@@ -31,6 +31,7 @@ data class RemoteBackupConfigEntity(
     val previousPublicationProviderFileId: String?,
     val previousPublicationId: String?,
     val previousPublicationSha256: String?,
+    val previousPublicationGeneration: Long?,
     val publicationSequence: Long?,
     val lastVerifiedGeneration: Long?,
     val lastVerifiedAtEpochMillis: Long?,

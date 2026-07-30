@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 7,
-    "identityHash": "ca2e2fc14a985599845d1cbae81097a7",
+    "identityHash": "8132df92fdc2f7d1df8605fdfcfa63a5",
     "entities": [
       {
         "tableName": "vaults",
@@ -1446,7 +1446,7 @@
       },
       {
         "tableName": "remote_backup_config",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`lineageId` TEXT NOT NULL, `vaultId` TEXT NOT NULL, `rootClaimProviderFileId` TEXT NOT NULL, `accountBindingDigest` BLOB NOT NULL, `lifecycle` TEXT NOT NULL, `activeDeviceId` TEXT, `writerEpoch` INTEGER, `ownershipClaimProviderFileId` TEXT, `ownershipClaimId` TEXT, `ownershipClaimSha256` TEXT, `nextSuccessorProviderFileId` TEXT, `currentPublicationProviderFileId` TEXT, `currentPublicationId` TEXT, `currentPublicationSha256` TEXT, `previousPublicationProviderFileId` TEXT, `previousPublicationId` TEXT, `previousPublicationSha256` TEXT, `publicationSequence` INTEGER, `lastVerifiedGeneration` INTEGER, `lastVerifiedAtEpochMillis` INTEGER, `recoveryCredentialGeneration` INTEGER NOT NULL, `failureCategory` TEXT, `stateVersion` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`lineageId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`lineageId` TEXT NOT NULL, `vaultId` TEXT NOT NULL, `rootClaimProviderFileId` TEXT NOT NULL, `accountBindingDigest` BLOB NOT NULL, `lifecycle` TEXT NOT NULL, `activeDeviceId` TEXT, `writerEpoch` INTEGER, `ownershipClaimProviderFileId` TEXT, `ownershipClaimId` TEXT, `ownershipClaimSha256` TEXT, `nextSuccessorProviderFileId` TEXT, `currentPublicationProviderFileId` TEXT, `currentPublicationId` TEXT, `currentPublicationSha256` TEXT, `previousPublicationProviderFileId` TEXT, `previousPublicationId` TEXT, `previousPublicationSha256` TEXT, `previousPublicationGeneration` INTEGER, `publicationSequence` INTEGER, `lastVerifiedGeneration` INTEGER, `lastVerifiedAtEpochMillis` INTEGER, `recoveryCredentialGeneration` INTEGER NOT NULL, `failureCategory` TEXT, `stateVersion` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`lineageId`))",
         "fields": [
           {
             "fieldPath": "lineageId",
@@ -1537,6 +1537,11 @@
             "fieldPath": "previousPublicationSha256",
             "columnName": "previousPublicationSha256",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "previousPublicationGeneration",
+            "columnName": "previousPublicationGeneration",
+            "affinity": "INTEGER"
           },
           {
             "fieldPath": "publicationSequence",
@@ -1843,7 +1848,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ca2e2fc14a985599845d1cbae81097a7')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '8132df92fdc2f7d1df8605fdfcfa63a5')"
     ]
   }
 }

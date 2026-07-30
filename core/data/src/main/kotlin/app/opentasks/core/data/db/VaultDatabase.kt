@@ -777,6 +777,7 @@ abstract class VaultDatabase : RoomDatabase() {
                         previousPublicationProviderFileId TEXT,
                         previousPublicationId TEXT,
                         previousPublicationSha256 TEXT,
+                        previousPublicationGeneration INTEGER,
                         publicationSequence INTEGER,
                         lastVerifiedGeneration INTEGER,
                         lastVerifiedAtEpochMillis INTEGER,

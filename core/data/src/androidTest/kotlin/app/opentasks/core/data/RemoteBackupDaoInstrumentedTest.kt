@@ -311,6 +311,16 @@ class RemoteBackupDaoInstrumentedTest {
             assertEquals(42L, afterGenerationJump.currentPublication!!.generation.value)
             assertEquals(6L, afterGenerationJump.currentPublication!!.sequence.value)
             assertEquals(5L, afterGenerationJump.previousPublication!!.sequence.value)
+
+            // The previous publication's own generation (9) must survive independently of
+            // the current publication's generation (42) — it is not derived or fabricated
+            // from any other column.
+            assertEquals(9L, afterGenerationJump.previousPublication!!.generation.value)
+            assertNotEquals(
+                afterGenerationJump.currentPublication!!.generation.value,
+                afterGenerationJump.previousPublication!!.generation.value,
+            )
+            assertEquals(second.currentPublication, afterGenerationJump.previousPublication)
         }
     }
 
