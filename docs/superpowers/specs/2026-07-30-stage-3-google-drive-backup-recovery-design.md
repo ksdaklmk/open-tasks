@@ -433,7 +433,15 @@ digest, and compares it before listing, reading, or mutating backup files.
 
 An account mismatch fails before Drive backup access and requires explicit
 foreground account selection. The app does not silently create a second
-lineage in an unexpected account.
+lineage in an unexpected account. Reconnection of an existing local lineage
+must use its originally bound account. Stage 3 offers no `Use this account
+instead` action; changing the configured account remains part of the deferred
+Stage 4 migration lifecycle.
+
+The digest key is installation-local and Keystore-protected. The digest is not
+serialized into structured backups. A recovered installation establishes a
+new local digest only after the user explicitly authorizes the account from
+which it discovered and authenticated the selected lineage.
 
 Access tokens stay in memory. They are not written to Room, preferences,
 files, WorkManager data, saved-instance state, exceptions, or logs. Invalid
@@ -684,6 +692,19 @@ The recovery importer can write only to a new inactive staging database. It
 cannot target the active database, use the normal cloud path, or merge
 records.
 
+Remote configuration, account-binding digests, old device IDs, provider
+revisions, transfer sessions, remote-operation rows, and the source device's
+local backup checkpoint are not structured backup records and are never
+imported. Recovery creates fresh installation-local operational state from the
+authenticated control and current authorization result.
+
+The staged database adopts the authenticated recovered generation so the next
+accepted `DomainCommand` allocates its successor. Its local backup journal
+starts without source-device operational rows and requires a fresh complete
+Stage 2 baseline after activation. Until that new local baseline is verified,
+the already authenticated Drive inventory remains the recovery authority and
+no new remote generation is published.
+
 Wrong passphrase, weakened KDF metadata, future format, missing generation,
 damaged AEAD, insufficient storage, invariant failure, or failed takeover
 leaves the active installation unchanged.
@@ -847,6 +868,24 @@ An atomic, backup-excluded marker selects the active database slot. Existing
 installations initially point to the current `open_tasks.db` without renaming
 or rewriting it. Only a verified recovery activation changes the marker.
 
+Activation:
+
+1. quiesces and closes the active repository;
+2. checkpoints, closes, and reopens the staged database for verification;
+3. durably records both the prior and staged opaque slots in the recovery
+   registry;
+4. writes and synchronizes a temporary active-slot marker;
+5. atomically replaces and directory-synchronizes the live marker;
+6. opens and verifies the selected staged slot through normal runtime
+   construction; and
+7. retires the previous slot and clears recovery state only after that open
+   succeeds.
+
+Process death before marker replacement leaves the prior slot active. Process
+death after replacement resumes opening the staged slot. If the first
+post-switch open fails, the registry permits an atomic rollback to the
+unchanged prior slot rather than an in-place repair.
+
 These operational files do not become an alternate authority for task data.
 Room remains the only live structured-data authority.
 
@@ -998,6 +1037,9 @@ require a separate witness or server and is outside Stage 3.
 - Foreign-key and SQLCipher integrity.
 - Current-base failure with previous-base recovery.
 - Active-slot atomicity, reopen verification, and rollback.
+- Process death immediately before and after active-marker replacement.
+- Recovery excludes source-device account, transfer, operation, and local
+  checkpoint rows and requires a fresh local baseline.
 - Keystore loss never creates a replacement key for an existing envelope.
 - Recovery registry loss cannot replace the active vault.
 
@@ -1076,6 +1118,8 @@ separate implementation plan is written and approved.
   `drive.appdata`.
 - No OAuth token, account email, profile, raw permission ID, or server
   credential is persisted.
+- Existing lineages reconnect only to their bound account; Stage 3 cannot
+  switch or migrate them to another account.
 - A credentialed test proves duplicate-create prevention and stale conditional
   update rejection before implementation proceeds.
 - A random cloud lineage has exactly one authoritative mutable control.
@@ -1090,6 +1134,8 @@ separate implementation plan is written and approved.
   the control last.
 - Recovery reconstructs a new SQLCipher database and never imports into the
   live database.
+- Recovery initializes fresh installation-local cloud state and verifies a new
+  local baseline before publishing another remote generation.
 - Recovery takeover conditionally claims the next epoch before activation.
 - A stale prior device cannot overwrite the recovered lineage.
 - Missing known controls are never recreated automatically.
