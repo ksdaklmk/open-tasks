@@ -3,6 +3,7 @@ package app.opentasks.backup
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.BackupStateMutation
 import app.opentasks.core.data.backup.BackupStateStore
 import app.opentasks.core.data.backup.PortableBootstrapHeaderV1
 import app.opentasks.core.data.backup.PortablePackageCodec
@@ -12,6 +13,7 @@ import app.opentasks.core.data.backup.VerifiedPortableBackup
 import app.opentasks.core.model.RestoredPackageCondition
 import app.opentasks.core.model.VaultId
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -25,6 +27,7 @@ sealed interface RestoredPackageIntakeResult {
         val condition: RestoredPackageCondition,
     ) : RestoredPackageIntakeResult
 
+    data object RetryableFailure : RestoredPackageIntakeResult
     data object PreservationBlocked : RestoredPackageIntakeResult
 }
 
@@ -41,12 +44,20 @@ class RestoredPackageIntake(
         SameFileSystemNoReplaceMover::move,
 ) {
     suspend fun inspect(): RestoredPackageIntakeResult {
-        val packageLength = packageFile.length()
-        if (!eligiblePackage.isFile || packageLength <= 0) {
-            return RestoredPackageIntakeResult.NoPackage
+        if (recoveryInbox.isFile) {
+            return RestoredPackageIntakeResult.Preserved(
+                RestoredPackageCondition.PRESERVED,
+            )
         }
+        if (!eligiblePackage.isFile) {
+            return reconcileAbandonedInitialPreparation()
+        }
+        val packageLength = packageFile.length()
+        if (packageLength <= 0) return RestoredPackageIntakeResult.RetryableFailure
         val header = try {
             packageFile.openRead().use { codec.readBootstrap(it, packageLength) }
+        } catch (_: IOException) {
+            return RestoredPackageIntakeResult.RetryableFailure
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
             return preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
@@ -55,17 +66,22 @@ class RestoredPackageIntake(
             stateStore.get(vaultId)
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            null
+            return RestoredPackageIntakeResult.RetryableFailure
         }
         val envelope = try {
             envelopeStore.get(vaultId)
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            null
+            return RestoredPackageIntakeResult.RetryableFailure
         }
-        val linked = try {
+        val linkage = try {
             try {
-                isLinked(header, state, envelope)
+                when {
+                    isLinked(header, state, envelope) -> PackageLinkage.ESTABLISHED
+                    isInitialCrashCandidate(header, state, envelope) ->
+                        PackageLinkage.INITIAL_CRASH_CANDIDATE
+                    else -> PackageLinkage.UNKNOWN
+                }
             } catch (failure: Throwable) {
                 failure.rethrowCancellation()
                 return preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
@@ -73,7 +89,7 @@ class RestoredPackageIntake(
         } finally {
             envelope?.clear()
         }
-        if (!linked || state == null) {
+        if (linkage == PackageLinkage.UNKNOWN || state == null) {
             return preserve(RestoredPackageCondition.PRESERVED)
         }
 
@@ -81,7 +97,11 @@ class RestoredPackageIntake(
             contentKeyStore.openExisting(vaultId)
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            return RestoredPackageIntakeResult.PreservationBlocked
+            return if (linkage == PackageLinkage.INITIAL_CRASH_CANDIDATE) {
+                preserve(RestoredPackageCondition.PRESERVED)
+            } else {
+                RestoredPackageIntakeResult.PreservationBlocked
+            }
         }
         val verified = try {
             try {
@@ -91,33 +111,129 @@ class RestoredPackageIntake(
             } finally {
                 key.close()
             }
+        } catch (_: IOException) {
+            return RestoredPackageIntakeResult.RetryableFailure
         } catch (failure: Throwable) {
             failure.rethrowCancellation()
-            return withdraw()
+            return if (linkage == PackageLinkage.INITIAL_CRASH_CANDIDATE) {
+                preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
+            } else {
+                withdraw()
+            }
         }
-        if (!verified.agreesWith(header, packageLength)) return withdraw()
+        if (!verified.agreesWith(header, packageLength)) {
+            return if (linkage == PackageLinkage.INITIAL_CRASH_CANDIDATE) {
+                preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
+            } else {
+                withdraw()
+            }
+        }
+        if (linkage == PackageLinkage.INITIAL_CRASH_CANDIDATE) {
+            return reconcileInitialCrashCandidate(verified, header)
+        }
         if (state.matches(verified)) {
             return RestoredPackageIntakeResult.CurrentSelfProduced
         }
 
-        val reconciled = state.copy(
-            portablePackageGeneration = verified.generation,
-            portablePackageBytes = verified.totalPackageLength,
-            portablePackageProducedAtEpochMillis = verified.producedAtEpochMillis,
-            packageState = if (verified.generation == state.currentGeneration) {
-                PACKAGE_READY
-            } else {
-                PACKAGE_UPDATE_PENDING
+        val reconciled = stateStore.mutate(
+            vaultId,
+            BackupStateMutation { latest ->
+                if (
+                    latest.packageState == PACKAGE_RESTORED_DETECTED ||
+                    verified.generation > latest.currentGeneration
+                ) {
+                    null
+                } else {
+                    latest.withVerifiedPackage(verified, envelopeReady = true)
+                }
             },
-            failureCategory = null,
-            recoveryEnvelopeReady = true,
         )
-        return if (
-            stateStore.compareAndUpdate(reconciled, state.currentGeneration) == 1
-        ) {
+        return if (reconciled != null) {
             RestoredPackageIntakeResult.ReconciledSelfProduced
         } else {
             RestoredPackageIntakeResult.PreservationBlocked
+        }
+    }
+
+    private suspend fun reconcileAbandonedInitialPreparation():
+        RestoredPackageIntakeResult {
+        val state = try {
+            stateStore.get(vaultId)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return RestoredPackageIntakeResult.RetryableFailure
+        } ?: return RestoredPackageIntakeResult.NoPackage
+        if (
+            state.packageState != PACKAGE_PREPARING ||
+            state.recoveryEnvelopeReady ||
+            state.portablePackageGeneration != null ||
+            state.portablePackageBytes != null ||
+            state.portablePackageProducedAtEpochMillis != null
+        ) {
+            return RestoredPackageIntakeResult.NoPackage
+        }
+        val cleared = try {
+            stateStore.mutate(
+                vaultId,
+                BackupStateMutation { latest ->
+                    if (
+                        latest.packageState == PACKAGE_PREPARING &&
+                        !latest.recoveryEnvelopeReady &&
+                        latest.portablePackageGeneration == null &&
+                        latest.portablePackageBytes == null &&
+                        latest.portablePackageProducedAtEpochMillis == null
+                    ) {
+                        latest.copy(
+                            packageState = PACKAGE_NOT_PREPARED,
+                            failureCategory = null,
+                        )
+                    } else {
+                        latest
+                    }
+                },
+            )
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            null
+        }
+        return if (cleared != null) {
+            RestoredPackageIntakeResult.NoPackage
+        } else {
+            RestoredPackageIntakeResult.RetryableFailure
+        }
+    }
+
+    private suspend fun reconcileInitialCrashCandidate(
+        verified: VerifiedPortableBackup,
+        header: PortableBootstrapHeaderV1,
+    ): RestoredPackageIntakeResult {
+        val recoveredEnvelope = try {
+            RecoveryEnvelopeCodec.fromPayload(header.recoveryEnvelope)
+        } catch (failure: Throwable) {
+            failure.rethrowCancellation()
+            return preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
+        }
+        try {
+            if (envelopeDigest(recoveredEnvelope) != verified.recoveryEnvelopeSha256) {
+                return preserve(RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT)
+            }
+            val committed = try {
+                envelopeStore.commitInitial(
+                    vaultId = vaultId,
+                    envelope = recoveredEnvelope,
+                    published = verified,
+                )
+            } catch (failure: Throwable) {
+                failure.rethrowCancellation()
+                return RestoredPackageIntakeResult.RetryableFailure
+            }
+            return if (committed != null) {
+                RestoredPackageIntakeResult.ReconciledSelfProduced
+            } else {
+                RestoredPackageIntakeResult.RetryableFailure
+            }
+        } finally {
+            recoveredEnvelope.clear()
         }
     }
 
@@ -137,6 +253,22 @@ class RestoredPackageIntake(
         }
         return envelopeDigest(envelope) == envelopeDigest(header)
     }
+
+    private fun isInitialCrashCandidate(
+        header: PortableBootstrapHeaderV1,
+        state: BackupStateEntity?,
+        envelope: VaultKeyEnvelope?,
+    ): Boolean =
+        state != null &&
+            envelope == null &&
+            state.vaultId == vaultId.value &&
+            !state.recoveryEnvelopeReady &&
+            (
+                state.packageState == PACKAGE_NOT_PREPARED ||
+                    state.packageState == PACKAGE_PREPARING
+            ) &&
+            header.vaultId == vaultId.value &&
+            header.generation <= state.currentGeneration
 
     private fun BackupStateEntity.matches(verified: VerifiedPortableBackup): Boolean {
         val expectedState = if (verified.generation == currentGeneration) {
@@ -161,6 +293,22 @@ class RestoredPackageIntake(
             producedAtEpochMillis == header.producedAtEpochMillis &&
             recoveryEnvelopeSha256 == envelopeDigest(header) &&
             totalPackageLength == packageLength
+
+    private fun BackupStateEntity.withVerifiedPackage(
+        verified: VerifiedPortableBackup,
+        envelopeReady: Boolean,
+    ): BackupStateEntity = copy(
+        portablePackageGeneration = verified.generation,
+        portablePackageBytes = verified.totalPackageLength,
+        portablePackageProducedAtEpochMillis = verified.producedAtEpochMillis,
+        packageState = if (verified.generation == currentGeneration) {
+            PACKAGE_READY
+        } else {
+            PACKAGE_UPDATE_PENDING
+        },
+        failureCategory = null,
+        recoveryEnvelopeReady = envelopeReady,
+    )
 
     private fun withdraw(): RestoredPackageIntakeResult =
         if (packageFile.delete()) {
@@ -210,10 +358,19 @@ class RestoredPackageIntake(
     }
 
     private companion object {
+        const val PACKAGE_NOT_PREPARED = "NOT_PREPARED"
+        const val PACKAGE_PREPARING = "PREPARING"
         const val PACKAGE_READY = "READY"
         const val PACKAGE_UPDATE_PENDING = "UPDATE_PENDING"
+        const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"
         const val HEX = "0123456789abcdef"
     }
+}
+
+private enum class PackageLinkage {
+    ESTABLISHED,
+    INITIAL_CRASH_CANDIDATE,
+    UNKNOWN,
 }
 
 internal class SameFileSystemNoReplaceMover(

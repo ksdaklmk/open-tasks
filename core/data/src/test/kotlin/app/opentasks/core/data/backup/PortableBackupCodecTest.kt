@@ -7,6 +7,7 @@ import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.AuthenticatedCloudObjectCodec
 import app.opentasks.core.data.CloudDecodeResult
 import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
+import app.opentasks.core.data.db.WorkflowStatusEntity
 import app.opentasks.core.domain.BackupPolicy
 import app.opentasks.core.sync.CloudBounds
 import app.opentasks.core.sync.CloudHeaderIdentity
@@ -678,7 +679,20 @@ class PortableBackupCodecTest {
                     stringField("displayName", "Member"),
                 ),
             ),
-        ),
+        ) + listOf("BACKLOG", "PLANNED", "STARTED", "BLOCKED", "COMPLETED")
+            .mapIndexed { index, semantic ->
+                WorkflowStatusEntity(
+                    id = "status-inbox-${semantic.lowercase()}",
+                    projectId = null,
+                    name = "Inbox ${semantic.lowercase()}",
+                    semanticStatus = semantic,
+                    rank = "inbox-$index",
+                    archivedAtEpochMillis = null,
+                    revisionWallMillis = 1,
+                    revisionLogical = index,
+                    revisionDeviceId = "device-alpha",
+                ).toBackupRecordV1()
+            },
     )
 
     private fun stringField(name: String, value: String) =

@@ -10,6 +10,7 @@ import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
 import app.opentasks.backup.RestoredPackageIntake
 import app.opentasks.backup.recordRestoredPackageStatus
+import app.opentasks.backup.requiresEstablishedContentKey
 import app.opentasks.backup.restoredPackagePublicationBlocked
 import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.TinkVaultCrypto
@@ -136,6 +137,13 @@ object AppModule {
         packageFile = AndroidAtomicPackageFile(files.eligiblePackage),
         codec = codec,
         prepareEnvelope = envelopePreparer::prepare,
+        publicationBlocked = {
+            files.recoveryInbox.isFile ||
+                restoredPackagePublicationBlocked(
+                    stateStore = runtime.backupStateStore,
+                    vaultId = runtime.vaultId,
+                )
+        },
     )
 
     @Provides
@@ -161,6 +169,7 @@ object AppModule {
     fun provideAndroidBackupRuntime(
         scope: CoroutineScope,
         runtime: LocalVaultRuntime,
+        files: AndroidBackupFiles,
         intake: RestoredPackageIntake,
         contentKeyStore: VaultContentKeyStore,
         coordinator: BackupCoordinator,
@@ -180,7 +189,19 @@ object AppModule {
                 return@bootstrap false
             }
             try {
-                if (state?.recoveryEnvelopeReady == true || envelope != null) {
+                val localBackupObjectPresent = try {
+                    files.localBackupRoot.walkTopDown().any { it.isFile }
+                } catch (_: Throwable) {
+                    return@bootstrap false
+                }
+                val requiresExisting = requiresEstablishedContentKey(
+                    state = state,
+                    recoveryEnvelopePresent = envelope != null,
+                    eligiblePackagePresent = files.eligiblePackage.isFile,
+                    recoveryInboxPresent = files.recoveryInbox.isFile,
+                    localBackupObjectPresent = localBackupObjectPresent,
+                )
+                if (requiresExisting) {
                     contentKeyStore.openExisting(runtime.vaultId).close()
                 } else {
                     contentKeyStore.getOrCreate(runtime.vaultId).close()

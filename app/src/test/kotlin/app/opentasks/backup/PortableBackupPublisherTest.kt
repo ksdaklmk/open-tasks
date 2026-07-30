@@ -7,6 +7,7 @@ import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.backup.BackupSnapshotPayloadV1
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.BackupStateMutation
 import app.opentasks.core.data.backup.BackupStateStore
 import app.opentasks.core.data.backup.PortableBootstrapHeaderV1
 import app.opentasks.core.data.backup.PortablePackageTooLargeException
@@ -19,6 +20,7 @@ import app.opentasks.core.domain.BackupCaptureSource
 import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.BackupUnavailableReason
+import app.opentasks.core.model.RestoredPackageCondition
 import app.opentasks.core.model.VaultId
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -298,6 +300,55 @@ class PortableBackupPublisherTest {
     }
 
     @Test
+    fun durableRestoredInputGuardBlocksDirectPrepareWithoutTouchingEligibleBytes() = runBlocking {
+        val initial = state()
+        val stateStore = FakeStateStore(initial)
+        val file = FakeAtomicPackageFile("restored-input".toByteArray())
+
+        val status = publisher(
+            stateStore = stateStore,
+            envelopeStore = FakeEnvelopeStore(mutableListOf()),
+            file = file,
+            failIfEnvelopePrepared = true,
+            failIfCaptured = true,
+            publicationBlocked = { true },
+        ).prepare("unused passphrase".toCharArray())
+
+        assertEquals(
+            AndroidBackupStatus.RestoredPackageDetected(
+                RestoredPackageCondition.PRESERVED,
+            ),
+            status,
+        )
+        assertArrayEquals("restored-input".toByteArray(), file.finalBytes)
+        assertEquals(initial, stateStore.current)
+    }
+
+    @Test
+    fun eligiblePackageWithoutDurablePreparingProofIsNeverReconciledOrOverwritten() = runBlocking {
+        val initial = state()
+        val stateStore = FakeStateStore(initial)
+        val file = FakeAtomicPackageFile("unknown-restored-input".toByteArray())
+
+        val status = publisher(
+            stateStore = stateStore,
+            envelopeStore = FakeEnvelopeStore(mutableListOf()),
+            file = file,
+            failIfEnvelopePrepared = true,
+            failIfCaptured = true,
+        ).prepare("unused passphrase".toCharArray())
+
+        assertEquals(
+            AndroidBackupStatus.RestoredPackageDetected(
+                RestoredPackageCondition.PRESERVED,
+            ),
+            status,
+        )
+        assertArrayEquals("unknown-restored-input".toByteArray(), file.finalBytes)
+        assertEquals(initial, stateStore.current)
+    }
+
+    @Test
     fun initialRollbackDeleteFailurePreservesRecoverablePackageTracking() {
         val stateStore = FakeStateStore(state())
         val envelopeStore = FakeEnvelopeStore(mutableListOf()).also {
@@ -324,8 +375,8 @@ class PortableBackupPublisherTest {
     }
 
     @Test
-    fun initialStateReadFailureAfterFileCommitDeletesNewFileAndLeavesSetupUnprepared() {
-        val stateStore = FakeStateStore(state()).also { it.failGetAtCall = 2 }
+    fun initialStateMutationFailureAfterFileCommitDeletesNewFileAndLeavesSetupUnprepared() {
+        val stateStore = FakeStateStore(state()).also { it.failMutateAtCall = 2 }
         val file = FakeAtomicPackageFile()
 
         val status = runBlocking {
@@ -370,6 +421,27 @@ class PortableBackupPublisherTest {
     }
 
     @Test
+    fun cancellationBeforeInitialFileCommitClearsDurablePreparingState() {
+        val stateStore = FakeStateStore(state())
+        val file = FakeAtomicPackageFile()
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                publisher(
+                    stateStore = stateStore,
+                    envelopeStore = FakeEnvelopeStore(mutableListOf()),
+                    file = file,
+                    onCapture = { throw CancellationException("capture cancelled") },
+                ).prepare("passphrase".toCharArray())
+            }
+        }
+
+        assertNull(file.finalBytes)
+        assertEquals("NOT_PREPARED", stateStore.current.packageState)
+        assertFalse(stateStore.current.recoveryEnvelopeReady)
+    }
+
+    @Test
     fun cancellationAfterInitialDatabaseCommitRetainsMatchingCommittedFileAndState() {
         val stateStore = FakeStateStore(state())
         val envelopeStore = FakeEnvelopeStore(mutableListOf()).also {
@@ -396,7 +468,9 @@ class PortableBackupPublisherTest {
     @Test
     fun prepareAndRefreshReconcileAuthenticatedInitialPackageAfterProcessDeath() {
         listOf("prepare", "refresh").forEach { operation ->
-            val stateStore = FakeStateStore(state())
+            val stateStore = FakeStateStore(
+                state(packageState = "PREPARING"),
+            )
             val envelopeStore = FakeEnvelopeStore(mutableListOf())
             val file = FakeAtomicPackageFile("package:7".toByteArray())
             val publisher = publisher(
@@ -424,64 +498,49 @@ class PortableBackupPublisherTest {
     }
 
     @Test
-    fun unverifiableUnlinkedInitialPackageIsWithdrawnOrTrackedOnDeleteFailure() = runBlocking {
+    fun unverifiableInitialCrashCandidateIsRetainedForRestoredIntake() = runBlocking {
         listOf("prepare", "refresh").forEach { operation ->
-            listOf(false, true).forEach { deleteFails ->
-                val stateStore = FakeStateStore(state())
-                val file = FakeAtomicPackageFile("tampered".toByteArray()).also {
-                    it.failDelete = deleteFails
-                }
-                val codec = FakePortableCodec().also {
-                    it.verificationFailure = IllegalArgumentException(
-                        "private /path checksum=cafe ciphertext=deadbeef",
-                    )
-                }
-                val publisher = publisher(
-                    stateStore = stateStore,
-                    envelopeStore = FakeEnvelopeStore(mutableListOf()),
-                    file = file,
-                    codec = codec,
-                    failIfEnvelopePrepared = true,
-                    failIfCaptured = true,
+            val stateStore = FakeStateStore(state(packageState = "PREPARING"))
+            val file = FakeAtomicPackageFile("tampered".toByteArray())
+            val codec = FakePortableCodec().also {
+                it.verificationFailure = IllegalArgumentException(
+                    "private /path checksum=cafe ciphertext=deadbeef",
                 )
-
-                val status = if (operation == "prepare") {
-                    publisher.prepare("unused passphrase".toCharArray())
-                } else {
-                    publisher.refresh()
-                }
-
-                if (deleteFails) {
-                    assertEquals(
-                        "$operation failed-delete status",
-                        AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO),
-                        status,
-                    )
-                    assertArrayEquals(
-                        "$operation failed-delete file",
-                        "tampered".toByteArray(),
-                        file.finalBytes,
-                    )
-                    assertEquals("PREPARING", stateStore.current.packageState)
-                    assertEquals("FILE_IO", stateStore.current.failureCategory)
-                } else {
-                    assertEquals(
-                        "$operation status",
-                        AndroidBackupStatus.Unavailable(
-                            BackupUnavailableReason.VERIFICATION_FAILED,
-                        ),
-                        status,
-                    )
-                    assertNull("$operation file", file.finalBytes)
-                    assertEquals("NOT_PREPARED", stateStore.current.packageState)
-                    assertNull(stateStore.current.failureCategory)
-                }
-                assertNull(stateStore.current.portablePackageGeneration)
-                assertFalse(stateStore.current.recoveryEnvelopeReady)
-                assertFalse(stateStore.current.toString().contains("private /path"))
-                assertFalse(stateStore.current.toString().contains("checksum"))
-                assertFalse(stateStore.current.toString().contains("ciphertext"))
             }
+            val publisher = publisher(
+                stateStore = stateStore,
+                envelopeStore = FakeEnvelopeStore(mutableListOf()),
+                file = file,
+                codec = codec,
+                failIfEnvelopePrepared = true,
+                failIfCaptured = true,
+            )
+
+            val status = if (operation == "prepare") {
+                publisher.prepare("unused passphrase".toCharArray())
+            } else {
+                publisher.refresh()
+            }
+
+            assertEquals(
+                "$operation status",
+                AndroidBackupStatus.Unavailable(
+                    BackupUnavailableReason.VERIFICATION_FAILED,
+                ),
+                status,
+            )
+            assertArrayEquals(
+                "$operation file",
+                "tampered".toByteArray(),
+                file.finalBytes,
+            )
+            assertEquals("PREPARING", stateStore.current.packageState)
+            assertNull(stateStore.current.failureCategory)
+            assertNull(stateStore.current.portablePackageGeneration)
+            assertFalse(stateStore.current.recoveryEnvelopeReady)
+            assertFalse(stateStore.current.toString().contains("private /path"))
+            assertFalse(stateStore.current.toString().contains("checksum"))
+            assertFalse(stateStore.current.toString().contains("ciphertext"))
         }
     }
 
@@ -690,6 +749,7 @@ class PortableBackupPublisherTest {
         failIfCaptured: Boolean = false,
         onCapture: () -> Unit = {},
         contentKeyStore: VaultContentKeyStore = NewKeyStore(),
+        publicationBlocked: suspend () -> Boolean = { false },
     ): PortableBackupPublisher = PortableBackupPublisher(
         vaultId = VAULT_ID,
         captureSource = BackupCaptureSource {
@@ -715,9 +775,31 @@ class PortableBackupPublisherTest {
             val envelope = envelope()
             PreparedRecoveryEnvelope(envelope, RecoveryEnvelopeCodec.encode(envelope))
         },
+        publicationBlocked = publicationBlocked,
         now = { Instant.ofEpochMilli(PRODUCED_AT) },
     ).also {
-        envelopeStore.onInitialCommit = { stateStore.current = it }
+        envelopeStore.onInitialCommit = { published ->
+            stateStore.mutate(
+                VAULT_ID,
+                BackupStateMutation { current ->
+                    current.copy(
+                        portablePackageGeneration = published.generation,
+                        portablePackageBytes = published.totalPackageLength,
+                        portablePackageProducedAtEpochMillis =
+                            published.producedAtEpochMillis,
+                        packageState = if (
+                            published.generation == current.currentGeneration
+                        ) {
+                            "READY"
+                        } else {
+                            "UPDATE_PENDING"
+                        },
+                        failureCategory = null,
+                        recoveryEnvelopeReady = true,
+                    )
+                },
+            )
+        }
     }
 
     private fun state(
@@ -747,7 +829,9 @@ class PortableBackupPublisherTest {
     ) : BackupStateStore {
         var current = initial
         var failGetAtCall: Int? = null
+        var failMutateAtCall: Int? = null
         private var getCalls = 0
+        private var mutateCalls = 0
 
         override fun observe(vaultId: VaultId): Flow<BackupStateEntity> =
             MutableStateFlow(current)
@@ -758,13 +842,18 @@ class PortableBackupPublisherTest {
             return current
         }
 
-        override suspend fun compareAndUpdate(
-            entity: BackupStateEntity,
-            expectedCurrentGeneration: Long,
-        ): Int {
-            if (current.currentGeneration != expectedCurrentGeneration) return 0
-            current = entity
-            return 1
+        override suspend fun mutate(
+            vaultId: VaultId,
+            mutation: BackupStateMutation,
+        ): BackupStateEntity? {
+            mutateCalls += 1
+            if (mutateCalls == failMutateAtCall) {
+                throw IllegalStateException("private database mutation path")
+            }
+            if (current.vaultId != vaultId.value) return null
+            val updated = mutation.apply(current) ?: return null
+            current = updated
+            return updated
         }
     }
 
@@ -776,7 +865,7 @@ class PortableBackupPublisherTest {
         var failInitialCommit = false
         var cancelInitialCommit = false
         var cancelAfterInitialCommit = false
-        var onInitialCommit: (BackupStateEntity) -> Unit = {}
+        var onInitialCommit: suspend (VerifiedPortableBackup) -> BackupStateEntity? = { null }
 
         override suspend fun get(vaultId: VaultId): VaultKeyEnvelope? = envelope?.copyEnvelope()
 
@@ -792,16 +881,15 @@ class PortableBackupPublisherTest {
         override suspend fun commitInitial(
             vaultId: VaultId,
             envelope: VaultKeyEnvelope,
-            state: BackupStateEntity,
-            expectedCurrentGeneration: Long,
-        ): Boolean {
+            published: VerifiedPortableBackup,
+        ): BackupStateEntity? {
             events += "commit-initial"
             if (cancelInitialCommit) throw CancellationException("cancelled")
-            if (failInitialCommit) return false
+            if (failInitialCommit) return null
+            val updated = onInitialCommit(published) ?: return null
             this.envelope = envelope.copyEnvelope()
-            onInitialCommit(state)
             if (cancelAfterInitialCommit) throw CancellationException("cancelled after commit")
-            return true
+            return updated
         }
     }
 

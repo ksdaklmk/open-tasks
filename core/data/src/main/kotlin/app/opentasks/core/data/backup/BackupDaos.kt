@@ -78,11 +78,22 @@ interface BackupJournalDao {
 
     @Query(
         """
-        SELECT COUNT(*) FROM backup_journal
-        WHERE vaultId = :vaultId AND generation > :generation
+        SELECT COUNT(*) FROM (
+            SELECT operationId FROM backup_journal
+            WHERE vaultId = :vaultId
+                AND generation > :afterGeneration
+                AND generation <= :throughGeneration
+            ORDER BY generation, sequence
+            LIMIT :limit
+        )
         """,
     )
-    suspend fun countAfter(vaultId: String, generation: Long): Int
+    suspend fun countThrough(
+        vaultId: String,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int
 }
 
 @Dao
@@ -136,6 +147,29 @@ interface BackupStateDao {
         legacyOutboxCoveredAtGeneration: Long?,
         snapshotCreatedAtEpochMillis: Long?,
     ): Int
+
+    @Query(
+        """
+        UPDATE backup_state SET
+            currentGeneration = :nextGeneration,
+            packageState = CASE
+                WHEN packageState = 'READY'
+                    AND (
+                        portablePackageGeneration IS NULL
+                        OR portablePackageGeneration < :nextGeneration
+                    )
+                THEN 'UPDATE_PENDING'
+                ELSE packageState
+            END
+        WHERE vaultId = :vaultId
+            AND currentGeneration = :expectedCurrentGeneration
+        """,
+    )
+    suspend fun advanceGeneration(
+        vaultId: String,
+        expectedCurrentGeneration: Long,
+        nextGeneration: Long,
+    ): Int
 }
 
 @Dao
@@ -188,16 +222,32 @@ interface BackupCaptureDao {
             INNER JOIN workspaces AS workspace ON workspace.id = project.workspaceId
             WHERE project.id = status.projectId AND workspace.vaultId = :vaultId
         ) OR (
-            status.projectId IS NULL AND EXISTS (
-                SELECT 1 FROM tasks AS task
-                INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
-                WHERE task.statusId = status.id AND workspace.vaultId = :vaultId
+            status.projectId IS NULL
+            AND (SELECT COUNT(*) FROM workspaces) = 1
+            AND EXISTS (
+                SELECT 1 FROM workspaces AS workspace
+                WHERE workspace.vaultId = :vaultId
             )
         )
         ORDER BY status.id
         """,
     )
     suspend fun workflowStatuses(vaultId: String): List<WorkflowStatusEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM workflow_statuses AS status
+        WHERE status.projectId IS NULL
+            AND NOT (
+                (SELECT COUNT(*) FROM workspaces) = 1
+                AND EXISTS (
+                    SELECT 1 FROM workspaces AS workspace
+                    WHERE workspace.vaultId = :vaultId
+                )
+            )
+        """,
+    )
+    suspend fun ambiguousInboxWorkflowStatusCount(vaultId: String): Int
 
     @Query(
         """
@@ -496,6 +546,9 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         require(unassignableTombstoneCount() == 0) {
             "Tombstone cannot be assigned to a vault"
         }
+        require(ambiguousInboxWorkflowStatusCount(vaultId) == 0) {
+            "Inbox workflow cannot be assigned to one workspace"
+        }
         vaults(vaultId).mapTo(this) { it.toBackupRecordV1() }
         workspaces(vaultId).mapTo(this) { it.toBackupRecordV1() }
         members(vaultId).mapTo(this) { it.toBackupRecordV1() }
@@ -516,13 +569,21 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         tombstones(vaultId).mapTo(this) { it.toBackupRecordV1() }
     }
 
+fun interface BackupStateMutation {
+    /**
+     * Runs against the latest row while the store owns its atomic transaction.
+     * Returning null rejects the transition without changing durable state.
+     */
+    fun apply(current: BackupStateEntity): BackupStateEntity?
+}
+
 interface BackupStateStore {
     fun observe(vaultId: VaultId): Flow<BackupStateEntity>
     suspend fun get(vaultId: VaultId): BackupStateEntity?
-    suspend fun compareAndUpdate(
-        entity: BackupStateEntity,
-        expectedCurrentGeneration: Long,
-    ): Int
+    suspend fun mutate(
+        vaultId: VaultId,
+        mutation: BackupStateMutation,
+    ): BackupStateEntity?
 }
 
 interface BackupJournalStore {
@@ -532,7 +593,12 @@ interface BackupJournalStore {
         limit: Int,
     ): List<BackupJournalEntity>
 
-    suspend fun countAfter(vaultId: VaultId, generation: Long): Int
+    suspend fun countThrough(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int
 
     suspend fun between(
         vaultId: VaultId,
@@ -548,38 +614,29 @@ interface RecoveryEnvelopeStore {
     suspend fun commitInitial(
         vaultId: VaultId,
         envelope: VaultKeyEnvelope,
-        state: BackupStateEntity,
-        expectedCurrentGeneration: Long,
-    ): Boolean
+        published: VerifiedPortableBackup,
+    ): BackupStateEntity?
 }
 
 class RoomBackupStateStore(
-    private val dao: BackupStateDao,
+    private val database: VaultDatabase,
+    private val beforeMutationTransaction: suspend () -> Unit = {},
 ) : BackupStateStore {
-    override fun observe(vaultId: VaultId): Flow<BackupStateEntity> = dao.observe(vaultId.value)
+    override fun observe(vaultId: VaultId): Flow<BackupStateEntity> =
+        database.backupStateDao().observe(vaultId.value)
 
-    override suspend fun get(vaultId: VaultId): BackupStateEntity? = dao.get(vaultId.value)
+    override suspend fun get(vaultId: VaultId): BackupStateEntity? =
+        database.backupStateDao().get(vaultId.value)
 
-    override suspend fun compareAndUpdate(
-        entity: BackupStateEntity,
-        expectedCurrentGeneration: Long,
-    ): Int = dao.compareAndUpdate(
-        vaultId = entity.vaultId,
-        expectedCurrentGeneration = expectedCurrentGeneration,
-        currentGeneration = entity.currentGeneration,
-        lastVerifiedSnapshotGeneration = entity.lastVerifiedSnapshotGeneration,
-        currentBaseObjectId = entity.currentBaseObjectId,
-        previousBaseObjectId = entity.previousBaseObjectId,
-        latestVerifiedSegmentGeneration = entity.latestVerifiedSegmentGeneration,
-        portablePackageGeneration = entity.portablePackageGeneration,
-        portablePackageBytes = entity.portablePackageBytes,
-        portablePackageProducedAtEpochMillis = entity.portablePackageProducedAtEpochMillis,
-        packageState = entity.packageState,
-        failureCategory = entity.failureCategory,
-        recoveryEnvelopeReady = entity.recoveryEnvelopeReady,
-        legacyOutboxCoveredAtGeneration = entity.legacyOutboxCoveredAtGeneration,
-        snapshotCreatedAtEpochMillis = entity.snapshotCreatedAtEpochMillis,
-    )
+    override suspend fun mutate(
+        vaultId: VaultId,
+        mutation: BackupStateMutation,
+    ): BackupStateEntity? {
+        beforeMutationTransaction()
+        return database.withTransaction {
+            database.backupStateDao().mutateLatest(vaultId, mutation)
+        }
+    }
 }
 
 class RoomBackupJournalStore(
@@ -591,8 +648,20 @@ class RoomBackupJournalStore(
         limit: Int,
     ): List<BackupJournalEntity> = dao.after(vaultId.value, generation, limit)
 
-    override suspend fun countAfter(vaultId: VaultId, generation: Long): Int =
-        dao.countAfter(vaultId.value, generation)
+    override suspend fun countThrough(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int {
+        if (throughGeneration <= afterGeneration || limit <= 0) return 0
+        return dao.countThrough(
+            vaultId = vaultId.value,
+            afterGeneration = afterGeneration,
+            throughGeneration = throughGeneration,
+            limit = limit,
+        )
+    }
 
     override suspend fun between(
         vaultId: VaultId,
@@ -639,49 +708,46 @@ class RoomRecoveryEnvelopeStore(
     override suspend fun commitInitial(
         vaultId: VaultId,
         envelope: VaultKeyEnvelope,
-        state: BackupStateEntity,
-        expectedCurrentGeneration: Long,
-    ): Boolean = database.withTransaction {
-        require(state.vaultId == vaultId.value) { "Backup state belongs to another vault" }
+        published: VerifiedPortableBackup,
+    ): BackupStateEntity? = database.withTransaction {
+        require(published.vaultId == vaultId.value) {
+            "Portable package belongs to another vault"
+        }
         val envelopeDao = database.vaultRecoveryEnvelopeDao()
         val stateDao = database.backupStateDao()
         if (!acceptInitialEnvelopeWhenAbsent(envelopeDao.get(vaultId.value))) {
-            return@withTransaction false
+            return@withTransaction null
         }
-        val current = stateDao.get(vaultId.value) ?: return@withTransaction false
-        if (
-            current.currentGeneration != expectedCurrentGeneration ||
-            current.recoveryEnvelopeReady
-        ) {
-            return@withTransaction false
-        }
+        val updated = stateDao.mutateLatest(
+            vaultId,
+            BackupStateMutation { current ->
+                if (
+                    current.recoveryEnvelopeReady ||
+                    current.packageState == PACKAGE_RESTORED_DETECTED ||
+                    published.generation > current.currentGeneration
+                ) {
+                    null
+                } else {
+                    current.copy(
+                        portablePackageGeneration = published.generation,
+                        portablePackageBytes = published.totalPackageLength,
+                        portablePackageProducedAtEpochMillis =
+                            published.producedAtEpochMillis,
+                        packageState = if (published.generation == current.currentGeneration) {
+                            PACKAGE_READY
+                        } else {
+                            PACKAGE_UPDATE_PENDING
+                        },
+                        failureCategory = null,
+                        recoveryEnvelopeReady = true,
+                    )
+                }
+            },
+        ) ?: return@withTransaction null
         val entity = RecoveryEnvelopeCodec.toEntity(vaultId, envelope)
         try {
             envelopeDao.upsert(entity)
-            check(
-                stateDao.compareAndUpdate(
-                    vaultId = state.vaultId,
-                    expectedCurrentGeneration = expectedCurrentGeneration,
-                    currentGeneration = state.currentGeneration,
-                    lastVerifiedSnapshotGeneration = state.lastVerifiedSnapshotGeneration,
-                    currentBaseObjectId = state.currentBaseObjectId,
-                    previousBaseObjectId = state.previousBaseObjectId,
-                    latestVerifiedSegmentGeneration = state.latestVerifiedSegmentGeneration,
-                    portablePackageGeneration = state.portablePackageGeneration,
-                    portablePackageBytes = state.portablePackageBytes,
-                    portablePackageProducedAtEpochMillis =
-                        state.portablePackageProducedAtEpochMillis,
-                    packageState = state.packageState,
-                    failureCategory = state.failureCategory,
-                    recoveryEnvelopeReady = state.recoveryEnvelopeReady,
-                    legacyOutboxCoveredAtGeneration =
-                        state.legacyOutboxCoveredAtGeneration,
-                    snapshotCreatedAtEpochMillis = state.snapshotCreatedAtEpochMillis,
-                ) == 1,
-            ) {
-                "Backup state changed during initial package commit"
-            }
-            true
+            updated
         } finally {
             entity.salt.fill(0)
             entity.nonce.fill(0)
@@ -699,3 +765,45 @@ internal fun acceptInitialEnvelopeWhenAbsent(
     existing.wrappedKeyset.fill(0)
     return false
 }
+
+private suspend fun BackupStateDao.mutateLatest(
+    vaultId: VaultId,
+    mutation: BackupStateMutation,
+): BackupStateEntity? {
+    val current = get(vaultId.value) ?: return null
+    val updated = mutation.apply(current) ?: return null
+    require(updated.vaultId == current.vaultId) {
+        "Backup state mutation changed vault ownership"
+    }
+    require(updated.currentGeneration == current.currentGeneration) {
+        "Backup state mutation cannot allocate a generation"
+    }
+    if (updated == current) return current
+    check(
+        compareAndUpdate(
+            vaultId = updated.vaultId,
+            expectedCurrentGeneration = current.currentGeneration,
+            currentGeneration = updated.currentGeneration,
+            lastVerifiedSnapshotGeneration = updated.lastVerifiedSnapshotGeneration,
+            currentBaseObjectId = updated.currentBaseObjectId,
+            previousBaseObjectId = updated.previousBaseObjectId,
+            latestVerifiedSegmentGeneration = updated.latestVerifiedSegmentGeneration,
+            portablePackageGeneration = updated.portablePackageGeneration,
+            portablePackageBytes = updated.portablePackageBytes,
+            portablePackageProducedAtEpochMillis =
+                updated.portablePackageProducedAtEpochMillis,
+            packageState = updated.packageState,
+            failureCategory = updated.failureCategory,
+            recoveryEnvelopeReady = updated.recoveryEnvelopeReady,
+            legacyOutboxCoveredAtGeneration = updated.legacyOutboxCoveredAtGeneration,
+            snapshotCreatedAtEpochMillis = updated.snapshotCreatedAtEpochMillis,
+        ) == 1,
+    ) {
+        "Backup state changed inside its mutation transaction"
+    }
+    return updated
+}
+
+private const val PACKAGE_READY = "READY"
+private const val PACKAGE_UPDATE_PENDING = "UPDATE_PENDING"
+private const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"

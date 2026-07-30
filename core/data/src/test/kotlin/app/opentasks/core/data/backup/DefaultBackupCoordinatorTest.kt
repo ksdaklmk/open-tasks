@@ -12,20 +12,25 @@ import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.VaultId
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.withLock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.io.InputStream
 import java.nio.file.Files
 import java.time.Instant
-import java.io.InputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class DefaultBackupCoordinatorTest {
     @Test
@@ -114,6 +119,181 @@ class DefaultBackupCoordinatorTest {
         } finally {
             keyStore.close()
             root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun snapshotCheckpointMergesSameGenerationPackageUpdateWithoutLostFields() = runBlocking {
+        val fixture = BackupPayloadTestFixtures.snapshot()
+        val capture = StructuredBackupCapture(
+            VaultId(fixture.vaultId),
+            BackupGeneration(fixture.coveredGeneration),
+            fixture.records,
+        )
+        val packageUpdate = defaultState(capture).copy(
+            portablePackageGeneration = 52,
+            portablePackageBytes = 4_096,
+            portablePackageProducedAtEpochMillis = 1_234,
+            packageState = "UPDATE_PENDING",
+            failureCategory = "FILE_IO",
+            recoveryEnvelopeReady = true,
+        )
+        val state = SameGenerationInterleavingStateStore(
+            initial = defaultState(capture),
+            concurrent = packageUpdate,
+        )
+        val root = Files.createTempDirectory("backup-coordinator-state-merge").toFile()
+        val crypto = TinkVaultCrypto()
+        val keys = InMemoryVaultContentKeyStore(crypto)
+        try {
+            DefaultBackupCoordinator(
+                vaultId = capture.vaultId,
+                captureSource = { capture },
+                stateStore = state,
+                journalStore = InMemoryBackupJournalStore(emptyList()),
+                objectStore = DefaultLocalBackupObjectStore(root),
+                authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(crypto),
+                contentKeyStore = keys,
+            ).request()
+
+            assertEquals("snapshot:53", state.value.currentBaseObjectId)
+            assertEquals(53L, state.value.lastVerifiedSnapshotGeneration)
+            assertEquals(52L, state.value.portablePackageGeneration)
+            assertEquals(4_096L, state.value.portablePackageBytes)
+            assertEquals(1_234L, state.value.portablePackageProducedAtEpochMillis)
+            assertEquals("UPDATE_PENDING", state.value.packageState)
+            assertEquals("FILE_IO", state.value.failureCategory)
+            assertTrue(state.value.recoveryEnvelopeReady)
+        } finally {
+            keys.close()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun inMemoryStateMutationsSerializeLatestRowReadsLikeRoom() = runBlocking {
+        val fixture = BackupPayloadTestFixtures.snapshot()
+        val capture = StructuredBackupCapture(
+            VaultId(fixture.vaultId),
+            BackupGeneration(fixture.coveredGeneration),
+            fixture.records,
+        )
+        val state = InMemoryBackupStateStore(defaultState(capture))
+        val firstEntered = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+
+        val coordinatorWriter = async(Dispatchers.Default) {
+            state.mutate(
+                capture.vaultId,
+                BackupStateMutation { latest ->
+                    firstEntered.countDown()
+                    check(releaseFirst.await(2, TimeUnit.SECONDS))
+                    latest.copy(
+                        lastVerifiedSnapshotGeneration = 53,
+                        currentBaseObjectId = "snapshot:53",
+                    )
+                },
+            )
+        }
+        check(firstEntered.await(2, TimeUnit.SECONDS))
+        val packageWriter = async(start = CoroutineStart.UNDISPATCHED) {
+            state.mutate(
+                capture.vaultId,
+                BackupStateMutation { latest ->
+                    latest.copy(
+                        portablePackageGeneration = 52,
+                        portablePackageBytes = 4_096,
+                        portablePackageProducedAtEpochMillis = 1_234,
+                        packageState = "UPDATE_PENDING",
+                        failureCategory = "FILE_IO",
+                        recoveryEnvelopeReady = true,
+                    )
+                },
+            )
+        }
+        releaseFirst.countDown()
+        checkNotNull(coordinatorWriter.await())
+        checkNotNull(packageWriter.await())
+
+        assertEquals("snapshot:53", state.value.currentBaseObjectId)
+        assertEquals(53L, state.value.lastVerifiedSnapshotGeneration)
+        assertEquals(52L, state.value.portablePackageGeneration)
+        assertEquals(4_096L, state.value.portablePackageBytes)
+        assertEquals(1_234L, state.value.portablePackageProducedAtEpochMillis)
+        assertEquals("UPDATE_PENDING", state.value.packageState)
+        assertEquals("FILE_IO", state.value.failureCategory)
+        assertTrue(state.value.recoveryEnvelopeReady)
+    }
+
+    @Test
+    fun postBootstrapKeyLossNeverCreatesAReplacementOrAdvancesBackupTruth() = runBlocking {
+        val fixture = BackupPayloadTestFixtures.snapshot()
+        val capture = StructuredBackupCapture(
+            VaultId(fixture.vaultId),
+            BackupGeneration(54),
+            fixture.records,
+        )
+        val scenarios = listOf(
+            "snapshot" to defaultState(capture).copy(
+                portablePackageGeneration = 53,
+                portablePackageBytes = 4_096,
+                portablePackageProducedAtEpochMillis = 1_234,
+                packageState = "UPDATE_PENDING",
+                failureCategory = "FILE_IO",
+                recoveryEnvelopeReady = true,
+            ),
+            "segment" to defaultState(capture).copy(
+                currentBaseObjectId = "snapshot:53",
+                lastVerifiedSnapshotGeneration = 53,
+                latestVerifiedSegmentGeneration = 53,
+                portablePackageGeneration = 53,
+                portablePackageBytes = 4_096,
+                portablePackageProducedAtEpochMillis = 1_234,
+                packageState = "UPDATE_PENDING",
+                failureCategory = "FILE_IO",
+                recoveryEnvelopeReady = true,
+                snapshotCreatedAtEpochMillis =
+                    Instant.parse("2026-07-29T00:00:00Z").toEpochMilli(),
+            ),
+        )
+
+        scenarios.forEach { (label, initial) ->
+            val root = Files.createTempDirectory("backup-coordinator-key-loss-$label").toFile()
+            val state = InMemoryBackupStateStore(initial)
+            val keyStore = MissingEstablishedKeyStore()
+            val entries = if (label == "segment") {
+                listOf(journalEntry("post-loss", 54, 0))
+            } else {
+                emptyList()
+            }
+            try {
+                val coordinator = DefaultBackupCoordinator(
+                    vaultId = capture.vaultId,
+                    captureSource = { capture },
+                    stateStore = state,
+                    journalStore = InMemoryBackupJournalStore(entries),
+                    objectStore = DefaultLocalBackupObjectStore(root),
+                    authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(TinkVaultCrypto()),
+                    contentKeyStore = keyStore,
+                    now = { Instant.parse("2026-07-29T00:00:00Z") },
+                )
+
+                assertThrows(IllegalStateException::class.java) {
+                    runBlocking { coordinator.request() }
+                }
+
+                assertEquals("$label key creation", 0, keyStore.createCount)
+                assertEquals("$label key open", 1, keyStore.openCount)
+                assertEquals("$label state", initial, state.value)
+                assertTrue("$label visible objects", root.walkTopDown().none {
+                    it.isFile && it.extension == "otf"
+                })
+                assertEquals("$label package state", "UPDATE_PENDING", state.value.packageState)
+                assertEquals("$label package generation", 53L, state.value.portablePackageGeneration)
+                assertEquals("$label failure", "FILE_IO", state.value.failureCategory)
+            } finally {
+                root.deleteRecursively()
+            }
         }
     }
 
@@ -349,6 +529,46 @@ class DefaultBackupCoordinatorTest {
 
             assertTrue(root.resolve("current/snapshot-54.otf").isFile)
             assertEquals(54L, state.value.lastVerifiedSnapshotGeneration)
+        } finally {
+            keys.close()
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun thresholdDecisionDoesNotMaterializeCapturedJournalPayloads() = runBlocking {
+        val fixture = BackupPayloadTestFixtures.snapshot()
+        val capture = StructuredBackupCapture(
+            VaultId(fixture.vaultId),
+            BackupGeneration(5_053),
+            fixture.records,
+        )
+        val state = InMemoryBackupStateStore(
+            defaultState(capture).copy(
+                currentBaseObjectId = "snapshot:53",
+                lastVerifiedSnapshotGeneration = 53,
+                latestVerifiedSegmentGeneration = 53,
+                snapshotCreatedAtEpochMillis =
+                    Instant.parse("2026-07-29T00:00:00Z").toEpochMilli(),
+            ),
+        )
+        val root = Files.createTempDirectory("backup-coordinator-bounded-threshold").toFile()
+        val crypto = TinkVaultCrypto()
+        val keys = InMemoryVaultContentKeyStore(crypto)
+        try {
+            DefaultBackupCoordinator(
+                vaultId = capture.vaultId,
+                captureSource = { capture },
+                stateStore = state,
+                journalStore = ThresholdReachedJournalStore(),
+                objectStore = DefaultLocalBackupObjectStore(root),
+                authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(crypto),
+                contentKeyStore = keys,
+                now = { Instant.parse("2026-07-29T00:00:00Z") },
+            ).request()
+
+            assertTrue(root.resolve("current/snapshot-5053.otf").isFile)
+            assertEquals(5_053L, state.value.lastVerifiedSnapshotGeneration)
         } finally {
             keys.close()
             root.deleteRecursively()
@@ -758,6 +978,7 @@ private fun assertSegmentFailurePreservesStateAndJournal(
 
 private class InMemoryBackupStateStore(initial: BackupStateEntity) : BackupStateStore {
     private val flow = MutableStateFlow(initial)
+    private val mutex = kotlinx.coroutines.sync.Mutex()
 
     val value: BackupStateEntity
         get() = flow.value
@@ -767,18 +988,47 @@ private class InMemoryBackupStateStore(initial: BackupStateEntity) : BackupState
     override suspend fun get(vaultId: VaultId): BackupStateEntity? =
         flow.value.takeIf { it.vaultId == vaultId.value }
 
-    override suspend fun compareAndUpdate(
-        entity: BackupStateEntity,
-        expectedCurrentGeneration: Long,
-    ): Int = if (flow.value.currentGeneration == expectedCurrentGeneration) {
-        flow.value = entity
-        1
-    } else {
-        0
+    override suspend fun mutate(
+        vaultId: VaultId,
+        mutation: BackupStateMutation,
+    ): BackupStateEntity? = mutex.withLock {
+        val current = flow.value.takeIf { it.vaultId == vaultId.value } ?: return@withLock null
+        val updated = mutation.apply(current) ?: return@withLock null
+        require(updated.currentGeneration == current.currentGeneration)
+        flow.value = updated
+        updated
     }
 
     fun replace(entity: BackupStateEntity) {
         flow.value = entity
+    }
+}
+
+private class SameGenerationInterleavingStateStore(
+    initial: BackupStateEntity,
+    private val concurrent: BackupStateEntity,
+) : BackupStateStore {
+    private val flow = MutableStateFlow(initial)
+    private var injected = false
+
+    val value: BackupStateEntity
+        get() = flow.value
+
+    override fun observe(vaultId: VaultId): Flow<BackupStateEntity> = flow
+
+    override suspend fun get(vaultId: VaultId): BackupStateEntity? = flow.value
+
+    override suspend fun mutate(
+        vaultId: VaultId,
+        mutation: BackupStateMutation,
+    ): BackupStateEntity? {
+        if (!injected) {
+            injected = true
+            flow.value = concurrent
+        }
+        val updated = mutation.apply(flow.value) ?: return null
+        flow.value = updated
+        return updated
     }
 }
 
@@ -862,8 +1112,16 @@ private class InMemoryBackupJournalStore(
     }.sortedWith(compareBy<BackupJournalEntity> { it.generation }.thenBy { it.sequence })
         .take(limit)
 
-    override suspend fun countAfter(vaultId: VaultId, generation: Long): Int =
-        entries.count { it.vaultId == vaultId.value && it.generation > generation }
+    override suspend fun countThrough(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int = entries.count {
+        it.vaultId == vaultId.value &&
+            it.generation > afterGeneration &&
+            it.generation <= throughGeneration
+    }.coerceAtMost(limit)
 
     override suspend fun between(
         vaultId: VaultId,
@@ -882,8 +1140,12 @@ private class CaptureBoundJournalStore : BackupJournalStore {
     override suspend fun after(vaultId: VaultId, generation: Long, limit: Int): List<BackupJournalEntity> =
         error("Coordinator must select the capture-bounded range")
 
-    override suspend fun countAfter(vaultId: VaultId, generation: Long): Int =
-        error("Coordinator must count only the capture-bounded range")
+    override suspend fun countThrough(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int = 0
 
     override suspend fun between(
         vaultId: VaultId,
@@ -895,15 +1157,64 @@ private class CaptureBoundJournalStore : BackupJournalStore {
     }
 }
 
+private class ThresholdReachedJournalStore : BackupJournalStore {
+    override suspend fun after(
+        vaultId: VaultId,
+        generation: Long,
+        limit: Int,
+    ): List<BackupJournalEntity> = error("Coordinator must use a capture-bounded count")
+
+    override suspend fun countThrough(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+        limit: Int,
+    ): Int {
+        assertEquals(53L, afterGeneration)
+        assertEquals(5_053L, throughGeneration)
+        assertEquals(5_000, limit)
+        return 5_000
+    }
+
+    override suspend fun between(
+        vaultId: VaultId,
+        afterGeneration: Long,
+        throughGeneration: Long,
+    ): List<BackupJournalEntity> =
+        error("Threshold decisions must not materialize journal payloads")
+}
+
+private class MissingEstablishedKeyStore : VaultContentKeyStore {
+    var createCount = 0
+        private set
+    var openCount = 0
+        private set
+
+    override fun getOrCreate(vaultId: VaultId): VaultKey {
+        createCount += 1
+        throw IllegalStateException("Routine work attempted key creation")
+    }
+
+    override fun openExisting(vaultId: VaultId): VaultKey {
+        openCount += 1
+        throw IllegalStateException("Established content key is unavailable")
+    }
+
+    override fun replace(vaultId: VaultId, key: VaultKey) = Unit
+
+    override fun delete(vaultId: VaultId) = Unit
+}
+
 private class InMemoryVaultContentKeyStore(
     private val crypto: TinkVaultCrypto,
 ) : VaultContentKeyStore {
     private val issued = mutableListOf<VaultKey>()
 
-    override fun getOrCreate(vaultId: VaultId): VaultKey = crypto.createKey().also(issued::add)
+    override fun getOrCreate(vaultId: VaultId): VaultKey =
+        error("Coordinator must not create a content key")
 
     override fun openExisting(vaultId: VaultId): VaultKey =
-        error("Backup coordinator tests bootstrap through getOrCreate")
+        crypto.createKey().also(issued::add)
 
     override fun replace(vaultId: VaultId, key: VaultKey) {
         issued += key

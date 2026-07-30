@@ -5,6 +5,7 @@ import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.backup.BackupSnapshotCodec
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.BackupStateMutation
 import app.opentasks.core.data.backup.BackupStateStore
 import app.opentasks.core.data.backup.PortablePackageCodec
 import app.opentasks.core.data.backup.PortablePackageTooLargeException
@@ -38,11 +39,15 @@ class PortableBackupPublisher(
     private val packageFile: AtomicPackageFile,
     private val codec: PortablePackageCodec,
     private val prepareEnvelope: (CharArray) -> PreparedRecoveryEnvelope,
+    private val publicationBlocked: suspend () -> Boolean = { false },
     private val now: () -> Instant = Instant::now,
 ) {
     private val mutex = Mutex()
 
     suspend fun prepare(passphrase: CharArray): AndroidBackupStatus = mutex.withLock {
+        if (isPublicationBlocked()) {
+            return@withLock restoredInputStatus()
+        }
         val initialState = checkNotNull(stateStore.get(vaultId)) {
             "Backup state is unavailable"
         }
@@ -52,6 +57,12 @@ class PortableBackupPublisher(
             return@withLock AndroidBackupStatus.Unavailable(
                 BackupUnavailableReason.RECOVERY_ENVELOPE_UNAVAILABLE,
             )
+        }
+        if (
+            packageFile.length() > 0 &&
+            initialState.packageState != PACKAGE_PREPARING
+        ) {
+            return@withLock restoredInputStatus()
         }
         recoverInitialPackage(initialState)?.let { return@withLock it }
         val prepared = try {
@@ -65,28 +76,31 @@ class PortableBackupPublisher(
             )
         }
         try {
+            checkNotNull(mutatePackage { current ->
+                if (current.recoveryEnvelopeReady) {
+                    null
+                } else {
+                    current.copy(
+                        packageState = PACKAGE_PREPARING,
+                        failureCategory = null,
+                    )
+                }
+            }) { "Backup state is unavailable before initial package capture" }
             val published = produce(prepared.envelope)
             var databaseCommitComplete = false
             try {
-                val latest = checkNotNull(stateStore.get(vaultId)) {
-                    "Backup state is unavailable"
-                }
-                val readyState = packageState(latest, published).copy(
-                    recoveryEnvelopeReady = true,
-                )
                 val committed = envelopeStore.commitInitial(
                     vaultId = vaultId,
                     envelope = prepared.envelope,
-                    state = readyState,
-                    expectedCurrentGeneration = latest.currentGeneration,
+                    published = published,
                 )
-                if (!committed) {
+                if (committed == null) {
                     return@withLock AndroidBackupStatus.Unavailable(
                         BackupUnavailableReason.FILE_IO,
                     )
                 }
                 databaseCommitComplete = true
-                status(readyState)
+                status(committed)
             } catch (failure: Throwable) {
                 if (failure is CancellationException) {
                     databaseCommitComplete = initialCommitMatches(published)
@@ -96,12 +110,27 @@ class PortableBackupPublisher(
             } finally {
                 if (!databaseCommitComplete) {
                     withContext(NonCancellable) {
-                        if (!packageFile.delete()) preserveUnlinkedPackage(published)
+                        if (!packageFile.delete()) {
+                            preserveUnlinkedPackage(published)
+                        } else {
+                            clearUncommittedInitialPreparation()
+                        }
                     }
                 }
             }
         } catch (failure: PublicationFailure) {
             recordFailure(initialState, failure.reason, failure.withdraw)
+        } catch (failure: CancellationException) {
+            withContext(NonCancellable) {
+                try {
+                    if (packageFile.length() <= 0) {
+                        clearUncommittedInitialPreparation()
+                    }
+                } catch (_: Throwable) {
+                    // A later startup retries reconciliation from durable state.
+                }
+            }
+            throw failure
         } finally {
             prepared.close()
         }
@@ -138,6 +167,9 @@ class PortableBackupPublisher(
     }
 
     suspend fun refresh(): AndroidBackupStatus = mutex.withLock {
+        if (isPublicationBlocked()) {
+            return@withLock restoredInputStatus()
+        }
         val initialState = checkNotNull(stateStore.get(vaultId)) {
             "Backup state is unavailable"
         }
@@ -168,30 +200,23 @@ class PortableBackupPublisher(
             ) {
                 return@withLock status(reconciled)
             }
-            val checkpoint = reconciled ?: initialState
-            val preparing = checkpoint.copy(
-                packageState = PACKAGE_PREPARING,
-                failureCategory = null,
-            )
-            check(
-                stateStore.compareAndUpdate(
-                    preparing,
-                    checkpoint.currentGeneration,
-                ) == 1,
-            ) {
-                "Backup state changed before portable package capture"
-            }
+            checkNotNull(
+                mutatePackage { current ->
+                    current.copy(
+                        packageState = PACKAGE_PREPARING,
+                        failureCategory = null,
+                    )
+                },
+            ) { "Backup state is unavailable before portable package capture" }
             try {
                 val published = produce(envelope)
-                val latest = checkNotNull(stateStore.get(vaultId)) {
-                    "Backup state is unavailable"
-                }
-                val updated = packageState(latest, published).copy(
-                    recoveryEnvelopeReady = true,
-                )
-                check(stateStore.compareAndUpdate(updated, latest.currentGeneration) == 1) {
-                    "Backup state changed during portable package checkpoint"
-                }
+                val updated = checkNotNull(
+                    mutatePackage { current ->
+                        packageState(current, published).copy(
+                            recoveryEnvelopeReady = true,
+                        )
+                    },
+                ) { "Backup state is unavailable during portable package checkpoint" }
                 status(updated)
             } catch (failure: PublicationFailure) {
                 val latest = checkNotNull(stateStore.get(vaultId)) {
@@ -205,20 +230,36 @@ class PortableBackupPublisher(
     }
 
     private suspend fun preserveUnlinkedPackage(published: VerifiedPortableBackup) {
-        val current = try {
-            stateStore.get(vaultId)
-        } catch (_: Throwable) {
-            null
-        } ?: return
-        val tracking = packageState(current, published).copy(
-            packageState = PACKAGE_PREPARING,
-            failureCategory = BackupUnavailableReason.FILE_IO.name,
-            recoveryEnvelopeReady = false,
-        )
         try {
-            stateStore.compareAndUpdate(tracking, current.currentGeneration)
+            mutatePackage { current ->
+                packageState(current, published).copy(
+                    packageState = PACKAGE_PREPARING,
+                    failureCategory = BackupUnavailableReason.FILE_IO.name,
+                    recoveryEnvelopeReady = false,
+                )
+            }
         } catch (_: Throwable) {
             // The eligible package remains discoverable and every entry point retries recovery.
+        }
+    }
+
+    private suspend fun clearUncommittedInitialPreparation() {
+        try {
+            mutatePackage { current ->
+                if (current.recoveryEnvelopeReady) {
+                    current
+                } else {
+                    current.copy(
+                        portablePackageGeneration = null,
+                        portablePackageBytes = null,
+                        portablePackageProducedAtEpochMillis = null,
+                        packageState = PACKAGE_NOT_PREPARED,
+                        failureCategory = null,
+                    )
+                }
+            }
+        } catch (_: Throwable) {
+            // Intake and a later explicit preparation retry remain fail closed.
         }
     }
 
@@ -226,21 +267,14 @@ class PortableBackupPublisher(
         state: BackupStateEntity,
     ): AndroidBackupStatus? {
         val packageLength = packageFile.length()
-        if (state.recoveryEnvelopeReady || packageLength <= 0) return null
-        val trackingState = if (state.packageState == PACKAGE_PREPARING) {
-            state
-        } else {
-            state.copy(
-                packageState = PACKAGE_PREPARING,
-                failureCategory = null,
-            )
-        }
         if (
-            trackingState != state &&
-            stateStore.compareAndUpdate(trackingState, state.currentGeneration) != 1
+            state.recoveryEnvelopeReady ||
+            state.packageState != PACKAGE_PREPARING ||
+            packageLength <= 0
         ) {
-            return AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+            return null
         }
+        val trackingState = state
         val key = try {
             contentKeyStore.openExisting(vaultId)
         } catch (failure: Throwable) {
@@ -282,22 +316,18 @@ class PortableBackupPublisher(
             if (envelopeDigest(recoveredEnvelope) != verified.recoveryEnvelopeSha256) {
                 return withdrawInvalidInitialPackage(trackingState)
             }
-            val readyState = packageState(trackingState, verified).copy(
-                recoveryEnvelopeReady = true,
-            )
             val committed = try {
                 envelopeStore.commitInitial(
                     vaultId = vaultId,
                     envelope = recoveredEnvelope,
-                    state = readyState,
-                    expectedCurrentGeneration = trackingState.currentGeneration,
+                    published = verified,
                 )
             } catch (failure: Throwable) {
                 failure.rethrowCancellation()
-                false
+                null
             }
-            return if (committed) {
-                status(readyState)
+            return if (committed != null) {
+                status(committed)
             } else {
                 AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
             }
@@ -307,12 +337,9 @@ class PortableBackupPublisher(
     }
 
     private suspend fun withdrawInvalidInitialPackage(
-        state: BackupStateEntity,
-    ): AndroidBackupStatus = recordFailure(
-        state = state,
-        reason = BackupUnavailableReason.VERIFICATION_FAILED,
-        withdraw = true,
-    )
+        @Suppress("UNUSED_PARAMETER") state: BackupStateEntity,
+    ): AndroidBackupStatus =
+        AndroidBackupStatus.Unavailable(BackupUnavailableReason.VERIFICATION_FAILED)
 
     private suspend fun reconcile(
         state: BackupStateEntity,
@@ -359,11 +386,20 @@ class PortableBackupPublisher(
             if (!packageFile.delete()) throw WithdrawalFailure()
             return null
         }
-        val reconciled = packageState(state, verified).copy(recoveryEnvelopeReady = true)
-        check(stateStore.compareAndUpdate(reconciled, state.currentGeneration) == 1) {
-            "Backup state changed during portable package reconciliation"
+        return mutatePackage { current ->
+            if (
+                verified.generation > current.currentGeneration ||
+                (
+                    current.packageState != PACKAGE_PREPARING &&
+                        current.portablePackageGeneration != null &&
+                        verified.generation != current.portablePackageGeneration
+                    )
+            ) {
+                null
+            } else {
+                packageState(current, verified).copy(recoveryEnvelopeReady = true)
+            }
         }
-        return reconciled
     }
 
     private suspend fun produce(envelope: VaultKeyEnvelope): VerifiedPortableBackup {
@@ -496,34 +532,33 @@ class PortableBackupPublisher(
                     state.portablePackageProducedAtEpochMillis != null,
             )
         }
-        val hasPrior = !withdraw &&
-            state.portablePackageGeneration != null &&
-            state.portablePackageBytes != null &&
-            state.portablePackageProducedAtEpochMillis != null &&
-            packageFile.length() > 0
-        val updated = if (hasPrior) {
-            state.copy(
-                packageState = PACKAGE_UPDATE_PENDING,
-                failureCategory = reason.name,
-            )
-        } else if (!state.recoveryEnvelopeReady && reason == BackupUnavailableReason.FILE_IO) {
-            state
-        } else {
-            state.copy(
-                portablePackageGeneration = null,
-                portablePackageBytes = null,
-                portablePackageProducedAtEpochMillis = null,
-                packageState = if (state.recoveryEnvelopeReady) {
-                    PACKAGE_UNAVAILABLE
-                } else {
-                    PACKAGE_NOT_PREPARED
-                },
-                failureCategory = if (state.recoveryEnvelopeReady) reason.name else null,
-            )
-        }
-        if (updated != state) {
-            stateStore.compareAndUpdate(updated, state.currentGeneration)
-        }
+        val eligiblePresent = packageFile.length() > 0
+        var hasPrior = false
+        val updated = mutatePackage { current ->
+            hasPrior = !withdraw &&
+                current.portablePackageGeneration != null &&
+                current.portablePackageBytes != null &&
+                current.portablePackageProducedAtEpochMillis != null &&
+                eligiblePresent
+            if (hasPrior) {
+                current.copy(
+                    packageState = PACKAGE_UPDATE_PENDING,
+                    failureCategory = reason.name,
+                )
+            } else {
+                current.copy(
+                    portablePackageGeneration = null,
+                    portablePackageBytes = null,
+                    portablePackageProducedAtEpochMillis = null,
+                    packageState = if (current.recoveryEnvelopeReady) {
+                        PACKAGE_UNAVAILABLE
+                    } else {
+                        PACKAGE_NOT_PREPARED
+                    },
+                    failureCategory = if (current.recoveryEnvelopeReady) reason.name else null,
+                )
+            }
+        } ?: return AndroidBackupStatus.Unavailable(reason)
         return if (hasPrior) {
             AndroidBackupStatus.UpdatePending(packageInfo(updated))
         } else {
@@ -535,13 +570,16 @@ class PortableBackupPublisher(
         state: BackupStateEntity,
         priorVerified: Boolean,
     ): AndroidBackupStatus {
-        val updated = state.copy(
-            packageState = if (priorVerified) PACKAGE_UPDATE_PENDING else PACKAGE_PREPARING,
-            failureCategory = BackupUnavailableReason.FILE_IO.name,
-        )
-        if (updated != state) {
-            stateStore.compareAndUpdate(updated, state.currentGeneration)
-        }
+        val updated = mutatePackage { current ->
+            current.copy(
+                packageState = if (priorVerified) {
+                    PACKAGE_UPDATE_PENDING
+                } else {
+                    PACKAGE_PREPARING
+                },
+                failureCategory = BackupUnavailableReason.FILE_IO.name,
+            )
+        } ?: state
         return if (priorVerified) {
             AndroidBackupStatus.UpdatePending(packageInfo(updated))
         } else {
@@ -563,6 +601,31 @@ class PortableBackupPublisher(
         },
         failureCategory = null,
     )
+
+    private suspend fun mutatePackage(
+        transition: (BackupStateEntity) -> BackupStateEntity?,
+    ): BackupStateEntity? = stateStore.mutate(
+        vaultId,
+        BackupStateMutation { current ->
+            if (current.packageState == PACKAGE_RESTORED_DETECTED) {
+                null
+            } else {
+                transition(current)
+            }
+        },
+    )
+
+    private suspend fun isPublicationBlocked(): Boolean = try {
+        publicationBlocked()
+    } catch (failure: Throwable) {
+        failure.rethrowCancellation()
+        true
+    }
+
+    private fun restoredInputStatus(): AndroidBackupStatus =
+        AndroidBackupStatus.RestoredPackageDetected(
+            app.opentasks.core.model.RestoredPackageCondition.PRESERVED,
+        )
 
     private fun status(state: BackupStateEntity): AndroidBackupStatus =
         if (state.packageState == PACKAGE_READY) {
@@ -613,6 +676,7 @@ class PortableBackupPublisher(
         const val PACKAGE_READY = "READY"
         const val PACKAGE_UPDATE_PENDING = "UPDATE_PENDING"
         const val PACKAGE_UNAVAILABLE = "UNAVAILABLE"
+        const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"
         const val HEX = "0123456789abcdef"
     }
 }

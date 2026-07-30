@@ -34,26 +34,78 @@ class RoomBackupCaptureSourceInstrumentedTest {
     }
 
     @Test
-    fun requestedVaultCaptureExcludesEveryOtherVaultFamilyAndStrictlyEncodes() = runBlocking {
+    fun multiVaultCaptureRejectsAmbiguousInboxWorkflowOwnership() {
+        runBlocking {
+            seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+            seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    RoomBackupCaptureSource(
+                        database = database,
+                        vaultId = VaultId("vault-alpha"),
+                    ).capture()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun captureIncludesCompleteInboxWorkflowWhenInboxHasNoTasks() = runBlocking {
         seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
-        seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+        seedRemainingInboxStatuses(scope = "alpha")
+        database.openHelper.writableDatabase.execSQL(
+            "DELETE FROM tasks WHERE id = ?",
+            arrayOf("inbox-task-alpha"),
+        )
 
         val capture = RoomBackupCaptureSource(
             database = database,
             vaultId = VaultId("vault-alpha"),
         ).capture()
 
-        assertEquals(VaultId("vault-alpha"), capture.vaultId)
-        assertEquals(7, capture.generation.value)
-        assertEquals(expectedIdentities("alpha"), capture.identitySets())
-        val encoded = BackupSnapshotCodec.encode(BackupSnapshotCodec.fromCapture(capture))
-        try {
-            val decoded = BackupSnapshotCodec.decode(encoded)
-            assertEquals("vault-alpha", decoded.vaultId)
-            assertEquals(7, decoded.coveredGeneration)
-            assertEquals(expectedIdentities("alpha"), decoded.records.identitySets())
-        } finally {
-            encoded.fill(0)
+        assertEquals(
+            SemanticFixture.entries.map(Enum<*>::name).toSet(),
+            capture.inboxSemanticStatuses(),
+        )
+        BackupSnapshotCodec.encode(BackupSnapshotCodec.fromCapture(capture)).fill(0)
+    }
+
+    @Test
+    fun captureIncludesBacklogWhenInboxTaskReferencesOnlyStarted() = runBlocking {
+        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+        seedRemainingInboxStatuses(scope = "alpha")
+
+        val capture = RoomBackupCaptureSource(
+            database = database,
+            vaultId = VaultId("vault-alpha"),
+        ).capture()
+
+        assertEquals(
+            SemanticFixture.entries.map(Enum<*>::name).toSet(),
+            capture.inboxSemanticStatuses(),
+        )
+        BackupSnapshotCodec.encode(BackupSnapshotCodec.fromCapture(capture)).fill(0)
+    }
+
+    @Test
+    fun captureRejectsInboxWorkflowWithAmbiguousWorkspaceOwnership() {
+        runBlocking {
+            seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+            seedRemainingInboxStatuses(scope = "alpha")
+            insert(
+                "workspaces",
+                "id" to "workspace-alpha-second",
+                "vaultId" to "vault-alpha",
+                "ownerId" to "member-alpha",
+                "name" to "Second workspace",
+            )
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    RoomBackupCaptureSource(database, VaultId("vault-alpha")).capture()
+                }
+            }
         }
     }
 
@@ -188,27 +240,31 @@ class RoomBackupCaptureSourceInstrumentedTest {
     }
 
     @Test
-    fun crossVaultRelationsOutsideRequestedVaultAreIgnored() = runBlocking {
-        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
-        seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
-        seedVaultGraph(scope = "gamma", vaultId = "vault-gamma", generation = 13)
-        insertDependency(
-            taskId = "task-alpha",
-            dependsOnTaskId = "prerequisite-beta",
-            scope = "cross-vault",
-        )
-        insertTaskTag(
-            taskId = "task-alpha",
-            tagId = "tag-beta",
-            scope = "cross-vault",
-        )
+    fun unrelatedCrossVaultRelationsStillFailClosedWithAmbiguousInboxOwnership() {
+        runBlocking {
+            seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+            seedVaultGraph(scope = "beta", vaultId = "vault-beta", generation = 11)
+            seedVaultGraph(scope = "gamma", vaultId = "vault-gamma", generation = 13)
+            insertDependency(
+                taskId = "task-alpha",
+                dependsOnTaskId = "prerequisite-beta",
+                scope = "cross-vault",
+            )
+            insertTaskTag(
+                taskId = "task-alpha",
+                tagId = "tag-beta",
+                scope = "cross-vault",
+            )
 
-        val capture = RoomBackupCaptureSource(
-            database = database,
-            vaultId = VaultId("vault-gamma"),
-        ).capture()
-
-        assertEquals(expectedIdentities("gamma"), capture.identitySets())
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    RoomBackupCaptureSource(
+                        database = database,
+                        vaultId = VaultId("vault-gamma"),
+                    ).capture()
+                }
+            }
+        }
     }
 
     private suspend fun seedVaultGraph(
@@ -446,6 +502,25 @@ class RoomBackupCaptureSourceInstrumentedTest {
         )
     }
 
+    private fun seedRemainingInboxStatuses(scope: String) {
+        SemanticFixture.entries
+            .filterNot { it == SemanticFixture.STARTED }
+            .forEachIndexed { index, semantic ->
+                insert(
+                    "workflow_statuses",
+                    "id" to "status-inbox-${semantic.name.lowercase()}-$scope",
+                    "projectId" to null,
+                    "name" to "Inbox ${semantic.name}",
+                    "semanticStatus" to semantic.name,
+                    "rank" to "inbox-$index-$scope",
+                    "archivedAtEpochMillis" to null,
+                    "revisionWallMillis" to 1L,
+                    "revisionLogical" to 0,
+                    "revisionDeviceId" to "device-$scope",
+                )
+            }
+    }
+
     private fun activityUpsertPayload(id: String): ByteArray =
         BackupMutationCodec.encode(
             BackupMutationPayloadV1(
@@ -645,6 +720,17 @@ class RoomBackupCaptureSourceInstrumentedTest {
                 listOf("legacy-purged-task-$scope", "task"),
             ),
         )
+
+    private fun StructuredBackupCapture.inboxSemanticStatuses(): Set<String> =
+        records.asSequence()
+            .filter { it.family == BackupRecordFamily.WORKFLOW_STATUS }
+            .filter { record ->
+                record.fields.single { it.name == "projectId" }.value == null
+            }
+            .map { record ->
+                checkNotNull(record.fields.single { it.name == "semanticStatus" }.value)
+            }
+            .toSet()
 
     private fun StructuredBackupCapture.identitySets() = records.identitySets()
 

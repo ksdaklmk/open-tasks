@@ -276,8 +276,27 @@ class BackupSnapshotCodecTest {
                     it.identity == listOf("status-project-planned")
             },
         )
+        val removedInboxWorkflow = original.copy(
+            records = original.records.filterNot {
+                it.family == BackupRecordFamily.WORKFLOW_STATUS &&
+                    it.fields.any { field ->
+                        field.name == "projectId" && field.value == null
+                    }
+            },
+        )
+        val inboxOnlyStarted = original.copy(
+            records = original.records.filterNot {
+                it.family == BackupRecordFamily.WORKFLOW_STATUS &&
+                    it.fields.any { field ->
+                        field.name == "projectId" && field.value == null
+                    } &&
+                    it.identity != listOf("status-inbox-started")
+            },
+        )
         val invalid = listOf(
             removedProjectPlanned,
+            removedInboxWorkflow,
+            inboxOnlyStarted,
             original.update(
                 BackupRecordFamily.WORKFLOW_STATUS,
                 "status-project-planned",

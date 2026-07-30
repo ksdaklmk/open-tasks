@@ -114,20 +114,31 @@ class DefaultBackupCoordinator(
         require(capture.vaultId == vaultId) { "Backup capture belongs to another vault" }
         val state = checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
         val lastSnapshotGeneration = state.lastVerifiedSnapshotGeneration
-        val capturedAfterBase = if (lastSnapshotGeneration == null) {
-            emptyList()
+        val baseOrAgeRequiresSnapshot = state.currentBaseObjectId == null ||
+            lastSnapshotGeneration == null ||
+            BackupPolicy.requiresSnapshot(
+                operationsSinceBase = 0,
+                baseProducedAt = Instant.ofEpochMilli(
+                    state.snapshotCreatedAtEpochMillis ?: 0L,
+                ),
+                now = now(),
+            )
+        val capturedOperationCount = if (baseOrAgeRequiresSnapshot) {
+            0
         } else {
-            journalStore.between(
+            journalStore.countThrough(
                 vaultId = vaultId,
                 afterGeneration = lastSnapshotGeneration,
                 throughGeneration = capture.generation.value,
+                limit = BackupPolicy.SNAPSHOT_OPERATION_INTERVAL,
             )
         }
-        val snapshotRequired = state.currentBaseObjectId == null ||
-            lastSnapshotGeneration == null ||
+        val snapshotRequired = baseOrAgeRequiresSnapshot ||
             BackupPolicy.requiresSnapshot(
-                operationsSinceBase = capturedAfterBase.size,
-                baseProducedAt = Instant.ofEpochMilli(state.snapshotCreatedAtEpochMillis ?: 0L),
+                operationsSinceBase = capturedOperationCount,
+                baseProducedAt = Instant.ofEpochMilli(
+                    checkNotNull(state.snapshotCreatedAtEpochMillis),
+                ),
                 now = now(),
             )
         return if (snapshotRequired) {
@@ -152,7 +163,7 @@ class DefaultBackupCoordinator(
     ): Boolean {
         val objectId = "snapshot:${capture.generation.value}"
         val identity = identity(CloudObjectFamily.SNAPSHOT, objectId)
-        val key = contentKeyStore.getOrCreate(vaultId)
+        val key = contentKeyStore.openExisting(vaultId)
         try {
             val plaintext = snapshotCodec.encode(snapshotCodec.fromCapture(capture))
             val frame = try {
@@ -175,25 +186,25 @@ class DefaultBackupCoordinator(
         } finally {
             key.close()
         }
-        val latest = checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
-        val updated = latest.copy(
-            lastVerifiedSnapshotGeneration = capture.generation.value,
-            currentBaseObjectId = objectId,
-            previousBaseObjectId = state.currentBaseObjectId,
-            latestVerifiedSegmentGeneration = capture.generation.value,
-            failureCategory = latest.failureCategory.takeIf {
-                latest.packageState == PACKAGE_RESTORED_DETECTED
-            },
-            legacyOutboxCoveredAtGeneration = capture.generation.value,
-            snapshotCreatedAtEpochMillis = now().toEpochMilli(),
-        )
-        check(stateStore.compareAndUpdate(updated, latest.currentGeneration) == 1) {
-            "Backup state changed before snapshot checkpoint"
-        }
+        val updated = checkNotNull(
+            stateStore.mutate(
+                vaultId,
+                BackupStateMutation { latest ->
+                    latest.copy(
+                        lastVerifiedSnapshotGeneration = capture.generation.value,
+                        currentBaseObjectId = objectId,
+                        previousBaseObjectId = state.currentBaseObjectId,
+                        latestVerifiedSegmentGeneration = capture.generation.value,
+                        legacyOutboxCoveredAtGeneration = capture.generation.value,
+                        snapshotCreatedAtEpochMillis = now().toEpochMilli(),
+                    )
+                },
+            ),
+        ) { "Backup state is unavailable during snapshot checkpoint" }
         objectStore.prune(
             setOfNotNull(updated.currentBaseObjectId, updated.previousBaseObjectId),
         )
-        return latest.currentGeneration != capture.generation.value
+        return updated.currentGeneration != capture.generation.value
     }
 
     private suspend fun produceSegments(
@@ -214,7 +225,7 @@ class DefaultBackupCoordinator(
                 app.opentasks.core.model.BackupGeneration(payload.lastGeneration),
             )
             val identity = identity(CloudObjectFamily.OPERATION_SEGMENT, objectId)
-            val key = contentKeyStore.getOrCreate(vaultId)
+            val key = contentKeyStore.openExisting(vaultId)
             try {
                 val plaintext = segmentCodec.encode(payload)
                 val frame = try {
@@ -237,16 +248,16 @@ class DefaultBackupCoordinator(
             } finally {
                 key.close()
             }
-            val latest = checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
-            val updated = latest.copy(
-                latestVerifiedSegmentGeneration = payload.lastGeneration,
-                failureCategory = latest.failureCategory.takeIf {
-                    latest.packageState == PACKAGE_RESTORED_DETECTED
-                },
-            )
-            check(stateStore.compareAndUpdate(updated, latest.currentGeneration) == 1) {
-                "Backup state changed before segment checkpoint"
-            }
+            val updated = checkNotNull(
+                stateStore.mutate(
+                    vaultId,
+                    BackupStateMutation { latest ->
+                        latest.copy(
+                            latestVerifiedSegmentGeneration = payload.lastGeneration,
+                        )
+                    },
+                ),
+            ) { "Backup state is unavailable during segment checkpoint" }
             state = updated
         }
         return state.currentGeneration != capture.generation.value
@@ -351,6 +362,5 @@ class DefaultBackupCoordinator(
 
     private companion object {
         const val MAX_SEGMENT_ENTRIES = 5_000
-        const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"
     }
 }

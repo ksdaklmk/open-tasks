@@ -6,6 +6,7 @@ import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.BackupStateMutation
 import app.opentasks.core.data.backup.BackupStateStore
 import app.opentasks.core.data.backup.PortableBootstrapHeaderV1
 import app.opentasks.core.data.backup.PortablePackageCodec
@@ -43,6 +44,41 @@ class RestoredPackageIntakeTest {
     }
 
     @Test
+    fun restartClearsAbandonedInitialPreparingStateWhenNoFinalFileExists() = runBlocking {
+        val fixture = fixture(
+            fileBytes = null,
+            state = state(
+                packageGeneration = null,
+                packageState = "PREPARING",
+                envelopeReady = false,
+            ),
+            storedEnvelope = null,
+        )
+
+        assertEquals(RestoredPackageIntakeResult.NoPackage, fixture.intake.inspect())
+        assertEquals("NOT_PREPARED", fixture.stateStore.current.packageState)
+        assertEquals(null, fixture.stateStore.current.failureCategory)
+        assertFalse(fixture.stateStore.current.recoveryEnvelopeReady)
+    }
+
+    @Test
+    fun durableInboxIsStartupTruthAfterMoveBeforeStatusPersistenceCrash() = runBlocking {
+        val fixture = fixture(fileBytes = null)
+        checkNotNull(fixture.inbox.parentFile).mkdirs()
+        val restoredBytes = "durable-restored-input".toByteArray()
+        fixture.inbox.writeBytes(restoredBytes)
+
+        assertEquals(
+            RestoredPackageIntakeResult.Preserved(RestoredPackageCondition.PRESERVED),
+            fixture.intake.inspect(),
+        )
+        assertArrayEquals(restoredBytes, fixture.inbox.readBytes())
+        assertFalse(fixture.eligible.exists())
+        assertEquals(0, fixture.keyStore.openCount)
+        assertEquals(0, fixture.codec.completeVerificationCount)
+    }
+
+    @Test
     fun currentVerifiedSelfProducedPackageKeepsStatusAndFile() = runBlocking {
         val fixture = fixture()
         val original = fixture.eligible.readBytes()
@@ -74,6 +110,32 @@ class RestoredPackageIntakeTest {
     }
 
     @Test
+    fun restartReconcilesInitialLocalFileCommitBeforeEnvelopeDatabaseCommit() = runBlocking {
+        val fixture = fixture(
+            state = state(
+                packageGeneration = null,
+                packageState = "NOT_PREPARED",
+                envelopeReady = false,
+            ),
+            storedEnvelope = null,
+        )
+        val original = fixture.eligible.readBytes()
+
+        assertEquals(
+            RestoredPackageIntakeResult.ReconciledSelfProduced,
+            fixture.intake.inspect(),
+        )
+        assertArrayEquals(original, fixture.eligible.readBytes())
+        assertFalse(fixture.inbox.exists())
+        assertEquals(1, fixture.keyStore.openCount)
+        assertEquals(1, fixture.codec.completeVerificationCount)
+        assertEquals(7L, fixture.stateStore.current.portablePackageGeneration)
+        assertEquals("READY", fixture.stateStore.current.packageState)
+        assertTrue(fixture.stateStore.current.recoveryEnvelopeReady)
+        assertTrue(fixture.envelopeStore.hasEnvelope)
+    }
+
+    @Test
     fun corruptLinkedSelfProducedPackageIsWithdrawnForRegeneration() = runBlocking {
         val fixture = fixture().also { it.codec.completeFailure = IllegalArgumentException() }
 
@@ -81,6 +143,52 @@ class RestoredPackageIntakeTest {
         assertFalse(fixture.eligible.exists())
         assertFalse(fixture.inbox.exists())
         assertEquals(1, fixture.codec.completeVerificationCount)
+    }
+
+    @Test
+    fun unprovenInitialCandidateAuthenticationFailureIsPreservedAsRestoredInput() = runBlocking {
+        val fixture = fixture(
+            state = state(
+                packageGeneration = null,
+                packageState = "PREPARING",
+                envelopeReady = false,
+            ),
+            storedEnvelope = null,
+        ).also {
+            it.codec.completeFailure = IllegalArgumentException("authentication mismatch")
+        }
+        val original = fixture.eligible.readBytes()
+
+        assertEquals(
+            RestoredPackageIntakeResult.Preserved(
+                RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT,
+            ),
+            fixture.intake.inspect(),
+        )
+        assertFalse(fixture.eligible.exists())
+        assertArrayEquals(original, fixture.inbox.readBytes())
+    }
+
+    @Test
+    fun transientBootstrapAndCompleteReadIoRetainEligiblePackageForRetry() = runBlocking {
+        val cases = listOf(
+            "bootstrap" to fixture().also {
+                it.codec.bootstrapFailure = java.io.IOException("transient bootstrap read")
+            },
+            "complete" to fixture().also {
+                it.codec.completeFailure = java.io.IOException("transient complete read")
+            },
+        )
+
+        cases.forEach { (label, fixture) ->
+            val original = fixture.eligible.readBytes()
+            val result = fixture.intake.inspect()
+
+            assertFalse("$label must not report no package", result is RestoredPackageIntakeResult.NoPackage)
+            assertFalse("$label must not quarantine as restored", result is RestoredPackageIntakeResult.Preserved)
+            assertArrayEquals("$label eligible bytes", original, fixture.eligible.readBytes())
+            assertFalse("$label inbox", fixture.inbox.exists())
+        }
     }
 
     @Test
@@ -142,7 +250,7 @@ class RestoredPackageIntakeTest {
     }
 
     @Test
-    fun existingInboxBlocksMoveAndLeavesBothInputsUntouched() = runBlocking {
+    fun existingInboxIsDurablePreservedTruthAndLeavesBothInputsUntouched() = runBlocking {
         val fixture = fixture(header = header(vaultId = "another-vault"))
         val eligible = fixture.eligible.readBytes()
         checkNotNull(fixture.inbox.parentFile).mkdirs()
@@ -150,7 +258,7 @@ class RestoredPackageIntakeTest {
         val inbox = fixture.inbox.readBytes()
 
         assertEquals(
-            RestoredPackageIntakeResult.PreservationBlocked,
+            RestoredPackageIntakeResult.Preserved(RestoredPackageCondition.PRESERVED),
             fixture.intake.inspect(),
         )
         assertArrayEquals(eligible, fixture.eligible.readBytes())
@@ -174,6 +282,31 @@ class RestoredPackageIntakeTest {
         assertFalse(fixture.inbox.exists())
         assertEquals(0, fixture.keyStore.openCount)
         assertEquals(0, fixture.codec.completeVerificationCount)
+    }
+
+    @Test
+    fun transientInitialCrashDatabaseCommitFailureRetainsEligiblePackageForRetry() = runBlocking {
+        val fixture = fixture(
+            state = state(
+                packageGeneration = null,
+                packageState = "PREPARING",
+                envelopeReady = false,
+            ),
+            storedEnvelope = null,
+        ).also {
+            it.envelopeStore.initialCommitFailure =
+                java.io.IOException("transient database commit")
+        }
+        val original = fixture.eligible.readBytes()
+
+        assertEquals(
+            RestoredPackageIntakeResult.RetryableFailure,
+            fixture.intake.inspect(),
+        )
+        assertArrayEquals(original, fixture.eligible.readBytes())
+        assertFalse(fixture.inbox.exists())
+        assertEquals("PREPARING", fixture.stateStore.current.packageState)
+        assertFalse(fixture.stateStore.current.recoveryEnvelopeReady)
     }
 
     @Test
@@ -225,6 +358,7 @@ class RestoredPackageIntakeTest {
         fileBytes: ByteArray? = "eligible-package".toByteArray(),
         state: BackupStateEntity? = state(),
         header: PortableBootstrapHeaderV1 = header(),
+        storedEnvelope: VaultKeyEnvelope? = envelope(),
         moveAtomicallyNoReplace: ((File, File) -> Boolean)? = null,
     ): IntakeFixture {
         val directory = Files.createTempDirectory("restored-intake").toFile()
@@ -235,13 +369,14 @@ class RestoredPackageIntakeTest {
         }
         val inbox = File(directory, "no_backup/recovery/incoming_android_v1.otb")
         val stateStore = FakeStateStore(state)
-        val envelopeStore = FakeEnvelopeStore(envelope())
+        val envelopeStore = FakeEnvelopeStore(storedEnvelope, stateStore)
         val keyStore = RecordingKeyStore()
         val codec = FakePortableCodec(header)
         return IntakeFixture(
             eligible = eligible,
             inbox = inbox,
             stateStore = stateStore,
+            envelopeStore = envelopeStore,
             keyStore = keyStore,
             codec = codec,
             intake = RestoredPackageIntake(
@@ -263,6 +398,7 @@ class RestoredPackageIntakeTest {
         val eligible: File,
         val inbox: File,
         val stateStore: FakeStateStore,
+        val envelopeStore: FakeEnvelopeStore,
         val keyStore: RecordingKeyStore,
         val codec: FakePortableCodec,
         val intake: RestoredPackageIntake,
@@ -279,36 +415,80 @@ class RestoredPackageIntakeTest {
         override suspend fun get(vaultId: VaultId): BackupStateEntity? =
             current.takeIf { available }
 
-        override suspend fun compareAndUpdate(
-            entity: BackupStateEntity,
-            expectedCurrentGeneration: Long,
-        ): Int {
-            if (!available || current.currentGeneration != expectedCurrentGeneration) return 0
-            current = entity
-            flow.value = entity
+        override suspend fun mutate(
+            vaultId: VaultId,
+            mutation: BackupStateMutation,
+        ): BackupStateEntity? {
+            if (!available || current.vaultId != vaultId.value) return null
+            val updated = mutation.apply(current) ?: return null
+            current = updated
+            flow.value = updated
             updateCount += 1
-            return 1
+            return updated
         }
     }
 
     private class FakeEnvelopeStore(
-        private val value: VaultKeyEnvelope?,
+        initial: VaultKeyEnvelope?,
+        private val stateStore: FakeStateStore,
     ) : RecoveryEnvelopeStore {
+        private var value = initial
+        var initialCommitFailure: Throwable? = null
+        val hasEnvelope: Boolean
+            get() = value != null
+
         override suspend fun get(vaultId: VaultId): VaultKeyEnvelope? = value?.copy(
-            kdf = value.kdf.copy(salt = value.kdf.salt.copyOf()),
-            nonce = value.nonce.copyOf(),
-            wrappedKeyset = value.wrappedKeyset.copyOf(),
+            kdf = checkNotNull(value).kdf.copy(salt = checkNotNull(value).kdf.salt.copyOf()),
+            nonce = checkNotNull(value).nonce.copyOf(),
+            wrappedKeyset = checkNotNull(value).wrappedKeyset.copyOf(),
         )
 
-        override suspend fun upsert(vaultId: VaultId, envelope: VaultKeyEnvelope) = Unit
-        override suspend fun delete(vaultId: VaultId) = Unit
+        override suspend fun upsert(vaultId: VaultId, envelope: VaultKeyEnvelope) {
+            value = envelope.copy(
+                kdf = envelope.kdf.copy(salt = envelope.kdf.salt.copyOf()),
+                nonce = envelope.nonce.copyOf(),
+                wrappedKeyset = envelope.wrappedKeyset.copyOf(),
+            )
+        }
+
+        override suspend fun delete(vaultId: VaultId) {
+            value = null
+        }
 
         override suspend fun commitInitial(
             vaultId: VaultId,
             envelope: VaultKeyEnvelope,
-            state: BackupStateEntity,
-            expectedCurrentGeneration: Long,
-        ): Boolean = false
+            published: VerifiedPortableBackup,
+        ): BackupStateEntity? {
+            initialCommitFailure?.let { throw it }
+            if (value != null) return null
+            val updated = stateStore.mutate(
+                vaultId,
+                BackupStateMutation { current ->
+                    if (published.generation > current.currentGeneration) {
+                        null
+                    } else {
+                        current.copy(
+                            portablePackageGeneration = published.generation,
+                            portablePackageBytes = published.totalPackageLength,
+                            portablePackageProducedAtEpochMillis =
+                                published.producedAtEpochMillis,
+                            packageState = if (
+                                published.generation == current.currentGeneration
+                            ) {
+                                "READY"
+                            } else {
+                                "UPDATE_PENDING"
+                            },
+                            failureCategory = null,
+                            recoveryEnvelopeReady = true,
+                        )
+                    }
+                },
+            ) ?: return null
+            upsert(vaultId, envelope)
+            return updated
+        }
     }
 
     private class RecordingKeyStore : VaultContentKeyStore {
@@ -381,6 +561,7 @@ class RestoredPackageIntakeTest {
         fun state(
             packageGeneration: Long? = 7,
             packageState: String = "READY",
+            envelopeReady: Boolean = true,
         ) = BackupStateEntity(
             vaultId = VAULT_ID.value,
             currentGeneration = 7,
@@ -393,7 +574,7 @@ class RestoredPackageIntakeTest {
             portablePackageProducedAtEpochMillis = if (packageGeneration == null) null else 1234,
             packageState = packageState,
             failureCategory = null,
-            recoveryEnvelopeReady = true,
+            recoveryEnvelopeReady = envelopeReady,
             legacyOutboxCoveredAtGeneration = 7,
             snapshotCreatedAtEpochMillis = 1234,
         )

@@ -9,6 +9,8 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import app.opentasks.core.data.backup.BackupJournalAppendBoundary
 import app.opentasks.core.data.backup.BackupMutationCodec
 import app.opentasks.core.data.backup.BackupRecordFamily
+import app.opentasks.core.data.backup.BackupStateMutation
+import app.opentasks.core.data.backup.RoomBackupStateStore
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
@@ -27,6 +29,7 @@ import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
+import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.ZonedMoment
 import kotlinx.coroutines.flow.filterNotNull
@@ -1675,6 +1678,46 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun acceptedMutationAtomicallyMarksVerifiedReadyPackageUpdatePending() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
+        val task = repository!!.currentWorkspace().tasks.first()
+        val initial = database!!.backupStateDao().require("vault-primary")
+        val ready = initial.copy(
+            portablePackageGeneration = initial.currentGeneration,
+            portablePackageBytes = 4_096,
+            portablePackageProducedAtEpochMillis = 1_234,
+            packageState = "READY",
+            failureCategory = null,
+            recoveryEnvelopeReady = true,
+        )
+        assertEquals(
+            ready,
+            RoomBackupStateStore(database!!).mutate(
+                VaultId("vault-primary"),
+                BackupStateMutation { ready },
+            ),
+        )
+
+        val result = repository!!.execute(
+            DomainCommand.RenameTask(task.id, "Package becomes stale"),
+        )
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        assertTrue(result is CommandResult.Success)
+        assertEquals(ready.currentGeneration + 1, after.currentGeneration)
+        assertEquals(ready.portablePackageGeneration, after.portablePackageGeneration)
+        assertEquals(ready.portablePackageBytes, after.portablePackageBytes)
+        assertEquals(
+            ready.portablePackageProducedAtEpochMillis,
+            after.portablePackageProducedAtEpochMillis,
+        )
+        assertEquals("UPDATE_PENDING", after.packageState)
+        assertEquals(null, after.failureCategory)
+        assertEquals(true, after.recoveryEnvelopeReady)
+        assertEquals(1, journalRows(after.currentGeneration).size)
+    }
+
+    @Test
     fun projectCreationCommitsProjectAndFiveWorkflowsUnderOneGeneration() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
         repository!!.currentWorkspace()
@@ -2004,6 +2047,21 @@ class RoomVaultRepositoryInstrumentedTest {
             },
         )
         val task = repository!!.currentWorkspace().tasks.first()
+        val initial = database!!.backupStateDao().require("vault-primary")
+        val ready = initial.copy(
+                    portablePackageGeneration = initial.currentGeneration,
+                    portablePackageBytes = 4_096,
+                    portablePackageProducedAtEpochMillis = 1_234,
+                    packageState = "READY",
+                    recoveryEnvelopeReady = true,
+                )
+        assertEquals(
+            ready,
+            RoomBackupStateStore(database!!).mutate(
+                VaultId("vault-primary"),
+                BackupStateMutation { ready },
+            ),
+        )
         val beforeState = database!!.backupStateDao().require("vault-primary")
         val beforeEntity = database!!.taskDao().getById(task.id.value)
 
@@ -2017,6 +2075,8 @@ class RoomVaultRepositoryInstrumentedTest {
         val afterEntity = database!!.taskDao().getById(task.id.value)
         assertEquals(beforeEntity!!.title, afterEntity!!.title)
         assertEquals(beforeState.currentGeneration, afterState.currentGeneration)
+        assertEquals("READY", afterState.packageState)
+        assertEquals(beforeState.portablePackageGeneration, afterState.portablePackageGeneration)
         assertTrue(
             database!!.backupJournalDao()
                 .after("vault-primary", beforeState.currentGeneration, 10)

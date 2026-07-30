@@ -48,7 +48,7 @@ object LocalVaultRepositoryFactory {
         )
         val vaultId = VaultId("vault-primary")
         val captureSource = RoomBackupCaptureSource(database, vaultId)
-        val stateStore = RoomBackupStateStore(database.backupStateDao())
+        val stateStore = RoomBackupStateStore(database)
         val journalStore = RoomBackupJournalStore(database.backupJournalDao())
         val envelopeStore = RoomRecoveryEnvelopeStore(database)
         return LocalVaultRuntime(

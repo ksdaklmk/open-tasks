@@ -373,8 +373,8 @@ private fun validateWorkflows(
         val active = workflow.filter { it.value("archivedAtEpochMillis") == null }
         require(active.size <= 20) { "Workflow exceeds 20 active statuses" }
     }
-    projectIds.forEach { projectId ->
-        val active = grouped[projectId]
+    (projectIds.map { it as String? } + null).forEach { scope ->
+        val active = grouped[scope]
             .orEmpty()
             .filter { it.value("archivedAtEpochMillis") == null }
         SemanticStatus.entries.forEach { semantic ->

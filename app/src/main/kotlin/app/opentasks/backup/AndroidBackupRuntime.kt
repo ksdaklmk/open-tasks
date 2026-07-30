@@ -1,6 +1,7 @@
 package app.opentasks.backup
 
 import app.opentasks.core.data.backup.BackupStateEntity
+import app.opentasks.core.data.backup.BackupStateMutation
 import app.opentasks.core.data.backup.BackupStateStore
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.model.AndroidBackupStatus
@@ -14,11 +15,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -46,18 +51,25 @@ class DefaultAndroidBackupRuntime(
     private val running = AtomicBoolean()
     private val keyBootstrapped = AtomicBoolean()
     private val keyBootstrapMutex = Mutex()
+    private val retryRequests = Channel<Unit>(Channel.CONFLATED)
 
     override fun start() {
         if (started.compareAndSet(false, true)) launch()
     }
 
     override fun retry() {
-        if (started.get()) launch()
+        if (started.get()) {
+            retryRequests.trySend(Unit)
+            launch()
+        }
     }
 
     private fun launch() {
         if (!running.compareAndSet(false, true)) return
         scope.launch {
+            // A signal that launched a stopped owner is represented by that
+            // owner's normal first pass, not an immediate duplicate pass.
+            retryRequests.tryReceive()
             try {
                 run()
             } catch (failure: Throwable) {
@@ -65,56 +77,117 @@ class DefaultAndroidBackupRuntime(
                 // Repository editing remains independent; retry is an explicit lifecycle entry.
             } finally {
                 running.set(false)
+                if (retryRequests.tryReceive().isSuccess) launch()
             }
         }
     }
 
     @OptIn(FlowPreview::class)
     private suspend fun run() {
-        val intakeResult = try {
-            restoredPackageIntake()
-        } catch (failure: Throwable) {
-            if (failure is CancellationException) throw failure
-            RestoredPackageIntakeResult.PreservationBlocked
-        }
-        val detectedStatus = when (intakeResult) {
-            is RestoredPackageIntakeResult.Preserved ->
-                AndroidBackupStatus.RestoredPackageDetected(intakeResult.condition)
-            RestoredPackageIntakeResult.PreservationBlocked ->
-                AndroidBackupStatus.RestoredPackageDetected(
-                    RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT,
-                )
-            else -> null
-        }
+        var intakeDecision = inspectRestoredInput()
+        var detectedStatus = intakeDecision.detectedStatus
         var statusRecorded = detectedStatus == null || tryRecordStatus(detectedStatus)
-        val blockedByIntake = detectedStatus != null
         val blockedByPersistedStatus = try {
             restoredPublicationBlocked()
         } catch (failure: Throwable) {
             if (failure is CancellationException) throw failure
             true
         }
-        val publicationBlocked = blockedByIntake || blockedByPersistedStatus
-        if (!bootstrapKeyOnce()) return
+        var publicationBlocked = intakeDecision.blocksPublication || blockedByPersistedStatus
+        if (!bootstrapKeyOnce()) {
+            if (!statusRecorded && detectedStatus != null) {
+                observeBackupState().first()
+                statusRecorded = tryRecordStatus(checkNotNull(detectedStatus))
+            }
+            return
+        }
         requestLocalBackup()
         var firstGeneration = true
+        var latestState: BackupStateEntity? = null
         val states = observeBackupState()
             .distinctUntilChangedBy { it.currentGeneration to it.recoveryEnvelopeReady }
         val debounced = if (debounceMillis > 0) states.debounce(debounceMillis) else states
-        debounced.collect { state ->
-            if (!firstGeneration) requestLocalBackup()
-            firstGeneration = false
-            if (!statusRecorded && detectedStatus != null) {
-                statusRecorded = tryRecordStatus(detectedStatus)
-            }
-            if (
-                !publicationBlocked &&
-                state.recoveryEnvelopeReady &&
-                envelopeAvailable()
-            ) {
-                refreshPortablePackage()
+        val events = merge(
+            debounced.map(RuntimeEvent::StateChanged),
+            retryRequests.receiveAsFlow().map { RuntimeEvent.RetryRequested },
+        )
+        events.collect { event ->
+            when (event) {
+                is RuntimeEvent.StateChanged -> {
+                    val state = event.state
+                    latestState = state
+                    if (!firstGeneration) requestLocalBackup()
+                    firstGeneration = false
+                    if (!statusRecorded && detectedStatus != null) {
+                        statusRecorded = tryRecordStatus(checkNotNull(detectedStatus))
+                    }
+                    if (
+                        !publicationBlocked &&
+                        state.recoveryEnvelopeReady &&
+                        envelopeAvailable()
+                    ) {
+                        refreshPortablePackage()
+                    }
+                }
+                RuntimeEvent.RetryRequested -> {
+                    intakeDecision = inspectRestoredInput()
+                    detectedStatus = intakeDecision.detectedStatus
+                    statusRecorded = detectedStatus?.let { status ->
+                        tryRecordStatus(status)
+                    } ?: true
+                    val persistedBlock = try {
+                        restoredPublicationBlocked()
+                    } catch (failure: Throwable) {
+                        if (failure is CancellationException) throw failure
+                        true
+                    }
+                    publicationBlocked =
+                        intakeDecision.blocksPublication || persistedBlock
+                    if (!bootstrapKeyOnce()) return@collect
+                    requestLocalBackup()
+                    latestState?.let { state ->
+                        if (
+                            !publicationBlocked &&
+                            state.recoveryEnvelopeReady &&
+                            envelopeAvailable()
+                        ) {
+                            refreshPortablePackage()
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private suspend fun inspectRestoredInput(): IntakeDecision {
+        val result = try {
+            restoredPackageIntake()
+        } catch (failure: Throwable) {
+            if (failure is CancellationException) throw failure
+            RestoredPackageIntakeResult.RetryableFailure
+        }
+        val detected = when (result) {
+            is RestoredPackageIntakeResult.Preserved ->
+                AndroidBackupStatus.RestoredPackageDetected(result.condition)
+            RestoredPackageIntakeResult.PreservationBlocked ->
+                AndroidBackupStatus.RestoredPackageDetected(
+                    RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT,
+                )
+            else -> null
+        }
+        return IntakeDecision(
+            detectedStatus = detected,
+            blocksPublication = when (result) {
+                RestoredPackageIntakeResult.NoPackage,
+                RestoredPackageIntakeResult.CurrentSelfProduced,
+                RestoredPackageIntakeResult.ReconciledSelfProduced,
+                -> false
+                RestoredPackageIntakeResult.RetryableFailure,
+                RestoredPackageIntakeResult.PreservationBlocked,
+                is RestoredPackageIntakeResult.Preserved,
+                -> true
+            },
+        )
     }
 
     private suspend fun tryRecordStatus(
@@ -172,11 +245,21 @@ internal suspend fun recordRestoredPackageStatus(
         ) {
             return true
         }
-        val detected = state.copy(
-            packageState = PACKAGE_RESTORED_DETECTED,
-            failureCategory = status.condition.name,
+        val detected = stateStore.mutate(
+            vaultId,
+            BackupStateMutation { latest ->
+                latest.copy(
+                    packageState = PACKAGE_RESTORED_DETECTED,
+                    failureCategory = status.condition.name,
+                )
+            },
         )
-        if (stateStore.compareAndUpdate(detected, state.currentGeneration) == 1) return true
+        if (
+            detected?.packageState == PACKAGE_RESTORED_DETECTED &&
+            detected.failureCategory == status.condition.name
+        ) {
+            return true
+        }
     }
     return false
 }
@@ -194,8 +277,13 @@ private fun storedAndroidBackupStatus(state: BackupStateEntity): AndroidBackupSt
             } ?: RestoredPackageCondition.INCOMPATIBLE_OR_CORRUPT,
         )
         "PREPARING" -> AndroidBackupStatus.Preparing
-        "READY" -> state.packageInfoOrNull()?.let(AndroidBackupStatus::Ready)
-            ?: AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
+        "READY" -> state.packageInfoOrNull()?.let { packageInfo ->
+            if (packageInfo.packageGeneration == packageInfo.currentGeneration) {
+                AndroidBackupStatus.Ready(packageInfo)
+            } else {
+                AndroidBackupStatus.UpdatePending(packageInfo)
+            }
+        } ?: AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
         "UPDATE_PENDING" -> state.packageInfoOrNull()?.let(AndroidBackupStatus::UpdatePending)
             ?: AndroidBackupStatus.Unavailable(BackupUnavailableReason.FILE_IO)
         "UNAVAILABLE" -> AndroidBackupStatus.Unavailable(
@@ -220,3 +308,13 @@ private fun BackupStateEntity.packageInfoOrNull(): BackupPackageInfo? {
 
 private const val PACKAGE_RESTORED_DETECTED = "RESTORED_PACKAGE_DETECTED"
 private const val STATUS_UPDATE_ATTEMPTS = 3
+
+private data class IntakeDecision(
+    val detectedStatus: AndroidBackupStatus.RestoredPackageDetected?,
+    val blocksPublication: Boolean,
+)
+
+private sealed interface RuntimeEvent {
+    data class StateChanged(val state: BackupStateEntity) : RuntimeEvent
+    data object RetryRequested : RuntimeEvent
+}

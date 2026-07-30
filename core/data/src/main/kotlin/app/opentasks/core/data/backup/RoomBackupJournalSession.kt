@@ -131,23 +131,10 @@ internal class RoomBackupJournalSession(
         }
         val next = Math.addExact(current.currentGeneration, 1)
         check(
-            stateDao.compareAndUpdate(
+            stateDao.advanceGeneration(
                 vaultId = current.vaultId,
                 expectedCurrentGeneration = current.currentGeneration,
-                currentGeneration = next,
-                lastVerifiedSnapshotGeneration = current.lastVerifiedSnapshotGeneration,
-                currentBaseObjectId = current.currentBaseObjectId,
-                previousBaseObjectId = current.previousBaseObjectId,
-                latestVerifiedSegmentGeneration = current.latestVerifiedSegmentGeneration,
-                portablePackageGeneration = current.portablePackageGeneration,
-                portablePackageBytes = current.portablePackageBytes,
-                portablePackageProducedAtEpochMillis =
-                    current.portablePackageProducedAtEpochMillis,
-                packageState = current.packageState,
-                failureCategory = current.failureCategory,
-                recoveryEnvelopeReady = current.recoveryEnvelopeReady,
-                legacyOutboxCoveredAtGeneration = current.legacyOutboxCoveredAtGeneration,
-                snapshotCreatedAtEpochMillis = current.snapshotCreatedAtEpochMillis,
+                nextGeneration = next,
             ) == 1,
         ) {
             "Backup generation changed during a serialised command"
