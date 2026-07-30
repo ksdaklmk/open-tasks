@@ -10,7 +10,10 @@
   pass. Encrypted Google-account Android transport upload/restore remains an
   external qualification gate, not a product defect. Do not begin Stage 3
   without a new user request. Train 1 Tasks 1.1–1.5 and Stage 1 remain
-  complete and independently reviewed. GitHub maintenance remains paused.**
+  complete and independently reviewed. GitHub maintenance was resumed on 30
+  July: the private repository has no open pull requests or issues, and the
+  queued Gradle, wrapper and GitHub Action updates were verified locally and
+  are recorded below.**
 - Current source implementation point: `f9e091b` (`fix: harden stage 2 backup
   state transitions`). The correction closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
@@ -64,15 +67,16 @@ time and milestone health with accessible table/text alternatives. The
 application is fixed to UK English with UK spelling, day–month dates, 24-hour
 time and Bin terminology.
 
-The public GitHub authority is
+The private GitHub authority is
 [ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
 tracks `origin/main`. Secret scanning, push protection, Dependabot alerts and
 security updates are enabled. The Android workflow now uses explicit compact
 API 36/stable/Pixel 6 and expanded API 37/canary/Pixel Tablet instrumented
 matrix entries, passes the matching channel and profile to the emulator runner,
 and runs a separate release-assembly job after verification. Its local
-structural verifier prevents mutable Action references. Queued dependency PR
-checks and resolution remain paused. A blocking `PreToolUse` guard rejects raw
+structural verifier prevents mutable Action references. The 30 July maintenance
+audit found no open pull requests or issues; it applied the queued dependency
+updates directly to `main` after local verification. A blocking `PreToolUse` guard rejects raw
 Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
@@ -449,11 +453,20 @@ identity above was unchanged after the module suites.
 - Android backup and device-transfer rules exclude vault data and keys.
 - Current source scan found no application logging calls or committed secrets.
 - Dependabot is configured weekly for Gradle and GitHub Actions.
-- Public-repository audit found no credential, private-key, OAuth-client or
+- Tracked-history audit found no credential, private-key, OAuth-client or
   provider-token patterns in the tracked tree or its existing history.
 - `.gitignore` excludes local properties, environment files, signing keys,
   OAuth/service-account files, local vault databases/exports and generated
   release artefacts.
+- 30 July 2026 maintenance resolved the eight queued Dependabot updates:
+  Gradle 9.6.1; Compose BOM 2026.06.01; Hilt 2.60.1; Kotlin serialization
+  1.11.0; AndroidX Window 1.5.1; and SHA-pinned `checkout` v7,
+  `setup-java` v5 and `setup-android` v4. `testDebugUnitTest`, `lintDebug`,
+  debug and release assembly, the workflow structural verifier, and the full
+  API 37 disposable device matrix passed. The first device run failed only
+  because the disposable Fold had booted closed at 2.0x font scale; the same
+  failures reproduced on the pre-update baseline. Re-running opened at 1.0x
+  passed in 8m16s.
 - A useful repository rollback point now exists:
   `806090a Establish Open Tasks baseline`.
 
@@ -473,7 +486,7 @@ identity above was unchanged after the module suites.
 | P0-10 | Strengthened multi-device foundations | Second-device recovery test plus merge/HLC rollback, retry and order tests |
 | P0-11 | Fixed repository teardown ordering | All 12 encrypted Room/Keystore device tests pass without connection-pool crashes |
 | P0-12 | Verified R8/resource shrinking and installed final debug build in place | Release assembly passes; app data retained after cold restart |
-| P0-13 | Published the audited history as a public GitHub repository | `main` tracks `origin/main`; GitHub secret scanning and push protection enabled |
+| P0-13 | Published the audited history to GitHub | `main` tracks the now-private `origin/main`; GitHub secret scanning and push protection enabled |
 
 ## Work completed in this P1 pass
 
@@ -1071,8 +1084,8 @@ only a local fact. Drive transport, recovery activation, writer takeover,
 remote merge, and attachment transport remain absent.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
-queued dependency PR checks and resolution remain paused. No Stage 3 source
-change is authorised until focused brainstorming, design, and implementation
+the queued dependency updates are resolved in the verified 30 July maintenance
+commit. No Stage 3 source change is authorised until focused brainstorming, design, and implementation
 planning are reviewed and approved.
 
 ## Resume instructions
@@ -1247,5 +1260,7 @@ Android package as supplementary recovery input, not upload evidence.
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly
 approved. Preserve existing outbox data and the exact Android package
-allow-list. Keep queued dependency PR checks and resolution paused unless the
-user explicitly resumes GitHub maintenance.
+allow-list. Continue normal dependency and pull-request maintenance against the
+private GitHub repository; reauthenticate the local `gh` CLI before any future
+CLI-only GitHub operation because its current token lacks valid private-repo
+access.
