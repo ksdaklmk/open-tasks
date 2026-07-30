@@ -2,20 +2,26 @@
 
 - Last updated: 30 July 2026
 - Branch: `main`
-- Session status: **Stage 3 began under the approved mutable-control design,
-  but its first credentialed provider gate proved that Drive supplies no
-  strong HTTP revision on either successful create or bounded metadata read.
-  No Stage 3 source was committed and Task 2 did not begin. The replacement
-  Drive-only design uses immutable create-only ownership slots plus
-  epoch-scoped publications, requires self-contained two-base takeover, and
-  accepts only non-authoritative old-epoch race residue. Its written design is
+- Session status: **Stage 3 remains stopped at revised Task 1. The superseded
+  mutable-control gate proved that Drive supplies no strong HTTP revision.
+  The replacement create-only transport and deterministic race harness are now
+  implemented locally but remain unstaged and uncommitted. Their exact
+  credentialed gate stopped at
+  `AUTH_START_ApiException_INTERNAL_ERROR_8` before authorization completed or
+  any Drive request ran, so no live create-only property is qualified and Task
+  2 did not begin. The replacement Drive-only design uses immutable
+  create-only ownership slots plus epoch-scoped publications, requires
+  self-contained two-base takeover, and accepts only non-authoritative
+  old-epoch race residue. Its written design is
   `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`.
   The replacement implementation plan is
   `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`;
   it begins with the credentialed duplicate-create race gate and supersedes
   the older plan wherever that plan depends on ETag, If-Match, mutable
-  control, or provider revisions. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
-  remain complete and independently reviewed.**
+  control, or provider revisions. Resume at the Task 1 authorization failure;
+  do not stage its source or begin Task 2 until the exact credentialed gate
+  returns `PASS`. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete
+  and independently reviewed.**
 - Current source implementation point: `f9e091b` (`fix: harden stage 2 backup
   state transitions`). The correction closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
@@ -83,11 +89,12 @@ Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
-package are implemented and user-visible in More. Stage 3 Google Identity and
-Drive transport qualification has started but remains uncommitted and
-provider-gated. Recovery activation, writer takeover, cloud attachments and
-Play Console work have not started. Release gates which depend on those later
-features remain blocked by their listed prerequisites.
+package are implemented and user-visible in More. Stage 3 create-only Google
+Identity and Drive transport qualification has locally passing deterministic
+coverage but remains uncommitted and blocked before provider access by Google
+authorization internal error 8. Recovery activation, writer takeover, cloud
+attachments and Play Console work have not started. Release gates which depend
+on those later features remain blocked by their listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
 independent of SQLCipher database keys and have separate recovery and per-vault
@@ -134,9 +141,11 @@ become authority over the new epoch.
 
 Before any Stage 3 source commit, the revised first task must repeatedly prove
 that two different authenticated claims racing one pre-generated successor ID
-produce exactly one unchanged winner and bounded duplicate rejection. Failure
-stops Stage 3 for another design. The untracked `artifacts/` directory remains
-user-owned and untouched.
+produce exactly one unchanged winner and bounded duplicate rejection. A
+provider-property failure stops Stage 3 for another design; an authorization
+setup failure blocks the qualification until diagnosed without establishing
+any provider result. The untracked `artifacts/` directory remains user-owned
+and untouched.
 
 The executable replacement plan is
 `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`.
@@ -146,6 +155,52 @@ same-generation bases independent remote identities, and finish with
 credentialed two-installation, terminal-tombstone, protected-workspace,
 privacy, schema, release, and connected gates. The older Stage 3 plan remains
 historical and is not the execution authority for create-only work.
+
+## Stage 3 revised Task 1 stopping checkpoint — 30 July 2026
+
+Subagent-driven execution started from documentation commit `303d1ae` in the
+user-approved `main` checkout. The first implementer replaced the superseded
+revision-bearing boundary with uncommitted `CreateOnlyDriveTransport` and
+`HttpCreateOnlyDriveTransport` work, plus the debug-only create-only
+qualification harness.
+
+Fresh local evidence recorded in
+`docs/qualification/stage3-drive-create-only.md`:
+
+- 14 focused create-only transport tests passed;
+- 4 deterministic qualification tests passed;
+- ten fake exact-successor races each selected one winner and one occupied
+  loser;
+- all thirty loser retries stayed occupied and all thirty winner readbacks
+  stayed byte-identical and authenticated;
+- deliberately discarded create success resolved only through exact-ID
+  authenticated readback;
+- deterministic cleanup-on-success and cleanup-on-failure passed;
+- injected HTTP tests distinguished missing, authorization, quota, retryable,
+  corrupt, provider-rejected, occupied, definite pre-request, and
+  post-transmission ambiguous outcomes; and
+- debug and release assemblies passed with the internal qualification
+  activity present only in debug.
+
+The exact credentialed command ran nine instrumentation tests on the sole
+audited API 37 `Pixel_10_Pro_Fold` disposable. Eight passed. The explicit
+credentialed test returned
+`AUTH_START_ApiException_INTERNAL_ERROR_8` before the account UI completed.
+No Drive provider request ran and no disposable provider object was created.
+Therefore the ten live races, thirty live loser retries, unchanged live
+winner readbacks, discarded-response resolution, and provider cleanup remain
+unqualified. The controller re-audited that sole API 37 target, shut down only
+the read-only/no-snapshot disposable, and confirmed the final ADB target list
+was empty.
+
+The hard stop was honoured: no Task 1 path is staged, no Stage 3 source commit
+exists, and Task 2 did not start. The detailed ignored execution report is
+`.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/task-1-report.md`.
+Resume by diagnosing the authorization start failure on the same intended
+Android authorization stack. Do not treat the deterministic harness as
+provider evidence, and do not stage Task 1 or begin Task 2 unless a later
+exact gate returns `PASS`. The historical uncommitted Stage 3 plan modification
+and user-owned `artifacts/` directory remain outside scope and untouched.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
