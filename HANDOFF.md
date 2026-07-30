@@ -10,10 +10,12 @@
   epoch-scoped publications, requires self-contained two-base takeover, and
   accepts only non-authoritative old-epoch race residue. Its written design is
   `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`.
-  The existing Stage 3 implementation plan is superseded where it depends on
-  ETag, If-Match, mutable control, or provider revisions; a revised plan must
-  begin with a credentialed duplicate-create race gate. Stage 2, Train 1
-  Tasks 1.1–1.5, and Stage 1 remain complete and independently reviewed.**
+  The replacement implementation plan is
+  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`;
+  it begins with the credentialed duplicate-create race gate and supersedes
+  the older plan wherever that plan depends on ETag, If-Match, mutable
+  control, or provider revisions. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
+  remain complete and independently reviewed.**
 - Current source implementation point: `f9e091b` (`fix: harden stage 2 backup
   state transitions`). The correction closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
@@ -135,6 +137,15 @@ that two different authenticated claims racing one pre-generated successor ID
 produce exactly one unchanged winner and bounded duplicate rejection. Failure
 stops Stage 3 for another design. The untracked `artifacts/` directory remains
 user-owned and untouched.
+
+The executable replacement plan is
+`docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`.
+Its fourteen review boundaries preserve the runtime-slot prerequisite, add a
+local Room state version instead of any provider revision, give the two
+same-generation bases independent remote identities, and finish with
+credentialed two-installation, terminal-tombstone, protected-workspace,
+privacy, schema, release, and connected gates. The older Stage 3 plan remains
+historical and is not the execution authority for create-only work.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
