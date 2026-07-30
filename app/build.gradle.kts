@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.window)
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
+    implementation(libs.google.play.services.auth)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

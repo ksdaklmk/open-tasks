@@ -48,36 +48,42 @@ serial environment variables were pinned to that sole audited target.
 
 ## Credentialed provider hard gate
 
-The exact explicit gate ran nine instrumentation tests. Eight non-provider
-tests passed. The credentialed test returned the bounded result
-`AUTH_START_ApiException_INTERNAL_ERROR_8`, not `PASS`, before authorization
-completed and before any Drive provider request or disposable object creation.
+The first explicit gate run stopped with the bounded result
+`AUTH_START_ApiException_INTERNAL_ERROR_8` before authorization completed and
+before any Drive provider request or disposable object creation. Diagnosis
+established the bounded cause as authorization setup, not a provider
+property: the freshly cold-booted disposable target carried no signed-in
+Google account state, and authorization start requires one. The device was
+otherwise healthy: Play services present and enabled, device checkin
+complete, network reachable, and the device clock correct. No account
+identity, token, or provider data was inspected or recorded.
 
-No live create race, loser retry, authenticated winner readback, discarded
-success resolution, or provider cleanup property is qualified by this run.
-Because no disposable provider object was created, there was no live object to
-clean up. The task is hard-stopped: source remains uncommitted and Stage 3 may
-not proceed to Task 2.
+After signed-in Google account state was restored to the disposable target's
+inherited device state, the exact explicit gate was rerun unchanged. All nine
+instrumentation tests passed with zero failures and zero skips. The
+credentialed test completed the explicit account consent step and returned
+the bounded result `PASS` after the full live provider sequence, taking
+approximately six minutes end to end.
 
 | Live provider property | Result |
 | --- | --- |
-| Drive app-data authorization | Blocked before completion |
-| Ten create-only successor races | Not run |
-| Thirty rejected loser retries | Not run |
-| Unchanged authenticated winner readbacks | Not run |
-| Discarded-success exact-ID resolution | Not run |
-| Disposable provider cleanup | No provider objects created |
+| Drive app-data authorization | Passed |
+| Ten create-only successor races | Passed |
+| Thirty rejected loser retries | Passed |
+| Unchanged authenticated winner readbacks | Passed |
+| Discarded-success exact-ID resolution | Passed |
+| Disposable provider cleanup | Passed |
 
-## Stopping point and resume condition
+Deterministic injected-HTTP tests remain the evidence for missing,
+authorization, quota, retryable, corrupt, provider-rejected, occupied,
+definite pre-request, and post-transmission indeterminate outcome mapping;
+the live gate did not manufacture quota or provider outages.
 
-Task 1 source is intentionally unstaged and uncommitted. Task 2 has not
-started. The ignored execution report is:
+## Qualification outcome
+
+The exact credentialed gate returned `PASS`, so Task 1 is qualified and its
+source may be committed. The ignored execution report is:
 
 ```text
 .superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/task-1-report.md
 ```
-
-Resume by diagnosing `AUTH_START_ApiException_INTERNAL_ERROR_8` on the same
-production-intended Android authorization stack. The deterministic harness is
-not provider evidence. Do not stage Task 1 or begin Task 2 unless a later run
-of the exact credentialed gate returns `PASS`.
