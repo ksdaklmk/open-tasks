@@ -2,28 +2,29 @@
 
 - Last updated: 30 July 2026
 - Branch: `main`
-- Session status: **Stage 3 remains stopped at revised Task 1. The superseded
-  mutable-control gate proved that Drive supplies no strong HTTP revision.
-  The replacement create-only transport and deterministic race harness are now
-  implemented locally but remain unstaged and uncommitted. Their exact
-  credentialed gate stopped at
-  `AUTH_START_ApiException_INTERNAL_ERROR_8` before authorization completed or
-  any Drive request ran, so no live create-only property is qualified and Task
-  2 did not begin. The replacement Drive-only design uses immutable
-  create-only ownership slots plus epoch-scoped publications, requires
-  self-contained two-base takeover, and accepts only non-authoritative
-  old-epoch race residue. Its written design is
-  `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`.
-  The replacement implementation plan is
-  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`;
-  it begins with the credentialed duplicate-create race gate and supersedes
-  the older plan wherever that plan depends on ETag, If-Match, mutable
-  control, or provider revisions. Resume at the Task 1 authorization failure;
-  do not stage its source or begin Task 2 until the exact credentialed gate
-  returns `PASS`. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete
-  and independently reviewed.**
-- Current source implementation point: `f9e091b` (`fix: harden stage 2 backup
-  state transitions`). The correction closes content-key authority, complete
+- Session status: **Stage 3 revised Task 1 is complete and committed as
+  `b6191fd` (`feat: qualify Drive create-only ownership slots`). The earlier
+  stop `AUTH_START_ApiException_INTERNAL_ERROR_8` was diagnosed as an
+  authorization setup failure: the freshly cold-booted read-only disposable
+  carried no signed-in Google account, and the Google Identity Authorization
+  API fails with bounded internal error 8 when the device has no Google
+  account, offering no add-account resolution. After the user signed a Google
+  account into the AVD's persistent device state, the sole audited API 37
+  disposable inherited it and the exact credentialed gate returned bounded
+  `PASS`: nine instrumentation tests with zero failures, covering ten live
+  create-only successor races, thirty rejected loser retries, unchanged
+  authenticated winner readbacks, discarded-success exact-ID resolution, and
+  disposable provider cleanup. Non-private evidence is
+  `docs/qualification/stage3-drive-create-only.md`. The design authority is
+  `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`
+  and the execution authority is
+  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`.
+  Resume at its Task 2 (freeze ownership and publication formats). Stage 2,
+  Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
+  reviewed.**
+- Current source implementation point: `b6191fd` (`feat: qualify Drive
+  create-only ownership slots`). The prior Stage 2 correction point is
+  `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
   I/O, bounded threshold selection, and stale Ready presentation. Detailed
@@ -90,9 +91,9 @@ protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
 package are implemented and user-visible in More. Stage 3 create-only Google
-Identity and Drive transport qualification has locally passing deterministic
-coverage but remains uncommitted and blocked before provider access by Google
-authorization internal error 8. Recovery activation, writer takeover, cloud
+Identity and Drive transport qualification is complete: the credentialed
+provider gate passed on the sole audited disposable and the transport is
+committed as `b6191fd`. Recovery activation, writer takeover, cloud
 attachments and Play Console work have not started. Release gates which depend
 on those later features remain blocked by their listed prerequisites.
 
@@ -201,6 +202,22 @@ Android authorization stack. Do not treat the deterministic harness as
 provider evidence, and do not stage Task 1 or begin Task 2 unless a later
 exact gate returns `PASS`. The historical uncommitted Stage 3 plan modification
 and user-owned `artifacts/` directory remain outside scope and untouched.
+
+Resolution, later on 30 July 2026: read-only device audit showed the freshly
+booted disposable inherited zero Google accounts, while Play services,
+checkin, network, and the device clock were healthy; the superseded gate had
+only ever completed authorization in a session with existing signed-in
+account state, which the read-only overlay discarded at shutdown. The Google
+Identity Authorization API fails with bounded internal error 8 when the
+device has no Google account. The user signed a Google account into the
+AVD's persistent device state; it survived restart and appeared on the
+freshly booted sole audited read-only API 37 disposable. The exact
+credentialed gate then ran once and returned bounded `PASS` (nine tests,
+zero failures; the credentialed test completed consent and the full live
+provider sequence in 364.7 seconds). The CI gate passed, the Step 9
+forbidden-concept scan found no matches, and Task 1 was committed as
+`b6191fd`. The disposable was shut down after the run and the final ADB
+target list was confirmed empty.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
