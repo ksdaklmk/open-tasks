@@ -1,8 +1,7 @@
 # Stage 3 Google Drive Backup and Recovery Design
 
 **Date:** 30 July 2026
-**Status:** Approved in section-by-section brainstorming; written-spec review
-pending
+**Status:** Approved
 **Scope:** One-account Google Drive app-data authorization, encrypted
 app-managed structured backup, conditional single-writer publication,
 retention, background scheduling, staged recovery, writer takeover, recovery
