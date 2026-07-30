@@ -2,18 +2,18 @@
 
 - Last updated: 30 July 2026
 - Branch: `main`
-- Session status: **The single Stage 2 final-review correction wave is
-  complete and committed as `f9e091b`. All nine broad-review findings are
-  closed under fresh focused, full host, release, fixture, source-scan, and
-  sole-disposable connected evidence; the scoped re-review has no open
-  Critical or Important finding. All repository-controlled Stage 2 gates
-  pass. Encrypted Google-account Android transport upload/restore remains an
-  external qualification gate, not a product defect. Do not begin Stage 3
-  without a new user request. Train 1 Tasks 1.1–1.5 and Stage 1 remain
-  complete and independently reviewed. GitHub maintenance was resumed on 30
-  July: the private repository has no open pull requests or issues, and the
-  queued Gradle, wrapper and GitHub Action updates were verified locally and
-  are recorded below.**
+- Session status: **Stage 3 began under the approved mutable-control design,
+  but its first credentialed provider gate proved that Drive supplies no
+  strong HTTP revision on either successful create or bounded metadata read.
+  No Stage 3 source was committed and Task 2 did not begin. The replacement
+  Drive-only design uses immutable create-only ownership slots plus
+  epoch-scoped publications, requires self-contained two-base takeover, and
+  accepts only non-authoritative old-epoch race residue. Its written design is
+  `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`.
+  The existing Stage 3 implementation plan is superseded where it depends on
+  ETag, If-Match, mutable control, or provider revisions; a revised plan must
+  begin with a credentialed duplicate-create race gate. Stage 2, Train 1
+  Tasks 1.1–1.5, and Stage 1 remain complete and independently reviewed.**
 - Current source implementation point: `f9e091b` (`fix: harden stage 2 backup
   state transitions`). The correction closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
@@ -81,9 +81,10 @@ Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
-package are implemented and user-visible in More. Google Identity, Drive
-transport, recovery activation, writer takeover, cloud attachments and Play
-Console work have not started. Release gates which depend on those later
+package are implemented and user-visible in More. Stage 3 Google Identity and
+Drive transport qualification has started but remains uncommitted and
+provider-gated. Recovery activation, writer takeover, cloud attachments and
+Play Console work have not started. Release gates which depend on those later
 features remain blocked by their listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
@@ -99,6 +100,41 @@ runtime activation, exact Android eligibility, inert restored input, and
 status UI. The final review's correctness defects are closed in `f9e091b`.
 Drive transport, user recovery activation, and attachments are not
 implemented. The historical Train 1 Task 1.6 is superseded.
+
+## Stage 3 provider and replacement-design checkpoint — 30 July 2026
+
+The original Stage 3 design and plan were committed as `8e0cfdd`, `afb59e3`,
+and `a39f117`. Task 1 then built an uncommitted debug-only credentialed
+qualification path, bounded Drive HTTP transport, app-data authorization, and
+provider evidence. None of that source is qualified or committed.
+
+The credentialed investigation established:
+
+- Google authorization, exact `drive.appdata` scope, account selection, and
+  Drive API access reach the provider on the sole disposable API 37 emulator;
+- pre-generated IDs are accepted for `appDataFolder` file creation;
+- successful create responses provide no strong HTTP ETag;
+- one approved bounded `files.get(...?fields=id)` metadata fallback also
+  provides no strong HTTP ETag; and
+- the final bounded result is
+  `TRANSPORT_CREATE_CONTROL_CONDITIONAL_UNAVAILABLE`.
+
+The approved hard stop was honored: there was no retry, JSON-version fallback,
+staging, source commit, or Task 2 work.
+
+The replacement design preserves the Drive-only boundary and eliminates
+mutable provider control. A short immutable ownership chain uses one
+pre-generated successor ID per takeover. Normal backups are immutable
+publications within the active epoch. Every new epoch uploads and verifies two
+independent complete bases before ownership activation. A stale old device may
+finish non-authoritative old-epoch bytes, but cannot overwrite, delete, or
+become authority over the new epoch.
+
+Before any Stage 3 source commit, the revised first task must repeatedly prove
+that two different authenticated claims racing one pre-generated successor ID
+produce exactly one unchanged winner and bounded duplicate rejection. Failure
+stops Stage 3 for another design. The untracked `artifacts/` directory remains
+user-owned and untouched.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 

@@ -1,11 +1,20 @@
 # Stage 3 Google Drive Backup and Recovery Design
 
 **Date:** 30 July 2026
-**Status:** Approved
+**Status:** Partially superseded by
+[Stage 3 Drive Create-Only Ownership Design](2026-07-30-stage-3-drive-create-only-ownership-design.md)
 **Scope:** One-account Google Drive app-data authorization, encrypted
 app-managed structured backup, conditional single-writer publication,
 retention, background scheduling, staged recovery, writer takeover, recovery
 passphrase change, and backup-management UI
+
+> **Supersession note:** The credentialed provider gate proved that Drive
+> supplied no strong HTTP revision on create or bounded metadata read. The
+> replacement design governs concurrency, control/publication format,
+> retention, takeover, passphrase rotation, cleanup, deletion, provider
+> qualification, and affected persistence. Unchanged account, encryption,
+> local-authority, staged-recovery, Android-package, privacy, and UI direction
+> in this document remains authoritative.
 
 ## Decision
 
