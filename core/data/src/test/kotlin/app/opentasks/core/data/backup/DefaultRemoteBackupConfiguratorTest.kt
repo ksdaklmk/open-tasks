@@ -230,6 +230,56 @@ class DefaultRemoteBackupConfiguratorTest {
     }
 
     @Test
+    fun crashBetweenTheConnectingRowAndItsPhaseResumesAndCompletes() = runConnectTest { fixture ->
+        // The durable configuration row is written before the phase that
+        // records it. A crash in that window must not leave an orphan that
+        // rejects every later attempt to connect this vault.
+        fixture.remoteStateStore.failTransitionToPhase = "IDENTITIES_STORED"
+
+        val interrupted = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(
+            RemoteBackupLifecycle.CONNECTING,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+        assertFalse(fixture.remoteStateStore.operationPhases.contains("IDENTITIES_STORED"))
+        assertTrue(fixture.store.createdIds.isEmpty())
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertTrue(resumed is RemoteBackupConnectResult.Connected)
+        assertEquals(
+            RemoteBackupLifecycle.ACTIVE,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+        assertEquals(
+            fixture.rootProviderId(),
+            checkNotNull(checkNotNull(fixture.remoteStateStore.stored).ownershipClaim).providerId,
+        )
+    }
+
+    @Test
+    fun anotherVaultsConnectingRowIsNeverAdoptedAtThisLineage() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "IDENTITIES_STORED"
+        fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+        fixture.remoteStateStore.reassignStoredVault(VaultId("vault-other"))
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(
+                RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+            ),
+            resumed,
+        )
+        assertTrue(fixture.store.createdIds.isEmpty())
+    }
+
+    @Test
     fun crashBetweenTheBaselineCreateAndItsPhaseResumesWithoutASecondBaseline() = runConnectTest { fixture ->
         fixture.remoteStateStore.failTransitionToPhase = "BASELINE_CREATED"
 
@@ -631,7 +681,7 @@ private class ConnectFixture(root: File) {
  * handle therefore stands for the same established vault content, and the
  * Argon2id recovery derivation stays out of a unit test's time budget.
  */
-private class SingleContentVaultCrypto(private val delegate: VaultCrypto) : VaultCrypto {
+internal class SingleContentVaultCrypto(private val delegate: VaultCrypto) : VaultCrypto {
     private val established: VaultKey = delegate.createKey()
 
     override fun createKey(): VaultKey = delegate.createKey()
@@ -666,7 +716,7 @@ private class SingleContentVaultCrypto(private val delegate: VaultCrypto) : Vaul
     fun close() = established.close()
 }
 
-private class IssuedContentKeyStore(private val crypto: VaultCrypto) : VaultContentKeyStore {
+internal class IssuedContentKeyStore(private val crypto: VaultCrypto) : VaultContentKeyStore {
     var openCount = 0
         private set
 
@@ -683,7 +733,7 @@ private class IssuedContentKeyStore(private val crypto: VaultCrypto) : VaultCont
     override fun delete(vaultId: VaultId) = error("Unsupported")
 }
 
-private class InMemoryStage2BackupStateStore(vaultId: VaultId) : BackupStateStore {
+internal class InMemoryStage2BackupStateStore(vaultId: VaultId) : BackupStateStore {
     private val flow = MutableStateFlow(
         BackupStateEntity(
             vaultId = vaultId.value,
@@ -724,7 +774,7 @@ private class InMemoryStage2BackupStateStore(vaultId: VaultId) : BackupStateStor
     }
 }
 
-private class InMemoryRecoveryEnvelopeStore(
+internal class InMemoryRecoveryEnvelopeStore(
     private var envelope: VaultKeyEnvelope?,
 ) : RecoveryEnvelopeStore {
     /** Copies like the Room-backed store, so a caller may clear what it reads. */
@@ -768,12 +818,28 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
     override fun observeActive(vaultId: VaultId): Flow<RemoteBackupConfiguration?> =
         MutableStateFlow(stored)
 
+    /** Models [RoomRemoteBackupStore.insertConnecting]'s insert-or-adopt rule. */
     override suspend fun insertConnecting(configuration: RemoteBackupConfiguration) {
-        check(stored == null) { "A remote backup configuration already exists" }
         require(configuration.lifecycle == RemoteBackupLifecycle.CONNECTING) {
             "Initial remote backup configuration must start CONNECTING"
         }
+        val current = stored
+        if (current != null) {
+            require(
+                current.lineageId == configuration.lineageId &&
+                    current.vaultId == configuration.vaultId &&
+                    current.lifecycle == RemoteBackupLifecycle.CONNECTING &&
+                    current.stateVersion == configuration.stateVersion,
+            ) {
+                "An unrelated remote backup configuration already exists"
+            }
+        }
         stored = configuration
+    }
+
+    /** Rewrites the stored row as if it belonged to a different vault. */
+    fun reassignStoredVault(vaultId: VaultId) {
+        stored = checkNotNull(stored).copy(vaultId = vaultId)
     }
 
     override suspend fun compareAndSet(

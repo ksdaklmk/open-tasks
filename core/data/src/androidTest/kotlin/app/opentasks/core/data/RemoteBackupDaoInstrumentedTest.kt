@@ -97,6 +97,85 @@ class RemoteBackupDaoInstrumentedTest {
     }
 
     @Test
+    fun anInterruptedConnectingRowIsAdoptedByItsOwnLineage() = runBlocking {
+        withTimeout(5_000) {
+            val vaultId = VaultId.new()
+            val lineageId = CloudLineageId.new()
+            // A crash between this row and the durable phase that records it
+            // leaves an orphan; the retry reserves fresh provider slots.
+            store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
+
+            store.insertConnecting(
+                configuration(lineageId = lineageId, vaultId = vaultId).copy(
+                    rootClaimProviderId = ProviderObjectId.of("root-claim-provider-retry"),
+                ),
+            )
+
+            val adopted = checkNotNull(store.known(lineageId))
+            assertEquals(
+                ProviderObjectId.of("root-claim-provider-retry"),
+                adopted.rootClaimProviderId,
+            )
+            assertEquals(RemoteBackupLifecycle.CONNECTING, adopted.lifecycle)
+            assertEquals(0L, adopted.stateVersion.value)
+        }
+    }
+
+    @Test
+    fun anotherVaultsConnectingRowIsNeverAdoptedAtThisLineage() = runBlocking {
+        withTimeout(5_000) {
+            val lineageId = CloudLineageId.new()
+            val first = VaultId.new()
+            store.insertConnecting(configuration(lineageId = lineageId, vaultId = first))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    store.insertConnecting(
+                        configuration(lineageId = lineageId, vaultId = VaultId.new()),
+                    )
+                }
+            }
+            assertEquals(first, checkNotNull(store.known(lineageId)).vaultId)
+        }
+    }
+
+    @Test
+    fun anAlreadyActiveLineageIsNeverAdoptedAsConnecting() = runBlocking {
+        withTimeout(5_000) {
+            val vaultId = VaultId.new()
+            val lineageId = CloudLineageId.new()
+            store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
+            assertTrue(
+                store.compareAndSet(
+                    lineageId,
+                    RemoteBackupStateVersion(0),
+                    activeConfiguration(
+                        lineageId = lineageId,
+                        vaultId = vaultId,
+                        activeDeviceId = CloudDeviceId.new(),
+                        writerEpoch = WriterEpoch(1),
+                        ownershipClaim = null,
+                        currentPublication = publication(sequence = 0, generation = 7),
+                        lastVerifiedGeneration = BackupGeneration(7),
+                        lastVerifiedAt = Instant.ofEpochMilli(1_000),
+                        stateVersion = RemoteBackupStateVersion(1),
+                    ),
+                ),
+            )
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
+                }
+            }
+            assertEquals(
+                RemoteBackupLifecycle.ACTIVE,
+                checkNotNull(store.known(lineageId)).lifecycle,
+            )
+        }
+    }
+
+    @Test
     fun staleLocalStateVersionCannotAdvanceRemoteCheckpoint() = runBlocking {
         withTimeout(5_000) {
             val vaultId = VaultId.new()

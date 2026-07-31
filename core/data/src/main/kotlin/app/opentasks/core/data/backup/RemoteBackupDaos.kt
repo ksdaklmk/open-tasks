@@ -48,6 +48,31 @@ interface RemoteBackupConfigDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: RemoteBackupConfigEntity)
 
+    /**
+     * Re-points an interrupted setup's own `CONNECTING` row at the provider
+     * slots a restart reserved. Every guard is in the statement itself, so a
+     * row that has already become active, moved to another vault, or advanced
+     * its state version updates nothing.
+     */
+    @Query(
+        """
+        UPDATE remote_backup_config SET
+            rootClaimProviderFileId = :rootClaimProviderFileId,
+            accountBindingDigest = :accountBindingDigest,
+            updatedAtEpochMillis = :updatedAtEpochMillis
+        WHERE lineageId = :lineageId AND vaultId = :vaultId
+            AND lifecycle = 'CONNECTING' AND stateVersion = :expectedStateVersion
+        """,
+    )
+    suspend fun adoptConnecting(
+        lineageId: String,
+        vaultId: String,
+        expectedStateVersion: Long,
+        rootClaimProviderFileId: String,
+        accountBindingDigest: ByteArray,
+        updatedAtEpochMillis: Long,
+    ): Int
+
     @Query(
         """
         UPDATE remote_backup_config SET

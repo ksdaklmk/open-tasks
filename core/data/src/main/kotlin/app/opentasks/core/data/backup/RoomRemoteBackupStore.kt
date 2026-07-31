@@ -53,6 +53,18 @@ class RoomRemoteBackupStore(
     override fun observeActive(vaultId: VaultId): Flow<RemoteBackupConfiguration?> =
         database.remoteBackupConfigDao().observeActiveForVault(vaultId.value).map { it?.toDomain() }
 
+    /**
+     * Inserts the connecting row, or adopts this lineage's own orphan.
+     *
+     * The row is written before the durable phase that records it, so a crash
+     * in that window leaves a `CONNECTING` row at state version zero with no
+     * operation phase behind it. A plain insert would then abort forever and
+     * that vault could never finish connecting, so the identical lineage's own
+     * orphan is adopted instead. Adoption is exact: same lineage, same vault,
+     * still `CONNECTING`, still at the initial state version. Anything else —
+     * another vault, an active lineage, or a row that has already moved on —
+     * fails closed rather than being overwritten.
+     */
     override suspend fun insertConnecting(configuration: RemoteBackupConfiguration) {
         require(configuration.lifecycle == RemoteBackupLifecycle.CONNECTING) {
             "Initial remote backup configuration must start CONNECTING"
@@ -60,9 +72,34 @@ class RoomRemoteBackupStore(
         validateConfiguration(configuration)
         val now = System.currentTimeMillis()
         database.withTransaction {
-            database.remoteBackupConfigDao().insert(
-                configuration.toEntity(createdAtEpochMillis = now, updatedAtEpochMillis = now),
+            val dao = database.remoteBackupConfigDao()
+            val existing = dao.byLineageId(configuration.lineageId.value)
+            if (existing == null) {
+                dao.insert(
+                    configuration.toEntity(createdAtEpochMillis = now, updatedAtEpochMillis = now),
+                )
+                return@withTransaction
+            }
+            require(
+                existing.vaultId == configuration.vaultId.value &&
+                    existing.lifecycle == RemoteBackupLifecycle.CONNECTING.name &&
+                    existing.stateVersion == configuration.stateVersion.value,
+            ) {
+                "An unrelated remote backup configuration already holds this lineage"
+            }
+            val entity = configuration.toEntity(
+                createdAtEpochMillis = existing.createdAtEpochMillis,
+                updatedAtEpochMillis = now,
             )
+            val adopted = dao.adoptConnecting(
+                lineageId = entity.lineageId,
+                vaultId = entity.vaultId,
+                expectedStateVersion = entity.stateVersion,
+                rootClaimProviderFileId = entity.rootClaimProviderFileId,
+                accountBindingDigest = entity.accountBindingDigest,
+                updatedAtEpochMillis = entity.updatedAtEpochMillis,
+            )
+            check(adopted == 1) { "The connecting remote backup configuration changed" }
         }
     }
 
