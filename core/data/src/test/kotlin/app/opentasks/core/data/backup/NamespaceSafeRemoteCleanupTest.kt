@@ -99,7 +99,7 @@ class NamespaceSafeRemoteCleanupTest {
     }
 
     @Test
-    fun anObjectYoungerThanTheLocalMinimumAgeRemains() = runCleanupTest { fixture ->
+    fun anAbandonedCandidateYoungerThanTheResidueMinimumRemains() = runCleanupTest { fixture ->
         fixture.seedOrphan("provider-young", firstObservedAt = NOW.minus(Duration.ofDays(6)))
 
         val result = fixture.runBatch()
@@ -108,6 +108,37 @@ class NamespaceSafeRemoteCleanupTest {
         assertEquals(0, result.blockers)
         assertTrue(fixture.store.contains("provider-young"))
     }
+
+    @Test
+    fun aRetiredObjectIsPrunedWithoutWaitingForTheResidueMinimum() = runCleanupTest { fixture ->
+        // Uploaded and read back by this device, this epoch, and named by
+        // neither retained publication: the successor already proves it is
+        // unreferenced, so holding it for a week would only starve the
+        // bounded per-epoch publication index.
+        fixture.seedOrphan("provider-retired", firstObservedAt = NOW, verified = true)
+
+        val result = fixture.runBatch()
+
+        assertEquals(1, result.deletedCount)
+        assertEquals(0, result.blockers)
+        assertFalse(fixture.store.contains("provider-retired"))
+    }
+
+    @Test
+    fun aVerifiedOlderEpochObjectStillWaitsForTheResidueMinimum() =
+        runCleanupTest(currentEpoch = 2) { fixture ->
+            fixture.seedOrphan(
+                providerFileId = "provider-old-epoch",
+                firstObservedAt = NOW,
+                writerEpoch = 1,
+                verified = true,
+            )
+
+            val result = fixture.runBatch()
+
+            assertEquals(0, result.deletedCount)
+            assertTrue(fixture.store.contains("provider-old-epoch"))
+        }
 
     @Test
     fun ageUsesTheLocallyPersistedFirstObservedTimeOnly() = runCleanupTest { fixture ->
@@ -203,8 +234,9 @@ class NamespaceSafeRemoteCleanupTest {
     fun aSupersededBaselineIsPrunedAndTheClaimKeepsItsEvidence() = runCleanupTest { fixture ->
         fixture.seedOrphan(
             providerFileId = BASELINE_PROVIDER,
-            firstObservedAt = OLD,
+            firstObservedAt = NOW,
             role = RemoteObjectRoleV1.PUBLICATION,
+            verified = true,
         )
 
         val result = fixture.runBatch(previous = null)
@@ -380,6 +412,8 @@ private class CleanupFixture(
         role: RemoteObjectRoleV1 = RemoteObjectRoleV1.SNAPSHOT,
         writerEpoch: Long = currentEpoch,
         ownerDeviceId: CloudDeviceId = deviceId,
+        /** False models a candidate whose upload was never proven complete. */
+        verified: Boolean = false,
     ) {
         val logicalObjectId = RemoteLogicalObjectId.new()
         seedObject(providerFileId, logicalObjectId.value, role, writerEpoch, ownerDeviceId)
@@ -397,11 +431,15 @@ private class CleanupFixture(
                     lastGeneration = BackupGeneration(53),
                     frameLength = 16,
                     frameSha256 = Sha256Digest.of(RemoteBackupTestFixtures.DIGEST_A),
-                    lifecycle = RemoteObjectLifecycle.VERIFIED,
+                    lifecycle = if (verified) {
+                        RemoteObjectLifecycle.VERIFIED
+                    } else {
+                        RemoteObjectLifecycle.PLANNED
+                    },
                     resumableSessionUri = null,
                     uploadedBytes = 16,
                     createdAt = observed,
-                    verifiedAt = observed,
+                    verifiedAt = observed.takeIf { verified },
                 ),
             )
         }

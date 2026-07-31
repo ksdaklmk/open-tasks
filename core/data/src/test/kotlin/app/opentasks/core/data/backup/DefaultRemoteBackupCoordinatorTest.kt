@@ -422,6 +422,93 @@ class DefaultRemoteBackupCoordinatorTest {
     }
 
     @Test
+    fun aFrozenPlanIsAbandonedWhenItsSourceIsGoneAndSlotIsEmpty() = runPublishTest { fixture ->
+        fixture.seedLocalSegment(54, 55)
+        fixture.provider.uploadFailure = RemoteBackupFailureCategory.RETRYABLE_PROVIDER
+
+        val interrupted = fixture.coordinator.run(fixture.store)
+
+        assertEquals(
+            RemoteBackupRunResult.Retryable(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            interrupted,
+        )
+        // Stage 2 rotates its base and drops the segment the frozen plan names.
+        fixture.provider.uploadFailure = null
+        fixture.seedLocalSnapshot(60)
+        fixture.removeLocalObject("segment:54:55")
+
+        val resumed = fixture.coordinator.run(fixture.store)
+
+        assertEquals(RemoteBackupRunResult.Verified(BackupGeneration(60)), resumed)
+        val published = fixture.verifiedCurrentPublication().manifest
+        assertEquals(60L, published.localGeneration)
+        assertEquals(1L, published.publicationSequence)
+        assertTrue(published.inventory.none { it.role == RemoteObjectRoleV1.SEGMENT })
+    }
+
+    @Test
+    fun anOccupiedSlotKeepsItsPlanEvenWhenTheLocalSourceIsGone() = runPublishTest { fixture ->
+        fixture.seedLocalSegment(54, 55)
+        fixture.remoteStateStore.failTransitionToPhase = "CANDIDATES_VERIFIED"
+
+        val interrupted = fixture.coordinator.run(fixture.store)
+
+        assertEquals(
+            RemoteBackupRunResult.Blocked(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(1, fixture.provider.uploadRequests.size)
+        // The local source is gone, but the reserved slot already holds this
+        // run's own verified bytes, so the plan stands rather than re-planning.
+        fixture.seedLocalSnapshot(60)
+        fixture.removeLocalObject("segment:54:55")
+
+        val resumed = fixture.coordinator.run(fixture.store)
+
+        assertEquals(RemoteBackupRunResult.Verified(BackupGeneration(55)), resumed)
+        assertEquals(1, fixture.provider.uploadRequests.size)
+        val published = fixture.verifiedCurrentPublication().manifest
+        assertEquals(55L, published.localGeneration)
+        assertEquals(
+            listOf(54L to 55L),
+            published.inventory
+                .filter { it.role == RemoteObjectRoleV1.SEGMENT }
+                .map { it.firstGeneration to it.lastGeneration },
+        )
+    }
+
+    @Test
+    fun aRetiredPublicationIsPrunedByTheNextVerifiedRun() = runPublishTest { fixture ->
+        fixture.seedLocalSegment(54, 55)
+        fixture.coordinator.run(fixture.store)
+        val retired = fixture.currentPublicationProviderId()
+
+        fixture.seedLocalSegment(56, 56)
+        fixture.coordinator.run(fixture.store)
+        val previous = fixture.currentPublicationProviderId()
+        assertTrue(fixture.provider.contains(retired))
+
+        fixture.seedLocalSegment(57, 57)
+        fixture.coordinator.run(fixture.store)
+
+        // Retained: the current publication and its immediate predecessor.
+        val current = fixture.currentPublicationProviderId()
+        assertTrue(fixture.provider.contains(current))
+        assertTrue(fixture.provider.contains(previous))
+        // The publication two generations back is proven retired and is gone
+        // immediately — no seven-day hold on a superseded same-epoch object.
+        assertFalse(fixture.provider.contains(retired))
+        assertEquals(listOf(retired), fixture.provider.deletedIds)
+        // Every object the retained pair still names survives.
+        fixture.verifiedCurrentPublication().manifest.inventory.forEach { item ->
+            assertTrue(item.providerFileId, fixture.provider.contains(item.providerFileId))
+        }
+        // The epoch baseline has no local first-observed record, so it is an
+        // unprovable blocker rather than a deletion candidate.
+        assertTrue(fixture.provider.contains(fixture.baselineProviderId()))
+    }
+
+    @Test
     fun aPublicationFromAnotherWriterEpochIsIgnoredAndNeverDeleted() = runPublishTest { fixture ->
         fixture.seedLocalSegment(54, 55)
         fixture.seedForeignEpochPublication("provider-foreign-epoch")
@@ -687,6 +774,19 @@ private class PublishFixture(root: File) {
                 snapshotCreatedAtEpochMillis = clock.toEpochMilli(),
             ),
         )
+    }
+
+    /** Drops one committed local object, as Stage 2 retention would. */
+    fun removeLocalObject(objectId: String) {
+        val name = if (objectId.startsWith("snapshot:")) {
+            "snapshot-${objectId.substringAfter(':')}.otf"
+        } else {
+            "segment-${objectId.substringAfter(':').replace(':', '-')}.otf"
+        }
+        val removed = listOf("current", "previous", "segments")
+            .map { File(localRoot, it).resolve(name) }
+            .count { it.delete() }
+        check(removed == 1) { "Expected exactly one committed local object to remove" }
     }
 
     // -- Internals -----------------------------------------------------------------------

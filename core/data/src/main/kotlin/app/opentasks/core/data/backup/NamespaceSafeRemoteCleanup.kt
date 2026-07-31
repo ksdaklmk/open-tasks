@@ -44,10 +44,15 @@ interface NamespaceSafeRemoteCleanup {
  * from local cache, so an object is deleted only after it has been proven
  * absent from both retained publications.
  *
- * Age comes from locally persisted first-observed time — the transfer-state
- * row this installation wrote before the object's first network mutation —
- * and never from provider metadata, which another writer controls. An object
- * with no local record cannot be aged and is therefore a blocker.
+ * An object proven retired — this epoch, verified by this device, and named by
+ * neither retained publication — is removed as soon as the successor is
+ * authenticated. Abandoned candidates and late old-epoch residue wait out a
+ * seven-day minimum instead, because either could still belong to an
+ * interrupted attempt. That age comes from locally persisted first-observed
+ * time — the transfer-state row this installation wrote before the object's
+ * first network mutation — and never from provider metadata, which another
+ * writer controls. An object with no local record cannot be aged and is
+ * therefore a blocker.
  *
  * Ownership claims are never listed and never deleted: the chain is permanent
  * creation evidence, and a claim keeps naming and digesting its epoch baseline
@@ -88,13 +93,14 @@ class DefaultNamespaceSafeRemoteCleanup(
             if (deleted >= maximumDeletesPerBatch) break
             if (candidate.providerObjectId.value in retained) continue
             val local = locallyKnown[candidate.providerObjectId]
-            if (!isDeletable(candidate, local, ownership, selfContained)) {
+            val disposition = disposition(candidate, local, ownership, selfContained, now)
+            if (disposition == Disposition.BLOCKED) {
                 blockers += 1
                 continue
             }
+            // Provable, but not yet old enough to count as residue.
+            if (disposition == Disposition.WAITING) continue
             checkNotNull(local)
-            // Provable, but not yet old enough to count as abandoned residue.
-            if (now.isBefore(local.createdAt.plus(minimumAge))) continue
             when (objectStore.delete(candidate.providerObjectId)) {
                 DeleteObjectResult.Deleted -> {
                     deleted += 1
@@ -166,26 +172,61 @@ class DefaultNamespaceSafeRemoteCleanup(
     }
 
     /**
-     * Only an object this installation can fully account for is deletable:
+     * What this batch may do with one non-retained object.
+     *
+     * The separation matters for liveness as much as for safety: a retired
+     * object must be removable as soon as it is proven retired, because the
+     * bounded per-epoch publication index leaves no room to hold every
+     * superseded publication for a week.
+     */
+    private enum class Disposition {
+        /** Unprovable, so it stays and is counted. */
+        BLOCKED,
+
+        /** Provable residue that has not yet aged out. */
+        WAITING,
+
+        /** Proven safe to remove now. */
+        DELETABLE,
+    }
+
+    /**
+     * Only an object this installation can fully account for may be removed:
      * complete index metadata, this lineage, this device, and either the
      * current epoch or a superseded one under a self-contained current epoch.
+     *
+     * Among those, an object of the current epoch that this device uploaded
+     * and read back — `verifiedAt != null` — and that neither retained
+     * publication names is *retired*: the authenticated successor already
+     * proves it is no longer referenced, which is the whole prune precondition,
+     * so it is removed immediately. An object that was never verified is an
+     * abandoned candidate, and an object of a superseded epoch is late
+     * residue; both could still belong to an interrupted attempt, so both wait
+     * out the residue minimum by locally persisted first-observed time.
      */
-    private fun isDeletable(
+    private fun disposition(
         candidate: RemoteListedObject,
         local: RemoteBackupObject?,
         ownership: VerifiedOwnershipClaim,
         selfContained: Boolean,
-    ): Boolean {
-        val role = candidate.role ?: return false
-        if (role !in DELETABLE_ROLES) return false
-        val epoch = candidate.writerEpoch?.value ?: return false
-        val ownerDeviceId = candidate.ownerDeviceId ?: return false
-        if (ownerDeviceId.value != ownership.claim.activeDeviceId) return false
+        now: Instant,
+    ): Disposition {
+        val role = candidate.role ?: return Disposition.BLOCKED
+        if (role !in DELETABLE_ROLES) return Disposition.BLOCKED
+        val epoch = candidate.writerEpoch?.value ?: return Disposition.BLOCKED
+        val ownerDeviceId = candidate.ownerDeviceId ?: return Disposition.BLOCKED
+        if (ownerDeviceId.value != ownership.claim.activeDeviceId) return Disposition.BLOCKED
         val currentEpoch = ownership.claim.writerEpoch
-        if (epoch > currentEpoch) return false
-        if (epoch < currentEpoch && !selfContained) return false
-        if (local == null) return false
-        return local.lineageId == lineageId
+        if (epoch > currentEpoch) return Disposition.BLOCKED
+        if (epoch < currentEpoch && !selfContained) return Disposition.BLOCKED
+        if (local == null) return Disposition.BLOCKED
+        if (local.lineageId != lineageId) return Disposition.BLOCKED
+        if (epoch == currentEpoch && local.verifiedAt != null) return Disposition.DELETABLE
+        return if (now.isBefore(local.createdAt.plus(minimumAge))) {
+            Disposition.WAITING
+        } else {
+            Disposition.DELETABLE
+        }
     }
 
     private suspend fun listCandidates(): List<RemoteListedObject> =

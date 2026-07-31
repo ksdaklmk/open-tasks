@@ -121,7 +121,8 @@ internal data class RemotePublishStateV1(
  * one mutex transition, so a request either joins this run or becomes the next
  * owner.
  *
- * The publication order is forced by the format and by create-only storage:
+ * The publication order is forced by create-only storage and by what each
+ * step has to prove before the next may run:
  * ownership is authenticated, the predecessor publication is authenticated,
  * Stage 2 is asked for a locally verified generation, every new immutable
  * candidate is uploaded and read back, ownership is rechecked, the successor
@@ -313,11 +314,18 @@ class DefaultRemoteBackupCoordinator(
             predecessor = adopted.predecessor
             published = adopted.created
 
-            val resumable = usable != null &&
+            failure(captureLocalGeneration())?.let { return it }
+            val continues = usable != null &&
                 usable.predecessorProviderFileId ==
                 predecessor.manifest.publicationProviderFileId &&
                 usable.predecessorPublicationId == predecessor.manifest.publicationId
-            failure(captureLocalGeneration())?.let { return it }
+            val resumable = when {
+                !continues -> false
+                else -> when (val fulfillable = isPlanFulfillable(checkNotNull(usable))) {
+                    is StepResult.Failed -> return fulfillable.reason.toRunResult()
+                    is StepResult.Ok -> fulfillable.value
+                }
+            }
             if (resumable) {
                 state = checkNotNull(usable)
             } else {
@@ -528,17 +536,73 @@ class DefaultRemoteBackupCoordinator(
             }
         }
 
+        /**
+         * Decides whether a durably frozen plan can still be completed.
+         *
+         * A plan names the exact Stage 2 objects it re-authenticates, and
+         * Stage 2 owns its own retention: a base rotation can drop a local
+         * object a frozen plan still names. If that object was never created
+         * remotely either, the plan can never be fulfilled and would fail
+         * identically on every later run, so it is abandoned in favour of a
+         * fresh plan. The abandoned reservations are ordinary create-only
+         * residue that cleanup already accounts for.
+         *
+         * Only a provably empty reserved slot may re-plan. An occupied,
+         * corrupt, or unreadable slot keeps its existing fail-closed handling,
+         * so a plan is never discarded to escape ambiguity.
+         */
+        private suspend fun isPlanFulfillable(
+            plan: RemotePublishStateV1,
+        ): StepResult<Boolean> {
+            if (RemotePublishPhase.valueOf(plan.phase) >=
+                RemotePublishPhase.CANDIDATES_VERIFIED
+            ) {
+                return StepResult.Ok(true)
+            }
+            val localObjectIds = try {
+                localObjectStore.objectIds().toSet()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return StepResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            }
+            plan.objects.forEach { candidate ->
+                val localObjectId = candidate.localObjectId ?: return@forEach
+                if (localObjectId in localObjectIds) return@forEach
+                // Nothing was ever encoded for this object, so nothing can be
+                // occupying its slot either.
+                if (candidate.frameSha256 == null) return StepResult.Ok(false)
+                when (val adopted = adoptPlannedObject(candidate)) {
+                    is StepResult.Failed -> return adopted
+                    is StepResult.Ok -> if (!adopted.value) return StepResult.Ok(false)
+                }
+            }
+            return StepResult.Ok(true)
+        }
+
         // -- Candidate selection --------------------------------------------------------
 
         /**
          * Selects the minimal successor inventory and reserves one provider
          * slot for every object that does not already exist.
          *
-         * Two complete bases covering the local base generation are always
-         * declared. One is reused from the authenticated predecessor whenever
-         * it already covers that generation; otherwise a fresh, independently
-         * identified copy is uploaded, exactly as epoch one does. Segments then
-         * bridge that base generation to the published generation.
+         * Both declared complete bases cover the *same* local base generation:
+         * one is reused from the authenticated predecessor when it already
+         * covers that generation, otherwise a fresh, independently identified
+         * copy is uploaded, exactly as epoch one does. Segments then bridge
+         * that base generation to the published generation.
+         *
+         * The same-generation pair is a deliberate policy choice, not a format
+         * constraint. [PublicationCodec] validates each declared base by
+         * walking the retained segments from that base's own last generation,
+         * so an older base is perfectly legal whenever retained segments bridge
+         * it. This coordinator declines that option — the
+         * `firstGeneration == baseGeneration` filter below is where — because
+         * two same-generation copies keep the epoch-one safety property that
+         * both bases decode to identical content, at the cost of one extra base
+         * upload per Stage 2 base rotation. The previous verified base is still
+         * retained: it is named by the retained previous publication, which
+         * cleanup never prunes.
          */
         private suspend fun planCandidates(): StepResult<Unit> {
             if (reached(RemotePublishPhase.CANDIDATE_IDS_STORED)) return StepResult.Ok(Unit)
