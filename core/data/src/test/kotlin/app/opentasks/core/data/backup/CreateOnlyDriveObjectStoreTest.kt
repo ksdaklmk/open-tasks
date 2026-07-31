@@ -685,8 +685,11 @@ class CreateOnlyDriveObjectStoreTest {
                 role = RemoteObjectRoleV1.PUBLICATION,
             ).copy(frameLength = PUBLICATION_CEILING_BYTES + 1)
 
-            val error = assertFailure { store.uploadImmutable(oversizedRequest) }
-            assertTrue(error is IllegalArgumentException)
+            val oversizedResult = store.uploadImmutable(oversizedRequest)
+            assertEquals(
+                ImmutableUploadResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+                oversizedResult,
+            )
             assertEquals(callsBeforeOversized, transport.createCalls.size)
         }
 

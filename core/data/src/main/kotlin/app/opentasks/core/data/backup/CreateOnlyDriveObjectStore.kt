@@ -162,6 +162,9 @@ class CreateOnlyDriveObjectStore(
 
     override suspend fun uploadImmutable(request: ImmutableUploadRequest): ImmutableUploadResult {
         validateUploadRequest(request)
+        if (exceedsRoleCeiling(request)) {
+            return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
+        }
         val existing = transferStore.objectState(request.lineageId, request.logicalObjectId)
         val state = if (existing != null) {
             require(existing.providerObjectId == request.providerObjectId) {
@@ -612,21 +615,24 @@ class CreateOnlyDriveObjectStore(
         expected.value.encodeToByteArray(),
     )
 
-    /**
-     * Rejects a request whose declared [ImmutableUploadRequest.frameLength] already
-     * exceeds its role's Stage 1/2 ceiling, before any network mutation. Ceilings are
-     * derived from the same public [CloudBounds] constants [PublicationCodec] and
-     * [OwnershipClaimCodec] use for their own file-length bounds.
-     */
     private fun validateUploadRequest(request: ImmutableUploadRequest) {
         require(request.frameLength >= 0) { "Frame length is negative" }
         require(request.lastGeneration.value >= request.firstGeneration.value) {
             "Last generation precedes first generation"
         }
+    }
+
+    /**
+     * True when the declared [ImmutableUploadRequest.frameLength] already exceeds its
+     * role's Stage 1/2 ceiling. Ceilings are derived from the same public [CloudBounds]
+     * constants [PublicationCodec] and [OwnershipClaimCodec] use for their own
+     * file-length bounds. Checked before any persistence or network mutation; an
+     * oversized request is data the caller sent, not a programming error, so it is
+     * reported through [ImmutableUploadResult.Failed] rather than thrown.
+     */
+    private fun exceedsRoleCeiling(request: ImmutableUploadRequest): Boolean {
         val ceiling = checkNotNull(MAX_UPLOAD_BYTES_BY_ROLE[request.role]) { "Unrecognized role" }
-        require(request.frameLength <= ceiling) {
-            "Frame length exceeds its role's ceiling"
-        }
+        return request.frameLength > ceiling
     }
 
     private companion object {
