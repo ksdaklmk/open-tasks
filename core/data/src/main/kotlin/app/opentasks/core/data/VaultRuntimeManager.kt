@@ -255,7 +255,7 @@ class DefaultVaultRuntimeManager(
                     throw failure
                 }
             }
-            finishInterruptedCleanup(active = slot)
+            if (!finishInterruptedCleanup(runtime)) return@withContext
             discardInactiveStaging(active = slot)
             mutableState.value = VaultRuntimeState.Active(runtime)
         }
@@ -443,19 +443,37 @@ class DefaultVaultRuntimeManager(
      *
      * The marker already names the staged slot, so removing the prior slot is
      * the remaining step of a succeeded activation rather than a new decision.
+     * Returns `false` when [runtime] must not be published, having already put
+     * the manager into the state that replaces it.
      */
-    private fun finishInterruptedCleanup(active: VaultSlot) {
+    private fun finishInterruptedCleanup(runtime: LocalVaultRuntime): Boolean {
         val record = try {
             recoveryRegistry.readOrDiscard()
         } catch (_: Throwable) {
             null
-        } ?: return
-        if (record.stagedSlot != active) return
-        if (record.activationState == ActivationState.PENDING) return
-        record.priorSlot
-            ?.takeIf { it != active }
-            ?.let { prior -> runCatching { runtimeFactory.discard(prior) } }
+        } ?: return true
+        if (record.stagedSlot != runtime.slot) return true
+        if (record.activationState == ActivationState.PENDING) return true
+        val prior = record.priorSlot?.takeIf { it != runtime.slot }
+        if (prior != null) {
+            // The database key and the content key are wrapped independently,
+            // so a staged slot whose database opens can still be unable to open
+            // the records it holds. The prior slot is the only vault that could
+            // read them, and it is about to be removed.
+            val contentKeyOpens = runCatching {
+                runtime.contentKeyStore.openExisting(runtime.vaultId).close()
+            }.isSuccess
+            if (!contentKeyOpens) {
+                runtime.close()
+                if (!restorePriorSlotAfterFailedActivation(failedSlot = runtime.slot)) {
+                    mutableState.value = VaultRuntimeState.Unreadable(runtime.slot)
+                }
+                return false
+            }
+            runCatching { runtimeFactory.discard(prior) }
+        }
         recoveryRegistry.clear()
+        return true
     }
 
     private fun discardInactiveStaging(active: VaultSlot?) {

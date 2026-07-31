@@ -124,7 +124,7 @@ class VaultRuntimeManagerInstrumentedTest {
             (manager.state.value as VaultRuntimeState.Unreadable).preservedSlot,
         )
         assertEquals(before, storageSnapshot())
-        assertEquals(0, storageSnapshot().aliases.size)
+        assertFalse(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
     }
 
     @Test
@@ -220,6 +220,30 @@ class VaultRuntimeManagerInstrumentedTest {
         assertEquals(staged, state.runtime.slot)
         assertFalse(databaseFile("open_tasks.db").exists())
         assertFalse(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
+        assertTrue(storageSnapshot().preferenceKeys.none { it.startsWith(LEGACY_CONTENT_KEYS) })
+        assertTrue(databaseFile(slotDatabaseName(staged)).isFile)
+    }
+
+    @Test
+    fun crashAfterMarkerReplacementWithoutAStagedContentKeyKeepsThePriorVault() = runBlocking {
+        seedLegacyVault()
+        val staged = VaultSlot.new()
+        seedSlotVault(staged, withContentKey = false)
+        writeInterruptedActivation(staged, ActivationState.MARKER_REPLACED)
+        val before = storageSnapshot()
+
+        val manager = manager()
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+
+        val state = manager.state.value as VaultRuntimeState.Active
+        assertEquals(VaultSlot.LEGACY, state.runtime.slot)
+        assertEquals(
+            VaultSlot.LEGACY,
+            VaultSlotRegistry(registryDirectory, AtomicFileVaultRegistryOperations()).read(),
+        )
+        assertTrue(databaseFile("open_tasks.db").isFile)
+        assertEquals(before.aliases, storageSnapshot().aliases)
+        assertEquals(before.preferenceKeys, storageSnapshot().preferenceKeys)
         assertTrue(databaseFile(slotDatabaseName(staged)).isFile)
     }
 
@@ -425,6 +449,7 @@ class VaultRuntimeManagerInstrumentedTest {
 
     private fun seedLegacyVault() {
         val runtime = openedRuntime(VaultSlot.LEGACY, create = true)
+        runtime.contentKeyStore.getOrCreate(runtime.vaultId).close()
         runtime.close()
         runtimes.remove(runtime)
     }
@@ -596,6 +621,7 @@ class VaultRuntimeManagerInstrumentedTest {
         const val ACTIVATION_TIMEOUT_MILLIS = 5_000L
         const val LEGACY_DATABASE_ALIAS = "open_tasks_local_vault_wrapper_v1"
         const val LEGACY_CIPHERTEXT_KEY = "database_key_ciphertext_v1"
+        const val LEGACY_CONTENT_KEYS = "vault_content_keys_v1/"
         const val REGISTRY_TEST_ALIAS = "open_tasks_vault_recovery_registry_test_v1"
         val SECRET = "slot-scoped record".toByteArray(Charsets.UTF_8)
     }
