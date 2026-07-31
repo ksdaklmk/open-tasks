@@ -1,7 +1,9 @@
 package app.opentasks.core.data
 
 import android.content.Context
+import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.VaultContentKeyStore
+import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.data.backup.DefaultBackupCoordinator
 import app.opentasks.core.data.backup.LocalBackupObjectStore
 import app.opentasks.core.data.backup.RoomBackupCaptureSource
@@ -20,48 +22,50 @@ import app.opentasks.core.model.Revision
 import app.opentasks.core.model.VaultId
 
 /**
- * Constructed local services. Task 8 owns lifecycle, debounce, and requests;
- * this bundle intentionally does not start backup work.
+ * Constructed local services for one vault slot.
+ *
+ * The runtime owns the SQLCipher handle and the slot-scoped content key store,
+ * so closing it releases every file the slot holds before that slot can be
+ * replaced. Task 8 owns backup lifecycle; this bundle starts no backup work.
  */
-data class LocalVaultRuntime(
+class LocalVaultRuntime internal constructor(
+    val slot: VaultSlot,
     val vaultId: VaultId,
     val repository: VaultRepository,
     val backupJournalReader: BackupJournalReader,
     val backupCaptureSource: RoomBackupCaptureSource,
     val backupStateStore: RoomBackupStateStore,
     val recoveryEnvelopeStore: RoomRecoveryEnvelopeStore,
-)
+    val contentKeyStore: VaultContentKeyStore,
+    private val database: VaultDatabase,
+) : AutoCloseable {
+    /** Joins repository observation before the SQLCipher handle is released. */
+    override fun close() {
+        try {
+            (repository as? AutoCloseable)?.close()
+        } finally {
+            database.close()
+        }
+    }
+}
 
 object LocalVaultRepositoryFactory {
-    fun createRuntime(context: Context): LocalVaultRuntime {
-        val applicationContext = context.applicationContext
-        val keyManager = AndroidVaultKeyManager(applicationContext)
-        val databaseKey = keyManager.getOrCreateDatabaseKey()
-        val database = try {
-            VaultDatabase.create(applicationContext, DATABASE_NAME, databaseKey)
-        } finally {
-            databaseKey.fill(0)
-        }
-        val repository = RoomVaultRepository(
-            database = database,
-            deviceId = keyManager.getOrCreateDeviceId(),
-        )
-        val vaultId = VaultId("vault-primary")
-        val captureSource = RoomBackupCaptureSource(database, vaultId)
-        val stateStore = RoomBackupStateStore(database)
-        val journalStore = RoomBackupJournalStore(database.backupJournalDao())
-        val envelopeStore = RoomRecoveryEnvelopeStore(database)
-        return LocalVaultRuntime(
-            vaultId = vaultId,
-            repository = repository,
-            backupJournalReader = RoomBackupJournalReader(
-                stateStore = stateStore,
-                journalStore = journalStore,
-            ),
-            backupCaptureSource = captureSource,
-            backupStateStore = stateStore,
-            recoveryEnvelopeStore = envelopeStore,
-        )
+    fun openRuntime(
+        context: Context,
+        slot: VaultSlot,
+        crypto: VaultCrypto,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ): LocalVaultRuntime = buildRuntime(context, slot, crypto, keyManager) {
+        keyManager.openExistingDatabaseKey(slot)
+    }
+
+    fun createRuntime(
+        context: Context,
+        slot: VaultSlot,
+        crypto: VaultCrypto,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ): LocalVaultRuntime = buildRuntime(context, slot, crypto, keyManager) {
+        keyManager.createDatabaseKey(slot)
     }
 
     fun createBackupCoordinator(
@@ -84,7 +88,71 @@ object LocalVaultRepositoryFactory {
         )
     }
 
-    private const val DATABASE_NAME = "open_tasks.db"
+    internal fun storageNamespace(slot: VaultSlot): String? =
+        if (slot == VaultSlot.LEGACY) null else slot.digest
+
+    private fun buildRuntime(
+        context: Context,
+        slot: VaultSlot,
+        crypto: VaultCrypto,
+        keyManager: AndroidVaultKeyManager,
+        databaseKey: () -> ByteArray,
+    ): LocalVaultRuntime {
+        val applicationContext = context.applicationContext
+        val key = databaseKey()
+        val database = try {
+            VaultDatabase.create(
+                applicationContext,
+                LocalVaultRuntimeFactory.databaseName(slot),
+                key,
+            )
+        } finally {
+            key.fill(0)
+        }
+        return try {
+            val vaultId = readVaultId(database) ?: DEFAULT_VAULT_ID
+            val captureSource = RoomBackupCaptureSource(database, vaultId)
+            val stateStore = RoomBackupStateStore(database)
+            val journalStore = RoomBackupJournalStore(database.backupJournalDao())
+            LocalVaultRuntime(
+                slot = slot,
+                vaultId = vaultId,
+                repository = RoomVaultRepository(
+                    database = database,
+                    deviceId = keyManager.getOrCreateDeviceId(),
+                ),
+                backupJournalReader = RoomBackupJournalReader(
+                    stateStore = stateStore,
+                    journalStore = journalStore,
+                ),
+                backupCaptureSource = captureSource,
+                backupStateStore = stateStore,
+                recoveryEnvelopeStore = RoomRecoveryEnvelopeStore(database),
+                contentKeyStore = AndroidVaultContentKeyStore(
+                    context = applicationContext,
+                    crypto = crypto,
+                    storageNamespace = storageNamespace(slot),
+                ),
+                database = database,
+            )
+        } catch (failure: Throwable) {
+            database.close()
+            throw failure
+        }
+    }
+
+    /**
+     * Reads the stored vault identity, which also proves the slot key opens the
+     * database before any service is constructed on top of it.
+     */
+    private fun readVaultId(database: VaultDatabase): VaultId? =
+        database.openHelper.readableDatabase
+            .query("SELECT id FROM vaults ORDER BY id LIMIT 1")
+            .use { cursor ->
+                if (cursor.moveToFirst()) VaultId(cursor.getString(0)) else null
+            }
+
+    private val DEFAULT_VAULT_ID = VaultId("vault-primary")
 }
 
 private class RoomBackupJournalReader(

@@ -1,0 +1,412 @@
+package app.opentasks.core.data
+
+import android.content.Context
+import app.opentasks.core.crypto.AndroidVaultContentKeyStorage
+import app.opentasks.core.crypto.VaultCrypto
+import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.VaultId
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/** A staged vault that has already been verified by the recovery pipeline. */
+data class VerifiedStagedVault(
+    val slot: VaultSlot,
+    val vaultId: VaultId,
+    val recoveredGeneration: BackupGeneration,
+)
+
+/** The identity a staging slot proves it holds before it can be activated. */
+data class StagedVaultIdentity(
+    val vaultId: VaultId,
+    val generation: BackupGeneration,
+)
+
+sealed interface VaultRuntimeState {
+    data object Initializing : VaultRuntimeState
+
+    data object NoVault : VaultRuntimeState
+
+    data class Unreadable(val preservedSlot: VaultSlot) : VaultRuntimeState
+
+    data class Recovering(val operationId: String) : VaultRuntimeState
+
+    data class Active(val runtime: LocalVaultRuntime) : VaultRuntimeState
+}
+
+interface VaultRuntimeManager {
+    val state: StateFlow<VaultRuntimeState>
+
+    suspend fun initialize()
+
+    suspend fun createNewVault()
+
+    suspend fun beginRecovery(operationId: String): VaultSlot
+
+    suspend fun activate(staged: VerifiedStagedVault)
+
+    fun requireActive(): LocalVaultRuntime
+}
+
+/** The slot-scoped storage every runtime state transition works through. */
+interface VaultRuntimeFactory {
+    fun hasVault(slot: VaultSlot): Boolean
+
+    fun openExisting(slot: VaultSlot): LocalVaultRuntime
+
+    fun createNew(slot: VaultSlot): LocalVaultRuntime
+
+    fun verifyStaging(slot: VaultSlot): StagedVaultIdentity
+
+    fun listStagedSlots(): List<VaultSlot>
+
+    fun discard(slot: VaultSlot)
+}
+
+class LocalVaultRuntimeFactory(
+    context: Context,
+    private val crypto: VaultCrypto,
+) : VaultRuntimeFactory {
+    private val context = context.applicationContext
+    private val keyManager = AndroidVaultKeyManager(this.context)
+
+    override fun hasVault(slot: VaultSlot): Boolean =
+        keyManager.hasDatabaseKey(slot) || databaseFile(slot).isFile
+
+    override fun openExisting(slot: VaultSlot): LocalVaultRuntime =
+        LocalVaultRepositoryFactory.openRuntime(context, slot, crypto, keyManager)
+
+    override fun createNew(slot: VaultSlot): LocalVaultRuntime =
+        LocalVaultRepositoryFactory.createRuntime(context, slot, crypto, keyManager)
+
+    /**
+     * Checkpoints, closes, reopens, and reads the staging slot so activation
+     * never publishes a slot whose write-ahead log is still outstanding.
+     */
+    override fun verifyStaging(slot: VaultSlot): StagedVaultIdentity {
+        openDatabase(slot).use { database ->
+            database.openHelper.writableDatabase
+                .query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .use { cursor -> cursor.moveToFirst() }
+        }
+        return openDatabase(slot).use { database ->
+            val readable = database.openHelper.readableDatabase
+            val vaultId = readable.query("SELECT id FROM vaults ORDER BY id LIMIT 1")
+                .use { cursor ->
+                    check(cursor.moveToFirst()) { "The staged vault holds no identity" }
+                    VaultId(cursor.getString(0))
+                }
+            val generation = readable
+                .query(
+                    "SELECT currentGeneration FROM backup_state WHERE vaultId = ?",
+                    arrayOf(vaultId.value),
+                )
+                .use { cursor ->
+                    check(cursor.moveToFirst()) { "The staged vault holds no backup state" }
+                    BackupGeneration(cursor.getLong(0))
+                }
+            StagedVaultIdentity(vaultId, generation)
+        }
+    }
+
+    override fun listStagedSlots(): List<VaultSlot> =
+        databaseFile(VaultSlot.LEGACY).parentFile?.list().orEmpty()
+            .mapNotNull { name ->
+                name.removeSurrounding(STAGED_DATABASE_PREFIX, DATABASE_SUFFIX)
+                    .takeIf { it != name }
+                    ?.let(VaultSlot::parseOrNull)
+            }
+            .filter { it != VaultSlot.LEGACY }
+            .distinct()
+
+    override fun discard(slot: VaultSlot) {
+        context.deleteDatabase(databaseName(slot))
+        keyManager.deleteDatabaseKey(slot)
+        when (val namespace = LocalVaultRepositoryFactory.storageNamespace(slot)) {
+            null -> AndroidVaultContentKeyStorage.deleteLegacyStorage(context)
+            else -> AndroidVaultContentKeyStorage.deleteNamespace(context, namespace)
+        }
+    }
+
+    private fun openDatabase(slot: VaultSlot): VaultDatabase {
+        val key = keyManager.openExistingDatabaseKey(slot)
+        return try {
+            VaultDatabase.create(context, databaseName(slot), key)
+        } finally {
+            key.fill(0)
+        }
+    }
+
+    private fun databaseFile(slot: VaultSlot): File =
+        context.getDatabasePath(databaseName(slot))
+
+    private fun <R> VaultDatabase.use(block: (VaultDatabase) -> R): R = try {
+        block(this)
+    } finally {
+        close()
+    }
+
+    companion object {
+        fun databaseName(slot: VaultSlot): String =
+            if (slot == VaultSlot.LEGACY) {
+                LEGACY_DATABASE_NAME
+            } else {
+                "$STAGED_DATABASE_PREFIX${slot.value}$DATABASE_SUFFIX"
+            }
+
+        private const val LEGACY_DATABASE_NAME = "open_tasks.db"
+        private const val STAGED_DATABASE_PREFIX = "vault_"
+        private const val DATABASE_SUFFIX = ".db"
+    }
+}
+
+/**
+ * Owns the single live vault runtime and the crash-safe slot transitions.
+ *
+ * Nothing that touches vault data is constructed outside
+ * [VaultRuntimeState.Active]; an unreadable slot is preserved exactly as it was
+ * found, and a lost registry key costs inactive staging alone.
+ */
+class DefaultVaultRuntimeManager(
+    directory: File,
+    fileOperations: VaultRegistryFileOperations,
+    secretBoundary: RegistrySecretBoundary,
+    private val runtimeFactory: VaultRuntimeFactory,
+) : VaultRuntimeManager {
+    constructor(context: Context, crypto: VaultCrypto) : this(
+        directory = File(context.applicationContext.filesDir, VAULT_RUNTIME_DIRECTORY),
+        fileOperations = AtomicFileVaultRegistryOperations(),
+        secretBoundary = AndroidKeystoreRegistrySecretBoundary(),
+        runtimeFactory = LocalVaultRuntimeFactory(context, crypto),
+    )
+
+    private val slotRegistry = VaultSlotRegistry(directory, fileOperations)
+    private val recoveryRegistry = RecoveryRegistry(
+        file = File(directory, RECOVERY_REGISTRY_NAME),
+        fileOperations = fileOperations,
+        secretBoundary = secretBoundary,
+    )
+    private val mutableState = MutableStateFlow<VaultRuntimeState>(VaultRuntimeState.Initializing)
+    private val transitions = Mutex()
+
+    @Volatile
+    private var quiescer: () -> Unit = {}
+
+    override val state: StateFlow<VaultRuntimeState> = mutableState.asStateFlow()
+
+    /** Registers the hook that stops active app services before a slot moves. */
+    fun setActiveServiceQuiescer(quiesce: () -> Unit) {
+        quiescer = quiesce
+    }
+
+    override suspend fun initialize() {
+        transitions.withLock {
+            if (mutableState.value !is VaultRuntimeState.Initializing) return
+            initializeLocked()
+        }
+    }
+
+    private suspend fun initializeLocked() {
+        withContext(Dispatchers.IO) {
+            val marker = try {
+                slotRegistry.read()
+            } catch (_: IllegalStateException) {
+                mutableState.value = VaultRuntimeState.Unreadable(VaultSlot.LEGACY)
+                return@withContext
+            }
+            val slot = marker
+                ?: VaultSlot.LEGACY.takeIf { runtimeFactory.hasVault(it) }
+                ?: run {
+                    discardInactiveStaging(active = null)
+                    mutableState.value = VaultRuntimeState.NoVault
+                    return@withContext
+                }
+            val runtime = try {
+                runtimeFactory.openExisting(slot)
+            } catch (_: Throwable) {
+                mutableState.value = VaultRuntimeState.Unreadable(slot)
+                return@withContext
+            }
+            if (marker == null) {
+                // Adoption records the slot the vault already lives in; it
+                // renames no file and rewraps no key.
+                try {
+                    slotRegistry.replace(slot)
+                } catch (failure: Throwable) {
+                    runtime.close()
+                    throw failure
+                }
+            }
+            finishInterruptedCleanup(active = slot)
+            discardInactiveStaging(active = slot)
+            mutableState.value = VaultRuntimeState.Active(runtime)
+        }
+    }
+
+    override suspend fun createNewVault(): Unit = transitions.withLock {
+        check(mutableState.value is VaultRuntimeState.NoVault) {
+            "A vault runtime already exists"
+        }
+        withContext(Dispatchers.IO) {
+            val runtime = runtimeFactory.createNew(VaultSlot.LEGACY)
+            try {
+                slotRegistry.replace(VaultSlot.LEGACY)
+            } catch (failure: Throwable) {
+                runtime.close()
+                throw failure
+            }
+            mutableState.value = VaultRuntimeState.Active(runtime)
+        }
+    }
+
+    override suspend fun beginRecovery(operationId: String): VaultSlot = transitions.withLock {
+        withContext(Dispatchers.IO) {
+            val staged = VaultSlot.new()
+            recoveryRegistry.write(
+                RecoveryRegistryRecord(
+                    operationId = operationId,
+                    phase = RecoveryPhase.STAGING,
+                    priorSlot = activeSlot(),
+                    stagedSlot = staged,
+                    providerReference = null,
+                    claimReference = null,
+                    publicationReference = null,
+                    claimedEpoch = null,
+                    activationState = ActivationState.PENDING,
+                    cleanupState = CleanupState.PENDING,
+                ),
+            )
+            if (mutableState.value !is VaultRuntimeState.Active) {
+                mutableState.value = VaultRuntimeState.Recovering(operationId)
+            }
+            staged
+        }
+    }
+
+    override suspend fun activate(staged: VerifiedStagedVault): Unit = transitions.withLock {
+        withContext(Dispatchers.IO) {
+            val record = recoveryRegistry.readOrDiscard()
+                ?: error("No staged recovery is registered")
+            check(record.stagedSlot == staged.slot) {
+                "The staged vault is not the registered staging slot"
+            }
+            val priorRuntime = (mutableState.value as? VaultRuntimeState.Active)?.runtime
+            val priorSlot = priorRuntime?.slot ?: record.priorSlot
+
+            quiescer()
+            priorRuntime?.close()
+            mutableState.value = VaultRuntimeState.Recovering(record.operationId)
+
+            val identity = runtimeFactory.verifyStaging(staged.slot)
+            check(identity.vaultId == staged.vaultId) {
+                "The staged vault identity does not match the verified recovery"
+            }
+            check(identity.generation.value >= staged.recoveredGeneration.value) {
+                "The staged vault is behind the verified recovery"
+            }
+
+            val activating = record.copy(
+                phase = RecoveryPhase.ACTIVATING,
+                priorSlot = priorSlot,
+                activationState = ActivationState.PENDING,
+            )
+            recoveryRegistry.write(activating)
+            slotRegistry.stageReplacement(staged.slot)
+            slotRegistry.commitReplacement()
+            recoveryRegistry.write(
+                activating.copy(activationState = ActivationState.MARKER_REPLACED),
+            )
+
+            val runtime = try {
+                runtimeFactory.openExisting(staged.slot)
+            } catch (failure: Throwable) {
+                rollbackToPriorSlot(priorSlot)
+                throw failure
+            }
+            mutableState.value = VaultRuntimeState.Active(runtime)
+
+            if (priorSlot != null && priorSlot != staged.slot) {
+                runCatching { runtimeFactory.discard(priorSlot) }
+            }
+            recoveryRegistry.clear()
+        }
+    }
+
+    override fun requireActive(): LocalVaultRuntime {
+        activeRuntime()?.let { return it }
+        if (mutableState.value is VaultRuntimeState.Initializing) {
+            runBlocking { initialize() }
+        }
+        return activeRuntime() ?: error("The local vault runtime is not active")
+    }
+
+    /** Releases the live runtime; the next call re-reads the active marker. */
+    fun close() {
+        activeRuntime()?.close()
+        mutableState.value = VaultRuntimeState.Initializing
+    }
+
+    private fun activeRuntime(): LocalVaultRuntime? =
+        (mutableState.value as? VaultRuntimeState.Active)?.runtime
+
+    private fun activeSlot(): VaultSlot? = activeRuntime()?.slot
+
+    /**
+     * Restores the unchanged prior marker after a failed staged open, leaving
+     * the prior database and every wrapper exactly as they were.
+     */
+    private fun rollbackToPriorSlot(priorSlot: VaultSlot?) {
+        if (priorSlot == null) {
+            mutableState.value = VaultRuntimeState.NoVault
+            return
+        }
+        runCatching { slotRegistry.replace(priorSlot) }
+        val restored = runCatching { runtimeFactory.openExisting(priorSlot) }.getOrNull()
+        mutableState.value = restored?.let(VaultRuntimeState::Active)
+            ?: VaultRuntimeState.Unreadable(priorSlot)
+    }
+
+    /**
+     * Completes a slot replacement that died after the marker was published.
+     *
+     * The marker already names the staged slot, so removing the prior slot is
+     * the remaining step of a succeeded activation rather than a new decision.
+     */
+    private fun finishInterruptedCleanup(active: VaultSlot) {
+        val record = try {
+            recoveryRegistry.readOrDiscard()
+        } catch (_: Throwable) {
+            null
+        } ?: return
+        if (record.stagedSlot != active) return
+        if (record.activationState == ActivationState.PENDING) return
+        record.priorSlot
+            ?.takeIf { it != active }
+            ?.let { prior -> runCatching { runtimeFactory.discard(prior) } }
+        recoveryRegistry.clear()
+    }
+
+    private fun discardInactiveStaging(active: VaultSlot?) {
+        val retained = try {
+            recoveryRegistry.readOrDiscard()
+                ?.takeIf { it.phase != RecoveryPhase.ACTIVATED }
+                ?.stagedSlot
+        } catch (_: Throwable) {
+            null
+        }
+        runtimeFactory.listStagedSlots()
+            .filter { it != active && it != retained }
+            .forEach { slot -> runCatching { runtimeFactory.discard(slot) } }
+    }
+
+    private companion object {
+        const val RECOVERY_REGISTRY_NAME = "recovery_registry.bin"
+    }
+}

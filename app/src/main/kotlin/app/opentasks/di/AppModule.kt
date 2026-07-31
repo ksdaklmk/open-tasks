@@ -1,6 +1,9 @@
 package app.opentasks.di
 
 import android.content.Context
+import app.opentasks.ActiveVaultServices
+import app.opentasks.ActiveVaultSession
+import app.opentasks.DefaultActiveVaultSession
 import app.opentasks.backup.AndroidAtomicPackageFile
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.backup.AndroidBackupRuntime
@@ -12,14 +15,15 @@ import app.opentasks.backup.RestoredPackageIntake
 import app.opentasks.backup.recordRestoredPackageStatus
 import app.opentasks.backup.requiresEstablishedContentKey
 import app.opentasks.backup.restoredPackagePublicationBlocked
-import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.TinkVaultCrypto
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.data.AuthenticatedCloudObjectCodec
 import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
+import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRepositoryFactory
+import app.opentasks.core.data.VaultRuntimeManager
 import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
 import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PortablePackageCodec
@@ -35,6 +39,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,9 +58,22 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideLocalVaultRuntime(
+    fun provideDefaultVaultRuntimeManager(
         @ApplicationContext context: Context,
-    ): LocalVaultRuntime = LocalVaultRepositoryFactory.createRuntime(context)
+        crypto: VaultCrypto,
+    ): DefaultVaultRuntimeManager = DefaultVaultRuntimeManager(context, crypto)
+
+    @Provides
+    fun provideVaultRuntimeManager(
+        manager: DefaultVaultRuntimeManager,
+    ): VaultRuntimeManager = manager
+
+    // Deliberately unscoped: the manager owns the single live runtime, so every
+    // injection resolves the currently active slot instead of a captured one.
+    @Provides
+    fun provideLocalVaultRuntime(
+        manager: DefaultVaultRuntimeManager,
+    ): LocalVaultRuntime = manager.requireActive()
 
     @Provides
     fun provideVaultRepository(runtime: LocalVaultRuntime): VaultRepository = runtime.repository
@@ -65,11 +83,9 @@ object AppModule {
     fun provideVaultCrypto(): VaultCrypto = TinkVaultCrypto()
 
     @Provides
-    @Singleton
     fun provideVaultContentKeyStore(
-        @ApplicationContext context: Context,
-        crypto: VaultCrypto,
-    ): VaultContentKeyStore = AndroidVaultContentKeyStore(context, crypto)
+        runtime: LocalVaultRuntime,
+    ): VaultContentKeyStore = runtime.contentKeyStore
 
     @Provides
     @Singleton
@@ -83,6 +99,7 @@ object AppModule {
         codec: AuthenticatedCloudObjectCodec,
     ): PortablePackageCodec = PortableBackupCodec(codec)
 
+    // Inert: portable package discovery stays available without a vault.
     @Provides
     @Singleton
     fun provideAndroidBackupFiles(
@@ -91,170 +108,160 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideBackupApplicationScope(): CoroutineScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    fun provideActiveVaultServices(
+        session: Provider<ActiveVaultSession>,
+    ): ActiveVaultServices = ActiveVaultServices(session::get)
 
     @Provides
-    @Singleton
-    fun provideBackupCoordinator(
+    fun provideAndroidBackupRuntime(
+        services: ActiveVaultServices,
+    ): AndroidBackupRuntime = services.requireSession().backupRuntime
+
+    @Provides
+    fun provideAndroidBackupStatusSource(
+        services: ActiveVaultServices,
+    ): AndroidBackupStatusSource = services.requireSession().statusSource
+
+    @Provides
+    fun providePortableBackupPublisher(
+        services: ActiveVaultServices,
+    ): PortableBackupPublisher = services.requireSession().portableBackupPublisher
+
+    /**
+     * Builds every vault-bound service for the active slot in one bundle.
+     *
+     * The members are constructed here rather than bound in the graph so that
+     * closing the session releases them all together, and so that no binding
+     * can hand a caller a service from a replaced slot.
+     */
+    @Provides
+    fun provideActiveVaultSession(
         runtime: LocalVaultRuntime,
         files: AndroidBackupFiles,
         codec: AuthenticatedCloudObjectCodec,
-        contentKeyStore: VaultContentKeyStore,
-    ): BackupCoordinator = LocalVaultRepositoryFactory.createBackupCoordinator(
-        runtime = runtime,
-        objectStore = DefaultLocalBackupObjectStore(files.localBackupRoot),
-        authenticatedCodec = codec,
-        contentKeyStore = contentKeyStore,
-    )
-
-    @Provides
-    @Singleton
-    fun provideRecoveryEnvelopePreparer(
-        runtime: LocalVaultRuntime,
-        contentKeyStore: VaultContentKeyStore,
+        packageCodec: PortablePackageCodec,
         crypto: VaultCrypto,
-    ): RecoveryEnvelopePreparer = RecoveryEnvelopePreparer(
-        vaultId = runtime.vaultId,
-        keyStore = contentKeyStore,
-        crypto = crypto,
-    )
-
-    @Provides
-    @Singleton
-    fun providePortableBackupPublisher(
-        runtime: LocalVaultRuntime,
-        files: AndroidBackupFiles,
-        contentKeyStore: VaultContentKeyStore,
-        codec: PortablePackageCodec,
-        envelopePreparer: RecoveryEnvelopePreparer,
-    ): PortableBackupPublisher = PortableBackupPublisher(
-        vaultId = runtime.vaultId,
-        captureSource = runtime.backupCaptureSource,
-        stateStore = runtime.backupStateStore,
-        envelopeStore = runtime.recoveryEnvelopeStore,
-        contentKeyStore = contentKeyStore,
-        packageFile = AndroidAtomicPackageFile(files.eligiblePackage),
-        codec = codec,
-        prepareEnvelope = envelopePreparer::prepare,
-        publicationBlocked = {
-            files.recoveryInbox.isFile ||
-                restoredPackagePublicationBlocked(
-                    stateStore = runtime.backupStateStore,
-                    vaultId = runtime.vaultId,
-                )
-        },
-    )
-
-    @Provides
-    @Singleton
-    fun provideRestoredPackageIntake(
-        runtime: LocalVaultRuntime,
-        files: AndroidBackupFiles,
-        contentKeyStore: VaultContentKeyStore,
-        codec: PortablePackageCodec,
-    ): RestoredPackageIntake = RestoredPackageIntake(
-        vaultId = runtime.vaultId,
-        eligiblePackage = files.eligiblePackage,
-        recoveryInbox = files.recoveryInbox,
-        packageFile = AndroidAtomicPackageFile(files.eligiblePackage),
-        stateStore = runtime.backupStateStore,
-        envelopeStore = runtime.recoveryEnvelopeStore,
-        contentKeyStore = contentKeyStore,
-        codec = codec,
-    )
-
-    @Provides
-    @Singleton
-    fun provideAndroidBackupRuntime(
-        scope: CoroutineScope,
-        runtime: LocalVaultRuntime,
-        files: AndroidBackupFiles,
-        intake: RestoredPackageIntake,
-        contentKeyStore: VaultContentKeyStore,
-        coordinator: BackupCoordinator,
-        publisher: PortableBackupPublisher,
-    ): AndroidBackupRuntime = DefaultAndroidBackupRuntime(
-        scope = scope,
-        restoredPackageIntake = intake::inspect,
-        bootstrapContentKey = bootstrap@{
-            val state = try {
-                runtime.backupStateStore.get(runtime.vaultId)
-            } catch (_: Throwable) {
-                return@bootstrap false
-            }
-            val envelope = try {
-                runtime.recoveryEnvelopeStore.get(runtime.vaultId)
-            } catch (_: Throwable) {
-                return@bootstrap false
-            }
-            try {
-                val localBackupObjectPresent = try {
-                    files.localBackupRoot.walkTopDown().any { it.isFile }
-                } catch (_: Throwable) {
-                    return@bootstrap false
-                }
-                val requiresExisting = requiresEstablishedContentKey(
-                    state = state,
-                    recoveryEnvelopePresent = envelope != null,
-                    eligiblePackagePresent = files.eligiblePackage.isFile,
-                    recoveryInboxPresent = files.recoveryInbox.isFile,
-                    localBackupObjectPresent = localBackupObjectPresent,
-                )
-                if (requiresExisting) {
-                    contentKeyStore.openExisting(runtime.vaultId).close()
-                } else {
-                    contentKeyStore.getOrCreate(runtime.vaultId).close()
-                }
-                true
-            } catch (_: Throwable) {
-                false
-            } finally {
-                envelope?.kdf?.salt?.fill(0)
-                envelope?.nonce?.fill(0)
-                envelope?.wrappedKeyset?.fill(0)
-            }
-        },
-        requestLocalBackup = coordinator::request,
-        observeBackupState = {
-            runtime.backupStateStore.observe(runtime.vaultId)
-        },
-        envelopeAvailable = {
-            runtime.recoveryEnvelopeStore.get(runtime.vaultId)?.let { envelope ->
-                envelope.kdf.salt.fill(0)
-                envelope.nonce.fill(0)
-                envelope.wrappedKeyset.fill(0)
-                true
-            } ?: false
-        },
-        recordStatus = { status ->
-            recordRestoredPackageStatus(
-                stateStore = runtime.backupStateStore,
-                vaultId = runtime.vaultId,
-                status = status,
-            )
-        },
-        restoredPublicationBlocked = {
-            restoredPackagePublicationBlocked(
-                stateStore = runtime.backupStateStore,
-                vaultId = runtime.vaultId,
-            )
-        },
-        refreshPortablePackage = {
-            publisher.refresh()
-            Unit
-        },
-    )
-
-    @Provides
-    @Singleton
-    fun provideAndroidBackupStatusSource(
-        scope: CoroutineScope,
-        runtime: LocalVaultRuntime,
-    ): AndroidBackupStatusSource = PersistedAndroidBackupStatusSource(
-        scope = scope,
-        observeBackupState = {
-            runtime.backupStateStore.observe(runtime.vaultId)
-        },
-    )
+    ): ActiveVaultSession {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val contentKeyStore = runtime.contentKeyStore
+        val coordinator: BackupCoordinator = LocalVaultRepositoryFactory.createBackupCoordinator(
+            runtime = runtime,
+            objectStore = DefaultLocalBackupObjectStore(files.localBackupRoot),
+            authenticatedCodec = codec,
+            contentKeyStore = contentKeyStore,
+        )
+        val envelopePreparer = RecoveryEnvelopePreparer(
+            vaultId = runtime.vaultId,
+            keyStore = contentKeyStore,
+            crypto = crypto,
+        )
+        val publisher = PortableBackupPublisher(
+            vaultId = runtime.vaultId,
+            captureSource = runtime.backupCaptureSource,
+            stateStore = runtime.backupStateStore,
+            envelopeStore = runtime.recoveryEnvelopeStore,
+            contentKeyStore = contentKeyStore,
+            packageFile = AndroidAtomicPackageFile(files.eligiblePackage),
+            codec = packageCodec,
+            prepareEnvelope = envelopePreparer::prepare,
+            publicationBlocked = {
+                files.recoveryInbox.isFile ||
+                    restoredPackagePublicationBlocked(
+                        stateStore = runtime.backupStateStore,
+                        vaultId = runtime.vaultId,
+                    )
+            },
+        )
+        val intake = RestoredPackageIntake(
+            vaultId = runtime.vaultId,
+            eligiblePackage = files.eligiblePackage,
+            recoveryInbox = files.recoveryInbox,
+            packageFile = AndroidAtomicPackageFile(files.eligiblePackage),
+            stateStore = runtime.backupStateStore,
+            envelopeStore = runtime.recoveryEnvelopeStore,
+            contentKeyStore = contentKeyStore,
+            codec = packageCodec,
+        )
+        return DefaultActiveVaultSession(
+            scope = scope,
+            backupRuntime = DefaultAndroidBackupRuntime(
+                scope = scope,
+                restoredPackageIntake = intake::inspect,
+                bootstrapContentKey = bootstrap@{
+                    val state = try {
+                        runtime.backupStateStore.get(runtime.vaultId)
+                    } catch (_: Throwable) {
+                        return@bootstrap false
+                    }
+                    val envelope = try {
+                        runtime.recoveryEnvelopeStore.get(runtime.vaultId)
+                    } catch (_: Throwable) {
+                        return@bootstrap false
+                    }
+                    try {
+                        val localBackupObjectPresent = try {
+                            files.localBackupRoot.walkTopDown().any { it.isFile }
+                        } catch (_: Throwable) {
+                            return@bootstrap false
+                        }
+                        val requiresExisting = requiresEstablishedContentKey(
+                            state = state,
+                            recoveryEnvelopePresent = envelope != null,
+                            eligiblePackagePresent = files.eligiblePackage.isFile,
+                            recoveryInboxPresent = files.recoveryInbox.isFile,
+                            localBackupObjectPresent = localBackupObjectPresent,
+                        )
+                        if (requiresExisting) {
+                            contentKeyStore.openExisting(runtime.vaultId).close()
+                        } else {
+                            contentKeyStore.getOrCreate(runtime.vaultId).close()
+                        }
+                        true
+                    } catch (_: Throwable) {
+                        false
+                    } finally {
+                        envelope?.kdf?.salt?.fill(0)
+                        envelope?.nonce?.fill(0)
+                        envelope?.wrappedKeyset?.fill(0)
+                    }
+                },
+                requestLocalBackup = coordinator::request,
+                observeBackupState = {
+                    runtime.backupStateStore.observe(runtime.vaultId)
+                },
+                envelopeAvailable = {
+                    runtime.recoveryEnvelopeStore.get(runtime.vaultId)?.let { envelope ->
+                        envelope.kdf.salt.fill(0)
+                        envelope.nonce.fill(0)
+                        envelope.wrappedKeyset.fill(0)
+                        true
+                    } ?: false
+                },
+                recordStatus = { status ->
+                    recordRestoredPackageStatus(
+                        stateStore = runtime.backupStateStore,
+                        vaultId = runtime.vaultId,
+                        status = status,
+                    )
+                },
+                restoredPublicationBlocked = {
+                    restoredPackagePublicationBlocked(
+                        stateStore = runtime.backupStateStore,
+                        vaultId = runtime.vaultId,
+                    )
+                },
+                refreshPortablePackage = {
+                    publisher.refresh()
+                    Unit
+                },
+            ),
+            statusSource = PersistedAndroidBackupStatusSource(
+                scope = scope,
+                observeBackupState = {
+                    runtime.backupStateStore.observe(runtime.vaultId)
+                },
+            ),
+            portableBackupPublisher = publisher,
+        )
+    }
 }

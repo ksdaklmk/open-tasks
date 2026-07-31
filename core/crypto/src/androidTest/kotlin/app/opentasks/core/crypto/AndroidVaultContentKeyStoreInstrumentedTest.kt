@@ -13,6 +13,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -721,13 +722,108 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
         expected.fill(0)
     }
 
+    @Test
+    fun nullNamespaceUsesTheExactLegacyStorageNamesAndAssociatedData() {
+        val explicitNull = AndroidVaultContentKeyStore(context, TinkVaultCrypto(), null)
+        val key = explicitNull.getOrCreate(firstVault)
+
+        assertTrue(preferences().contains(nonceKey(firstVault)))
+        assertTrue(preferences().contains(ciphertextKey(firstVault)))
+        assertNotNull(keyStore().getKey(aliasFor(firstVault), null))
+
+        val defaulted = AndroidVaultContentKeyStore(context).openExisting(firstVault)
+        assertArrayEquals(key.serializedKeyset, defaulted.serializedKeyset)
+        key.close()
+        defaulted.close()
+    }
+
+    @Test
+    fun theSameVaultInTwoNamespacesKeepsIndependentWrappers() {
+        val legacy = AndroidVaultContentKeyStore(context)
+        val staged = AndroidVaultContentKeyStore(context, TinkVaultCrypto(), NAMESPACE)
+
+        val legacyKey = legacy.getOrCreate(firstVault)
+        val stagedKey = staged.getOrCreate(firstVault)
+
+        assertFalse(legacyKey.serializedKeyset.contentEquals(stagedKey.serializedKeyset))
+        assertNotEquals(aliasFor(firstVault), namespacedAliasFor(firstVault, NAMESPACE))
+        assertNotNull(keyStore().getKey(namespacedAliasFor(firstVault, NAMESPACE), null))
+        assertFalse(namespacePreferences(NAMESPACE).all.isEmpty())
+        legacyKey.close()
+        stagedKey.close()
+    }
+
+    @Test
+    fun replacingANamespacedKeyLeavesTheLegacyWrapperUntouched() {
+        val legacy = AndroidVaultContentKeyStore(context)
+        val staged = AndroidVaultContentKeyStore(context, TinkVaultCrypto(), NAMESPACE)
+        val legacyKey = legacy.getOrCreate(firstVault)
+        val legacyBytes = legacyKey.serializedKeyset.copyOf()
+        staged.getOrCreate(firstVault).close()
+        val replacement = TinkVaultCrypto().createKey()
+
+        staged.replace(firstVault, replacement)
+
+        val reopenedLegacy = AndroidVaultContentKeyStore(context).openExisting(firstVault)
+        assertArrayEquals(legacyBytes, reopenedLegacy.serializedKeyset)
+        assertNotNull(keyStore().getKey(aliasFor(firstVault), null))
+        legacyBytes.fill(0)
+        legacyKey.close()
+        replacement.close()
+        reopenedLegacy.close()
+    }
+
+    @Test
+    fun deletingANamespaceRemovesOnlyItsOwnStorage() {
+        val legacy = AndroidVaultContentKeyStore(context)
+        val staged = AndroidVaultContentKeyStore(context, TinkVaultCrypto(), NAMESPACE)
+        val legacyKey = legacy.getOrCreate(firstVault)
+        val legacyBytes = legacyKey.serializedKeyset.copyOf()
+        staged.getOrCreate(firstVault).close()
+        staged.getOrCreate(secondVault).close()
+
+        AndroidVaultContentKeyStorage.deleteNamespace(context, NAMESPACE)
+
+        assertTrue(namespacePreferences(NAMESPACE).all.isEmpty())
+        assertNull(keyStore().getKey(namespacedAliasFor(firstVault, NAMESPACE), null))
+        assertNull(keyStore().getKey(namespacedAliasFor(secondVault, NAMESPACE), null))
+        val reopenedLegacy = AndroidVaultContentKeyStore(context).openExisting(firstVault)
+        assertArrayEquals(legacyBytes, reopenedLegacy.serializedKeyset)
+        assertNotNull(keyStore().getKey(aliasFor(firstVault), null))
+        legacyBytes.fill(0)
+        legacyKey.close()
+        reopenedLegacy.close()
+    }
+
+    @Test
+    fun namespaceDeletionRefusesAnEmptyNamespace() {
+        AndroidVaultContentKeyStore(context).getOrCreate(firstVault).close()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            AndroidVaultContentKeyStorage.deleteNamespace(context, "")
+        }
+
+        assertTrue(preferences().contains(ciphertextKey(firstVault)))
+        assertNotNull(keyStore().getKey(aliasFor(firstVault), null))
+    }
+
     private fun clearTestState() {
         context.deleteSharedPreferences(PREFERENCES_NAME)
+        context.deleteSharedPreferences("${PREFERENCES_NAME}_$NAMESPACE")
         keyStore().deleteEntry(aliasFor(firstVault))
         keyStore().deleteEntry(aliasFor(secondVault))
         keyStore().deleteEntry(aliasFor(malformedHighVault))
         keyStore().deleteEntry(aliasFor(malformedLowVault))
+        keyStore().aliases().toList()
+            .filter { it.startsWith("$ALIAS_PREFIX${NAMESPACE}_") }
+            .forEach(keyStore()::deleteEntry)
     }
+
+    private fun namespacePreferences(namespace: String) =
+        context.getSharedPreferences("${PREFERENCES_NAME}_$namespace", Context.MODE_PRIVATE)
+
+    private fun namespacedAliasFor(vaultId: VaultId, namespace: String): String =
+        "$ALIAS_PREFIX${namespace}_${vaultDigest(vaultId)}"
 
     private fun storeWith(
         commitBoundary: PreferenceCommitBoundary,
@@ -879,5 +975,7 @@ class AndroidVaultContentKeyStoreInstrumentedTest {
         const val NONCE_PREFIX = "nonce_v1_"
         const val CIPHERTEXT_PREFIX = "ciphertext_v1_"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        const val NAMESPACE =
+            "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
     }
 }

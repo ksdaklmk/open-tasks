@@ -26,6 +26,7 @@ import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -289,14 +290,19 @@ class ReminderNotifier @Inject constructor(
 
 @AndroidEntryPoint
 class ReminderActionReceiver : BroadcastReceiver() {
+    // Lazy: a broadcast can arrive while no vault runtime is active, and no
+    // repository may be constructed outside an active one.
     @Inject
-    lateinit var repository: VaultRepository
+    lateinit var vaultRepository: Lazy<VaultRepository>
 
     @Inject
     lateinit var scheduler: ReminderScheduler
 
     @Inject
     lateinit var notifier: ReminderNotifier
+
+    private val repository: VaultRepository
+        get() = vaultRepository.get()
 
     override fun onReceive(context: Context, intent: Intent) {
         val pendingResult = goAsync()
@@ -307,6 +313,8 @@ class ReminderActionReceiver : BroadcastReceiver() {
                     ReminderIntents.ACTION_SNOOZE -> snooze(intent)
                     ReminderIntents.ACTION_COMPLETE -> complete(intent)
                 }
+            } catch (_: IllegalStateException) {
+                // No active vault runtime: the reminder is dropped, not repaired.
             } finally {
                 pendingResult.finish()
             }
@@ -387,8 +395,10 @@ class ReminderActionReceiver : BroadcastReceiver() {
 
 @AndroidEntryPoint
 class ReminderSystemEventReceiver : BroadcastReceiver() {
+    // Lazy: boot and package-replacement broadcasts arrive before, and without,
+    // an active vault runtime.
     @Inject
-    lateinit var repository: VaultRepository
+    lateinit var vaultRepository: Lazy<VaultRepository>
 
     @Inject
     lateinit var scheduler: ReminderScheduler
@@ -398,7 +408,9 @@ class ReminderSystemEventReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                scheduler.reconcile(repository.currentWorkspace())
+                scheduler.reconcile(vaultRepository.get().currentWorkspace())
+            } catch (_: IllegalStateException) {
+                // No active vault runtime: nothing can be reconciled yet.
             } finally {
                 pendingResult.finish()
             }

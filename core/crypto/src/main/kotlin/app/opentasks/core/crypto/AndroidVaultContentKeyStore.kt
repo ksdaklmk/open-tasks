@@ -151,13 +151,17 @@ internal object LocalVaultIdentityEncoding {
         }
     }
 
-    fun associatedData(vaultId: VaultId): ByteArray {
+    fun associatedData(vaultId: VaultId, storageNamespace: String? = null): ByteArray {
+        val prefix = when (storageNamespace) {
+            null -> ASSOCIATED_DATA_PREFIX
+            else -> "$ASSOCIATED_DATA_TEXT:$storageNamespace".toByteArray(Charsets.UTF_8)
+        }
         val identity = identityBytes(vaultId)
         val result = ByteArray(
-            ASSOCIATED_DATA_PREFIX.size + IDENTITY_LENGTH_BYTES + identity.size,
+            prefix.size + IDENTITY_LENGTH_BYTES + identity.size,
         )
-        ASSOCIATED_DATA_PREFIX.copyInto(result)
-        val lengthOffset = ASSOCIATED_DATA_PREFIX.size
+        prefix.copyInto(result)
+        val lengthOffset = prefix.size
         result[lengthOffset] = (identity.size ushr 24).toByte()
         result[lengthOffset + 1] = (identity.size ushr 16).toByte()
         result[lengthOffset + 2] = (identity.size ushr 8).toByte()
@@ -171,10 +175,70 @@ internal object LocalVaultIdentityEncoding {
     private const val IDENTITY_LENGTH_BYTES = 4
     private const val DIGEST_ALGORITHM = "SHA-256"
     private const val HEX_DIGITS = "0123456789abcdef"
-    private val ASSOCIATED_DATA_PREFIX =
-        "open-tasks:local-vault-content-key:v1".toByteArray(Charsets.UTF_8)
+    private const val ASSOCIATED_DATA_TEXT = "open-tasks:local-vault-content-key:v1"
+    private val ASSOCIATED_DATA_PREFIX = ASSOCIATED_DATA_TEXT.toByteArray(Charsets.UTF_8)
 }
 
+/**
+ * Removes the local storage of one content-key namespace.
+ *
+ * A staged slot owns its own preference file and Keystore aliases, so
+ * discarding it can never touch another slot's wrappers.
+ */
+object AndroidVaultContentKeyStorage {
+    fun deleteNamespace(context: Context, storageNamespace: String) {
+        require(storageNamespace.isNotBlank()) {
+            "A content-key namespace cannot be blank"
+        }
+        deleteStorage(
+            context = context,
+            preferencesName = "${PREFERENCES_NAME}_$storageNamespace",
+            aliasPrefix = "$KEYSTORE_ALIAS_PREFIX${storageNamespace}_",
+            legacy = false,
+        )
+    }
+
+    fun deleteLegacyStorage(context: Context) {
+        deleteStorage(
+            context = context,
+            preferencesName = PREFERENCES_NAME,
+            aliasPrefix = KEYSTORE_ALIAS_PREFIX,
+            legacy = true,
+        )
+    }
+
+    private fun deleteStorage(
+        context: Context,
+        preferencesName: String,
+        aliasPrefix: String,
+        legacy: Boolean,
+    ) {
+        val applicationContext = context.applicationContext
+        applicationContext.deleteSharedPreferences(preferencesName)
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        keyStore.aliases().toList()
+            .filter { alias ->
+                alias.startsWith(aliasPrefix) &&
+                    // The legacy prefix is also the prefix of every namespaced
+                    // alias, so only unnamespaced digests belong to it.
+                    (!legacy || !alias.removePrefix(aliasPrefix).contains('_'))
+            }
+            .forEach(keyStore::deleteEntry)
+    }
+
+    private const val PREFERENCES_NAME = "vault_content_keys_v1"
+    private const val KEYSTORE_ALIAS_PREFIX = "open_tasks_vault_content_wrapper_v1_"
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+}
+
+/**
+ * Stores one vault-content key per vault inside one storage namespace.
+ *
+ * A `null` [storageNamespace] is the storage this application shipped with and
+ * keeps its preference names, Keystore aliases, and associated data unchanged.
+ * A staged slot passes only its SHA-256 digest, so the same logical vault held
+ * in two slots keeps two independent wrappers.
+ */
 class AndroidVaultContentKeyStore internal constructor(
     context: Context,
     private val crypto: VaultCrypto,
@@ -182,20 +246,29 @@ class AndroidVaultContentKeyStore internal constructor(
     private val wrappingKeyBoundary: WrappingKeyBoundary,
     private val base64Boundary: LocalEnvelopeBase64Boundary =
         AndroidLocalEnvelopeBase64Boundary,
+    private val storageNamespace: String? = null,
 ) : VaultContentKeyStore {
     constructor(
         context: Context,
         crypto: VaultCrypto = TinkVaultCrypto(),
+        storageNamespace: String? = null,
     ) : this(
         context = context,
         crypto = crypto,
         commitBoundary = SharedPreferencesCommitBoundary,
         wrappingKeyBoundary = AndroidKeystoreWrappingKeyBoundary(),
         base64Boundary = AndroidLocalEnvelopeBase64Boundary,
+        storageNamespace = storageNamespace,
     )
 
+    init {
+        require(storageNamespace == null || storageNamespace.isNotBlank()) {
+            "A content-key namespace cannot be blank"
+        }
+    }
+
     private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
+        preferencesName(),
         Context.MODE_PRIVATE,
     )
 
@@ -321,7 +394,7 @@ class AndroidVaultContentKeyStore internal constructor(
         requireExistingAlias: Boolean,
     ): WrappedKey {
         val plaintext = key.copySerializedKeyset()
-        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId)
+        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId, storageNamespace)
         return try {
             val cipher = Cipher.getInstance(AES_GCM).apply {
                 init(
@@ -360,7 +433,7 @@ class AndroidVaultContentKeyStore internal constructor(
         check(stored.nonce.size == GCM_NONCE_BYTES) {
             "The local vault-content key nonce is invalid"
         }
-        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId)
+        val associatedData = LocalVaultIdentityEncoding.associatedData(vaultId, storageNamespace)
         val plaintext = try {
             Cipher.getInstance(AES_GCM).run {
                 init(
@@ -457,8 +530,18 @@ class AndroidVaultContentKeyStore internal constructor(
             }
         }
 
-    private fun aliasFor(vaultId: VaultId): String =
-        "$KEYSTORE_ALIAS_PREFIX${LocalVaultIdentityEncoding.digest(vaultId)}"
+    private fun preferencesName(): String = when (storageNamespace) {
+        null -> PREFERENCES_NAME
+        else -> "${PREFERENCES_NAME}_$storageNamespace"
+    }
+
+    private fun aliasFor(vaultId: VaultId): String {
+        val prefix = when (storageNamespace) {
+            null -> KEYSTORE_ALIAS_PREFIX
+            else -> "$KEYSTORE_ALIAS_PREFIX${storageNamespace}_"
+        }
+        return "$prefix${LocalVaultIdentityEncoding.digest(vaultId)}"
+    }
 
     private fun noncePreferenceKey(vaultId: VaultId): String =
         "$NONCE_PREFERENCE_PREFIX${LocalVaultIdentityEncoding.digest(vaultId)}"
