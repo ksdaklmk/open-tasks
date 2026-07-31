@@ -555,8 +555,12 @@ class CreateOnlyDriveObjectStore(
 
     private fun listQuery(request: RemoteListRequest): String = buildString {
         appendPropertyClause(PROPERTY_ROLE_KEY, request.role.name)
-        append(" and ")
-        appendPropertyClause(PROPERTY_LINEAGE, request.lineageId.value)
+        // A null lineage is account-wide ownership-root discovery, which must
+        // reach roots this installation has never held.
+        request.lineageId?.let {
+            append(" and ")
+            appendPropertyClause(PROPERTY_LINEAGE, it.value)
+        }
         request.writerEpoch?.let {
             append(" and ")
             appendPropertyClause(PROPERTY_EPOCH, it.value.toString())
@@ -694,7 +698,7 @@ class CreateOnlyDriveObjectStore(
     }
 }
 
-private fun DriveTransportFailureCategory.toRemoteFailure(): RemoteBackupFailureCategory =
+internal fun DriveTransportFailureCategory.toRemoteFailure(): RemoteBackupFailureCategory =
     when (this) {
         DriveTransportFailureCategory.AUTHORIZATION ->
             RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED

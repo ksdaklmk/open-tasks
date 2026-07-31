@@ -197,6 +197,13 @@ interface RemoteBackupStateStore {
         next: RemoteBackupConfiguration,
     ): Boolean
 
+    /**
+     * The durable record a crash-interrupted operation resumes from. Its
+     * phase and state bytes are the only way a restarted process learns which
+     * identities were already generated and which remote objects already exist.
+     */
+    suspend fun operation(operationId: String): RemoteBackupOperation?
+
     suspend fun putOperation(operation: RemoteBackupOperation)
 
     suspend fun transitionOperation(

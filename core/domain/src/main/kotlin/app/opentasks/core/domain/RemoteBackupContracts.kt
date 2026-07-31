@@ -272,8 +272,15 @@ interface OwnedRemoteFile : AutoCloseable {
     val length: Long
 }
 
+/**
+ * A bounded provider index query.
+ *
+ * [lineageId] is null only for account-wide ownership-root discovery, which
+ * must see roots belonging to lineages this installation has never held.
+ * Every other listing names its exact lineage.
+ */
 data class RemoteListRequest(
-    val lineageId: CloudLineageId,
+    val lineageId: CloudLineageId?,
     val role: RemoteObjectRoleV1,
     val writerEpoch: WriterEpoch?,
     val ownerDeviceId: CloudDeviceId?,
@@ -346,6 +353,36 @@ sealed interface DeleteObjectResult {
     data object Missing : DeleteObjectResult
     data class Failed(val reason: RemoteBackupFailureCategory) :
         DeleteObjectResult
+}
+
+sealed interface RemoteBackupConnectResult {
+    /**
+     * The account already holds ownership roots, so setup stopped before it
+     * created anything. Only an explicit separate-lineage choice may continue.
+     */
+    data class ExistingBackupsFound(val count: Int) : RemoteBackupConnectResult
+
+    data class Connected(
+        val lineageId: CloudLineageId,
+        val generation: BackupGeneration,
+    ) : RemoteBackupConnectResult
+
+    data class Failed(val reason: RemoteBackupFailureCategory) : RemoteBackupConnectResult
+}
+
+/**
+ * Establishes epoch one of a create-only remote backup lineage.
+ *
+ * The implementation lives in `core:data` because it composes the ownership
+ * and publication codecs with Stage 2 local capture; this contract stays
+ * provider-independent so scheduling and product code never depend on Drive.
+ */
+interface RemoteBackupConfigurator {
+    suspend fun connect(
+        objectStore: CreateOnlyBackupObjectStore,
+        accountBindingDigest: ByteArray,
+        allowSeparateLineage: Boolean,
+    ): RemoteBackupConnectResult
 }
 
 interface CreateOnlyBackupObjectStore {

@@ -5,21 +5,28 @@ import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.data.backup.DefaultBackupCoordinator
+import app.opentasks.core.data.backup.DefaultRemoteBackupConfigurator
 import app.opentasks.core.data.backup.LocalBackupObjectStore
+import app.opentasks.core.data.backup.OwnershipClaimCodec
+import app.opentasks.core.data.backup.PublicationCodec
+import app.opentasks.core.data.backup.RemoteObjectCodec
 import app.opentasks.core.data.backup.RoomBackupCaptureSource
 import app.opentasks.core.data.backup.RoomBackupJournalStore
 import app.opentasks.core.data.backup.RoomBackupStateStore
 import app.opentasks.core.data.backup.RoomRecoveryEnvelopeStore
+import app.opentasks.core.data.backup.RoomRemoteBackupStore
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.BackupJournalEntry
 import app.opentasks.core.domain.BackupJournalReader
 import app.opentasks.core.domain.BackupMutationKind
+import app.opentasks.core.domain.RemoteBackupConfigurator
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.VaultId
+import java.io.File
 
 /**
  * Constructed local services for one vault slot.
@@ -36,6 +43,7 @@ class LocalVaultRuntime internal constructor(
     val backupCaptureSource: RoomBackupCaptureSource,
     val backupStateStore: RoomBackupStateStore,
     val recoveryEnvelopeStore: RoomRecoveryEnvelopeStore,
+    val remoteBackupStore: RoomRemoteBackupStore,
     val contentKeyStore: VaultContentKeyStore,
     private val database: VaultDatabase,
 ) : AutoCloseable {
@@ -88,6 +96,35 @@ object LocalVaultRepositoryFactory {
         )
     }
 
+    /**
+     * Wires initial create-only remote setup for one open runtime.
+     *
+     * The provider object store is supplied per call rather than held here,
+     * because authorization is established outside this factory and no remote
+     * work may start from opening a vault slot.
+     */
+    fun createRemoteBackupConfigurator(
+        runtime: LocalVaultRuntime,
+        backupCoordinator: BackupCoordinator,
+        localObjectStore: LocalBackupObjectStore,
+        authenticatedCodec: AuthenticatedCloudObjectCodec,
+        remoteStagingRoot: File,
+    ): RemoteBackupConfigurator = DefaultRemoteBackupConfigurator(
+        vaultId = runtime.vaultId,
+        backupCoordinator = backupCoordinator,
+        backupStateStore = runtime.backupStateStore,
+        recoveryEnvelopeStore = runtime.recoveryEnvelopeStore,
+        contentKeyStore = runtime.contentKeyStore,
+        remoteStateStore = runtime.remoteBackupStore,
+        remoteObjectCodec = RemoteObjectCodec(
+            authenticatedCodec = authenticatedCodec,
+            localObjectStore = localObjectStore,
+            stagingRoot = remoteStagingRoot,
+        ),
+        ownershipCodec = OwnershipClaimCodec(authenticatedCodec),
+        publicationCodec = PublicationCodec(authenticatedCodec),
+    )
+
     internal fun storageNamespace(slot: VaultSlot): String? =
         if (slot == VaultSlot.LEGACY) null else slot.digest
 
@@ -128,6 +165,7 @@ object LocalVaultRepositoryFactory {
                 backupCaptureSource = captureSource,
                 backupStateStore = stateStore,
                 recoveryEnvelopeStore = RoomRecoveryEnvelopeStore(database),
+                remoteBackupStore = RoomRemoteBackupStore(database),
                 contentKeyStore = AndroidVaultContentKeyStore(
                     context = applicationContext,
                     crypto = crypto,

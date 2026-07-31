@@ -130,6 +130,9 @@ class RoomRemoteBackupStore(
         }
     }
 
+    override suspend fun operation(operationId: String): RemoteBackupOperation? =
+        database.remoteBackupOperationDao().get(operationId)?.toDomain()
+
     override suspend fun putOperation(operation: RemoteBackupOperation) {
         validateOperation(operation)
         database.withTransaction {
