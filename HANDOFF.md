@@ -2,28 +2,33 @@
 
 - Last updated: 30 July 2026
 - Branch: `main`
-- Session status: **Stage 3 revised Task 1 is complete and committed as
-  `b6191fd` (`feat: qualify Drive create-only ownership slots`). The earlier
-  stop `AUTH_START_ApiException_INTERNAL_ERROR_8` was diagnosed as an
-  authorization setup failure: the freshly cold-booted read-only disposable
-  carried no signed-in Google account, and the Google Identity Authorization
-  API fails with bounded internal error 8 when the device has no Google
-  account, offering no add-account resolution. After the user signed a Google
-  account into the AVD's persistent device state, the sole audited API 37
-  disposable inherited it and the exact credentialed gate returned bounded
-  `PASS`: nine instrumentation tests with zero failures, covering ten live
-  create-only successor races, thirty rejected loser retries, unchanged
-  authenticated winner readbacks, discarded-success exact-ID resolution, and
-  disposable provider cleanup. Non-private evidence is
-  `docs/qualification/stage3-drive-create-only.md`. The design authority is
-  `docs/superpowers/specs/2026-07-30-stage-3-drive-create-only-ownership-design.md`
-  and the execution authority is
-  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`.
-  Resume at its Task 2 (freeze ownership and publication formats). Stage 2,
-  Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
-  reviewed.**
-- Current source implementation point: `b6191fd` (`feat: qualify Drive
-  create-only ownership slots`). The prior Stage 2 correction point is
+- Session status: **Stage 3 execution is paused at the user's request after
+  Task 6 of the create-only plan. Tasks 1–6 are complete, independently
+  reviewed, and committed: the qualified create-only transport (`b6191fd`),
+  frozen ownership and publication formats (`7ce27b1`), additive Room v7
+  remote state (`b0284bb`, `184786f`), crash-safe vault slot gating
+  (`5fc11ae`, `839efc5`, `4f57781`), explicit authorization and account
+  binding (`ca70ca8`, `2bb76dc`), and create-only Drive object storage
+  (`051ce53`, `05a1d44`, `75f94a8`). Every task review closed with zero open
+  Critical or Important findings; deferred minors, rulings, and fix-round
+  history live in the ignored SDD ledger
+  `.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/progress.md`.
+  Resume at Task 7 (Resolve Ownership and Publish Epoch One) of
+  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`
+  with subagent-driven execution. Two user rulings amended that plan in
+  place: the v7 config entity gained `previousPublicationGeneration`, and
+  `DriveAuthorizationResult.Unavailable` now carries a bounded reason enum.
+  One ruling is pending implementation at Task 12: tighten the publication
+  codec so equal local generation requires a recovery-credential-generation
+  increase, amending the brief-mandated equal-generation test. Task 14
+  carry-forwards: live confirmation of the Google `Account` derivation used
+  for revoke, and R8 keep-rule reachability once product UI calls
+  `authorize()`. The disposable emulator was shut down cleanly; the AVD
+  retains the signed-in Google account that disposables inherit for
+  credentialed gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain
+  complete and independently reviewed.**
+- Current source implementation point: `75f94a8` (`fix: bound oversized
+  upload rejection`). The prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
@@ -90,11 +95,13 @@ Kotlin `Color(0x...)` writes outside `core/designsystem`; its deterministic
 protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
-package are implemented and user-visible in More. Stage 3 create-only Google
-Identity and Drive transport qualification is complete: the credentialed
-provider gate passed on the sole audited disposable and the transport is
-committed as `b6191fd`. Recovery activation, writer takeover, cloud
-attachments and Play Console work have not started. Release gates which depend
+package are implemented and user-visible in More. Stage 3 create-only Tasks
+1–6 are committed and reviewed: qualified transport, frozen formats, Room v7
+remote state, crash-safe vault slot gating, explicit authorization with HMAC
+account binding, and byte-bounded create-only object storage. Ownership
+resolution, publication, scheduling, recovery activation, writer takeover,
+lifecycle, product UI, cloud attachments and Play Console work have not
+started (plan Tasks 7–14). Release gates which depend
 on those later features remain blocked by their listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
@@ -218,6 +225,48 @@ provider sequence in 364.7 seconds). The CI gate passed, the Step 9
 forbidden-concept scan found no matches, and Task 1 was committed as
 `b6191fd`. The disposable was shut down after the run and the final ADB
 target list was confirmed empty.
+
+## Stage 3 create-only Tasks 2–6 checkpoint — 31 July 2026
+
+Subagent-driven execution continued from the Task 1 qualification commit
+`b6191fd` directly on `main`, with an independent task review after each
+task and scoped re-reviews after every fix round. All five task boundaries
+closed with zero open Critical or Important findings.
+
+- Task 2 (`7ce27b1`) froze the ownership-claim and publication formats:
+  opaque redacted IDs, strict authenticated codecs binding every public
+  identity through the Stage 1 manifest family, publication-pair authority
+  validation, and independent Node fixtures with byte-identical
+  regeneration.
+- Task 3 (`b0284bb`, `184786f`) added additive Room v7 remote state with a
+  byte-preserving v6 fixture migration test. A user ruling added the
+  `previousPublicationGeneration` column before the schema shipped, and the
+  schema-drift script gained a restore-on-tool-failure path.
+- Task 4 (`5fc11ae`, `839efc5`, `4f57781`) gated startup behind crash-safe
+  vault slots. Fix rounds restarted the orphaned Stage 2 backup pipeline on
+  session open, closed four activation-safety windows, added a real
+  `AtomicFile` crash-boundary suite, and extended the staged content-key
+  verification rung to the crash-restart completion path. A live disposable
+  launch confirmed unrenamed legacy adoption on real migrated data.
+- Task 5 (`ca70ca8`, `2bb76dc`) added explicit authorization and HMAC
+  account binding behind a non-exportable Keystore key, with no token or
+  identifier persistence. A user ruling enriched
+  `DriveAuthorizationResult.Unavailable` with a bounded reason enum, and a
+  missing Google `Account` handle now degrades revoke instead of failing
+  authorization.
+- Task 6 (`051ce53`, `05a1d44`, `75f94a8`) implemented create-only Drive
+  object storage: exact-ID occupied/ambiguous resolution, take-once owned
+  bytes/files, provider-confirmed resumable transfer with bounded restart
+  and stall guards, compare-and-set persistence that fails closed, per-role
+  Stage 1/2 byte ceilings, and lineage-visible small creates proven by a
+  create-to-list round trip.
+
+Deferred minors, controller rulings, and the full fix-round history are in
+the ignored SDD ledger. The pending Task 12 codec-tightening ruling and the
+Task 14 live-confirmation carry-forwards are recorded there and in the
+session status above. The protected workspace and user-owned `artifacts/`
+were untouched; all connected and credentialed evidence came from sole
+audited read-only disposables.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
