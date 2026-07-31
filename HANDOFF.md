@@ -1,34 +1,41 @@
 # Open Tasks Handoff
 
-- Last updated: 30 July 2026
+- Last updated: 31 July 2026
 - Branch: `main`
 - Session status: **Stage 3 execution is paused at the user's request after
-  Task 6 of the create-only plan. Tasks 1–6 are complete, independently
+  Task 7 of the create-only plan. Tasks 1–7 are complete, independently
   reviewed, and committed: the qualified create-only transport (`b6191fd`),
   frozen ownership and publication formats (`7ce27b1`), additive Room v7
   remote state (`b0284bb`, `184786f`), crash-safe vault slot gating
   (`5fc11ae`, `839efc5`, `4f57781`), explicit authorization and account
-  binding (`ca70ca8`, `2bb76dc`), and create-only Drive object storage
-  (`051ce53`, `05a1d44`, `75f94a8`). Every task review closed with zero open
-  Critical or Important findings; deferred minors, rulings, and fix-round
-  history live in the ignored SDD ledger
+  binding (`ca70ca8`, `2bb76dc`), create-only Drive object storage
+  (`051ce53`, `05a1d44`, `75f94a8`), and crash-resumable epoch-one
+  ownership resolution and publication (`85e2f57`, `bf9bcb2`). Every task
+  review closed with zero open Critical or Important findings; deferred
+  minors, rulings, and fix-round history live in the ignored SDD ledger
   `.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/progress.md`.
-  Resume at Task 7 (Resolve Ownership and Publish Epoch One) of
+  Resume at Task 8 (Publish Immutable Successors and Clean Safely) of
   `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`
   with subagent-driven execution. Two user rulings amended that plan in
   place: the v7 config entity gained `previousPublicationGeneration`, and
   `DriveAuthorizationResult.Unavailable` now carries a bounded reason enum.
   One ruling is pending implementation at Task 12: tighten the publication
   codec so equal local generation requires a recovery-credential-generation
-  increase, amending the brief-mandated equal-generation test. Task 14
-  carry-forwards: live confirmation of the Google `Account` derivation used
-  for revoke, and R8 keep-rule reachability once product UI calls
-  `authorize()`. The disposable emulator was shut down cleanly; the AVD
-  retains the signed-in Google account that disposables inherit for
-  credentialed gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain
-  complete and independently reviewed.**
-- Current source implementation point: `75f94a8` (`fix: bound oversized
-  upload rejection`). The prior Stage 2 correction point is
+  increase, amending the brief-mandated equal-generation test. Task 8
+  carry-forwards from the Task 7 boundary: clear stale resumable transfer
+  state before a planned base is re-encoded, and close the
+  `storeIdentities` local crash window whose orphaned configuration row
+  aborts every later `connect`. One question awaits a user ruling: whether
+  a malformed listed ownership root may keep blocking root discovery
+  permanently, or needs a bounded recovery path. Task 14 carry-forwards:
+  live confirmation of the Google `Account` derivation used for revoke,
+  and R8 keep-rule reachability once product UI calls `authorize()`. No
+  emulator ran in the Task 7 session (JVM-only work); the AVD retains the
+  signed-in Google account that disposables inherit for credentialed
+  gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and
+  independently reviewed.**
+- Current source implementation point: `bf9bcb2` (`fix: resume connect
+  across create-and-crash windows`). The prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
@@ -96,13 +103,15 @@ protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
 package are implemented and user-visible in More. Stage 3 create-only Tasks
-1–6 are committed and reviewed: qualified transport, frozen formats, Room v7
+1–7 are committed and reviewed: qualified transport, frozen formats, Room v7
 remote state, crash-safe vault slot gating, explicit authorization with HMAC
-account binding, and byte-bounded create-only object storage. Ownership
-resolution, publication, scheduling, recovery activation, writer takeover,
-lifecycle, product UI, cloud attachments and Play Console work have not
-started (plan Tasks 7–14). Release gates which depend
-on those later features remain blocked by their listed prerequisites.
+account binding, byte-bounded create-only object storage, and
+crash-resumable epoch-one ownership resolution with two verified bases and
+a sequence-zero baseline publication. Successor publication, cleanup,
+scheduling, recovery activation, writer takeover, lifecycle, product UI,
+cloud attachments and Play Console work have not started (plan Tasks 8–14).
+Release gates which depend on those later features remain blocked by their
+listed prerequisites.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
 independent of SQLCipher database keys and have separate recovery and per-vault
@@ -115,8 +124,9 @@ backup journal, strict snapshot/segment payloads, consistent capture, verified
 local recovery objects, recovery-envelope preparation, the portable package,
 runtime activation, exact Android eligibility, inert restored input, and
 status UI. The final review's correctness defects are closed in `f9e091b`.
-Drive transport, user recovery activation, and attachments are not
-implemented. The historical Train 1 Task 1.6 is superseded.
+User recovery activation and attachment transport are not implemented; the
+committed Stage 3 Drive transport work is recorded above. The historical
+Train 1 Task 1.6 is superseded.
 
 ## Stage 3 provider and replacement-design checkpoint — 30 July 2026
 
@@ -267,6 +277,55 @@ Task 14 live-confirmation carry-forwards are recorded there and in the
 session status above. The protected workspace and user-owned `artifacts/`
 were untouched; all connected and credentialed evidence came from sole
 audited read-only disposables.
+
+## Stage 3 create-only Task 7 checkpoint — 31 July 2026
+
+Subagent-driven execution resumed from `a46f1f5` on `main`. Task 7
+(`85e2f57`, `bf9bcb2`) implemented epoch-one ownership resolution and
+publication and closed its independent review with zero open Critical or
+Important findings after one fix round.
+
+- `OwnershipChainStore` resolves ownership by exact successor IDs only:
+  public headers navigate, the root and every successor authenticate after
+  content-key unlock, a missing successor is the tip, authenticated and
+  public tips must agree, and every duplicate, fork, decoy, epoch overflow,
+  or bound violation (64 roots, 1,024 claims, 128 candidates) fails closed
+  with no alternate slot.
+- `PublicationCatalog` authenticates bounded publication candidates and
+  rejects duplicate sequences, forks, gaps, generation regressions,
+  competing tips, and claim/device mismatches.
+- `RemoteObjectCodec` re-authenticates local Stage 2 objects and
+  re-encrypts them under explicit fresh remote logical IDs, so the two
+  epoch-one base copies never share identity; staged files are synced,
+  cleared, and deleted on failure.
+- `DefaultRemoteBackupConfigurator` runs crash-resumable epoch-one setup
+  over the plan's exact ten phases: identities are generated once and
+  persisted, two independent complete bases are uploaded and verified, the
+  sequence-zero baseline binds the planned root and the root binds the
+  baseline back, and remote backup activates only after root readback and
+  full chain re-resolution. The fix round made every create-and-crash
+  window resumable: intended bytes are recorded durably before the first
+  network mutation, and an occupied slot is adopted only when its occupant
+  authenticates at this connection's persisted identity; foreign occupants
+  stay ambiguous or lost, and no alternate slot is ever generated.
+- The review upheld the recorded interface deviations (sealed
+  Blocked-capable discovery results, `PublicationCandidate`, a `contentKey`
+  parameter on `createClaim`, nullable list lineage) as forced by the
+  Task 6 list()-failure carry-forward and the frozen Task 2 formats.
+- Evidence: focused RED compilation failure first; GREEN
+  `:core:data:testDebugUnitTest` 317/317 (60 Task 7 tests plus 5 fix-round
+  crash-window and fail-closed guard tests, mutation-verified); repository
+  gate 547 tasks and separate release assembly 441 tasks passed at
+  `bf9bcb2`; `git diff --check` clean. No emulator, ADB, or connected
+  command ran; the protected workspace and user-owned `artifacts/` were
+  untouched.
+
+Carry-forwards for the resume session are in the ledger: Task 8 must clear
+stale resumable transfer state before re-encoding a planned base and close
+the `storeIdentities` orphaned-configuration-row crash window; a user
+ruling is requested on whether a malformed listed ownership root may block
+root discovery permanently; the deferred-minor list gained the Task 7
+review and re-review items.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
@@ -1246,15 +1305,16 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 ## Current programme boundary
 
 There is no uncommitted source implementation. Stage 2 is implemented,
-verified, and reviewed through its task boundaries. The local coordinator and
-portable Android package are shipped source features, but package readiness is
-only a local fact. Drive transport, recovery activation, writer takeover,
-remote merge, and attachment transport remain absent.
+verified, and reviewed through its task boundaries, and Stage 3 create-only
+Tasks 1–7 are committed and reviewed through `bf9bcb2`. The local
+coordinator and portable Android package are shipped source features, but
+package readiness is only a local fact. Recovery activation, writer
+takeover, remote merge, and attachment transport remain absent.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
-the queued dependency updates are resolved in the verified 30 July maintenance
-commit. No Stage 3 source change is authorised until focused brainstorming, design, and implementation
-planning are reviewed and approved.
+the queued dependency updates are resolved in the verified 30 July
+maintenance commit. The approved Stage 3 execution authority is the
+create-only plan named in the session status; resume it at Task 8.
 
 ## Resume instructions
 
@@ -1270,9 +1330,9 @@ planning are reviewed and approved.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
-3. With a new explicit user request, begin focused Stage 3 brainstorming and
-   design. Do not write provider, recovery, writer-epoch, or remote-retention
-   source before the new design and implementation plan are approved.
+3. With a new explicit user request, resume the approved create-only plan at
+   Task 8 with subagent-driven execution, honouring the ledger's
+   carry-forwards, pending rulings, and deferred minors.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -1298,7 +1358,7 @@ recorded above.
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
-| 3 | App-managed backup and recovery takeover | Ready for brainstorming and design | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
+| 3 | App-managed backup and recovery takeover | Paused mid-execution after plan Task 7 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
@@ -1311,10 +1371,13 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Brainstorm and design Stage 3 app-managed backup and recovery takeover
-   against the completed Stage 2 boundary.
-2. Review and approve the Stage 3 design and detailed implementation plan.
-3. Only then begin Stage 3 source work.
+1. Resume the approved Stage 3 create-only plan at Task 8 (Publish
+   Immutable Successors and Clean Safely) from `bf9bcb2`.
+2. Continue through Tasks 9–14, applying the pending Task 12 ruling and the
+   recorded Task 8 and Task 14 carry-forwards.
+3. Close Stage 3 with the credentialed two-installation, tombstone,
+   protected-workspace, privacy, schema, release, and connected gates
+   before any Stage 4 work.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -1419,9 +1482,9 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-After a new explicit user request, run focused Stage 3 brainstorming and design
-for app-managed encrypted backup, retention, recovery takeover, writer epochs,
-and stale-writer rejection.
+After a new explicit user request, resume the Stage 3 create-only plan at
+Task 8 (Publish Immutable Successors and Clean Safely) with subagent-driven
+execution from `bf9bcb2`.
 Preserve Room as the sole live structured-data authority and treat the Stage 2
 Android package as supplementary recovery input, not upload evidence.
 
