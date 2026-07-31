@@ -23,6 +23,7 @@ import app.opentasks.core.data.backup.RemoteBackupConfigDao
 import app.opentasks.core.data.backup.RemoteBackupConfigEntity
 import app.opentasks.core.data.backup.RemoteBackupObjectDao
 import app.opentasks.core.data.backup.RemoteBackupObjectEntity
+import app.opentasks.core.data.backup.RecoveryImportDao
 import app.opentasks.core.data.backup.RemoteBackupOperationDao
 import app.opentasks.core.data.backup.RemoteBackupOperationEntity
 import app.opentasks.core.data.backup.VaultRecoveryEnvelopeDao
@@ -405,6 +406,16 @@ abstract class VaultDatabase : RoomDatabase() {
     internal abstract fun backupMutationDao(): BackupMutationDao
     abstract fun backupStateDao(): BackupStateDao
     abstract fun vaultRecoveryEnvelopeDao(): VaultRecoveryEnvelopeDao
+
+    /**
+     * Recovery-only write and read-back access.
+     *
+     * The DAO declares no new entity, so registering it changes no schema; it
+     * exists solely so a recovery import and its verifier can reach a new
+     * inactive staging database without widening any normal write path.
+     */
+    internal abstract fun recoveryImportDao(): RecoveryImportDao
+
     abstract fun backupCaptureDao(): BackupCaptureDao
     abstract fun remoteBackupConfigDao(): RemoteBackupConfigDao
     abstract fun remoteBackupObjectDao(): RemoteBackupObjectDao

@@ -125,6 +125,44 @@ object LocalVaultRepositoryFactory {
         publicationCodec = PublicationCodec(authenticatedCodec),
     )
 
+    /**
+     * Creates a staged slot's database under a brand-new SQLCipher key.
+     *
+     * No repository, journal, or content-key service is built on top: only the
+     * recovery importer writes here, and the slot stays inactive until the
+     * staged-vault verifier has proved it.
+     */
+    internal fun createStagingDatabase(
+        context: Context,
+        slot: VaultSlot,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ): VaultDatabase = openStagingDatabase(context, slot) { keyManager.createDatabaseKey(slot) }
+
+    /** Reopens a staged slot's database for verification, creating no key. */
+    internal fun openStagingDatabase(
+        context: Context,
+        slot: VaultSlot,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ): VaultDatabase =
+        openStagingDatabase(context, slot) { keyManager.openExistingDatabaseKey(slot) }
+
+    private fun openStagingDatabase(
+        context: Context,
+        slot: VaultSlot,
+        databaseKey: () -> ByteArray,
+    ): VaultDatabase {
+        val key = databaseKey()
+        return try {
+            VaultDatabase.create(
+                context.applicationContext,
+                LocalVaultRuntimeFactory.databaseName(slot),
+                key,
+            )
+        } finally {
+            key.fill(0)
+        }
+    }
+
     internal fun storageNamespace(slot: VaultSlot): String? =
         if (slot == VaultSlot.LEGACY) null else slot.digest
 
