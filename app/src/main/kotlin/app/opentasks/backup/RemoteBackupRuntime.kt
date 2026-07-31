@@ -262,8 +262,16 @@ class DefaultRemoteBackupRunner(
  * re-enqueueing on every edit would let a vault edited more often than an
  * upload takes never finish the debounced path at all. The runner's in-flight
  * state is therefore part of what this observes, and a run finishing is its
- * own event: the runtime re-evaluates then and enqueues if the lineage is
- * still behind.
+ * own event.
+ *
+ * That completion enqueues only for work the finished run did not already
+ * attempt — a generation strictly newer than the one it started from. A run
+ * that fails with nothing new behind it must not re-arm the debounce: doing
+ * so would poll an outcome that cannot change on its own every fifteen
+ * minutes forever, and would replace the still-returning worker, discarding
+ * the `Result.retry()` whose 30-second exponential backoff is what actually
+ * owns transient retry. An action-required state waits for the person or for
+ * the periodic pass instead.
  *
  * The runner is held as its concrete type on purpose. This runtime owns the
  * single runner for its slot, and that ownership is what both the in-flight
@@ -281,8 +289,15 @@ class DefaultRemoteBackupRuntime(
     private val manualRequests = Channel<Unit>(Channel.CONFLATED)
     private var observation: Job? = null
 
-    /** Only ever read and written by the single observing coroutine. */
+    // All three are only ever read and written by the single observing
+    // coroutine, so they need no synchronisation.
     private var lastActive: Boolean? = null
+
+    /** The generation the debounced work was last enqueued for. */
+    private var requestedGeneration: Long? = null
+
+    /** The generation observed when the run currently in flight began. */
+    private var runStartGeneration: Long? = null
 
     override fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -332,15 +347,47 @@ class DefaultRemoteBackupRuntime(
             configuration.lifecycle == RemoteBackupLifecycle.ACTIVE
         if (lastActive != active) {
             lastActive = active
-            if (active) scheduler.ensurePeriodic() else scheduler.cancelAll()
+            if (active) {
+                scheduler.ensurePeriodic()
+            } else {
+                // A lineage that stops being active abandons what it asked
+                // for, so a later activation arms the debounce again.
+                requestedGeneration = null
+                runStartGeneration = null
+                scheduler.cancelAll()
+            }
         }
         if (configuration == null || !active) return
-        // Enqueueing replaces — and so cancels — a run already in progress.
-        // The run finishing is itself an observation, which is what re-checks
-        // whether the lineage is still behind.
-        if (observation.running) return
+
+        if (observation.running) {
+            // Enqueueing replaces — and so cancels — a run already in
+            // progress. Remembering the generation this run started from is
+            // what lets its completion tell newer work apart from the work it
+            // already attempted.
+            if (runStartGeneration == null) runStartGeneration = observation.generation
+            return
+        }
+
+        val startedFrom = runStartGeneration
+        runStartGeneration = null
         val verified = configuration.lastVerifiedGeneration?.value ?: NOTHING_VERIFIED
-        if (observation.generation > verified) scheduler.onPendingGeneration()
+        if (observation.generation <= verified) return
+        // The run that just finished already attempted exactly this
+        // generation, so re-arming the debounce would poll a result that
+        // cannot change on its own — every 15 minutes, forever. What happens
+        // next belongs to that run's own outcome instead: WorkManager's
+        // 30-second exponential backoff owns a transient failure, and an
+        // action-required state waits for the person or the periodic pass.
+        // Re-arming here would also replace the still-returning worker and
+        // discard the `Result.retry()` it is in the middle of reporting.
+        if (startedFrom != null && observation.generation <= startedFrom) return
+        // Work is already scheduled for this generation; a configuration
+        // change alone is no reason to restart its debounce.
+        val requested = requestedGeneration
+        if (requested != null && observation.generation <= requested) return
+
+        requestedGeneration = observation.generation
+        scheduler.onPendingGeneration()
     }
 
     private data class Observation(

@@ -351,25 +351,36 @@ class RemoteBackupRuntimeTest {
         assertEquals(0, fixture.openedObjectStores.get())
     }
 
+    /**
+     * Ordering is established by the coordinator gate, not by racing delays:
+     * the first run provably holds the single-run lock before the second is
+     * launched, and the lock is only released after the slot has stopped.
+     */
     @Test
-    fun aRunnerAlreadyQueuedBehindAnotherRunStillRefusesOnceItsSlotIsStopped() {
+    fun aRunnerQueuedBehindAnotherRunStillRefusesOnceItsSlotIsStopped() {
         val fixture = runnerFixture(outcome = RemoteBackupRunResult.NoChanges)
-        fixture.coordinator.passDelayMillis = 50
+        val release = CountDownLatch(1)
+        val queuedEntered = CountDownLatch(1)
+        fixture.coordinator.gate = release
 
-        val results = runBlocking {
+        val queuedResult = runBlocking {
             withTimeout(5_000) {
-                val first = async(Dispatchers.Default) { fixture.runner.run() }
+                val holder = async(Dispatchers.Default) { fixture.runner.run() }
+                // The first run is inside the coordinator, holding the lock.
+                assertTrue(fixture.coordinator.awaitPasses(1))
                 val queued = async(Dispatchers.Default) {
-                    // Queues behind the first run, then the slot goes away.
-                    delay(10)
-                    fixture.runner.stop()
+                    queuedEntered.countDown()
                     fixture.runner.run()
                 }
-                listOf(first.await(), queued.await())
+                queuedEntered.await()
+                fixture.runner.stop()
+                release.countDown()
+                holder.await()
+                queued.await()
             }
         }
 
-        assertEquals(RemoteBackupRunResult.NoChanges, results[1])
+        assertEquals(RemoteBackupRunResult.NoChanges, queuedResult)
         assertEquals(1, fixture.coordinator.passes.get())
     }
 
@@ -493,6 +504,97 @@ class RemoteBackupRuntimeTest {
         fixture.close()
     }
 
+    /**
+     * A run that finishes with nothing new behind it must leave the debounce
+     * alone. Re-arming would poll an outcome that cannot change on its own
+     * every debounce, forever — a silent authorization and an `about.get`
+     * each time — which is exactly what the worker's own contract says not to
+     * do.
+     */
+    @Test
+    fun aFailedRunWithNoNewEditsNeverReArmsTheDebouncedWork() {
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 5,
+            outcome = RemoteBackupRunResult.AuthorizationRequired,
+        )
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(2))
+        assertEquals(listOf("periodic", "pending"), fixture.scheduler.events())
+
+        fixture.runtime.requestNow()
+        assertTrue(fixture.coordinator.awaitPasses(1))
+        // The run's bounded action-required state reaches the configuration.
+        fixture.configuration.value = configuration(
+            verifiedGeneration = 4,
+            failureCategory = RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+        )
+
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(listOf("periodic", "pending"), fixture.scheduler.events())
+        fixture.close()
+    }
+
+    /**
+     * The completion emission fires while the worker that produced it is
+     * still returning. Enqueueing then would `REPLACE` — and so cancel — that
+     * worker, throwing away the `Result.retry()` whose 30-second exponential
+     * backoff is what actually owns transient retry.
+     */
+    @Test
+    fun aRetryableRunCompletionNeverReplacesTheWorkerStillReportingIt() {
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 5,
+            outcome = RemoteBackupRunResult.Retryable(
+                RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+            ),
+        )
+        val release = CountDownLatch(1)
+        fixture.coordinator.gate = release
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(2))
+        fixture.runtime.requestNow()
+        // Held open so the runtime observes the run in flight, and observes
+        // its completion as a distinct event rather than a conflated flicker.
+        assertTrue(fixture.coordinator.awaitPasses(1))
+        assertTrue(fixture.awaitRunning(true))
+        release.countDown()
+        assertTrue(fixture.awaitRunning(false))
+
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(listOf("periodic", "pending"), fixture.scheduler.events())
+        fixture.close()
+    }
+
+    @Test
+    fun repeatedRunsWithoutNewLocalWorkEnqueueNothingBeyondTheFirstDebounce() {
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 5,
+            outcome = RemoteBackupRunResult.AuthorizationRequired,
+        )
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(2))
+        repeat(3) { attempt ->
+            val release = CountDownLatch(1)
+            fixture.coordinator.gate = release
+            fixture.runtime.requestNow()
+            assertTrue(fixture.coordinator.awaitPasses(attempt + 1))
+            assertTrue(fixture.awaitRunning(true))
+            release.countDown()
+            assertTrue(fixture.awaitRunning(false))
+        }
+
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(listOf("periodic", "pending"), fixture.scheduler.events())
+        assertEquals(3, fixture.coordinator.passes.get())
+        fixture.close()
+    }
+
     @Test
     fun stoppingTheRuntimeStopsItsRunnerSoLateWorkCannotDriveAReplacedSlot() {
         val fixture = runtimeFixture(verifiedGeneration = 4, localGeneration = 4)
@@ -588,6 +690,7 @@ class RemoteBackupRuntimeTest {
         verifiedGeneration: Long,
         localGeneration: Long,
         configured: Boolean = true,
+        outcome: RemoteBackupRunResult = RemoteBackupRunResult.NoChanges,
     ): RuntimeFixture {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val configurationFlow = MutableStateFlow(
@@ -596,7 +699,7 @@ class RemoteBackupRuntimeTest {
         val generationFlow = MutableStateFlow(localGeneration)
         val scheduler = RecordingBackupWorkScheduler()
         val runnerFixture = runnerFixture(
-            outcome = RemoteBackupRunResult.NoChanges,
+            outcome = outcome,
             configured = configured,
         )
         val runner = runnerFixture.runner
@@ -626,6 +729,16 @@ class RemoteBackupRuntimeTest {
         val coordinator: FakeRemoteBackupCoordinator,
         val runtime: DefaultRemoteBackupRuntime,
     ) {
+        /** Waits for the single-run lock to be held, or released again. */
+        fun awaitRunning(expected: Boolean): Boolean {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (System.nanoTime() < deadline) {
+                if (runner.running.value == expected) return true
+                Thread.sleep(5)
+            }
+            return runner.running.value == expected
+        }
+
         fun close() {
             scope.cancel()
         }
