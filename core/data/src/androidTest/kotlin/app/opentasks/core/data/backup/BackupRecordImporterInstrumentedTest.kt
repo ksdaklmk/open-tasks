@@ -34,6 +34,8 @@ import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.VaultId
+import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -549,6 +551,56 @@ class BackupRecordImporterInstrumentedTest {
         )
     }
 
+    /**
+     * The VAULT family is deletable in replay as long as the final state still
+     * describes exactly one vault, which is what exercises `deleteVault`.
+     */
+    @Test
+    fun replayDeletesAndReUpsertsTheRecoveredVaultRow() = runBlocking {
+        val restored = vaultEntity().copy(createdAtEpochMillis = 1_700_000_099_000)
+        val request = request(
+            snapshot = oneRecordPerFamilySnapshot(),
+            segments = listOf(
+                segment(
+                    listOf(
+                        deleteEntry(
+                            operationId = "delete-vault",
+                            generation = 6,
+                            sequence = 0,
+                            family = BackupRecordFamily.VAULT,
+                            identity = listOf(VAULT_ID),
+                        ),
+                        recordUpsertEntry(
+                            operationId = "restore-vault",
+                            generation = 7,
+                            sequence = 0,
+                            record = restored.toBackupRecordV1(),
+                        ),
+                    ),
+                ),
+            ),
+            expectedGeneration = BackupGeneration(7),
+        )
+
+        importer.importInto(staging(), request)
+
+        assertEquals(1, importedCount(staging(), BackupRecordFamily.VAULT))
+        assertRow(
+            table = "vaults",
+            where = "id = ?",
+            whereArgs = arrayOf(VAULT_ID),
+            expected = mapOf(
+                "id" to VAULT_ID,
+                "storageMode" to "LOCAL",
+                "createdAtEpochMillis" to 1_700_000_099_000L,
+                "schemaVersion" to 7,
+                "cryptoVersion" to 1,
+                "minimumReaderVersion" to 1,
+            ),
+        )
+        assertEquals(7L, staging().backupStateDao().require(VAULT_ID).currentGeneration)
+    }
+
     @Test
     fun replayDeletingTheRecoveredVaultIsRejected() = runBlocking {
         assertRejected {
@@ -994,6 +1046,140 @@ class BackupRecordImporterInstrumentedTest {
         Unit
     }
 
+    /**
+     * The staged record set is read through vault-scoped capture queries, so a
+     * row bound to another vault is invisible to them and to every relation
+     * check; only an unscoped total can exclude it.
+     */
+    @Test
+    fun verificationRejectsAStagedRowOutsideTheRecoveredVault() = runBlocking {
+        val request = request(completeVaultSnapshot(), expectedGeneration = BackupGeneration(12))
+        importer.importInto(staging(), request)
+        staging().openHelper.writableDatabase.execSQL(
+            """
+            INSERT INTO vaults (
+                id, storageMode, createdAtEpochMillis, schemaVersion, cryptoVersion,
+                minimumReaderVersion
+            ) VALUES ('$FOREIGN_VAULT_ID', 'LOCAL', 1, 7, 1, 1)
+            """.trimIndent(),
+        )
+        closeStaging()
+        installContentKey()
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                verifier().verify(
+                    slot = slot,
+                    expectedVaultId = VaultId(VAULT_ID),
+                    expectedGeneration = BackupGeneration(12),
+                    expectedCapture = request.expectedCapture(),
+                )
+            }
+        }
+        Unit
+    }
+
+    /**
+     * Every reference resolves and every record is individually valid here, yet
+     * the task's semantic status contradicts the workflow status it points at —
+     * a state Stage 2 would refuse to capture.
+     */
+    @Test
+    fun verificationRejectsARecordSetThatIsNotAValidVaultState() = runBlocking {
+        val contradiction = completeTask(
+            id = COMPLETE_PREREQUISITE_ID,
+            semantic = SemanticStatus.PLANNED,
+            milestoneId = null,
+        ).copy(semanticStatus = SemanticStatus.BLOCKED.name).toBackupRecordV1()
+        val request = request(
+            replacing(completeVaultSnapshot(), contradiction),
+            expectedGeneration = BackupGeneration(12),
+        )
+        importer.importInto(staging(), request)
+        closeStaging()
+        installContentKey()
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                verifier().verify(
+                    slot = slot,
+                    expectedVaultId = VaultId(VAULT_ID),
+                    expectedGeneration = BackupGeneration(12),
+                    expectedCapture = request.expectedCapture(),
+                )
+            }
+        }
+        Unit
+    }
+
+    /**
+     * Opening a normal repository runs the local retention purge, so a recovery
+     * old enough to hold expired trash legitimately moves past the record set
+     * that was just verified. That must be accounted for, not rejected.
+     */
+    @Test
+    fun verificationAcceptsAndReportsTheRetentionPurgeTheRuntimePerforms() = runBlocking {
+        val request = request(expiredTrashSnapshot(), expectedGeneration = BackupGeneration(12))
+        importer.importInto(staging(), request)
+        closeStaging()
+        installContentKey()
+
+        val verified = withTimeout(TIMEOUT_MILLIS) {
+            verifier().verify(
+                slot = slot,
+                expectedVaultId = VaultId(VAULT_ID),
+                expectedGeneration = BackupGeneration(12),
+                expectedCapture = request.expectedCapture(),
+            )
+        }
+
+        assertEquals(BackupGeneration(12), verified.recoveredGeneration)
+        assertEquals(BackupGeneration(13), verified.activationGeneration)
+        assertEquals(1, verified.retentionPurge.purgedTaskCount)
+        assertEquals(EXPIRED_TRASH_RECORDS, verified.retentionPurge.removedRecordCount)
+        assertEquals(EXPIRED_TRASH_RECORDS + 1, verified.retentionPurge.journalEntryCount)
+
+        reopenStaging()
+        assertEquals(
+            verified.activationGeneration.value,
+            staging().backupStateDao().require(VAULT_ID).currentGeneration,
+        )
+        assertEquals(2, importedCount(staging(), BackupRecordFamily.TASK))
+        assertEquals(EXPIRED_TRASH_RECORDS + 1, tableCount("backup_journal"))
+        assertEquals(EXPIRED_DELETED_AT, tombstoneDeletedAt(EXPIRED_TASK_ID))
+    }
+
+    /**
+     * The same purge, judged by a clock under which that task was not yet
+     * eligible: drift verification cannot attribute to expired trash is drift
+     * that must fail closed.
+     */
+    @Test
+    fun verificationRejectsDriftItCannotAttributeToExpiredTrash() = runBlocking {
+        val request = request(expiredTrashSnapshot(), expectedGeneration = BackupGeneration(12))
+        importer.importInto(staging(), request)
+        closeStaging()
+        installContentKey()
+
+        val verifier = DefaultStagedVaultVerifier(
+            context = context,
+            crypto = crypto,
+            now = { Instant.ofEpochMilli(EXPIRED_DELETED_AT) },
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                verifier.verify(
+                    slot = slot,
+                    expectedVaultId = VaultId(VAULT_ID),
+                    expectedGeneration = BackupGeneration(12),
+                    expectedCapture = request.expectedCapture(),
+                )
+            }
+        }
+        Unit
+    }
+
     @Test
     fun verificationRejectsStagingThatHoldsOperationalRows() = runBlocking {
         val request = request(completeVaultSnapshot(), expectedGeneration = BackupGeneration(12))
@@ -1029,6 +1215,12 @@ class BackupRecordImporterInstrumentedTest {
     private fun closeStaging() {
         database?.close()
         database = null
+    }
+
+    /** Reads the staged slot again once verification has released it. */
+    private fun reopenStaging() {
+        closeStaging()
+        database = LocalVaultRepositoryFactory.openStagingDatabase(context, slot)
     }
 
     private fun verifier(): StagedVaultVerifier = DefaultStagedVaultVerifier(context, crypto)
@@ -1451,6 +1643,81 @@ class BackupRecordImporterInstrumentedTest {
         )
     }
 
+    /**
+     * A complete vault whose Bin holds one task deleted long enough ago that a
+     * normal repository purges it the moment it opens, together with every
+     * child record that purge cascades through.
+     */
+    private fun expiredTrashSnapshot(): BackupSnapshotPayloadV1 {
+        val complete = completeVaultSnapshot()
+        return complete.copy(
+            records = complete.records + listOf(
+                completeTask(
+                    id = EXPIRED_TASK_ID,
+                    semantic = SemanticStatus.PLANNED,
+                    milestoneId = null,
+                ).copy(
+                    title = "Expired task",
+                    deletedAtEpochMillis = EXPIRED_DELETED_AT,
+                ).toBackupRecordV1(),
+                ChecklistItemEntity(
+                    id = "check-expired",
+                    taskId = EXPIRED_TASK_ID,
+                    text = "Expired step",
+                    completed = false,
+                    rank = "a0",
+                ).toBackupRecordV1(),
+                TaskDependencyEntity(
+                    taskId = EXPIRED_TASK_ID,
+                    dependsOnTaskId = COMPLETE_PREREQUISITE_ID,
+                    revisionWallMillis = 1,
+                    revisionLogical = 0,
+                    revisionDeviceId = SOURCE_DEVICE_ID,
+                ).toBackupRecordV1(),
+                TaskTagEntity(
+                    taskId = EXPIRED_TASK_ID,
+                    tagId = TAG_ID,
+                    present = true,
+                    revisionWallMillis = 1,
+                    revisionLogical = 0,
+                    revisionDeviceId = SOURCE_DEVICE_ID,
+                ).toBackupRecordV1(),
+                ReminderEntity(
+                    id = "reminder:$EXPIRED_TASK_ID",
+                    taskId = EXPIRED_TASK_ID,
+                    triggerAtEpochMillis = 1_700_000_007_000,
+                    zoneId = "UTC",
+                    precise = false,
+                ).toBackupRecordV1(),
+                AttachmentEntity(
+                    id = "attachment-expired",
+                    taskId = EXPIRED_TASK_ID,
+                    displayNameCiphertext = DISPLAY_NAME_CIPHERTEXT.copyOf(),
+                    mimeType = "application/pdf",
+                    byteCount = 8,
+                    contentHash = CONTENT_HASH,
+                    keepOffline = false,
+                ).toBackupRecordV1(),
+                ActivityEntryEntity(
+                    id = "activity-expired",
+                    taskId = EXPIRED_TASK_ID,
+                    projectId = COMPLETE_PROJECT_ID,
+                    kind = "UPDATED",
+                    bodyCiphertext = BODY_CIPHERTEXT.copyOf(),
+                    createdAtEpochMillis = 1_700_000_008_000,
+                ).toBackupRecordV1(),
+                TimeEntryEntity(
+                    id = "time-expired",
+                    taskId = EXPIRED_TASK_ID,
+                    deviceId = SOURCE_DEVICE_ID,
+                    startedAtEpochMillis = 1_700_000_009_000,
+                    stoppedAtEpochMillis = 1_700_000_010_000,
+                    noteCiphertext = NOTE_CIPHERTEXT.copyOf(),
+                ).toBackupRecordV1(),
+            ),
+        )
+    }
+
     private fun completeTask(
         id: String,
         semantic: SemanticStatus,
@@ -1596,16 +1863,28 @@ class BackupRecordImporterInstrumentedTest {
         generation: Long,
         sequence: Int,
         record: TaskEntity = taskEntity(),
+    ): BackupSegmentEntryV1 = recordUpsertEntry(
+        operationId = operationId,
+        generation = generation,
+        sequence = sequence,
+        record = record.toBackupRecordV1(),
+    )
+
+    private fun recordUpsertEntry(
+        operationId: String,
+        generation: Long,
+        sequence: Int,
+        record: BackupRecordV1,
     ): BackupSegmentEntryV1 = entry(
         operationId = operationId,
         generation = generation,
         sequence = sequence,
-        family = BackupRecordFamily.TASK,
-        identity = listOf(record.id),
+        family = record.family,
+        identity = record.identity,
         payload = BackupMutationCodec.encode(
             BackupMutationPayloadV1(
                 mutationKind = BackupMutationKind.UPSERT,
-                record = record.toBackupRecordV1(),
+                record = record,
                 deletedFamily = null,
                 deletedIdentity = null,
             ),
@@ -1689,6 +1968,15 @@ class BackupRecordImporterInstrumentedTest {
         database: VaultDatabase,
         family: BackupRecordFamily,
     ): Int = tableCount(family.tableName(), database)
+
+    private fun tombstoneDeletedAt(objectId: String): Long? = staging()
+        .openHelper
+        .readableDatabase
+        .query(
+            "SELECT deletedAtEpochMillis FROM tombstones WHERE objectId = ? AND objectType = ?",
+            arrayOf(objectId, TOMBSTONE_OBJECT_TYPE),
+        )
+        .use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
 
     private fun tableCount(
         table: String,
@@ -1784,6 +2072,15 @@ class BackupRecordImporterInstrumentedTest {
         const val COMPLETE_MILESTONE_ID = "milestone-complete"
         const val COMPLETE_TASK_ID = "task-complete"
         const val COMPLETE_PREREQUISITE_ID = "task-complete-prerequisite"
+        const val EXPIRED_TASK_ID = "task-expired"
+
+        /** The task itself plus every child record `purgeTask` cascades through. */
+        const val EXPIRED_TRASH_RECORDS = 8
+
+        /** Sorts after the recovered vault, so it cannot be read as its identity. */
+        const val FOREIGN_VAULT_ID = "vault-zzz-elsewhere"
+        val EXPIRED_DELETED_AT: Long =
+            System.currentTimeMillis() - Duration.ofDays(60).toMillis()
         val DESCRIPTION_CIPHERTEXT = byteArrayOf(1, 2, 3, 4, 5)
         val DISPLAY_NAME_CIPHERTEXT = byteArrayOf(11, 12, 13)
         val BODY_CIPHERTEXT = byteArrayOf(21, 22)

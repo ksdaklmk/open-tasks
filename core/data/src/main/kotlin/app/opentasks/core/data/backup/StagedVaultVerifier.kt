@@ -5,11 +5,14 @@ import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.data.AndroidVaultKeyManager
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.LocalVaultRuntime
+import app.opentasks.core.data.RetentionPurgeAccounting
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.data.VerifiedStagedVault
 import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.VaultId
+import java.time.Instant
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -33,6 +36,7 @@ internal class DefaultStagedVaultVerifier(
     context: Context,
     private val crypto: VaultCrypto,
     private val keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    private val now: () -> Instant = Instant::now,
 ) : StagedVaultVerifier {
     private val context = context.applicationContext
 
@@ -73,10 +77,25 @@ internal class DefaultStagedVaultVerifier(
             runtime.close()
         }
 
+        // That repository purged expired trash as it opened, so the staged vault
+        // above is no longer necessarily the staged vault below. Activation gets
+        // what the slot actually holds now, and only after every difference has
+        // been attributed to that purge.
+        val settled = LocalVaultRepositoryFactory.openStagingDatabase(context, slot, keyManager)
+        val outcome = try {
+            verifyStorageIntegrity(settled)
+            verifySettledState(settled, expectedVaultId, expectedGeneration, expectedCapture)
+                .also { checkpoint(settled) }
+        } finally {
+            settled.close()
+        }
+
         return VerifiedStagedVault(
             slot = slot,
             vaultId = expectedVaultId,
             recoveredGeneration = expectedGeneration,
+            activationGeneration = outcome.generation,
+            retentionPurge = outcome.retentionPurge,
         )
     }
 
@@ -156,6 +175,12 @@ internal class DefaultStagedVaultVerifier(
         expectedCapture: StructuredBackupCapture,
     ) {
         val actual = database.stagedRecords(expectedVaultId)
+        // Those reads are vault-scoped, so a row bound to another vault is
+        // invisible to them and to every relation they resolve; an unscoped
+        // total is the only thing that can exclude one.
+        check(database.recoveryImportDao().structuredRecordCount() == actual.size) {
+            "The staged vault holds a record outside the recovered vault"
+        }
         check(actual.size == expectedCapture.records.size) {
             "The staged vault holds a different number of records"
         }
@@ -165,7 +190,181 @@ internal class DefaultStagedVaultVerifier(
         ) {
             "The staged vault does not match the authenticated recovery"
         }
+        verifyVaultStateRules(expectedVaultId, expectedCapture.generation, actual)
     }
+
+    /**
+     * Proves the staged records form a vault state Stage 2 would accept.
+     *
+     * Matching the authenticated recovery record for record still allows a set
+     * no live vault could hold — an owner-less workspace, a workflow missing an
+     * active semantic status, a task whose status belongs to another workflow.
+     * The exhaustive rule set already lives in the snapshot codec, so this runs
+     * that codec over the staged records rather than restating any rule here.
+     */
+    private fun verifyVaultStateRules(
+        vaultId: VaultId,
+        generation: BackupGeneration,
+        records: List<BackupRecordV1>,
+    ) {
+        try {
+            BackupSnapshotCodec.encode(
+                BackupSnapshotPayloadV1(
+                    vaultId = vaultId.value,
+                    coveredGeneration = generation.value,
+                    records = records,
+                ),
+            ).fill(0)
+        } catch (failure: IllegalArgumentException) {
+            throw IllegalStateException("The staged vault is not a valid vault state", failure)
+        }
+    }
+
+    /**
+     * Re-reads the staged vault once the runtime smoke check has released it.
+     *
+     * `RoomVaultRepository` purges retention-expired trash as it initialises,
+     * which deletes records, appends journal entries, and advances the stored
+     * generation — correct local-authority behaviour that a legitimately old
+     * recovery must survive. Every difference from the verified capture is
+     * therefore attributed to that purge, and anything else fails closed.
+     */
+    private suspend fun verifySettledState(
+        database: VaultDatabase,
+        expectedVaultId: VaultId,
+        recoveredGeneration: BackupGeneration,
+        expectedCapture: StructuredBackupCapture,
+    ): SettledStagedVault {
+        val importDao = database.recoveryImportDao()
+        val actual = database.stagedRecords(expectedVaultId)
+        check(importDao.structuredRecordCount() == actual.size) {
+            "The staged vault holds a record outside the recovered vault"
+        }
+        check(importDao.localBackupStateCount() == 2) {
+            "The staged vault no longer holds exactly one backup state and envelope"
+        }
+        val journalEntryCount = importDao.journalEntryCount()
+        check(importDao.operationalRecordCount() == journalEntryCount) {
+            "The staged vault holds operational rows no local purge could write"
+        }
+
+        val retentionPurge = accountForRetentionPurge(
+            verified = expectedCapture.records,
+            actual = actual,
+            journalEntryCount = journalEntryCount,
+        )
+        val state = database.backupStateDao().get(expectedVaultId.value)
+        checkNotNull(state) { "The staged vault holds no backup state" }
+        val expectedGeneration = if (retentionPurge.purgedTaskCount == 0) {
+            recoveredGeneration.value
+        } else {
+            // The purge runs as one transaction, so it allocates one generation.
+            Math.addExact(recoveredGeneration.value, 1L)
+        }
+        check(state.currentGeneration == expectedGeneration) {
+            "The staged vault advanced past its retention purge"
+        }
+        return SettledStagedVault(
+            generation = BackupGeneration(state.currentGeneration),
+            retentionPurge = retentionPurge,
+        )
+    }
+
+    /**
+     * Attributes every difference to expired trash, or fails closed.
+     *
+     * A record may only disappear as part of purging a task that was in the Bin
+     * past retention, a record may only appear as the tombstone that purge
+     * writes, and journal entries are only allowed to exist when they match.
+     */
+    private fun accountForRetentionPurge(
+        verified: List<BackupRecordV1>,
+        actual: List<BackupRecordV1>,
+        journalEntryCount: Int,
+    ): RetentionPurgeAccounting {
+        val verifiedByKey = verified.associateBy { BackupRecordKey(it) }
+        val actualByKey = actual.associateBy { BackupRecordKey(it) }
+        check(actualByKey.size == actual.size) {
+            "The staged vault holds a duplicate record identity"
+        }
+
+        val removed = verifiedByKey.keys - actualByKey.keys
+        val written = actualByKey.keys.filterTo(mutableSetOf()) { key ->
+            actualByKey.getValue(key) != verifiedByKey[key]
+        }
+        if (removed.isEmpty() && written.isEmpty()) {
+            check(journalEntryCount == 0) {
+                "The staged vault journalled a change it did not make"
+            }
+            return RetentionPurgeAccounting.NONE
+        }
+
+        val purgedTasks = removed
+            .filter { it.family == BackupRecordFamily.TASK }
+            .associate { key -> key.identity.single() to verifiedByKey.getValue(key) }
+        purgedTasks.values.forEach { task ->
+            val deletedAt = BackupRecordFields.of(task).nullableLong("deletedAtEpochMillis")
+            check(
+                deletedAt != null &&
+                    TrashPolicy.isEligibleForPurge(Instant.ofEpochMilli(deletedAt), now()),
+            ) {
+                "The staged vault lost a task no retention purge could remove"
+            }
+        }
+        check(removed == retentionPurgeRemovals(verified, purgedTasks.keys)) {
+            "The staged vault lost records beyond its retention purge"
+        }
+
+        val tombstones = purgedTasks.keys.mapTo(mutableSetOf()) { taskId ->
+            BackupRecordKey(BackupRecordFamily.TOMBSTONE, listOf(taskId, TASK_OBJECT_TYPE))
+        }
+        check(written.all { it in tombstones }) {
+            "The staged vault gained a record its retention purge did not write"
+        }
+        tombstones.forEach { key ->
+            val tombstone = actualByKey[key]
+            checkNotNull(tombstone) { "The retention purge left a purged task untombstoned" }
+            check(
+                BackupRecordFields.of(tombstone).long("deletedAtEpochMillis") ==
+                    BackupRecordFields.of(purgedTasks.getValue(key.identity.first()))
+                        .nullableLong("deletedAtEpochMillis"),
+            ) {
+                "A retention tombstone does not describe the task it replaced"
+            }
+        }
+        check(journalEntryCount == removed.size + written.size) {
+            "The staged vault journalled changes beyond its retention purge"
+        }
+        return RetentionPurgeAccounting(
+            purgedTaskCount = purgedTasks.size,
+            removedRecordCount = removed.size,
+            journalEntryCount = journalEntryCount,
+        )
+    }
+
+    /** The rows `VaultDatabase.purgeTask` removes for each expired task. */
+    private fun retentionPurgeRemovals(
+        verified: List<BackupRecordV1>,
+        taskIds: Set<String>,
+    ): Set<BackupRecordKey> = verified.asSequence()
+        .filter { record ->
+            when (record.family) {
+                BackupRecordFamily.TASK -> record.identity.single() in taskIds
+                BackupRecordFamily.CHECKLIST_ITEM,
+                BackupRecordFamily.REMINDER,
+                BackupRecordFamily.ATTACHMENT,
+                BackupRecordFamily.TIME_ENTRY,
+                -> BackupRecordFields.of(record).string("taskId") in taskIds
+                BackupRecordFamily.ACTIVITY_ENTRY ->
+                    BackupRecordFields.of(record).nullableString("taskId")
+                        ?.let { it in taskIds } == true
+                BackupRecordFamily.TASK_TAG -> record.identity.first() in taskIds
+                BackupRecordFamily.TASK_DEPENDENCY -> record.identity.any { it in taskIds }
+                else -> false
+            }
+        }
+        .map { BackupRecordKey(it) }
+        .toSet()
 
     /**
      * Reads the staged vault with Stage 2 capture semantics.
@@ -247,8 +446,15 @@ internal class DefaultStagedVaultVerifier(
         .map { it.identity.single() }
         .toSet()
 
+    /** The staged vault as it stands after the runtime smoke check. */
+    private data class SettledStagedVault(
+        val generation: BackupGeneration,
+        val retentionPurge: RetentionPurgeAccounting,
+    )
+
     private companion object {
         const val INTEGRITY_OK = "ok"
         const val REOPEN_TIMEOUT_MILLIS = 5_000L
+        const val TASK_OBJECT_TYPE = "task"
     }
 }

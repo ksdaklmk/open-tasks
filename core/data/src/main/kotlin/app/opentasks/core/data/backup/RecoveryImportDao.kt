@@ -261,6 +261,16 @@ internal interface RecoveryImportDao {
     suspend fun localBackupStateCount(): Int
 
     /**
+     * Counts journal rows alone.
+     *
+     * A staged vault is imported with an empty journal, but the local retention
+     * purge legitimately appends to it the first time a normal repository opens
+     * the slot, so that one operational table has to be countable on its own.
+     */
+    @Query("SELECT COUNT(*) FROM backup_journal")
+    suspend fun journalEntryCount(): Int
+
+    /**
      * Counts every structured reference that resolves to no row.
      *
      * Room declares no SQL foreign keys, so `PRAGMA foreign_key_check` cannot

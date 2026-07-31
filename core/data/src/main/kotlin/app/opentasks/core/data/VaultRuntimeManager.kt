@@ -16,12 +16,42 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** A staged vault that has already been verified by the recovery pipeline. */
+/**
+ * A staged vault that has already been verified by the recovery pipeline.
+ *
+ * [recoveredGeneration] is the generation the authenticated payload described.
+ * [activationGeneration] is what the staged database actually sits at once
+ * verification is finished, which is what activation must trust: constructing a
+ * normal repository over a recovered vault runs the local retention purge, and
+ * that legitimately advances the staged vault past its recovered payload.
+ */
 data class VerifiedStagedVault(
     val slot: VaultSlot,
     val vaultId: VaultId,
     val recoveredGeneration: BackupGeneration,
+    val activationGeneration: BackupGeneration = recoveredGeneration,
+    val retentionPurge: RetentionPurgeAccounting = RetentionPurgeAccounting.NONE,
 )
+
+/**
+ * The only drift a verified staging slot may show after it has been verified.
+ *
+ * Everything here is attributed to the local retention purge; any other
+ * difference fails verification instead of being reported.
+ */
+data class RetentionPurgeAccounting(
+    val purgedTaskCount: Int,
+    val removedRecordCount: Int,
+    val journalEntryCount: Int,
+) {
+    companion object {
+        val NONE = RetentionPurgeAccounting(
+            purgedTaskCount = 0,
+            removedRecordCount = 0,
+            journalEntryCount = 0,
+        )
+    }
+}
 
 /** The identity a staging slot proves it holds before it can be activated. */
 data class StagedVaultIdentity(
