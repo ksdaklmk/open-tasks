@@ -1378,6 +1378,15 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 3. Close Stage 3 with the credentialed two-installation, tombstone,
    protected-workspace, privacy, schema, release, and connected gates
    before any Stage 4 work.
+4. Immediately after the Stage 3 exit gates and before any Stage 4 work,
+   run the approved Galaxy Z Fold 8 trifold-ready adaptive layout slice:
+   design
+   `docs/superpowers/specs/2026-07-31-galaxy-fold8-trifold-adaptive-design.md`,
+   plan
+   `docs/superpowers/plans/2026-07-31-galaxy-fold8-trifold-adaptive-plan.md`
+   (user-approved 31 July 2026; One UI pane ratios, hinge snap,
+   trifold-ready `WindowPosture` contract, fold-continuity acceptance,
+   Fold 8 AVD profiles, External Samsung Remote Test Lab step).
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
