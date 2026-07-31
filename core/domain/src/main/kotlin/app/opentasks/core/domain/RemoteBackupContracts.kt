@@ -422,6 +422,43 @@ interface RemoteBackupCoordinator {
     suspend fun run(objectStore: CreateOnlyBackupObjectStore): RemoteBackupRunResult
 }
 
+/**
+ * Provider- and framework-independent background scheduling for routine
+ * remote backup.
+ *
+ * The implementation lives in `:app` because only that module may depend on
+ * WorkManager; no scheduling type, work name, or worker input reaches this
+ * contract, so product and data code never learn how work is scheduled.
+ * Every scheduled unit is identified by a constant name alone: an
+ * implementation must place no lineage, provider identity, account digest,
+ * token, claim, publication, session URI, or task text in a work name or in
+ * worker input.
+ */
+interface BackupWorkScheduler {
+    /** Debounces one routine run for a local generation the lineage has not published. */
+    fun onPendingGeneration()
+
+    /** Ensures the recurring safety-net check exists, without disturbing a scheduled one. */
+    fun ensurePeriodic()
+
+    /** Cancels the ordinary debounced and recurring work this scheduler owns. */
+    fun cancelAll()
+}
+
+/**
+ * One routine remote-backup attempt, from authorization through publication.
+ *
+ * Exactly one run executes at a time for a vault, whatever asks for it: a
+ * background worker and a manual request share a single instance, so no two
+ * runs can ever drive the same [RemoteBackupCoordinator] concurrently.
+ * A run never launches authorization UI; a resolution it cannot satisfy
+ * silently becomes [RemoteBackupRunResult.AuthorizationRequired] and is
+ * persisted as an action-required state instead.
+ */
+interface RemoteBackupRunner {
+    suspend fun run(): RemoteBackupRunResult
+}
+
 interface CreateOnlyBackupObjectStore {
     suspend fun generateProviderIds(
         count: Int,

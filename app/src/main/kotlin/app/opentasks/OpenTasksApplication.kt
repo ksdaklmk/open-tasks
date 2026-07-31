@@ -3,6 +3,8 @@ package app.opentasks
 import android.app.Application
 import android.app.LocaleManager
 import android.os.LocaleList
+import androidx.work.Configuration
+import app.opentasks.backup.RemoteBackupWorkerFactory
 import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.reminders.ReminderNotifications
 import dagger.hilt.android.HiltAndroidApp
@@ -13,14 +15,28 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 @HiltAndroidApp
-class OpenTasksApplication : Application() {
+class OpenTasksApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var vaultRuntimeManager: DefaultVaultRuntimeManager
 
     @Inject
     lateinit var activeVaultServices: ActiveVaultServices
 
+    @Inject
+    lateinit var remoteBackupWorkerFactory: RemoteBackupWorkerFactory
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * WorkManager initializes on demand from here rather than at startup, so a
+     * remote-backup worker is always constructed with the runner of the vault
+     * that is open when it runs. The manifest removes WorkManager's default
+     * startup initializer for exactly that reason.
+     */
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(remoteBackupWorkerFactory)
+            .build()
 
     override fun onCreate() {
         super.onCreate()

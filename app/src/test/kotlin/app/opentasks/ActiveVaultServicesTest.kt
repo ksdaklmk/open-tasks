@@ -2,9 +2,12 @@ package app.opentasks
 
 import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.PortableBackupPublisher
+import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.domain.AndroidBackupStatusSource
+import app.opentasks.core.domain.RemoteBackupRunResult
+import app.opentasks.core.domain.RemoteBackupRunner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -43,6 +46,21 @@ class ActiveVaultServicesTest {
         val second = services.requireSession().backupRuntime as CountingBackupRuntime
         assertEquals(1, second.starts)
         assertFalse(first === second)
+    }
+
+    @Test
+    fun remoteBackupSchedulingStartsWithTheSlotAndStopsBeforeItIsReplaced() {
+        val factory = CountingSessionFactory()
+        val services = ActiveVaultServices(factory::open)
+
+        services.applyActive(true)
+        val session = services.requireSession() as FakeSession
+        assertEquals(1, session.remoteBackupRuntime.starts)
+        assertEquals(0, session.remoteBackupRuntime.stops)
+
+        services.quiesce()
+
+        assertEquals(1, session.remoteBackupRuntime.stops)
     }
 
     @Test
@@ -174,6 +192,12 @@ class ActiveVaultServicesTest {
         override val backupRuntime: AndroidBackupRuntime,
         private val onClose: () -> Unit,
     ) : ActiveVaultSession {
+        override val remoteBackupRuntime = CountingRemoteBackupRuntime()
+
+        override val remoteBackupRunner = object : RemoteBackupRunner {
+            override suspend fun run(): RemoteBackupRunResult = RemoteBackupRunResult.NoChanges
+        }
+
         override val statusSource: AndroidBackupStatusSource
             get() = error("The fake session exposes no status source")
 
@@ -181,7 +205,26 @@ class ActiveVaultServicesTest {
             get() = error("The fake session exposes no publisher")
 
         override fun close() {
+            remoteBackupRuntime.stop()
             onClose()
+        }
+    }
+
+    private class CountingRemoteBackupRuntime : RemoteBackupRuntime {
+        var starts: Int = 0
+            private set
+
+        var stops: Int = 0
+            private set
+
+        override fun start() {
+            starts += 1
+        }
+
+        override fun requestNow() = Unit
+
+        override fun stop() {
+            stops += 1
         }
     }
 

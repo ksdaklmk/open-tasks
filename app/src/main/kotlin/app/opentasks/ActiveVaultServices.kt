@@ -2,8 +2,10 @@ package app.opentasks
 
 import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.PortableBackupPublisher
+import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.domain.AndroidBackupStatusSource
+import app.opentasks.core.domain.RemoteBackupRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 
@@ -20,6 +22,14 @@ interface ActiveVaultSession : AutoCloseable {
     val statusSource: AndroidBackupStatusSource
 
     val portableBackupPublisher: PortableBackupPublisher
+
+    val remoteBackupRuntime: RemoteBackupRuntime
+
+    /**
+     * The single runner this slot's remote runtime owns, so background work
+     * joins the run in flight instead of starting a second coordinator.
+     */
+    val remoteBackupRunner: RemoteBackupRunner
 }
 
 class DefaultActiveVaultSession(
@@ -27,9 +37,16 @@ class DefaultActiveVaultSession(
     override val backupRuntime: AndroidBackupRuntime,
     override val statusSource: AndroidBackupStatusSource,
     override val portableBackupPublisher: PortableBackupPublisher,
+    override val remoteBackupRuntime: RemoteBackupRuntime,
+    override val remoteBackupRunner: RemoteBackupRunner,
 ) : ActiveVaultSession {
+    /** Cancels scheduled remote work before the observing scope goes away. */
     override fun close() {
-        scope.cancel()
+        try {
+            remoteBackupRuntime.stop()
+        } finally {
+            scope.cancel()
+        }
     }
 }
 
@@ -68,6 +85,12 @@ class ActiveVaultServices(
     }
 
     /**
+     * The running session, or null. Background work outlives a vault slot, so
+     * it has to be able to ask without demanding one exist.
+     */
+    fun sessionOrNull(): ActiveVaultSession? = synchronized(lock) { session }
+
+    /**
      * Opens a session and starts its backup runtime.
      *
      * The runtime is bound to the session's scope, so closing the session is
@@ -81,6 +104,7 @@ class ActiveVaultServices(
             session = opened
             try {
                 opened.backupRuntime.start()
+                opened.remoteBackupRuntime.start()
             } catch (failure: Throwable) {
                 session = null
                 try {

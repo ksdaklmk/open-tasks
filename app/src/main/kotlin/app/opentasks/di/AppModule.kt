@@ -8,11 +8,16 @@ import app.opentasks.backup.AndroidAtomicPackageFile
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.DefaultAndroidBackupRuntime
+import app.opentasks.backup.DefaultRemoteBackupRunner
+import app.opentasks.backup.DefaultRemoteBackupRuntime
 import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
+import app.opentasks.backup.RemoteBackupWorkerFactory
 import app.opentasks.backup.RestoredPackageIntake
+import app.opentasks.backup.WorkManagerRemoteBackupScheduler
 import app.opentasks.backup.drive.DefaultGoogleDriveAuthorizationManager
+import app.opentasks.backup.drive.DriveAuthorizationMode
 import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.backup.recordRestoredPackageStatus
 import app.opentasks.backup.requiresEstablishedContentKey
@@ -26,11 +31,17 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.VaultRuntimeManager
+import app.opentasks.core.data.backup.CreateOnlyDriveObjectStore
 import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
+import app.opentasks.core.data.backup.DefaultRemoteBackupCoordinator
+import app.opentasks.core.data.backup.OwnershipClaimCodec
 import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PortablePackageCodec
+import app.opentasks.core.data.backup.PublicationCodec
+import app.opentasks.core.data.backup.RemoteObjectCodec
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.AndroidBackupStatusSource
+import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.VaultRepository
@@ -46,6 +57,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -116,6 +128,26 @@ object AppModule {
         @ApplicationContext context: Context,
     ): GoogleDriveAuthorizationManager = DefaultGoogleDriveAuthorizationManager(context)
 
+    // Process-scoped: unique background work outlives any one vault slot.
+    @Provides
+    @Singleton
+    fun provideBackupWorkScheduler(
+        @ApplicationContext context: Context,
+    ): BackupWorkScheduler = WorkManagerRemoteBackupScheduler(context)
+
+    /**
+     * Resolves the runner of whichever slot is active when work actually
+     * starts, so a worker never holds a service from a replaced slot and a
+     * device with no open vault simply runs nothing.
+     */
+    @Provides
+    @Singleton
+    fun provideRemoteBackupWorkerFactory(
+        services: ActiveVaultServices,
+    ): RemoteBackupWorkerFactory = RemoteBackupWorkerFactory {
+        services.sessionOrNull()?.remoteBackupRunner
+    }
+
     @Provides
     @Singleton
     fun provideActiveVaultServices(
@@ -151,12 +183,15 @@ object AppModule {
         codec: AuthenticatedCloudObjectCodec,
         packageCodec: PortablePackageCodec,
         crypto: VaultCrypto,
+        authorizationManager: GoogleDriveAuthorizationManager,
+        workScheduler: BackupWorkScheduler,
     ): ActiveVaultSession {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val contentKeyStore = runtime.contentKeyStore
+        val localObjectStore = DefaultLocalBackupObjectStore(files.localBackupRoot)
         val coordinator: BackupCoordinator = LocalVaultRepositoryFactory.createBackupCoordinator(
             runtime = runtime,
-            objectStore = DefaultLocalBackupObjectStore(files.localBackupRoot),
+            objectStore = localObjectStore,
             authenticatedCodec = codec,
             contentKeyStore = contentKeyStore,
         )
@@ -191,6 +226,44 @@ object AppModule {
             envelopeStore = runtime.recoveryEnvelopeStore,
             contentKeyStore = contentKeyStore,
             codec = packageCodec,
+        )
+        // Exactly one coordinator, and one runner around it, exists per open
+        // slot: retention and durable publication both depend on no two runs
+        // for a vault ever overlapping.
+        val remoteRunner = DefaultRemoteBackupRunner(
+            vaultId = runtime.vaultId,
+            remoteStateStore = runtime.remoteBackupStore,
+            coordinator = DefaultRemoteBackupCoordinator(
+                vaultId = runtime.vaultId,
+                backupCoordinator = coordinator,
+                backupStateStore = runtime.backupStateStore,
+                recoveryEnvelopeStore = runtime.recoveryEnvelopeStore,
+                contentKeyStore = contentKeyStore,
+                remoteStateStore = runtime.remoteBackupStore,
+                transferStore = runtime.remoteBackupStore,
+                localObjectStore = localObjectStore,
+                remoteObjectCodec = RemoteObjectCodec(
+                    authenticatedCodec = codec,
+                    localObjectStore = localObjectStore,
+                    stagingRoot = files.remoteTransferRoot,
+                ),
+                ownershipCodec = OwnershipClaimCodec(codec),
+                publicationCodec = PublicationCodec(codec),
+            ),
+            authorize = { expectedAccountDigest ->
+                authorizationManager.authorize(
+                    mode = DriveAuthorizationMode.NON_INTERACTIVE,
+                    expectedAccountDigest = expectedAccountDigest,
+                )
+            },
+            clearToken = authorizationManager::clearToken,
+            openObjectStore = { transport ->
+                CreateOnlyDriveObjectStore(
+                    transport = transport,
+                    transferStore = runtime.remoteBackupStore,
+                    stagingRoot = files.remoteTransferRoot,
+                )
+            },
         )
         return DefaultActiveVaultSession(
             scope = scope,
@@ -272,6 +345,21 @@ object AppModule {
                 },
             ),
             portableBackupPublisher = publisher,
+            remoteBackupRuntime = DefaultRemoteBackupRuntime(
+                scope = scope,
+                runner = remoteRunner,
+                scheduler = workScheduler,
+                observeConfiguration = {
+                    runtime.remoteBackupStore.observeActive(runtime.vaultId)
+                },
+                // Stage 2's own checkpoint is what tells the lineage it is
+                // behind; remote verification never advances it.
+                observeLocalGeneration = {
+                    runtime.backupStateStore.observe(runtime.vaultId)
+                        .map { it.currentGeneration }
+                },
+            ),
+            remoteBackupRunner = remoteRunner,
         )
     }
 }
