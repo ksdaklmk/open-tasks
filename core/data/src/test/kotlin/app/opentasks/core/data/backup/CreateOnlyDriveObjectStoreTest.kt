@@ -999,14 +999,19 @@ private class FakeCreateOnlyDriveTransport(
     }
 }
 
-private class InMemoryRemoteBackupTransferStore(
+internal class InMemoryRemoteBackupTransferStore(
     private val events: MutableList<String>? = null,
 ) : RemoteBackupTransferStore {
-    private val objects = mutableMapOf<Pair<String, String>, RemoteBackupObject>()
+    private val objects = linkedMapOf<Pair<String, String>, RemoteBackupObject>()
     val insertCalls = mutableListOf<RemoteBackupObject>()
 
     /** When true, the next [compareAndSetObject] call reports a lost race without applying it. */
     var failNextCompareAndSet = false
+
+    /** Installs durable object state directly, as an earlier run would have left it. */
+    fun seed(value: RemoteBackupObject) {
+        objects[value.lineageId.value to value.logicalObjectId.value] = value
+    }
 
     override suspend fun objectState(
         lineageId: CloudLineageId,

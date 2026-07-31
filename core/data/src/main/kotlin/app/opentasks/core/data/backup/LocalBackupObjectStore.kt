@@ -22,6 +22,18 @@ interface LocalBackupObjectStore {
     fun open(objectId: String): InputStream
     fun length(objectId: String): Long
     fun prune(retainedObjectIds: Set<String>)
+
+    /**
+     * Every committed object ID, in a deterministic order.
+     *
+     * Remote publication has to name the exact local bases and segments it
+     * re-authenticates, and generation ranges alone cannot recover a
+     * `segment:first:last` identity, so the committed set is read rather than
+     * guessed. This is a read-only view: it commits nothing, prunes nothing,
+     * and grants no authority — the caller still selects only the objects the
+     * retention rule requires and re-authenticates each one.
+     */
+    fun objectIds(): List<String>
 }
 
 class LocalBackupFileException(message: String, cause: Throwable? = null) :
@@ -176,6 +188,25 @@ class DefaultLocalBackupObjectStore(
         }
     }
 
+    /**
+     * Lists `current`, `previous`, and `segments` once each, keeping only
+     * names that parse back to a committed object identity. More than
+     * [MAX_LOCAL_OBJECTS] entries is a namespace this protocol cannot describe,
+     * so it fails closed rather than returning a silently truncated view.
+     */
+    override fun objectIds(): List<String> {
+        val ids = sortedSetOf<String>()
+        listOf(current, previous, segments).forEach { directory ->
+            directory.toFile().listFiles()?.forEach { file ->
+                idForFile(file.name)?.let(ids::add)
+            }
+            if (ids.size > MAX_LOCAL_OBJECTS) {
+                throw LocalBackupFileException("Local backup namespace exceeds its bound")
+            }
+        }
+        return ids.toList()
+    }
+
     private fun resolveVisible(objectId: String) = when {
         snapshotId.matches(objectId) -> {
             val name = fileName(objectId)
@@ -234,10 +265,13 @@ class DefaultLocalBackupObjectStore(
         .split(':')
         .let { (first, last) -> first.toLong() to last.toLong() }
 
-    private companion object {
-        val snapshotId = Regex("snapshot:[0-9]+")
-        val segmentId = Regex("segment:[0-9]+:[0-9]+")
-        val snapshotFile = Regex("snapshot-[0-9]+\\.otf")
-        val segmentFile = Regex("segment-[0-9]+-[0-9]+\\.otf")
+    companion object {
+        /** The most committed objects one local backup namespace may hold. */
+        const val MAX_LOCAL_OBJECTS = 4_096
+
+        private val snapshotId = Regex("snapshot:[0-9]+")
+        private val segmentId = Regex("segment:[0-9]+:[0-9]+")
+        private val snapshotFile = Regex("snapshot-[0-9]+\\.otf")
+        private val segmentFile = Regex("segment-[0-9]+-[0-9]+\\.otf")
     }
 }

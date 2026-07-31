@@ -302,7 +302,11 @@ private const val FORMAT_VERSION = 1
 private const val MINIMUM_READER_VERSION = 1
 private const val REMOTE_HEX_ALPHABET = "0123456789abcdef"
 
-private fun sha256Hex(bytes: ByteArray): String {
+/**
+ * Lowercase hex SHA-256 of [bytes]. Shared with the publication coordinator so
+ * the remote-object and publication paths digest bytes identically.
+ */
+internal fun sha256Hex(bytes: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
     return try {
         buildString(digest.size * 2) {

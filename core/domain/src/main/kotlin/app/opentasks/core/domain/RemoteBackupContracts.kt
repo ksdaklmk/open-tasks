@@ -385,6 +385,43 @@ interface RemoteBackupConfigurator {
     ): RemoteBackupConnectResult
 }
 
+/**
+ * The bounded outcome of one routine remote-backup run.
+ *
+ * Every case carries a redacted category at most: no provider message,
+ * identifier, digest, or account detail ever reaches a caller, so a result may
+ * be surfaced in product state without further filtering.
+ */
+sealed interface RemoteBackupRunResult {
+    /** A successor publication was created, read back, and checkpointed. */
+    data class Verified(val generation: BackupGeneration) : RemoteBackupRunResult
+
+    /** The remote lineage already publishes this local generation. */
+    data object NoChanges : RemoteBackupRunResult
+
+    data object AuthorizationRequired : RemoteBackupRunResult
+    data object AccountMismatch : RemoteBackupRunResult
+    data object OwnershipLost : RemoteBackupRunResult
+    data object Terminated : RemoteBackupRunResult
+    data object AmbiguousRemoteState : RemoteBackupRunResult
+
+    data class Retryable(val reason: RemoteBackupFailureCategory) : RemoteBackupRunResult
+    data class Blocked(val reason: RemoteBackupFailureCategory) : RemoteBackupRunResult
+}
+
+/**
+ * Publishes routine immutable successors inside an already-established
+ * ownership epoch.
+ *
+ * One process-scoped run per lineage executes at a time; concurrent callers
+ * join the run in flight and observe its result, its failure, or its
+ * cancellation. The implementation lives in `core:data` beside the codecs it
+ * composes, so scheduling and product code never depend on a provider.
+ */
+interface RemoteBackupCoordinator {
+    suspend fun run(objectStore: CreateOnlyBackupObjectStore): RemoteBackupRunResult
+}
+
 interface CreateOnlyBackupObjectStore {
     suspend fun generateProviderIds(
         count: Int,

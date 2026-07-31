@@ -689,6 +689,7 @@ internal class FakeCreateOnlyBackupObjectStore(
     var listPageSize = 32
     val readFailures = mutableMapOf<String, RemoteBackupFailureCategory>()
     val createFailures = mutableMapOf<String, RemoteBackupFailureCategory>()
+    val deleteFailures = mutableMapOf<String, RemoteBackupFailureCategory>()
     val ambiguousCreates = mutableSetOf<String>()
     var uploadFailure: RemoteBackupFailureCategory? = null
 
@@ -973,6 +974,7 @@ internal class FakeCreateOnlyBackupObjectStore(
 
     override suspend fun delete(providerObjectId: ProviderObjectId): DeleteObjectResult {
         callOrder += "delete:${providerObjectId.value}"
+        deleteFailures[providerObjectId.value]?.let { return DeleteObjectResult.Failed(it) }
         deletedIds += providerObjectId.value
         return if (entries.remove(providerObjectId.value) != null) {
             DeleteObjectResult.Deleted

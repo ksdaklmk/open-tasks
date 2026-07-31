@@ -203,6 +203,44 @@ class LocalBackupObjectStoreTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun committedObjectIdsAreEnumeratedInADeterministicOrder() {
+        val root = Files.createTempDirectory("local-backup-store-test").toFile()
+        try {
+            val store = DefaultLocalBackupObjectStore(root)
+            store.commitSnapshot(store.writeCandidate("snapshot:1", byteArrayOf(1)), null)
+            store.commitSnapshot(store.writeCandidate("snapshot:12", byteArrayOf(2)), "snapshot:1")
+            store.commitSegment(store.writeCandidate("segment:2:3", byteArrayOf(3)))
+            store.commitSegment(store.writeCandidate("segment:4:4", byteArrayOf(4)))
+            root.resolve("staging/interrupted.otf").writeBytes(byteArrayOf(9))
+            root.resolve("segments/unrelated.txt").writeBytes(byteArrayOf(9))
+
+            assertEquals(
+                listOf("segment:2:3", "segment:4:4", "snapshot:1", "snapshot:12"),
+                store.objectIds(),
+            )
+            assertEquals(store.objectIds(), DefaultLocalBackupObjectStore(root).objectIds())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anOverBoundLocalNamespaceFailsClosedRatherThanTruncating() {
+        val root = Files.createTempDirectory("local-backup-store-test").toFile()
+        try {
+            val store = DefaultLocalBackupObjectStore(root)
+            val segments = root.resolve("segments")
+            repeat(DefaultLocalBackupObjectStore.MAX_LOCAL_OBJECTS + 1) { index ->
+                segments.resolve("segment-$index-$index.otf").writeBytes(byteArrayOf(1))
+            }
+
+            assertThrows(LocalBackupFileException::class.java) { store.objectIds() }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
 
 private class FailingLocalBackupFileOperations(
