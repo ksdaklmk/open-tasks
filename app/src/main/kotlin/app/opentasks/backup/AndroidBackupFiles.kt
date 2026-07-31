@@ -14,6 +14,10 @@ class AndroidBackupFiles(context: Context) {
         File(context.noBackupFilesDir, "backup/v1")
     val recoveryInbox =
         File(context.noBackupFilesDir, "recovery/incoming_android_v1.otb")
+    val remoteTransferRoot =
+        File(context.noBackupFilesDir, "backup/remote-transfer/v1")
+    val recoveryRoot =
+        File(context.noBackupFilesDir, "recovery/staging/v1")
 }
 
 interface AtomicPackageFile {

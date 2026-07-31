@@ -3,6 +3,7 @@ package app.opentasks
 import android.content.pm.ApplicationInfo
 import androidx.test.core.app.ApplicationProvider
 import app.opentasks.backup.AndroidAtomicPackageFile
+import app.opentasks.backup.AndroidBackupFiles
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,6 +45,23 @@ class BackupConfigurationInstrumentedTest {
         )
         assertTrue(legacy.rules.none { it.element == "include" })
         assertTrue(legacy.rules.all { it.path == "." })
+    }
+
+    @Test
+    fun remoteTransferAndRecoveryStagingRootsStayUnderTheNoBackupDirectoryAndOutsideEveryIncludeRule() {
+        val context = ApplicationProvider.getApplicationContext<OpenTasksApplication>()
+        val files = AndroidBackupFiles(context)
+        val noBackupPath = context.noBackupFilesDir.path
+
+        assertTrue(files.remoteTransferRoot.path.startsWith("$noBackupPath${File.separator}"))
+        assertTrue(files.recoveryRoot.path.startsWith("$noBackupPath${File.separator}"))
+
+        // Every include rule names only the portable package; since Android backup
+        // (classic and Auto Backup) never inspects noBackupFilesDir, the new roots
+        // above are excluded both structurally and by this exhaustive allow-list.
+        val extraction = parseRules(context.resources.getXml(R.xml.data_extraction_rules))
+        val includedPaths = extraction.rules.filter { it.element == "include" }.map(Rule::path)
+        assertEquals(listOf(PORTABLE_PATH, PORTABLE_PATH), includedPaths)
     }
 
     @Test

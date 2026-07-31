@@ -15,6 +15,7 @@ import app.opentasks.core.model.RemoteObjectRoleV1
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
+import java.io.File
 import java.time.Instant
 
 /**
@@ -234,4 +235,133 @@ data class RemoteBackupObject(
 ) {
     override fun toString(): String =
         "RemoteBackupObject(role=$role, lifecycle=$lifecycle)"
+}
+
+/**
+ * Provider-independent create-only remote object storage contract.
+ *
+ * [CreateOnlyDriveObjectStore] in `core:data` is the sole implementation,
+ * composing [app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport]
+ * with the Task 3 [app.opentasks.core.data.backup.RemoteBackupTransferStore].
+ * This interface lives here — rather than beside its implementation — so
+ * later ownership, publication, and configurator work in `core:data` can
+ * depend on it without depending on a concrete provider.
+ *
+ * A held [OwnedRemoteBytes] or [OwnedRemoteFile] owns private, staged bytes
+ * that never survive past a single call: [OwnedRemoteBytes.take] transfers
+ * its buffer exactly once, and closing either type makes every later access
+ * fail rather than silently return stale or cleared content.
+ */
+interface OwnedRemoteBytes : AutoCloseable {
+    val size: Int
+    fun take(): ByteArray
+}
+
+interface OwnedRemoteFile : AutoCloseable {
+    val file: File
+    val length: Long
+}
+
+data class RemoteListRequest(
+    val lineageId: CloudLineageId,
+    val role: RemoteObjectRoleV1,
+    val writerEpoch: WriterEpoch?,
+    val ownerDeviceId: CloudDeviceId?,
+    val pageToken: String?,
+    val pageSize: Int,
+)
+
+data class RemoteListedObject(
+    val providerObjectId: ProviderObjectId,
+    val logicalObjectId: String?,
+    val role: RemoteObjectRoleV1?,
+    val writerEpoch: WriterEpoch?,
+    val ownerDeviceId: CloudDeviceId?,
+)
+
+data class RemoteListPage(
+    val objects: List<RemoteListedObject>,
+    val nextPageToken: String?,
+)
+
+sealed interface CreateSmallResult {
+    data object Created : CreateSmallResult
+    data object AlreadyExists : CreateSmallResult
+    data object Ambiguous : CreateSmallResult
+    data class Failed(val reason: RemoteBackupFailureCategory) :
+        CreateSmallResult
+}
+
+sealed interface ReadSmallResult {
+    data class Found(val bytes: OwnedRemoteBytes) : ReadSmallResult
+    data object Missing : ReadSmallResult
+    data class Failed(val reason: RemoteBackupFailureCategory) :
+        ReadSmallResult
+}
+
+data class ImmutableUploadRequest(
+    val lineageId: CloudLineageId,
+    val writerEpoch: WriterEpoch,
+    val ownerDeviceId: CloudDeviceId,
+    val operationId: String,
+    val logicalObjectId: RemoteLogicalObjectId,
+    val providerObjectId: ProviderObjectId,
+    val role: RemoteObjectRoleV1,
+    val firstGeneration: BackupGeneration,
+    val lastGeneration: BackupGeneration,
+    val frameLength: Long,
+    val frameSha256: Sha256Digest,
+    val frame: OwnedRemoteFile,
+)
+
+sealed interface ImmutableUploadResult {
+    data object UploadedAndVerified : ImmutableUploadResult
+    data object OccupiedByExpectedBytes : ImmutableUploadResult
+    data object OccupiedByDifferentBytes : ImmutableUploadResult
+    data class Failed(val reason: RemoteBackupFailureCategory) :
+        ImmutableUploadResult
+}
+
+sealed interface ImmutableDownloadResult {
+    data class Downloaded(val frame: OwnedRemoteFile) :
+        ImmutableDownloadResult
+    data object Missing : ImmutableDownloadResult
+    data object Corrupt : ImmutableDownloadResult
+    data class Failed(val reason: RemoteBackupFailureCategory) :
+        ImmutableDownloadResult
+}
+
+sealed interface DeleteObjectResult {
+    data object Deleted : DeleteObjectResult
+    data object Missing : DeleteObjectResult
+    data class Failed(val reason: RemoteBackupFailureCategory) :
+        DeleteObjectResult
+}
+
+interface CreateOnlyBackupObjectStore {
+    suspend fun generateProviderIds(
+        count: Int,
+        role: RemoteObjectRoleV1,
+    ): List<ProviderObjectId>
+    suspend fun createSmallIfAbsent(
+        providerObjectId: ProviderObjectId,
+        metadata: RemoteListedObject,
+        bytes: OwnedRemoteBytes,
+    ): CreateSmallResult
+    suspend fun readSmall(
+        providerObjectId: ProviderObjectId,
+        maximumBytes: Long,
+    ): ReadSmallResult
+    suspend fun list(request: RemoteListRequest): RemoteListPage
+    suspend fun uploadImmutable(
+        request: ImmutableUploadRequest,
+    ): ImmutableUploadResult
+    suspend fun downloadImmutable(
+        providerObjectId: ProviderObjectId,
+        maximumBytes: Long,
+        expectedSha256: Sha256Digest,
+    ): ImmutableDownloadResult
+    suspend fun delete(
+        providerObjectId: ProviderObjectId,
+    ): DeleteObjectResult
 }
