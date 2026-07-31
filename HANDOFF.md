@@ -2,40 +2,49 @@
 
 - Last updated: 31 July 2026
 - Branch: `main`
-- Session status: **Stage 3 execution is paused at the user's request after
-  Task 7 of the create-only plan. Tasks 1–7 are complete, independently
-  reviewed, and committed: the qualified create-only transport (`b6191fd`),
-  frozen ownership and publication formats (`7ce27b1`), additive Room v7
-  remote state (`b0284bb`, `184786f`), crash-safe vault slot gating
-  (`5fc11ae`, `839efc5`, `4f57781`), explicit authorization and account
-  binding (`ca70ca8`, `2bb76dc`), create-only Drive object storage
-  (`051ce53`, `05a1d44`, `75f94a8`), and crash-resumable epoch-one
-  ownership resolution and publication (`85e2f57`, `bf9bcb2`). Every task
-  review closed with zero open Critical or Important findings; deferred
-  minors, rulings, and fix-round history live in the ignored SDD ledger
-  `.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/progress.md`.
-  Resume at Task 8 (Publish Immutable Successors and Clean Safely) of
-  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`
-  with subagent-driven execution. Two user rulings amended that plan in
-  place: the v7 config entity gained `previousPublicationGeneration`, and
-  `DriveAuthorizationResult.Unavailable` now carries a bounded reason enum.
-  One ruling is pending implementation at Task 12: tighten the publication
-  codec so equal local generation requires a recovery-credential-generation
-  increase, amending the brief-mandated equal-generation test. Task 8
-  carry-forwards from the Task 7 boundary: clear stale resumable transfer
-  state before a planned base is re-encoded, and close the
-  `storeIdentities` local crash window whose orphaned configuration row
-  aborts every later `connect`. One question awaits a user ruling: whether
-  a malformed listed ownership root may keep blocking root discovery
-  permanently, or needs a bounded recovery path. Task 14 carry-forwards:
-  live confirmation of the Google `Account` derivation used for revoke,
-  and R8 keep-rule reachability once product UI calls `authorize()`. No
-  emulator ran in the Task 7 session (JVM-only work); the AVD retains the
-  signed-in Google account that disposables inherit for credentialed
-  gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and
-  independently reviewed.**
-- Current source implementation point: `bf9bcb2` (`fix: resume connect
-  across create-and-crash windows`). The prior Stage 2 correction point is
+- Session status: **Stage 3 execution is paused at the user's request
+  (plan-usage limit) during the Task 10 independent review. Tasks 1–9 are
+  complete, independently reviewed, and committed; this session added
+  Task 8's immutable publication coordinator and namespace-safe cleanup
+  (`5495def`, `1b8feef`, `357ca98`) and Task 9's unique background
+  scheduling runtime (`6684478`, `eb26cfb`, `4ff32cc`), each closing with
+  zero open Critical or Important findings after fix rounds. Task 10
+  (verified staging reconstruction) is implemented and committed
+  (`41d0a07`, DONE_WITH_CONCERNS; connected `:core:data` 129/129 on the
+  sole disposable), but its dispatched independent review was stopped
+  before returning a verdict. Resume by re-dispatching that review over
+  `4ff32cc..41d0a07` with the three recorded implementer concerns: the
+  recovered-vault Stage 2 capture defect (proposed Task 11/12
+  carry-forward), the `recoveryEnvelopeReady = true` judgment call, and
+  the single-vault invariant versus the brief's "DELETE for every
+  family" mandate (possible plan-conflict ruling). Session rulings, all
+  in the ignored SDD ledger
+  `.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/progress.md`:
+  a malformed listed ownership root stays literally fail-closed (user
+  ruling); a bounded read-only `objectIds()` enumeration was added to
+  `LocalBackupObjectStore` (controller ruling — bases-only publishing
+  rejected); `DriveAuthorizationUnavailableReason` was split so
+  quota/corrupt failures no longer masquerade as revoked grants; exactly
+  one coordinator instance and run per vault is now retention-load-bearing
+  (7-day hold scoped to abandoned/old-epoch classes only); completion
+  re-arm requires a strictly newer generation than the finished run.
+  Carry-forwards: Task 11/12 must make Stage 2 capture work on recovered
+  vaults holding tombstones or relationless activity entries; Task 13
+  must give manual "back up now" its own retry affordance; the pending
+  Task 12 equal-generation codec tightening and the Task 14 live
+  Account/R8 confirmations are unchanged. The separately approved Galaxy
+  Z Fold 8 trifold-ready adaptive slice (spec `1de991d`, plan `c364a60`)
+  is scheduled immediately after the Stage 3 exit gates. Pause gates at
+  `c364a60`: repository gate 547 tasks and separate release assembly 441
+  tasks BUILD SUCCESSFUL; `git diff --check` clean. All device work this
+  session used sole audited read-only disposables with clean final
+  audits; one leftover disposable, identified by its qemu flags, was
+  killed with user approval. The protected workspace and user-owned
+  `artifacts/` were untouched. Stage 2, Train 1 Tasks 1.1–1.5, and
+  Stage 1 remain complete and independently reviewed.**
+- Current source implementation point: `41d0a07` (`feat: reconstruct
+  verified staging vaults`); later commits `1de991d` and `c364a60` are
+  documentation only. The prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
@@ -326,6 +335,45 @@ the `storeIdentities` orphaned-configuration-row crash window; a user
 ruling is requested on whether a malformed listed ownership root may block
 root discovery permanently; the deferred-minor list gained the Task 7
 review and re-review items.
+
+## Stage 3 create-only Tasks 8–10 checkpoint — 31 July 2026
+
+Subagent-driven execution resumed from `bf9bcb2`/`26d2029` on `main`.
+
+- Task 8 (`5495def`, `1b8feef`, `357ca98`) published immutable successor
+  generations: the eleven-phase durable `DefaultRemoteBackupCoordinator`
+  (checkpoint only after publication readback and a second ownership
+  recheck), bounded `NamespaceSafeRemoteCleanup` (≤32 deletes, tip
+  authentication before every batch, blockers retained), both Task 7
+  carry-forwards closed, and the review's two Important findings fixed:
+  the seven-day hold now applies only to abandoned candidates and
+  old-epoch residue, and an unfulfillable frozen plan is discarded only
+  when its local source is gone and its slot is provably empty. The
+  reviewer disproved the "format forbids bridging" base-pair rationale;
+  the same-generation pair stands as recorded policy.
+- Task 9 (`6684478`, `eb26cfb`, `4ff32cc`) scheduled unique background
+  work: WorkManager runtime with the exact One UI-independent plan
+  cadence (15-minute debounce, 24-hour periodic, no unmetered
+  requirement), non-interactive authorization that persists
+  action-required state, a split `Unavailable` reason enum, a stopped
+  flag making stale runners refuse after slot teardown, and completion
+  re-arm only for strictly newer generations. Connected evidence:
+  `:core:data` 100/100 (first device run of the Task 8 Room
+  `adoptConnecting` cases, 20/20) and `:app` 13 tests on the sole
+  disposable.
+- Task 10 (`41d0a07`) reconstructs verified staging vaults: exhaustive
+  per-family import with strict typed record access, fresh-only local
+  operational state (schema marker normalised to 7), close/reopen
+  canonical-capture verification, and 29 new instrumented tests
+  (connected `:core:data` 129/129). Its independent review is pending
+  re-dispatch; three implementer concerns are recorded in the ledger,
+  including the recovered-vault Stage 2 capture defect proposed as a
+  Task 11/12 carry-forward.
+
+The separately approved Galaxy Z Fold 8 trifold-ready adaptive layout
+slice was designed and planned in parallel (spec `1de991d`, plan
+`c364a60`, user-approved) and is scheduled immediately after the Stage 3
+exit gates in the execution order below.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
@@ -1305,8 +1353,9 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 ## Current programme boundary
 
 There is no uncommitted source implementation. Stage 2 is implemented,
-verified, and reviewed through its task boundaries, and Stage 3 create-only
-Tasks 1–7 are committed and reviewed through `bf9bcb2`. The local
+verified, and reviewed through its task boundaries; Stage 3 create-only
+Tasks 1–9 are committed and reviewed through `4ff32cc`, and Task 10 is
+committed at `41d0a07` awaiting its re-dispatched independent review. The local
 coordinator and portable Android package are shipped source features, but
 package readiness is only a local fact. Recovery activation, writer
 takeover, remote merge, and attachment transport remain absent.
