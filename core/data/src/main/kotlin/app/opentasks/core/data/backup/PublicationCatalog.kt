@@ -13,7 +13,6 @@ import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteObjectRoleV1
 import app.opentasks.core.model.WriterEpoch
-import kotlinx.coroutines.CancellationException
 
 /**
  * One bounded publication candidate paired with the exact provider object it
@@ -95,7 +94,8 @@ class DefaultPublicationCatalog(
         plannedOrActualClaimProviderId: ProviderObjectId,
     ): PublicationCandidateDiscovery {
         val listed = try {
-            listAll(
+            listAllBounded(
+                objectStore,
                 RemoteListRequest(
                     lineageId = lineageId,
                     role = RemoteObjectRoleV1.PUBLICATION,
@@ -104,6 +104,7 @@ class DefaultPublicationCatalog(
                     pageToken = null,
                     pageSize = PAGE_SIZE,
                 ),
+                maximum = MAX_CANDIDATES_PER_EPOCH,
             )
         } catch (failure: BoundedRemoteFailure) {
             return PublicationCandidateDiscovery.Blocked(failure.reason)
@@ -302,37 +303,8 @@ class DefaultPublicationCatalog(
         }
     }
 
-    private suspend fun readSmall(providerObjectId: ProviderObjectId): ReadSmallResult = try {
-        objectStore.readSmall(providerObjectId, MAX_PUBLICATION_FILE_BYTES)
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (failure: Exception) {
-        ReadSmallResult.Failed(failure.toBoundedReason())
-    }
-
-    private suspend fun listAll(request: RemoteListRequest): List<RemoteListedObject> {
-        val accumulated = mutableListOf<RemoteListedObject>()
-        var pageToken: String? = request.pageToken
-        var pages = 0
-        while (true) {
-            val page = try {
-                objectStore.list(request.copy(pageToken = pageToken))
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (failure: Exception) {
-                throw BoundedRemoteFailure(failure.toBoundedReason())
-            }
-            accumulated += page.objects
-            if (accumulated.size > MAX_CANDIDATES_PER_EPOCH) {
-                throw BoundedRemoteFailure(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-            }
-            pages += 1
-            pageToken = page.nextPageToken ?: return accumulated
-            if (pages >= DefaultOwnershipChainStore.MAX_PAGES) {
-                throw BoundedRemoteFailure(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-            }
-        }
-    }
+    private suspend fun readSmall(providerObjectId: ProviderObjectId): ReadSmallResult =
+        readSmallBounded(objectStore, providerObjectId, MAX_PUBLICATION_FILE_BYTES)
 
     companion object {
         const val MAX_CANDIDATES_PER_EPOCH = 128

@@ -10,8 +10,12 @@ import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupConnectResult
 import app.opentasks.core.domain.RemoteBackupOperation
+import app.opentasks.core.model.CloudDeviceId
 import app.opentasks.core.model.CloudLineageId
+import app.opentasks.core.model.OwnershipClaimId
+import app.opentasks.core.model.OwnershipStateV1
 import app.opentasks.core.model.ProviderObjectId
+import app.opentasks.core.model.PublicationId
 import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
@@ -197,6 +201,124 @@ class DefaultRemoteBackupConfiguratorTest {
     }
 
     @Test
+    fun crashBetweenTheBaseUploadAndItsPhaseResumesWithoutASecondUpload() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "BASE_A_VERIFIED"
+
+        val interrupted = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(listOf("BASE_A"), fixture.store.authorityEvents)
+        assertEquals(1, fixture.store.baseRequests.size)
+        assertFalse(fixture.remoteStateStore.operationPhases.contains("BASE_A_VERIFIED"))
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertTrue(resumed is RemoteBackupConnectResult.Connected)
+        // Base A was adopted from the provider, so only base B was uploaded.
+        assertEquals(2, fixture.store.baseRequests.size)
+        assertEquals(
+            listOf("BASE_A", "BASE_B", "BASELINE", "ROOT"),
+            fixture.store.authorityEvents,
+        )
+        assertEquals(
+            RemoteBackupLifecycle.ACTIVE,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+    }
+
+    @Test
+    fun crashBetweenTheBaselineCreateAndItsPhaseResumesWithoutASecondBaseline() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "BASELINE_CREATED"
+
+        val interrupted = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(listOf("BASE_A", "BASE_B", "BASELINE"), fixture.store.authorityEvents)
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertTrue(resumed is RemoteBackupConnectResult.Connected)
+        assertEquals(1, fixture.store.authorityEvents.count { it == "BASELINE" })
+        assertEquals(
+            listOf("BASE_A", "BASE_B", "BASELINE", "ROOT"),
+            fixture.store.authorityEvents,
+        )
+        // The root binds whichever baseline bytes actually survived.
+        assertEquals(
+            fixture.verifiedBaseline().completeSha256.value,
+            fixture.verifiedRoot().claim.baselinePublicationSha256,
+        )
+    }
+
+    @Test
+    fun crashBetweenTheRootCreateAndItsPhaseResumesWithoutASecondRoot() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "ROOT_CREATED"
+
+        val interrupted = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(listOf("BASE_A", "BASE_B", "BASELINE", "ROOT"), fixture.store.authorityEvents)
+        assertEquals(
+            RemoteBackupLifecycle.CONNECTING,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertTrue(resumed is RemoteBackupConnectResult.Connected)
+        assertEquals(1, fixture.store.authorityEvents.count { it == "ROOT" })
+        assertEquals(
+            RemoteBackupLifecycle.ACTIVE,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+    }
+
+    @Test
+    fun anotherWritersRootAtTheReservedSlotIsStillOwnershipLost() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "ROOT_CREATED"
+        fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+        // Replace this connection's own root with a well-formed foreign root
+        // occupying the same reserved provider slot.
+        fixture.replaceRootWithForeignClaim()
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.OWNERSHIP_LOST),
+            resumed,
+        )
+        assertEquals(
+            RemoteBackupLifecycle.CONNECTING,
+            checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+        )
+    }
+
+    @Test
+    fun anotherWritersBaselineAtTheReservedSlotIsStillAmbiguous() = runConnectTest { fixture ->
+        fixture.remoteStateStore.failTransitionToPhase = "BASELINE_CREATED"
+        fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+        fixture.replaceBaselineWithForeignPublication()
+
+        val resumed = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+
+        assertEquals(
+            RemoteBackupConnectResult.Failed(
+                RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE,
+            ),
+            resumed,
+        )
+    }
+
+    @Test
     fun aCompletedConnectionIsIdempotent() = runConnectTest { fixture ->
         val first = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
         val createdIds = fixture.store.createdIds.toList()
@@ -346,6 +468,71 @@ private class ConnectFixture(root: File) {
     fun rootProviderId(): ProviderObjectId = ProviderObjectId.of(
         checkNotNull(remoteStateStore.stored).rootClaimProviderId.value,
     )
+
+    private suspend fun publicationProviderId(): ProviderObjectId = checkNotNull(
+        checkNotNull(
+            remoteStateStore.operation("remote-connect:" + RemoteBackupTestFixtures.VAULT_ID),
+        ).candidatePublicationProviderId,
+    )
+
+    private fun lineageId(): CloudLineageId = checkNotNull(remoteStateStore.stored).lineageId
+
+    /** Puts a well-formed root belonging to another writer at the reserved slot. */
+    fun replaceRootWithForeignClaim() {
+        val providerObjectId = rootProviderId()
+        val foreign = OwnershipClaimV1(
+            lineageId = lineageId().value,
+            writerEpoch = 1,
+            state = OwnershipStateV1.ACTIVE,
+            predecessorProviderFileId = null,
+            predecessorClaimId = null,
+            predecessorClaimSha256 = null,
+            providerFileId = providerObjectId.value,
+            claimId = OwnershipClaimId.new().value,
+            predecessorReservedSuccessorProviderFileId = null,
+            sourceVaultId = RemoteBackupTestFixtures.VAULT_ID,
+            activeDeviceId = CloudDeviceId.new().value,
+            nextSuccessorProviderFileId = "provider-foreign-successor",
+            baselinePublicationProviderFileId = "provider-foreign-baseline",
+            baselinePublicationId = PublicationId.new().value,
+            baselinePublicationSha256 = RemoteBackupTestFixtures.DIGEST_A,
+            recoveryCredentialGeneration = 0,
+            creationOperationId = "operation-foreign",
+            tombstoneId = null,
+        )
+        withContentKey { key ->
+            val codec = OwnershipClaimCodec(authenticatedCodec)
+            val encoded = codec.encode(foreign, key)
+            store.put(
+                providerObjectId = providerObjectId.value,
+                bytes = encoded,
+                metadata = RemoteBackupTestFixtures.claimMetadata(
+                    codec.readPublicHeader(encoded),
+                ),
+                lineageId = lineageId(),
+            )
+        }
+    }
+
+    /** Puts a well-formed publication of another identity at the reserved slot. */
+    suspend fun replaceBaselineWithForeignPublication() {
+        val providerObjectId = publicationProviderId()
+        val envelope = checkNotNull(recoveryEnvelopeStore.get(vaultId))
+        withContentKey { key ->
+            val codec = PublicationCodec(authenticatedCodec)
+            val existing = codec.verify(store.requireBytes(providerObjectId.value), key)
+            val foreign = existing.manifest.copy(publicationId = PublicationId.new().value)
+            store.put(
+                providerObjectId = providerObjectId.value,
+                bytes = codec.encode(foreign, envelope, key),
+                metadata = RemoteBackupTestFixtures.publicationMetadata(
+                    providerObjectId.value,
+                    1,
+                ),
+                lineageId = lineageId(),
+            )
+        }
+    }
 
     fun verifiedRoot(): VerifiedOwnershipClaim = withContentKey { key ->
         OwnershipClaimCodec(authenticatedCodec).verify(
@@ -608,6 +795,15 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
         operationPhases += operation.phase
     }
 
+    /**
+     * Drops the next transition that would enter this phase, exactly once.
+     *
+     * That is the crash window the create-only protocol cares about: the
+     * remote object is already durable, but the local phase recording it never
+     * reached storage.
+     */
+    var failTransitionToPhase: String? = null
+
     override suspend fun transitionOperation(
         operationId: String,
         expectedPhase: String,
@@ -615,6 +811,10 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
     ): Boolean {
         val current = operations[operationId] ?: return false
         if (current.phase != expectedPhase) return false
+        if (next.phase == failTransitionToPhase && next.phase != expectedPhase) {
+            failTransitionToPhase = null
+            return false
+        }
         operations[operationId] = next
         operationPhases += next.phase
         return true

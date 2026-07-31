@@ -28,6 +28,7 @@ import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
 import app.opentasks.core.model.RemoteLogicalObjectId
 import app.opentasks.core.model.RemoteObjectRoleV1
+import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
 import java.time.Instant
@@ -323,6 +324,13 @@ class DefaultRemoteBackupConfigurator(
         /**
          * Uploads, downloads, authenticates, decodes, and compares one of two
          * independently identified copies of the same complete capture.
+         *
+         * Re-encoding a base produces a fresh AES-GCM nonce, so a restart can
+         * never reproduce the bytes a previous attempt uploaded. The intended
+         * bytes are therefore recorded durably *before* the first network
+         * mutation: a restart that finds those exact bytes already present
+         * adopts them instead of uploading a second, differently nonced copy
+         * into the same slot.
          */
         private suspend fun publishBase(first: Boolean): StepResult<Unit> {
             val phase = if (first) {
@@ -338,6 +346,17 @@ class DefaultRemoteBackupConfigurator(
                 checkNotNull(if (first) state.baseAProviderFileId else state.baseBProviderFileId),
             )
             val generation = BackupGeneration(checkNotNull(state.localGeneration))
+
+            // An unverified record at this phase is a previous attempt's plan.
+            val planned = if (first) state.baseA else state.baseB
+            if (planned != null) {
+                when (val adopted = adoptPlannedBase(planned, logicalObjectId, generation)) {
+                    is StepResult.Failed -> return adopted
+                    is StepResult.Ok ->
+                        if (adopted.value) return advance(phase, state)
+                }
+            }
+
             val remote = try {
                 remoteObjectCodec.reauthenticateLocalObject(
                     localObjectId = checkNotNull(state.localBaseObjectId),
@@ -350,6 +369,19 @@ class DefaultRemoteBackupConfigurator(
                 throw cancellation
             } catch (_: Exception) {
                 return StepResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            }
+            val record = RemoteConnectObjectV1(
+                logicalObjectId = logicalObjectId.value,
+                providerFileId = providerObjectId.value,
+                frameLength = remote.frameLength,
+                frameSha256 = remote.frameSha256.value,
+                payloadSha256 = remote.payloadSha256.value,
+            )
+            val planning =
+                record(if (first) state.copy(baseA = record) else state.copy(baseB = record))
+            if (planning is StepResult.Failed) {
+                remote.close()
+                return planning
             }
             remote.use {
                 val upload = objectStore.uploadImmutable(
@@ -381,10 +413,43 @@ class DefaultRemoteBackupConfigurator(
                         return StepResult.Failed(upload.reason)
                 }
             }
+            return when (val adopted = adoptPlannedBase(record, logicalObjectId, generation)) {
+                is StepResult.Failed -> adopted
+                is StepResult.Ok ->
+                    if (adopted.value) {
+                        advance(phase, state)
+                    } else {
+                        StepResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
+                    }
+            }
+        }
+
+        /**
+         * Downloads the exact bytes [planned] records, authenticates them at
+         * the persisted lineage plus remote logical object, and checks the
+         * decoded payload.
+         *
+         * `Ok(true)` means the provider holds this connection's own copy —
+         * either the one just uploaded or one a previous attempt uploaded
+         * before it could persist its phase. `Ok(false)` means the slot is
+         * empty and the object still has to be created. Anything else fails
+         * closed: bytes at the slot that are not the planned bytes are never
+         * adopted, and no alternate slot is ever generated.
+         */
+        private suspend fun adoptPlannedBase(
+            planned: RemoteConnectObjectV1,
+            logicalObjectId: RemoteLogicalObjectId,
+            generation: BackupGeneration,
+        ): StepResult<Boolean> {
+            val providerObjectId = ProviderObjectId.of(planned.providerFileId)
+            val expected = runBounded { Sha256Digest.of(planned.frameSha256) }
+                ?: return StepResult.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
             val downloaded = objectStore.downloadImmutable(
                 providerObjectId = providerObjectId,
-                maximumBytes = remote.frameLength,
-                expectedSha256 = remote.frameSha256,
+                maximumBytes = planned.frameLength,
+                expectedSha256 = expected,
             )
             val authenticated = when (downloaded) {
                 is ImmutableDownloadResult.Downloaded ->
@@ -401,42 +466,35 @@ class DefaultRemoteBackupConfigurator(
                         RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
                     )
 
-                ImmutableDownloadResult.Missing, ImmutableDownloadResult.Corrupt ->
+                // Nothing was ever created at this slot; the caller encodes and
+                // uploads a fresh copy under the same identity.
+                ImmutableDownloadResult.Missing -> return StepResult.Ok(false)
+
+                ImmutableDownloadResult.Corrupt ->
                     return StepResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
 
                 is ImmutableDownloadResult.Failed ->
                     return StepResult.Failed(downloaded.reason)
             }
-            if (authenticated.coveredGeneration != generation.value) {
+            if (authenticated.coveredGeneration != generation.value ||
+                authenticated.payloadSha256.value != planned.payloadSha256
+            ) {
                 return StepResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             }
-            val record = RemoteConnectObjectV1(
-                logicalObjectId = logicalObjectId.value,
-                providerFileId = providerObjectId.value,
-                frameLength = remote.frameLength,
-                frameSha256 = remote.frameSha256.value,
-                payloadSha256 = authenticated.payloadSha256.value,
-            )
             // The two bases must be independent objects carrying identical
             // structured content; only then are two complete bases proven.
-            state.baseA?.let { other ->
-                if (!first &&
-                    (
-                        other.payloadSha256 != record.payloadSha256 ||
-                            other.logicalObjectId == record.logicalObjectId ||
-                            other.providerFileId == record.providerFileId ||
-                            other.frameSha256 == record.frameSha256
-                        )
+            val other = state.baseA
+            if (other != null && other.logicalObjectId != planned.logicalObjectId) {
+                if (other.payloadSha256 != planned.payloadSha256 ||
+                    other.providerFileId == planned.providerFileId ||
+                    other.frameSha256 == planned.frameSha256
                 ) {
                     return StepResult.Failed(
                         RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
                     )
                 }
             }
-            return advance(
-                phase,
-                if (first) state.copy(baseA = record) else state.copy(baseB = record),
-            )
+            return StepResult.Ok(true)
         }
 
         /** Creates the sequence-zero baseline that names the planned root. */
@@ -471,8 +529,15 @@ class DefaultRemoteBackupConfigurator(
                 is PublicationCreateResult.OccupiedByExpected ->
                     advance(RemoteConnectPhase.BASELINE_CREATED, state)
 
+                // Re-encoding produces a fresh nonce, so a previous attempt's
+                // own baseline occupies the slot with different bytes. Adopt it
+                // only when it authenticates to the identity this connection
+                // planned, which nothing without the content key can forge.
                 PublicationCreateResult.OccupiedByDifferent ->
-                    StepResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
+                    when (val occupant = readPlannedBaseline()) {
+                        is StepResult.Failed -> occupant
+                        is StepResult.Ok -> advance(RemoteConnectPhase.BASELINE_CREATED, state)
+                    }
 
                 is PublicationCreateResult.Failed -> StepResult.Failed(created.reason)
             }
@@ -481,6 +546,22 @@ class DefaultRemoteBackupConfigurator(
         /** Reads the baseline back and records the digest the root must bind. */
         private suspend fun verifyBaseline(): StepResult<Unit> {
             if (reached(RemoteConnectPhase.BASELINE_VERIFIED)) return StepResult.Ok(Unit)
+            return when (val verified = readPlannedBaseline()) {
+                is StepResult.Failed -> verified
+                is StepResult.Ok -> advance(
+                    RemoteConnectPhase.BASELINE_VERIFIED,
+                    state.copy(baselineSha256 = verified.value.completeSha256.value),
+                )
+            }
+        }
+
+        /**
+         * Reads the publication slot this connection reserved and requires the
+         * occupant to be the sequence-zero baseline it planned: same lineage,
+         * publication identity, provider file, epoch, device, source vault, and
+         * planned ownership claim. Any other occupant is ambiguity.
+         */
+        private suspend fun readPlannedBaseline(): StepResult<VerifiedPublication> {
             val providerObjectId =
                 ProviderObjectId.of(checkNotNull(state.publicationProviderFileId))
             val bytes = when (val read = readPublication(providerObjectId)) {
@@ -493,21 +574,28 @@ class DefaultRemoteBackupConfigurator(
             val verified = bytes.useOwned { source ->
                 runBounded { publicationCodec.verify(source, contentKey) }
             } ?: return StepResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-            if (verified.manifest.publicationId != state.publicationId ||
-                verified.manifest.publicationSequence != BASELINE_SEQUENCE
-            ) {
+            val manifest = verified.manifest
+            val planned = manifest.lineageId == state.lineageId &&
+                manifest.publicationId == state.publicationId &&
+                manifest.publicationProviderFileId == providerObjectId.value &&
+                manifest.publicationSequence == BASELINE_SEQUENCE &&
+                manifest.baseline &&
+                manifest.writerEpoch == FIRST_EPOCH.value &&
+                manifest.activeDeviceId == state.deviceId &&
+                manifest.sourceVaultId == vaultId.value &&
+                manifest.plannedClaimProviderFileId == state.rootProviderFileId &&
+                manifest.plannedClaimId == state.rootClaimId
+            if (!planned) {
                 return StepResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
             }
-            return advance(
-                RemoteConnectPhase.BASELINE_VERIFIED,
-                state.copy(baselineSha256 = verified.completeSha256.value),
-            )
+            return StepResult.Ok(verified)
         }
 
         private suspend fun createRoot(): StepResult<Unit> {
             if (reached(RemoteConnectPhase.ROOT_CREATED)) return StepResult.Ok(Unit)
+            val intended = rootClaim()
             val encoded = try {
-                ownershipCodec.encode(rootClaim(), contentKey)
+                ownershipCodec.encode(intended, contentKey)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -522,8 +610,18 @@ class DefaultRemoteBackupConfigurator(
                 is OwnershipClaimCreateResult.Won ->
                     advance(RemoteConnectPhase.ROOT_CREATED, state)
 
+                // The root claim's plaintext is fully determined by persisted
+                // state, so an occupant whose authenticated claim equals the
+                // claim this connection intended is its own earlier create
+                // recovering across a crash — not another writer. Only the
+                // content key can produce those authenticated bytes, and every
+                // other occupant is still ownership loss.
                 is OwnershipClaimCreateResult.Lost ->
-                    StepResult.Failed(RemoteBackupFailureCategory.OWNERSHIP_LOST)
+                    if (created.winner.claim == intended) {
+                        advance(RemoteConnectPhase.ROOT_CREATED, state)
+                    } else {
+                        StepResult.Failed(RemoteBackupFailureCategory.OWNERSHIP_LOST)
+                    }
 
                 OwnershipClaimCreateResult.AmbiguousRemoteState ->
                     StepResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
@@ -702,6 +800,14 @@ class DefaultRemoteBackupConfigurator(
 
         private fun reached(phase: RemoteConnectPhase): Boolean =
             RemoteConnectPhase.valueOf(state.phase).ordinal >= phase.ordinal
+
+        /**
+         * Persists state durably without leaving the current phase, so intent
+         * recorded before a network mutation survives a crash that happens
+         * before the phase itself can advance.
+         */
+        private suspend fun record(next: RemoteConnectStateV1): StepResult<Unit> =
+            advance(RemoteConnectPhase.valueOf(state.phase), next)
 
         private suspend fun advance(
             phase: RemoteConnectPhase,

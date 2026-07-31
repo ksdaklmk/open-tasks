@@ -30,6 +30,12 @@ class ReauthenticatedRemoteObject internal constructor(
     val lastGeneration: BackupGeneration,
     val frameLength: Long,
     val frameSha256: Sha256Digest,
+    /**
+     * Digest of the canonical plaintext this frame encrypts. Two copies of one
+     * generation share it even though their nonces, ciphertext, and frame
+     * digests differ, so a copy read back later can be compared by content.
+     */
+    val payloadSha256: Sha256Digest,
     backing: File,
 ) : OwnedRemoteFile {
     private var staged: File? = backing
@@ -91,6 +97,7 @@ class RemoteObjectCodec(
         var frame: ByteArray? = null
         var staged: File? = null
         try {
+            val payloadSha256 = Sha256Digest.of(sha256Hex(plaintext))
             frame = authenticatedCodec.encrypt(
                 CloudHeaderIdentity(
                     family = descriptor.family,
@@ -119,6 +126,7 @@ class RemoteObjectCodec(
                 lastGeneration = BackupGeneration(descriptor.lastGeneration),
                 frameLength = frame.size.toLong(),
                 frameSha256 = Sha256Digest.of(sha256Hex(frame)),
+                payloadSha256 = payloadSha256,
                 backing = staged,
             )
         } catch (failure: Throwable) {
