@@ -26,6 +26,13 @@ enum class DriveAuthorizationMode {
     NON_INTERACTIVE,
 }
 
+/** Why authorization could not produce a session, without leaking why in detail. */
+enum class DriveAuthorizationUnavailableReason {
+    AUTHORIZATION_REQUIRED,
+    RETRYABLE,
+    REJECTED,
+}
+
 sealed interface DriveAuthorizationResult {
     data class Authorized(
         val session: AuthorizedDriveSession,
@@ -37,7 +44,9 @@ sealed interface DriveAuthorizationResult {
 
     data object AccountMismatch : DriveAuthorizationResult
 
-    data object Unavailable : DriveAuthorizationResult
+    data class Unavailable(
+        val reason: DriveAuthorizationUnavailableReason,
+    ) : DriveAuthorizationResult
 }
 
 /**
@@ -48,12 +57,16 @@ sealed interface DriveAuthorizationResult {
  * [GoogleDriveAuthorizationManager.revokeAccess]; both are dropped on
  * [close], alongside the wrapped [transport]. [toString] never reveals the
  * token, account, or digest.
+ *
+ * [account] may be absent: the account handle is only ever needed by
+ * [GoogleDriveAuthorizationManager.revokeAccess], never by authorization
+ * itself, so a missing handle must not fail an otherwise valid token grant.
  */
 class AuthorizedDriveSession internal constructor(
     val transport: CreateOnlyDriveTransport,
     accountBindingDigest: ByteArray,
     accessToken: String,
-    account: Account,
+    account: Account?,
 ) : AutoCloseable {
     private val ownedAccountBindingDigest: ByteArray = accountBindingDigest.copyOf()
     private var ownedAccessToken: String? = accessToken
@@ -215,7 +228,7 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
         val outcome = try {
             identity.resultFromIntent(data)
         } catch (_: Exception) {
-            return DriveAuthorizationResult.Unavailable
+            return DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.REJECTED)
         }
         return resolveOutcome(DriveAuthorizationMode.EXPLICIT_ACCOUNT, outcome, expectedAccountDigest)
     }
@@ -232,7 +245,14 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
     override suspend fun revokeAccess(session: AuthorizedDriveSession) {
         val account = session.accountOrNull()
         try {
-            account?.let { identity.revokeAccess(it, DRIVE_APPDATA_SCOPE) }
+            if (account != null) {
+                identity.revokeAccess(account, DRIVE_APPDATA_SCOPE)
+            } else {
+                // No account handle: nothing to revoke server-side, but the
+                // locally cached token can still be dropped from the Google
+                // token cache so a later authorize() does not silently reuse it.
+                session.accessTokenOrNull()?.let { identity.clearToken(it) }
+            }
         } finally {
             session.close()
         }
@@ -246,15 +266,16 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
         if (outcome.hasResolution) {
             val pendingIntent = outcome.pendingIntent
             return when {
-                mode == DriveAuthorizationMode.NON_INTERACTIVE -> DriveAuthorizationResult.Unavailable
+                mode == DriveAuthorizationMode.NON_INTERACTIVE ->
+                    unavailable(DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED)
                 pendingIntent != null -> DriveAuthorizationResult.ResolutionRequired(pendingIntent)
-                else -> DriveAuthorizationResult.Unavailable
+                else -> unavailable(DriveAuthorizationUnavailableReason.REJECTED)
             }
         }
         val accessToken = outcome.accessToken
         val account = outcome.account
-        if (accessToken.isNullOrEmpty() || account == null) {
-            return DriveAuthorizationResult.Unavailable
+        if (accessToken.isNullOrEmpty()) {
+            return unavailable(DriveAuthorizationUnavailableReason.REJECTED)
         }
         val transport = transportFactory(accessToken)
         val permissionId = try {
@@ -264,7 +285,7 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
                 identity.clearToken(accessToken)
             }
             transport.close()
-            return DriveAuthorizationResult.Unavailable
+            return unavailable(exception.category.toUnavailableReason())
         }
         val digest = accountBinding.digest(permissionId)
         try {
@@ -284,6 +305,22 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
             digest.fill(0)
         }
     }
+
+    private fun unavailable(
+        reason: DriveAuthorizationUnavailableReason,
+    ): DriveAuthorizationResult.Unavailable = DriveAuthorizationResult.Unavailable(reason)
+
+    private fun DriveTransportFailureCategory.toUnavailableReason(): DriveAuthorizationUnavailableReason =
+        when (this) {
+            DriveTransportFailureCategory.AUTHORIZATION ->
+                DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED
+            DriveTransportFailureCategory.RETRYABLE -> DriveAuthorizationUnavailableReason.RETRYABLE
+            DriveTransportFailureCategory.MISSING,
+            DriveTransportFailureCategory.STORAGE_QUOTA,
+            DriveTransportFailureCategory.CORRUPT_RESPONSE,
+            DriveTransportFailureCategory.PROVIDER_REJECTED,
+            -> DriveAuthorizationUnavailableReason.REJECTED
+        }
 
     companion object {
         const val DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"

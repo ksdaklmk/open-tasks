@@ -1616,6 +1616,12 @@ enum class DriveAuthorizationMode {
     NON_INTERACTIVE,
 }
 
+enum class DriveAuthorizationUnavailableReason {
+    AUTHORIZATION_REQUIRED,
+    RETRYABLE,
+    REJECTED,
+}
+
 sealed interface DriveAuthorizationResult {
     data class Authorized(
         val session: AuthorizedDriveSession,
@@ -1624,7 +1630,9 @@ sealed interface DriveAuthorizationResult {
         val pendingIntent: PendingIntent,
     ) : DriveAuthorizationResult
     data object AccountMismatch : DriveAuthorizationResult
-    data object Unavailable : DriveAuthorizationResult
+    data class Unavailable(
+        val reason: DriveAuthorizationUnavailableReason,
+    ) : DriveAuthorizationResult
 }
 
 class AuthorizedDriveSession internal constructor(

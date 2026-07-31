@@ -52,7 +52,23 @@ class GoogleDriveAuthorizationManagerTest {
 
         val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
 
-        assertEquals(DriveAuthorizationResult.Unavailable, result)
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED),
+            result,
+        )
+        assertEquals(0, manager.transportCount)
+    }
+
+    @Test
+    fun explicitModeResolutionRequiredWithoutAPendingIntentReportsRejected() = runBlocking {
+        val manager = manager(permissionId = "account-a", hasResolution = true)
+
+        val result = manager.authorize(DriveAuthorizationMode.EXPLICIT_ACCOUNT, null)
+
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.REJECTED),
+            result,
+        )
         assertEquals(0, manager.transportCount)
     }
 
@@ -137,7 +153,7 @@ class GoogleDriveAuthorizationManagerTest {
     }
 
     @Test
-    fun permissionLookupAuthorizationFailureClearsTheTokenAndReportsUnavailable() = runBlocking {
+    fun permissionLookupAuthorizationFailureClearsTheTokenAndReportsAuthorizationRequired() = runBlocking {
         val manager = manager(
             permissionId = "unused",
             accessToken = "stale-token",
@@ -146,13 +162,16 @@ class GoogleDriveAuthorizationManagerTest {
 
         val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
 
-        assertEquals(DriveAuthorizationResult.Unavailable, result)
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED),
+            result,
+        )
         assertEquals(listOf("stale-token"), manager.identity.clearedTokens)
         assertEquals(1, manager.closedTransports)
     }
 
     @Test
-    fun nonAuthorizationPermissionLookupFailureNeverClearsTheToken() = runBlocking {
+    fun retryablePermissionLookupFailureNeverClearsTheTokenAndReportsRetryable() = runBlocking {
         val manager = manager(
             permissionId = "unused",
             accessToken = "live-token",
@@ -161,9 +180,73 @@ class GoogleDriveAuthorizationManagerTest {
 
         val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
 
-        assertEquals(DriveAuthorizationResult.Unavailable, result)
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.RETRYABLE),
+            result,
+        )
         assertTrue(manager.identity.clearedTokens.isEmpty())
         assertEquals(1, manager.closedTransports)
+    }
+
+    @Test
+    fun rejectedPermissionLookupFailureReportsRejected() = runBlocking {
+        val manager = manager(
+            permissionId = "unused",
+            accessToken = "live-token",
+            permissionIdFailure = DriveTransportException(DriveTransportFailureCategory.PROVIDER_REJECTED),
+        )
+
+        val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
+
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.REJECTED),
+            result,
+        )
+        assertTrue(manager.identity.clearedTokens.isEmpty())
+        assertEquals(1, manager.closedTransports)
+    }
+
+    @Test
+    fun authorizeSucceedsWithoutAnAccountHandle() = runBlocking {
+        val manager = manager(permissionId = "account-a", account = null)
+
+        val result = manager.authorize(DriveAuthorizationMode.EXPLICIT_ACCOUNT, null)
+
+        assertTrue(result is DriveAuthorizationResult.Authorized)
+        assertEquals(1, manager.transportCount)
+        (result as DriveAuthorizationResult.Authorized).session.close()
+    }
+
+    @Test
+    fun revokeAccessWithoutAnAccountHandleClearsTheTokenInsteadAndCloses() = runBlocking {
+        val manager = manager(
+            permissionId = "account-a",
+            account = null,
+            accessToken = "no-account-token",
+        )
+        val session = (
+            manager.authorize(DriveAuthorizationMode.EXPLICIT_ACCOUNT, null)
+                as DriveAuthorizationResult.Authorized
+            ).session
+
+        manager.revokeAccess(session)
+
+        assertTrue(manager.identity.revokedAccounts.isEmpty())
+        assertEquals(listOf("no-account-token"), manager.identity.clearedTokens)
+        assertThrows(IllegalStateException::class.java) { session.copyAccountBindingDigest() }
+        Unit
+    }
+
+    @Test
+    fun acceptResolutionExtractionFailureReportsRejectedWithoutThrowing() = runBlocking {
+        val manager = manager(permissionId = "account-a", resultFromIntentFailure = IllegalStateException())
+
+        val result = manager.acceptResolution(Intent(), null)
+
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(DriveAuthorizationUnavailableReason.REJECTED),
+            result,
+        )
     }
 
     @Test
@@ -233,9 +316,10 @@ class GoogleDriveAuthorizationManagerTest {
         permissionId: String,
         expectedDigest: ByteArray? = null,
         accessToken: String = "token",
-        account: Account = Account("account", "type"),
+        account: Account? = Account("account", "type"),
         hasResolution: Boolean = false,
         permissionIdFailure: DriveTransportException? = null,
+        resultFromIntentFailure: Exception? = null,
     ): RecordingAuthorizationManager {
         val outcome = DriveAuthorizationOutcome(
             accessToken = accessToken,
@@ -243,7 +327,7 @@ class GoogleDriveAuthorizationManagerTest {
             hasResolution = hasResolution,
             pendingIntent = null,
         )
-        val identity = FakeDriveIdentityBoundary(outcome)
+        val identity = FakeDriveIdentityBoundary(outcome, resultFromIntentFailure)
         val transports = mutableListOf<TrackingCreateOnlyDriveTransport>()
         val delegate = DefaultGoogleDriveAuthorizationManager(
             identity = identity,
@@ -267,6 +351,7 @@ class GoogleDriveAuthorizationManagerTest {
 
     private class FakeDriveIdentityBoundary(
         private val outcome: DriveAuthorizationOutcome,
+        private val resultFromIntentFailure: Exception? = null,
     ) : DriveIdentityBoundary {
         val authorizeSpecs = mutableListOf<DriveAuthorizationRequestSpec>()
         val clearedTokens = mutableListOf<String>()
@@ -281,6 +366,7 @@ class GoogleDriveAuthorizationManagerTest {
 
         override fun resultFromIntent(data: Intent): DriveAuthorizationOutcome {
             resultFromIntentCalls++
+            resultFromIntentFailure?.let { throw it }
             return outcome
         }
 
