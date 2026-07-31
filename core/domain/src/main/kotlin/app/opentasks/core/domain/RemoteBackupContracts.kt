@@ -247,10 +247,20 @@ data class RemoteBackupObject(
  * later ownership, publication, and configurator work in `core:data` can
  * depend on it without depending on a concrete provider.
  *
- * A held [OwnedRemoteBytes] or [OwnedRemoteFile] owns private, staged bytes
- * that never survive past a single call: [OwnedRemoteBytes.take] transfers
- * its buffer exactly once, and closing either type makes every later access
- * fail rather than silently return stale or cleared content.
+ * A held [OwnedRemoteBytes] or [OwnedRemoteFile] owns private, staged bytes:
+ * [OwnedRemoteBytes.take] transfers its buffer exactly once, and closing
+ * either type makes every later access fail rather than silently return
+ * stale or cleared content. Ownership direction differs by call, though:
+ * bytes passed into [CreateOnlyBackupObjectStore.createSmallIfAbsent] are
+ * store-owned for that single call — the store always closes them before
+ * returning, whatever the outcome. [ImmutableUploadRequest.frame] is
+ * caller-owned instead: an upload reads it across multiple resumable
+ * chunks and may be retried by the caller with the same request after a
+ * failure, so the store never closes it; the caller closes it once the
+ * whole upload for that frame is finished, successfully or not. A value
+ * the store *returns* to the caller (a [ReadSmallResult.Found]'s `bytes`,
+ * or an [ImmutableDownloadResult.Downloaded]'s `frame`) is caller-owned
+ * from the moment it is returned.
  */
 interface OwnedRemoteBytes : AutoCloseable {
     val size: Int
@@ -345,6 +355,7 @@ interface CreateOnlyBackupObjectStore {
     ): List<ProviderObjectId>
     suspend fun createSmallIfAbsent(
         providerObjectId: ProviderObjectId,
+        lineageId: CloudLineageId,
         metadata: RemoteListedObject,
         bytes: OwnedRemoteBytes,
     ): CreateSmallResult

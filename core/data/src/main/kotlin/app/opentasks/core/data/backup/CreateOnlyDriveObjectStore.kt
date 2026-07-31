@@ -29,7 +29,9 @@ import app.opentasks.core.model.RemoteObjectLifecycle
 import app.opentasks.core.model.RemoteObjectRoleV1
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.WriterEpoch
+import app.opentasks.core.sync.CloudBounds
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.time.Instant
@@ -72,6 +74,7 @@ class CreateOnlyDriveObjectStore(
 
     override suspend fun createSmallIfAbsent(
         providerObjectId: ProviderObjectId,
+        lineageId: CloudLineageId,
         metadata: RemoteListedObject,
         bytes: OwnedRemoteBytes,
     ): CreateSmallResult {
@@ -82,7 +85,7 @@ class CreateOnlyDriveObjectStore(
         val driveMetadata = metadataFor(
             providerObjectId = providerObjectId,
             role = role,
-            lineageId = null,
+            lineageId = lineageId,
             logicalObjectId = metadata.logicalObjectId,
             writerEpoch = metadata.writerEpoch,
             ownerDeviceId = metadata.ownerDeviceId,
@@ -106,8 +109,14 @@ class CreateOnlyDriveObjectStore(
         providerObjectId: ProviderObjectId,
         maximumBytes: Long,
     ): ReadSmallResult {
-        require(maximumBytes >= 0) { "Maximum bytes is negative" }
-        val staged = createStagingFile("read")
+        require(maximumBytes in 0..MAX_SMALL_OBJECT_BYTES) {
+            "Maximum bytes is outside its bound"
+        }
+        val staged = try {
+            createStagingFile("read")
+        } catch (exception: IOException) {
+            return ReadSmallResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
         return try {
             transport.downloadFile(providerObjectId.value, staged, maximumBytes)
             ReadSmallResult.Found(StagedRemoteBytes(staged.readBytes()))
@@ -117,6 +126,8 @@ class CreateOnlyDriveObjectStore(
             } else {
                 ReadSmallResult.Failed(exception.category.toRemoteFailure())
             }
+        } catch (exception: IOException) {
+            ReadSmallResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
         } finally {
             staged.delete()
         }
@@ -200,8 +211,14 @@ class CreateOnlyDriveObjectStore(
         maximumBytes: Long,
         expectedSha256: Sha256Digest,
     ): ImmutableDownloadResult {
-        require(maximumBytes >= 0) { "Maximum bytes is negative" }
-        val staged = createStagingFile("download")
+        require(maximumBytes in 0..MAX_IMMUTABLE_OBJECT_BYTES) {
+            "Maximum bytes is outside its bound"
+        }
+        val staged = try {
+            createStagingFile("download")
+        } catch (exception: IOException) {
+            return ImmutableDownloadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
         return try {
             transport.downloadFile(providerObjectId.value, staged, maximumBytes)
             if (digestMatches(staged, expectedSha256)) {
@@ -217,6 +234,9 @@ class CreateOnlyDriveObjectStore(
             } else {
                 ImmutableDownloadResult.Failed(exception.category.toRemoteFailure())
             }
+        } catch (exception: IOException) {
+            staged.delete()
+            ImmutableDownloadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
         }
     }
 
@@ -237,7 +257,11 @@ class CreateOnlyDriveObjectStore(
         request: ImmutableUploadRequest,
         state: RemoteBackupObject,
     ): ImmutableUploadResult {
-        val content = request.frame.file.readBytes()
+        val content = try {
+            request.frame.file.readBytes()
+        } catch (exception: IOException) {
+            return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
         val result = try {
             transport.createFileIfAbsent(DriveCreateRequest(metadataFor(request), content))
         } catch (exception: DriveTransportException) {
@@ -253,18 +277,23 @@ class CreateOnlyDriveObjectStore(
     }
 
     // -- Resumable (> 5 MiB) ---------------------------------------------------------------
+    //
+    // Both restarted sessions (after Expired) and non-advancing confirmed
+    // offsets (a provider repeating the same ResumeAt/chunk answer) are
+    // bounded: past MAX_RESTART_ATTEMPTS/MAX_STALL_ATTEMPTS the loop fails
+    // closed with Failed(RETRYABLE_PROVIDER) rather than spinning forever.
 
     private suspend fun uploadViaResumable(
         request: ImmutableUploadRequest,
         initial: RemoteBackupObject,
     ): ImmutableUploadResult {
         var step: SessionStep = if (initial.resumableSessionUri == null) {
-            startSession(request, initial)
+            startSession(request, initial, restartCount = 0)
         } else {
-            resumeSession(request, initial)
+            resumeSession(request, initial, restartCount = 0)
         }
         while (step is SessionStep.Continue && step.offset < request.frameLength) {
-            step = uploadNextChunk(request, step.state, step.offset)
+            step = uploadNextChunk(request, step)
         }
         return when (step) {
             is SessionStep.Done -> step.result
@@ -275,6 +304,7 @@ class CreateOnlyDriveObjectStore(
     private suspend fun startSession(
         request: ImmutableUploadRequest,
         state: RemoteBackupObject,
+        restartCount: Int,
     ): SessionStep {
         val sessionUri = try {
             transport.startResumableCreate(metadataFor(request), request.frameLength).sessionUri
@@ -286,13 +316,27 @@ class CreateOnlyDriveObjectStore(
             uploadedBytes = 0,
             lifecycle = RemoteObjectLifecycle.UPLOADING,
         )
-        transferStore.compareAndSetObject(state, next)
-        return SessionStep.Continue(next, 0L)
+        if (!transferStore.compareAndSetObject(state, next)) return lostRaceFailure()
+        return SessionStep.Continue(next, 0L, restartCount, stallCount = 0)
+    }
+
+    private suspend fun restartSession(
+        request: ImmutableUploadRequest,
+        state: RemoteBackupObject,
+        restartCount: Int,
+    ): SessionStep {
+        if (restartCount >= MAX_RESTART_ATTEMPTS) {
+            return SessionStep.Done(
+                ImmutableUploadResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            )
+        }
+        return startSession(request, state, restartCount + 1)
     }
 
     private suspend fun resumeSession(
         request: ImmutableUploadRequest,
         state: RemoteBackupObject,
+        restartCount: Int,
     ): SessionStep {
         val sessionUri = checkNotNull(state.resumableSessionUri)
         val queried = try {
@@ -301,53 +345,99 @@ class CreateOnlyDriveObjectStore(
             return exception.asSessionFailure()
         }
         return when (queried) {
-            is DriveChunkResult.ResumeAt -> confirmOffset(state, queried.nextByte)
-            DriveChunkResult.Complete -> confirmOffset(state, request.frameLength)
-            DriveChunkResult.Expired -> startSession(request, state)
+            is DriveChunkResult.ResumeAt -> confirmOffset(state, queried.nextByte, restartCount, 0)
+            DriveChunkResult.Complete -> confirmOffset(state, request.frameLength, restartCount, 0)
+            DriveChunkResult.Expired -> restartSession(request, state, restartCount)
             DriveChunkResult.Ambiguous -> SessionStep.Done(resolveOccupied(request, state))
         }
     }
 
     private suspend fun uploadNextChunk(
         request: ImmutableUploadRequest,
-        state: RemoteBackupObject,
-        offset: Long,
+        step: SessionStep.Continue,
     ): SessionStep {
+        val state = step.state
+        val offset = step.offset
         val sessionUri = checkNotNull(state.resumableSessionUri)
         val remaining = request.frameLength - offset
         val chunkLength = minOf(remaining, CHUNK_SIZE_BYTES)
         val chunk = ByteArray(chunkLength.toInt())
-        RandomAccessFile(request.frame.file, "r").use { source ->
-            source.seek(offset)
-            source.readFully(chunk)
-        }
-        val chunkResult = try {
-            transport.uploadChunk(sessionUri, offset, request.frameLength, chunk)
-        } catch (exception: DriveTransportException) {
-            return exception.asSessionFailure()
+        try {
+            try {
+                RandomAccessFile(request.frame.file, "r").use { source ->
+                    source.seek(offset)
+                    source.readFully(chunk)
+                }
+            } catch (exception: IOException) {
+                return SessionStep.Done(
+                    ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+                )
+            }
+            val chunkResult = try {
+                transport.uploadChunk(sessionUri, offset, request.frameLength, chunk)
+            } catch (exception: DriveTransportException) {
+                return exception.asSessionFailure()
+            }
+            return when (chunkResult) {
+                is DriveChunkResult.ResumeAt -> {
+                    if (chunkResult.nextByte > offset) {
+                        confirmOffset(state, chunkResult.nextByte, step.restartCount, 0)
+                    } else {
+                        val stallCount = step.stallCount + 1
+                        if (stallCount >= MAX_STALL_ATTEMPTS) {
+                            SessionStep.Done(
+                                ImmutableUploadResult.Failed(
+                                    RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+                                ),
+                            )
+                        } else {
+                            confirmOffset(
+                                state,
+                                chunkResult.nextByte,
+                                step.restartCount,
+                                stallCount,
+                            )
+                        }
+                    }
+                }
+                DriveChunkResult.Complete ->
+                    SessionStep.Continue(state, request.frameLength, step.restartCount, 0)
+                DriveChunkResult.Expired -> restartSession(request, state, step.restartCount)
+                DriveChunkResult.Ambiguous -> SessionStep.Done(resolveOccupied(request, state))
+            }
         } finally {
             chunk.fill(0)
         }
-        return when (chunkResult) {
-            is DriveChunkResult.ResumeAt -> confirmOffset(state, chunkResult.nextByte)
-            DriveChunkResult.Complete -> SessionStep.Continue(state, request.frameLength)
-            DriveChunkResult.Expired -> startSession(request, state)
-            DriveChunkResult.Ambiguous -> SessionStep.Done(resolveOccupied(request, state))
-        }
     }
 
-    private suspend fun confirmOffset(state: RemoteBackupObject, offset: Long): SessionStep {
-        if (offset == state.uploadedBytes) return SessionStep.Continue(state, offset)
+    private suspend fun confirmOffset(
+        state: RemoteBackupObject,
+        offset: Long,
+        restartCount: Int,
+        stallCount: Int,
+    ): SessionStep {
+        if (offset == state.uploadedBytes) {
+            return SessionStep.Continue(state, offset, restartCount, stallCount)
+        }
         val next = state.copy(uploadedBytes = offset)
-        transferStore.compareAndSetObject(state, next)
-        return SessionStep.Continue(next, offset)
+        if (!transferStore.compareAndSetObject(state, next)) return lostRaceFailure()
+        return SessionStep.Continue(next, offset, restartCount, stallCount)
     }
+
+    private fun lostRaceFailure(): SessionStep = SessionStep.Done(
+        ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+    )
 
     private fun DriveTransportException.asSessionFailure(): SessionStep =
         SessionStep.Done(ImmutableUploadResult.Failed(category.toRemoteFailure()))
 
     private sealed interface SessionStep {
-        data class Continue(val state: RemoteBackupObject, val offset: Long) : SessionStep
+        data class Continue(
+            val state: RemoteBackupObject,
+            val offset: Long,
+            val restartCount: Int,
+            val stallCount: Int,
+        ) : SessionStep
         data class Done(val result: ImmutableUploadResult) : SessionStep
     }
 
@@ -357,20 +447,28 @@ class CreateOnlyDriveObjectStore(
         request: ImmutableUploadRequest,
         state: RemoteBackupObject,
     ): ImmutableUploadResult {
-        val staged = createStagingFile("verify")
+        val staged = try {
+            createStagingFile("verify")
+        } catch (exception: IOException) {
+            return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
         return try {
             val receipt = try {
                 transport.downloadFile(request.providerObjectId.value, staged, request.frameLength)
             } catch (exception: DriveTransportException) {
-                return if (exception.category == DriveTransportFailureCategory.MISSING) {
-                    ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
-                } else {
-                    ImmutableUploadResult.Failed(exception.category.toRemoteFailure())
-                }
+                return ImmutableUploadResult.Failed(exception.toExactIdFailure())
             }
-            if (exactBytesMatch(receipt, staged, request)) {
-                markVerified(request, state)
-                ImmutableUploadResult.UploadedAndVerified
+            val matches = try {
+                exactBytesMatch(receipt, staged, request)
+            } catch (exception: IOException) {
+                return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            }
+            if (matches) {
+                if (markVerified(request, state)) {
+                    ImmutableUploadResult.UploadedAndVerified
+                } else {
+                    ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
+                }
             } else {
                 ImmutableUploadResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             }
@@ -383,21 +481,28 @@ class CreateOnlyDriveObjectStore(
         request: ImmutableUploadRequest,
         state: RemoteBackupObject,
     ): ImmutableUploadResult {
-        val staged = createStagingFile("resolve")
+        val staged = try {
+            createStagingFile("resolve")
+        } catch (exception: IOException) {
+            return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
         return try {
             val receipt = try {
                 transport.downloadFile(request.providerObjectId.value, staged, request.frameLength)
             } catch (exception: DriveTransportException) {
-                val category = if (exception.category == DriveTransportFailureCategory.MISSING) {
-                    RemoteBackupFailureCategory.RETRYABLE_PROVIDER
-                } else {
-                    RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE
-                }
-                return ImmutableUploadResult.Failed(category)
+                return ImmutableUploadResult.Failed(exception.toExactIdFailure())
             }
-            if (exactBytesMatch(receipt, staged, request)) {
-                markVerified(request, state)
-                ImmutableUploadResult.OccupiedByExpectedBytes
+            val matches = try {
+                exactBytesMatch(receipt, staged, request)
+            } catch (exception: IOException) {
+                return ImmutableUploadResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            }
+            if (matches) {
+                if (markVerified(request, state)) {
+                    ImmutableUploadResult.OccupiedByExpectedBytes
+                } else {
+                    ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE)
+                }
             } else {
                 ImmutableUploadResult.OccupiedByDifferentBytes
             }
@@ -406,6 +511,23 @@ class CreateOnlyDriveObjectStore(
         }
     }
 
+    /**
+     * Maps a transport failure encountered while resolving an exact-ID
+     * outcome (an occupied create, or a post-upload verification read).
+     * `MISSING` here means the provider previously reported the object as
+     * present (`Created`/`AlreadyExists`/`Ambiguous`, or a completed
+     * chunk upload) but an immediate follow-up `GET` cannot find it — an
+     * inconsistency that is never treated as a definite, retryable
+     * absence, only as an unresolved ambiguity. Every other category maps
+     * through the normal transport→remote failure mapping.
+     */
+    private fun DriveTransportException.toExactIdFailure(): RemoteBackupFailureCategory =
+        if (category == DriveTransportFailureCategory.MISSING) {
+            RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE
+        } else {
+            category.toRemoteFailure()
+        }
+
     private fun exactBytesMatch(
         receipt: DriveDownloadReceipt,
         staged: File,
@@ -413,14 +535,17 @@ class CreateOnlyDriveObjectStore(
     ): Boolean =
         receipt.byteCount == request.frameLength && digestMatches(staged, request.frameSha256)
 
-    private suspend fun markVerified(request: ImmutableUploadRequest, state: RemoteBackupObject) {
+    private suspend fun markVerified(
+        request: ImmutableUploadRequest,
+        state: RemoteBackupObject,
+    ): Boolean {
         val verified = state.copy(
             lifecycle = RemoteObjectLifecycle.VERIFIED,
             resumableSessionUri = null,
             uploadedBytes = request.frameLength,
             verifiedAt = Instant.now(),
         )
-        transferStore.compareAndSetObject(state, verified)
+        return transferStore.compareAndSetObject(state, verified)
     }
 
     // -- Shared helpers ----------------------------------------------------------------------
@@ -487,12 +612,56 @@ class CreateOnlyDriveObjectStore(
         expected.value.encodeToByteArray(),
     )
 
+    /**
+     * Rejects a request whose declared [ImmutableUploadRequest.frameLength] already
+     * exceeds its role's Stage 1/2 ceiling, before any network mutation. Ceilings are
+     * derived from the same public [CloudBounds] constants [PublicationCodec] and
+     * [OwnershipClaimCodec] use for their own file-length bounds.
+     */
+    private fun validateUploadRequest(request: ImmutableUploadRequest) {
+        require(request.frameLength >= 0) { "Frame length is negative" }
+        require(request.lastGeneration.value >= request.firstGeneration.value) {
+            "Last generation precedes first generation"
+        }
+        val ceiling = checkNotNull(MAX_UPLOAD_BYTES_BY_ROLE[request.role]) { "Unrecognized role" }
+        require(request.frameLength <= ceiling) {
+            "Frame length exceeds its role's ceiling"
+        }
+    }
+
     private companion object {
+        // The outer length-prefix every CloudObjectFormat-shaped frame carries; see
+        // the identically-valued private constants in PublicationCodec/OwnershipClaimCodec.
+        const val LENGTH_PREFIX_BYTES = 4L
+        val HEADER_AND_PREFIX_BYTES = LENGTH_PREFIX_BYTES + CloudBounds.MAX_HEADER_BYTES
+        val INNER_FRAME_CEILING_BYTES =
+            HEADER_AND_PREFIX_BYTES + CloudBounds.MAX_MANIFEST_CIPHERTEXT_BYTES
+        val CLAIM_OR_BOOTSTRAP_CEILING_BYTES = HEADER_AND_PREFIX_BYTES + INNER_FRAME_CEILING_BYTES
+        val SNAPSHOT_CEILING_BYTES =
+            HEADER_AND_PREFIX_BYTES + CloudBounds.MAX_SNAPSHOT_CIPHERTEXT_BYTES
+        val SEGMENT_CEILING_BYTES =
+            HEADER_AND_PREFIX_BYTES + CloudBounds.MAX_OPERATION_SEGMENT_CIPHERTEXT_BYTES
+        val MAX_UPLOAD_BYTES_BY_ROLE: Map<RemoteObjectRoleV1, Long> = mapOf(
+            RemoteObjectRoleV1.OWNERSHIP_ROOT to CLAIM_OR_BOOTSTRAP_CEILING_BYTES,
+            RemoteObjectRoleV1.OWNERSHIP_CLAIM to CLAIM_OR_BOOTSTRAP_CEILING_BYTES,
+            RemoteObjectRoleV1.OWNERSHIP_TOMBSTONE to CLAIM_OR_BOOTSTRAP_CEILING_BYTES,
+            RemoteObjectRoleV1.PUBLICATION to CLAIM_OR_BOOTSTRAP_CEILING_BYTES,
+            RemoteObjectRoleV1.SNAPSHOT to SNAPSHOT_CEILING_BYTES,
+            RemoteObjectRoleV1.SEGMENT to SEGMENT_CEILING_BYTES,
+        )
+
+        // readSmall/downloadImmutable carry no role, so they bound against the widest
+        // ceiling among the roles that legitimately call them.
+        val MAX_SMALL_OBJECT_BYTES = CLAIM_OR_BOOTSTRAP_CEILING_BYTES
+        val MAX_IMMUTABLE_OBJECT_BYTES = SNAPSHOT_CEILING_BYTES
+
         const val MULTIPART_THRESHOLD_BYTES = 5L * 1024 * 1024
         const val CHUNK_SIZE_BYTES = 256L * 1024
         const val MAX_PAGE_SIZE = 100
         const val MAX_PAGE_TOKEN_CHARACTERS = 1_024
         const val MAX_GENERATED_IDS_PER_REQUEST = 100
+        const val MAX_RESTART_ATTEMPTS = 3
+        const val MAX_STALL_ATTEMPTS = 3
         const val FORMAT_V1 = "v1"
         const val APP_PROPERTIES = "appProperties"
         const val PROPERTY_FORMAT = "format"
@@ -516,13 +685,6 @@ class CreateOnlyDriveObjectStore(
             RemoteObjectRoleV1.SNAPSHOT to "snapshot",
             RemoteObjectRoleV1.SEGMENT to "segment",
         )
-    }
-}
-
-private fun validateUploadRequest(request: ImmutableUploadRequest) {
-    require(request.frameLength >= 0) { "Frame length is negative" }
-    require(request.lastGeneration.value >= request.firstGeneration.value) {
-        "Last generation precedes first generation"
     }
 }
 

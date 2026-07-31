@@ -67,7 +67,7 @@ class CreateOnlyDriveObjectStoreTest {
 
     @Test
     fun listBuildsBoundedQueryAndMapsAppPropertiesToListedObjects() = runStoreTest { store, transport, _, _ ->
-        transport.listPage = DriveListPage(
+        transport.listPageOverride = DriveListPage(
             files = listOf(
                 DriveListedFile(
                     providerFileId = "listed-a",
@@ -167,6 +167,7 @@ class CreateOnlyDriveObjectStoreTest {
 
             val result = store.createSmallIfAbsent(
                 ProviderObjectId.of("small-id"),
+                LINEAGE,
                 RemoteListedObject(
                     providerObjectId = ProviderObjectId.of("small-id"),
                     logicalObjectId = "logical-small",
@@ -182,6 +183,59 @@ class CreateOnlyDriveObjectStoreTest {
         }
         assertEquals(3, transport.createCalls.size)
         assertFalse(transport.createCalls[0].metadata.appProperties.containsKey("role"))
+        assertEquals(LINEAGE.value, transport.createCalls[0].metadata.appProperties["lineageId"])
+    }
+
+    @Test
+    fun smallCreateWritesAreVisibleThroughListForTheSameLineageAndRole() = runStoreTest { store, transport, _, _ ->
+        transport.createResults.add(DriveCreateResult.Created)
+        val providerId = ProviderObjectId.of("root-id")
+
+        val created = store.createSmallIfAbsent(
+            providerId,
+            LINEAGE,
+            RemoteListedObject(
+                providerObjectId = providerId,
+                logicalObjectId = "root-logical",
+                role = RemoteObjectRoleV1.OWNERSHIP_ROOT,
+                writerEpoch = WriterEpoch(1),
+                ownerDeviceId = DEVICE,
+            ),
+            ownedBytes("root-bytes".toByteArray()),
+        )
+        assertEquals(CreateSmallResult.Created, created)
+
+        val page = store.list(
+            RemoteListRequest(
+                lineageId = LINEAGE,
+                role = RemoteObjectRoleV1.OWNERSHIP_ROOT,
+                writerEpoch = null,
+                ownerDeviceId = null,
+                pageToken = null,
+                pageSize = 10,
+            ),
+        )
+
+        assertEquals(1, page.objects.size)
+        val listed = page.objects.single()
+        assertEquals(providerId, listed.providerObjectId)
+        assertEquals("root-logical", listed.logicalObjectId)
+        assertEquals(RemoteObjectRoleV1.OWNERSHIP_ROOT, listed.role)
+        assertEquals(WriterEpoch(1), listed.writerEpoch)
+        assertEquals(DEVICE, listed.ownerDeviceId)
+
+        // A different lineage never sees it.
+        val otherLineagePage = store.list(
+            RemoteListRequest(
+                lineageId = CloudLineageId.new(),
+                role = RemoteObjectRoleV1.OWNERSHIP_ROOT,
+                writerEpoch = null,
+                ownerDeviceId = null,
+                pageToken = null,
+                pageSize = 10,
+            ),
+        )
+        assertTrue(otherLineagePage.objects.isEmpty())
     }
 
     @Test
@@ -189,6 +243,7 @@ class CreateOnlyDriveObjectStoreTest {
         val mismatchError = assertFailure {
             store.createSmallIfAbsent(
                 ProviderObjectId.of("small-id"),
+                LINEAGE,
                 RemoteListedObject(
                     providerObjectId = ProviderObjectId.of("different-id"),
                     logicalObjectId = null,
@@ -204,6 +259,7 @@ class CreateOnlyDriveObjectStoreTest {
         val missingRoleError = assertFailure {
             store.createSmallIfAbsent(
                 ProviderObjectId.of("small-id"),
+                LINEAGE,
                 RemoteListedObject(ProviderObjectId.of("small-id"), null, null, null, null),
                 ownedBytes("content".toByteArray()),
             )
@@ -215,6 +271,7 @@ class CreateOnlyDriveObjectStoreTest {
         )
         val result = store.createSmallIfAbsent(
             ProviderObjectId.of("small-id"),
+            LINEAGE,
             RemoteListedObject(
                 providerObjectId = ProviderObjectId.of("small-id"),
                 logicalObjectId = null,
@@ -488,6 +545,151 @@ class CreateOnlyDriveObjectStoreTest {
         assertTrue(transport.downloadCalls.isEmpty())
     }
 
+    @Test
+    fun uploadImmutableNeverClosesTheCallerOwnedFrameRegardlessOfOutcome() =
+        runStoreTest { store, transport, _, root ->
+            val bytes = "caller-owned-frame".toByteArray()
+            val successFrame = RecordingOwnedFile(ownedFile(bytes, root))
+            val successRequest = uploadRequest(bytes, root).copy(frame = successFrame)
+            transport.createResults.add(DriveCreateResult.Created)
+            transport.remoteObjects[successRequest.providerObjectId.value] = bytes
+
+            val successResult = store.uploadImmutable(successRequest)
+            assertEquals(ImmutableUploadResult.UploadedAndVerified, successResult)
+            assertFalse(successFrame.closed)
+
+            val failureFrame = RecordingOwnedFile(ownedFile(bytes, root))
+            val failureRequest = uploadRequest(bytes, root).copy(frame = failureFrame)
+            transport.createResults.add(failure(DriveTransportFailureCategory.RETRYABLE))
+
+            val failureResult = store.uploadImmutable(failureRequest)
+            assertTrue(failureResult is ImmutableUploadResult.Failed)
+            assertFalse(failureFrame.closed)
+        }
+
+    @Test
+    fun readSmallMapsLocalStagingIoFailureToLocalStorage() = runStoreTest { store, transport, _, _ ->
+        transport.remoteObjects["vanishing-id"] = "will-disappear-before-read".toByteArray()
+        transport.corruptStagedFileAfterDownload = true
+
+        val result = store.readSmall(ProviderObjectId.of("vanishing-id"), maximumBytes = 1_024)
+
+        assertEquals(ReadSmallResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE), result)
+    }
+
+    @Test
+    fun repeatedlyExpiredResumableSessionFailsAfterBoundedRestarts() = runStoreTest { store, transport, _, root ->
+        val bytes = ByteArray(MULTIPART_THRESHOLD_BYTES.toInt() + 1) { it.toByte() }
+        val request = uploadRequest(bytes, root)
+        repeat(4) { index ->
+            transport.resumableSessions.add(DriveResumableSession("session-$index"))
+        }
+        repeat(4) { transport.chunkResults.add(DriveChunkResult.Expired) }
+
+        val result = store.uploadImmutable(request)
+
+        assertEquals(
+            ImmutableUploadResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            result,
+        )
+        assertEquals(4, transport.resumableStartCalls.size)
+        assertEquals(4, transport.chunkCalls.size)
+    }
+
+    @Test
+    fun repeatedlyNonAdvancingConfirmedOffsetFailsAfterBoundedStalls() = runStoreTest { store, transport, _, root ->
+        val bytes = ByteArray(MULTIPART_THRESHOLD_BYTES.toInt() + 1) { it.toByte() }
+        val request = uploadRequest(bytes, root)
+        transport.resumableSessions.add(DriveResumableSession("session-a"))
+        repeat(3) { transport.chunkResults.add(DriveChunkResult.ResumeAt(0)) }
+
+        val result = store.uploadImmutable(request)
+
+        assertEquals(
+            ImmutableUploadResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            result,
+        )
+        assertEquals(3, transport.chunkCalls.size)
+        assertTrue(transport.chunkCalls.all { it.firstByte == 0L })
+    }
+
+    @Test
+    fun lostCompareAndSetDuringVerificationFailsClosedInsteadOfReportingSuccess() =
+        runStoreTest { store, transport, transferStore, root ->
+            val bytes = "verify-me".toByteArray()
+            val request = uploadRequest(bytes, root)
+            transport.createResults.add(DriveCreateResult.Created)
+            transport.remoteObjects[request.providerObjectId.value] = bytes
+            transferStore.failNextCompareAndSet = true
+
+            val result = store.uploadImmutable(request)
+
+            assertEquals(
+                ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+                result,
+            )
+            val persisted = transferStore.objectState(request.lineageId, request.logicalObjectId)
+            assertEquals(RemoteObjectLifecycle.PLANNED, persisted?.lifecycle)
+            assertNull(persisted?.verifiedAt)
+        }
+
+    @Test
+    fun resolveOccupiedMapsAuthorizationNormallyAndMissingAsAmbiguous() =
+        runStoreTest { store, transport, _, root ->
+            val bytes = "occupied-bytes".toByteArray()
+
+            val authRequest = uploadRequest(
+                bytes,
+                root,
+                providerObjectId = ProviderObjectId.of("occupied-auth-id"),
+            )
+            transport.createResults.add(DriveCreateResult.AlreadyExists)
+            transport.downloadOverrides.add(failure(DriveTransportFailureCategory.AUTHORIZATION))
+            val authResult = store.uploadImmutable(authRequest)
+            assertEquals(
+                ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED),
+                authResult,
+            )
+
+            val missingRequest = uploadRequest(
+                bytes,
+                root,
+                providerObjectId = ProviderObjectId.of("occupied-missing-id"),
+            )
+            transport.createResults.add(DriveCreateResult.AlreadyExists)
+            // No transport.remoteObjects entry for "occupied-missing-id": the exact-ID GET
+            // that resolves the occupied create reports MISSING.
+            val missingResult = store.uploadImmutable(missingRequest)
+            assertEquals(
+                ImmutableUploadResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+                missingResult,
+            )
+        }
+
+    @Test
+    fun uploadImmutableEnforcesItsRoleByteCeilingBeforeAnyNetworkCall() =
+        runStoreTest { store, transport, _, root ->
+            val exactBytes = ByteArray(PUBLICATION_CEILING_BYTES.toInt()) { it.toByte() }
+            val exactRequest =
+                uploadRequest(exactBytes, root, role = RemoteObjectRoleV1.PUBLICATION)
+            transport.createResults.add(DriveCreateResult.Created)
+            transport.remoteObjects[exactRequest.providerObjectId.value] = exactBytes
+
+            val exactResult = store.uploadImmutable(exactRequest)
+            assertEquals(ImmutableUploadResult.UploadedAndVerified, exactResult)
+            val callsBeforeOversized = transport.createCalls.size
+
+            val oversizedRequest = uploadRequest(
+                byteArrayOf(0),
+                root,
+                role = RemoteObjectRoleV1.PUBLICATION,
+            ).copy(frameLength = PUBLICATION_CEILING_BYTES + 1)
+
+            val error = assertFailure { store.uploadImmutable(oversizedRequest) }
+            assertTrue(error is IllegalArgumentException)
+            assertEquals(callsBeforeOversized, transport.createCalls.size)
+        }
+
     private fun assertNoStagedFilesRemain(stagingRoot: File) {
         val remaining = stagingRoot.listFiles()?.filter { it.name.endsWith(".otr") }.orEmpty()
         assertTrue(remaining.isEmpty())
@@ -533,6 +735,7 @@ class CreateOnlyDriveObjectStoreTest {
         providerObjectId: ProviderObjectId = ProviderObjectId.of("exact-provider-id"),
         logicalObjectId: RemoteLogicalObjectId = RemoteLogicalObjectId.new(),
         operationId: String = "operation-a",
+        role: RemoteObjectRoleV1 = RemoteObjectRoleV1.SEGMENT,
     ): ImmutableUploadRequest = ImmutableUploadRequest(
         lineageId = lineageId,
         writerEpoch = WriterEpoch(1),
@@ -540,7 +743,7 @@ class CreateOnlyDriveObjectStoreTest {
         operationId = operationId,
         logicalObjectId = logicalObjectId,
         providerObjectId = providerObjectId,
-        role = RemoteObjectRoleV1.SEGMENT,
+        role = role,
         firstGeneration = BackupGeneration(1),
         lastGeneration = BackupGeneration(1),
         frameLength = bytes.size.toLong(),
@@ -583,6 +786,11 @@ class CreateOnlyDriveObjectStoreTest {
         val DEVICE = CloudDeviceId.new()
         const val MULTIPART_THRESHOLD_BYTES = 5L * 1024 * 1024
         const val CHUNK_SIZE_BYTES = 256L * 1024
+
+        // Mirrors CreateOnlyDriveObjectStore's own CLAIM_OR_BOOTSTRAP_CEILING_BYTES:
+        // 4-byte length prefix + 16 KiB header + (4-byte prefix + 16 KiB header + 1 MiB
+        // manifest ciphertext), all from the public CloudBounds constants.
+        const val PUBLICATION_CEILING_BYTES = 4L + 16 * 1024 + (4L + 16 * 1024 + 1L * 1024 * 1024)
     }
 }
 
@@ -607,6 +815,20 @@ private fun ownedFile(bytes: ByteArray, directory: File): OwnedRemoteFile {
     }
 }
 
+/** Wraps a real [OwnedRemoteFile], recording whether the caller ever closed it. */
+private class RecordingOwnedFile(private val delegate: OwnedRemoteFile) : OwnedRemoteFile {
+    var closed = false
+        private set
+
+    override val file: File get() = delegate.file
+    override val length: Long get() = delegate.length
+
+    override fun close() {
+        closed = true
+        delegate.close()
+    }
+}
+
 private fun ownedBytes(bytes: ByteArray): OwnedRemoteBytes = object : OwnedRemoteBytes {
     private var owned: ByteArray? = bytes
     override val size: Int = bytes.size
@@ -625,6 +847,7 @@ private fun ownedBytes(bytes: ByteArray): OwnedRemoteBytes = object : OwnedRemot
 
 private data class ListCall(val query: String, val pageToken: String?, val pageSize: Int)
 private data class ChunkCall(val sessionUri: String, val firstByte: Long, val size: Int)
+private val PROPERTY_CLAUSE = Regex("key='([^']*)' and value='([^']*)'")
 
 private inline fun <reified T> ArrayDeque<Any>.nextOrFail(): T {
     val next = removeFirstOrNull() ?: throw AssertionError("Unexpected fake transport call")
@@ -653,7 +876,15 @@ private class FakeCreateOnlyDriveTransport(
     val queryResults = ArrayDeque<Any>()
     val chunkResults = ArrayDeque<Any>()
     val deleteResults = ArrayDeque<Any>()
-    var listPage: DriveListPage = DriveListPage(emptyList(), null)
+
+    /** Explicit override for [listAppDataFiles]; when null, results derive from [createdFiles]. */
+    var listPageOverride: DriveListPage? = null
+
+    /** Files [createFileIfAbsent] has actually created — source of truth for the default list. */
+    val createdFiles = mutableMapOf<String, DriveFileMetadata>()
+
+    /** When true, the next successful [downloadFile] deletes its destination after writing. */
+    var corruptStagedFileAfterDownload = false
 
     override suspend fun readCurrentUserPermissionId(): String = "unused-permission-id"
 
@@ -668,13 +899,32 @@ private class FakeCreateOnlyDriveTransport(
         pageSize: Int,
     ): DriveListPage {
         listCalls += ListCall(query, pageToken, pageSize)
-        return listPage
+        listPageOverride?.let { return it }
+        val clauses = PROPERTY_CLAUSE.findAll(query)
+            .associate { it.groupValues[1] to it.groupValues[2] }
+        val files = createdFiles.values.filter { metadata ->
+            clauses.all { (key, value) ->
+                if (key == "role") metadata.role == value else metadata.appProperties[key] == value
+            }
+        }.map { metadata ->
+            DriveListedFile(
+                providerFileId = metadata.providerFileId,
+                name = metadata.name,
+                role = metadata.role,
+                appProperties = metadata.appProperties,
+            )
+        }
+        return DriveListPage(files, null)
     }
 
     override suspend fun createFileIfAbsent(request: DriveCreateRequest): DriveCreateResult {
         createCalls += request
         events?.add("create:${request.metadata.providerFileId}")
-        return createResults.nextOrFail()
+        val result = createResults.nextOrFail<DriveCreateResult>()
+        if (result == DriveCreateResult.Created) {
+            createdFiles[request.metadata.providerFileId] = request.metadata
+        }
+        return result
     }
 
     override suspend fun downloadFile(
@@ -691,6 +941,10 @@ private class FakeCreateOnlyDriveTransport(
             ?: throw failure(DriveTransportFailureCategory.MISSING)
         if (bytes.size > maximumBytes) throw failure(DriveTransportFailureCategory.CORRUPT_RESPONSE)
         destination.writeBytes(bytes)
+        if (corruptStagedFileAfterDownload) {
+            corruptStagedFileAfterDownload = false
+            destination.delete()
+        }
         return DriveDownloadReceipt(bytes.size.toLong())
     }
 
@@ -748,6 +1002,9 @@ private class InMemoryRemoteBackupTransferStore(
     private val objects = mutableMapOf<Pair<String, String>, RemoteBackupObject>()
     val insertCalls = mutableListOf<RemoteBackupObject>()
 
+    /** When true, the next [compareAndSetObject] call reports a lost race without applying it. */
+    var failNextCompareAndSet = false
+
     override suspend fun objectState(
         lineageId: CloudLineageId,
         logicalObjectId: RemoteLogicalObjectId,
@@ -765,6 +1022,10 @@ private class InMemoryRemoteBackupTransferStore(
         expected: RemoteBackupObject,
         next: RemoteBackupObject,
     ): Boolean {
+        if (failNextCompareAndSet) {
+            failNextCompareAndSet = false
+            return false
+        }
         val key = expected.lineageId.value to expected.logicalObjectId.value
         if (objects[key] != expected) return false
         objects[key] = next
