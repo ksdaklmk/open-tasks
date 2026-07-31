@@ -26,11 +26,25 @@ enum class DriveAuthorizationMode {
     NON_INTERACTIVE,
 }
 
-/** Why authorization could not produce a session, without leaking why in detail. */
+/**
+ * Why authorization could not produce a session, without leaking why in detail.
+ *
+ * Deliberately bounded, and deliberately *not* collapsed to "refused": silent
+ * authorization performs a live `about.get` probe, so a provider storage
+ * failure or a mangled response surfaces here too. Folding those into
+ * [REJECTED] would tell a person to reconnect an account that is perfectly
+ * fine, so each keeps the category that describes it. No provider message,
+ * status code, or identifier is carried — only which of these five a caller
+ * may act on.
+ */
 enum class DriveAuthorizationUnavailableReason {
     AUTHORIZATION_REQUIRED,
     RETRYABLE,
+
+    /** The grant itself was refused; only a person can resolve it. */
     REJECTED,
+    PROVIDER_STORAGE,
+    CORRUPT_OR_INCOMPATIBLE,
 }
 
 sealed interface DriveAuthorizationResult {
@@ -310,16 +324,26 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
         reason: DriveAuthorizationUnavailableReason,
     ): DriveAuthorizationResult.Unavailable = DriveAuthorizationResult.Unavailable(reason)
 
+    /**
+     * Maps a failure of the `about.get` account-binding probe.
+     *
+     * Only a genuinely refused grant becomes [DriveAuthorizationUnavailableReason.REJECTED].
+     * Storage and malformed-response failures say nothing about the grant, so
+     * they keep their own categories rather than being reported as an account
+     * problem.
+     */
     private fun DriveTransportFailureCategory.toUnavailableReason(): DriveAuthorizationUnavailableReason =
         when (this) {
             DriveTransportFailureCategory.AUTHORIZATION ->
                 DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED
             DriveTransportFailureCategory.RETRYABLE -> DriveAuthorizationUnavailableReason.RETRYABLE
+            DriveTransportFailureCategory.STORAGE_QUOTA ->
+                DriveAuthorizationUnavailableReason.PROVIDER_STORAGE
             DriveTransportFailureCategory.MISSING,
-            DriveTransportFailureCategory.STORAGE_QUOTA,
             DriveTransportFailureCategory.CORRUPT_RESPONSE,
-            DriveTransportFailureCategory.PROVIDER_REJECTED,
-            -> DriveAuthorizationUnavailableReason.REJECTED
+            -> DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE
+            DriveTransportFailureCategory.PROVIDER_REJECTED ->
+                DriveAuthorizationUnavailableReason.REJECTED
         }
 
     companion object {

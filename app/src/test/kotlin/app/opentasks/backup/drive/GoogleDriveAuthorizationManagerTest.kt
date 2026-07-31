@@ -207,6 +207,84 @@ class GoogleDriveAuthorizationManagerTest {
     }
 
     @Test
+    fun storageQuotaPermissionLookupFailureReportsProviderStorageNotARefusedGrant() = runBlocking {
+        val manager = manager(
+            permissionId = "unused",
+            accessToken = "live-token",
+            permissionIdFailure = DriveTransportException(DriveTransportFailureCategory.STORAGE_QUOTA),
+        )
+
+        val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
+
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(
+                DriveAuthorizationUnavailableReason.PROVIDER_STORAGE,
+            ),
+            result,
+        )
+        assertTrue(manager.identity.clearedTokens.isEmpty())
+        assertEquals(1, manager.closedTransports)
+    }
+
+    @Test
+    fun missingAndCorruptPermissionLookupFailuresReportCorruptNotARefusedGrant() = runBlocking {
+        listOf(
+            DriveTransportFailureCategory.MISSING,
+            DriveTransportFailureCategory.CORRUPT_RESPONSE,
+        ).forEach { category ->
+            val manager = manager(
+                permissionId = "unused",
+                accessToken = "live-token",
+                permissionIdFailure = DriveTransportException(category),
+            )
+
+            val result = manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
+
+            assertEquals(
+                category.name,
+                DriveAuthorizationResult.Unavailable(
+                    DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE,
+                ),
+                result,
+            )
+            assertTrue(category.name, manager.identity.clearedTokens.isEmpty())
+        }
+    }
+
+    @Test
+    fun everyTransportFailureCategoryMapsToExactlyOneBoundedUnavailableReason() = runBlocking {
+        val mapped = DriveTransportFailureCategory.entries.associateWith { category ->
+            val manager = manager(
+                permissionId = "unused",
+                accessToken = "live-token",
+                permissionIdFailure = DriveTransportException(category),
+            )
+            (
+                manager.authorize(DriveAuthorizationMode.NON_INTERACTIVE, null)
+                    as DriveAuthorizationResult.Unavailable
+                ).reason
+        }
+
+        assertEquals(
+            mapOf(
+                DriveTransportFailureCategory.AUTHORIZATION to
+                    DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
+                DriveTransportFailureCategory.RETRYABLE to
+                    DriveAuthorizationUnavailableReason.RETRYABLE,
+                DriveTransportFailureCategory.STORAGE_QUOTA to
+                    DriveAuthorizationUnavailableReason.PROVIDER_STORAGE,
+                DriveTransportFailureCategory.MISSING to
+                    DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE,
+                DriveTransportFailureCategory.CORRUPT_RESPONSE to
+                    DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE,
+                DriveTransportFailureCategory.PROVIDER_REJECTED to
+                    DriveAuthorizationUnavailableReason.REJECTED,
+            ),
+            mapped,
+        )
+    }
+
+    @Test
     fun authorizeSucceedsWithoutAnAccountHandle() = runBlocking {
         val manager = manager(permissionId = "account-a", account = null)
 

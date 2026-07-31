@@ -1,5 +1,6 @@
 package app.opentasks.backup
 
+import android.app.PendingIntent
 import app.opentasks.backup.drive.AuthorizedDriveSession
 import app.opentasks.backup.drive.DriveAuthorizationResult
 import app.opentasks.backup.drive.DriveAuthorizationUnavailableReason
@@ -109,7 +110,7 @@ class RemoteBackupRuntimeTest {
     }
 
     @Test
-    fun resolutionRequirementPersistsActionRequiredWithoutStartingAuthorizationUi() {
+    fun silentAuthorizationRequirementPersistsActionRequiredWithoutRunningTheLineage() {
         val fixture = runnerFixture(
             authorization = {
                 DriveAuthorizationResult.Unavailable(
@@ -125,6 +126,74 @@ class RemoteBackupRuntimeTest {
         assertEquals(
             RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
             fixture.stateStore.stored().failureCategory,
+        )
+    }
+
+    /**
+     * The pending intent is a live instance whose every member throws, so a
+     * runner that reads it at all — to start it, log it, or even print it —
+     * fails here rather than opening a consent screen from background work.
+     */
+    @Test
+    fun aResolutionRequirementPersistsActionRequiredWithoutTouchingItsPendingIntent() {
+        val fixture = runnerFixture(
+            authorization = {
+                DriveAuthorizationResult.ResolutionRequired(untouchablePendingIntent())
+            },
+        )
+
+        val result = runBlocking { withTimeout(5_000) { fixture.runner.run() } }
+
+        assertEquals(RemoteBackupRunResult.AuthorizationRequired, result)
+        assertEquals(0, fixture.coordinator.passes.get())
+        assertEquals(0, fixture.openedObjectStores.get())
+        assertEquals(
+            RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+            fixture.stateStore.stored().failureCategory,
+        )
+    }
+
+    /**
+     * Silent authorization probes the provider to bind the account, so its
+     * storage and malformed-response failures arrive as authorization
+     * outcomes. Neither says anything about the account, and reporting either
+     * as "reconnect" would send a person after an account that works.
+     */
+    @Test
+    fun providerStorageAndCorruptAuthorizationFailuresNeverAskThePersonToReconnect() {
+        val storage = runnerFixture(
+            authorization = {
+                DriveAuthorizationResult.Unavailable(
+                    DriveAuthorizationUnavailableReason.PROVIDER_STORAGE,
+                )
+            },
+        )
+        val corrupt = runnerFixture(
+            authorization = {
+                DriveAuthorizationResult.Unavailable(
+                    DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE,
+                )
+            },
+        )
+
+        val storageResult = runBlocking { withTimeout(5_000) { storage.runner.run() } }
+        val corruptResult = runBlocking { withTimeout(5_000) { corrupt.runner.run() } }
+
+        assertEquals(
+            RemoteBackupRunResult.Blocked(RemoteBackupFailureCategory.PROVIDER_STORAGE),
+            storageResult,
+        )
+        assertEquals(
+            RemoteBackupRunResult.Blocked(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            corruptResult,
+        )
+        assertEquals(
+            RemoteBackupFailureCategory.PROVIDER_STORAGE,
+            storage.stateStore.stored().failureCategory,
+        )
+        assertEquals(
+            RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+            corrupt.stateStore.stored().failureCategory,
         )
     }
 
@@ -259,6 +328,51 @@ class RemoteBackupRuntimeTest {
         assertEquals(0, absent.authorizations.get())
     }
 
+    // -- Runner: bound to one slot ---------------------------------------------------------
+
+    /**
+     * Background work resolves a runner when the worker is *created*, which
+     * can be before the slot it belonged to is replaced. A stopped runner
+     * must refuse rather than drive a coordinator beside its replacement.
+     */
+    @Test
+    fun aRunnerStoppedWithItsSlotRefusesWorkThatResolvedItBeforeTheReplacement() {
+        val fixture = runnerFixture(outcome = RemoteBackupRunResult.Verified(BackupGeneration(3)))
+        val resolvedBeforeReplacement: RemoteBackupRunner = fixture.runner
+
+        fixture.runner.stop()
+        val result = runBlocking {
+            withTimeout(5_000) { resolvedBeforeReplacement.run() }
+        }
+
+        assertEquals(RemoteBackupRunResult.NoChanges, result)
+        assertEquals(0, fixture.authorizations.get())
+        assertEquals(0, fixture.coordinator.passes.get())
+        assertEquals(0, fixture.openedObjectStores.get())
+    }
+
+    @Test
+    fun aRunnerAlreadyQueuedBehindAnotherRunStillRefusesOnceItsSlotIsStopped() {
+        val fixture = runnerFixture(outcome = RemoteBackupRunResult.NoChanges)
+        fixture.coordinator.passDelayMillis = 50
+
+        val results = runBlocking {
+            withTimeout(5_000) {
+                val first = async(Dispatchers.Default) { fixture.runner.run() }
+                val queued = async(Dispatchers.Default) {
+                    // Queues behind the first run, then the slot goes away.
+                    delay(10)
+                    fixture.runner.stop()
+                    fixture.runner.run()
+                }
+                listOf(first.await(), queued.await())
+            }
+        }
+
+        assertEquals(RemoteBackupRunResult.NoChanges, results[1])
+        assertEquals(1, fixture.coordinator.passes.get())
+    }
+
     // -- Runtime: scheduling ---------------------------------------------------------------
 
     @Test
@@ -338,7 +452,7 @@ class RemoteBackupRuntimeTest {
         fixture.runtime.start()
         assertTrue(fixture.scheduler.awaitEvents(1))
         fixture.runtime.requestNow()
-        assertTrue(fixture.runner.awaitRuns(1))
+        assertTrue(fixture.coordinator.awaitPasses(1))
 
         fixture.runtime.stop()
         assertTrue(fixture.scheduler.awaitEvents(2))
@@ -346,7 +460,51 @@ class RemoteBackupRuntimeTest {
 
         Thread.sleep(SETTLE_MILLIS)
         assertEquals(listOf("periodic", "cancel"), fixture.scheduler.events())
-        assertEquals(1, fixture.runner.runs.get())
+        assertEquals(1, fixture.coordinator.passes.get())
+        fixture.close()
+    }
+
+    /**
+     * The debounced unit is enqueued with `REPLACE`, which cancels work that
+     * is already running. An edit during an upload must therefore not
+     * re-enqueue, or a vault edited more often than an upload takes would
+     * never finish the debounced path at all.
+     */
+    @Test
+    fun anEditDuringAnInFlightRunNeverReplacesItAndReEnqueuesOnceItFinishes() {
+        val fixture = runtimeFixture(verifiedGeneration = 4, localGeneration = 4)
+        val release = CountDownLatch(1)
+        fixture.coordinator.gate = release
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(1))
+        fixture.runtime.requestNow()
+        assertTrue(fixture.coordinator.awaitPasses(1))
+
+        fixture.localGeneration.value = 5
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(listOf("periodic"), fixture.scheduler.events())
+
+        release.countDown()
+        assertTrue(fixture.scheduler.awaitEvents(2))
+
+        assertEquals(listOf("periodic", "pending"), fixture.scheduler.events())
+        assertEquals(1, fixture.coordinator.passes.get())
+        fixture.close()
+    }
+
+    @Test
+    fun stoppingTheRuntimeStopsItsRunnerSoLateWorkCannotDriveAReplacedSlot() {
+        val fixture = runtimeFixture(verifiedGeneration = 4, localGeneration = 4)
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(1))
+        fixture.runtime.stop()
+
+        val result = runBlocking { withTimeout(5_000) { fixture.runner.run() } }
+
+        assertEquals(RemoteBackupRunResult.NoChanges, result)
+        assertEquals(0, fixture.coordinator.passes.get())
         fixture.close()
     }
 
@@ -421,6 +579,11 @@ class RemoteBackupRuntimeTest {
         var authorizedBuffer: ByteArray? = null
     }
 
+    /**
+     * Builds the runtime over a *real* runner, so in-flight suppression and
+     * stop-with-the-slot are exercised against the same mutex and flags
+     * production uses rather than against a stand-in.
+     */
     private fun runtimeFixture(
         verifiedGeneration: Long,
         localGeneration: Long,
@@ -432,13 +595,18 @@ class RemoteBackupRuntimeTest {
         )
         val generationFlow = MutableStateFlow(localGeneration)
         val scheduler = RecordingBackupWorkScheduler()
-        val runner = CountingRemoteBackupRunner()
+        val runnerFixture = runnerFixture(
+            outcome = RemoteBackupRunResult.NoChanges,
+            configured = configured,
+        )
+        val runner = runnerFixture.runner
         return RuntimeFixture(
             scope = scope,
             configuration = configurationFlow,
             localGeneration = generationFlow,
             scheduler = scheduler,
             runner = runner,
+            coordinator = runnerFixture.coordinator,
             runtime = DefaultRemoteBackupRuntime(
                 scope = scope,
                 runner = runner,
@@ -454,7 +622,8 @@ class RemoteBackupRuntimeTest {
         val configuration: MutableStateFlow<RemoteBackupConfiguration?>,
         val localGeneration: MutableStateFlow<Long>,
         val scheduler: RecordingBackupWorkScheduler,
-        val runner: CountingRemoteBackupRunner,
+        val runner: DefaultRemoteBackupRunner,
+        val coordinator: FakeRemoteBackupCoordinator,
         val runtime: DefaultRemoteBackupRuntime,
     ) {
         fun close() {
@@ -495,24 +664,6 @@ class RemoteBackupRuntimeTest {
         }
     }
 
-    private class CountingRemoteBackupRunner : RemoteBackupRunner {
-        val runs = AtomicInteger()
-
-        override suspend fun run(): RemoteBackupRunResult {
-            runs.incrementAndGet()
-            return RemoteBackupRunResult.NoChanges
-        }
-
-        fun awaitRuns(count: Int): Boolean {
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-            while (System.nanoTime() < deadline) {
-                if (runs.get() >= count) return true
-                Thread.sleep(10)
-            }
-            return runs.get() >= count
-        }
-    }
-
     private class FakeRemoteBackupCoordinator(
         private val outcome: RemoteBackupRunResult,
     ) : RemoteBackupCoordinator {
@@ -526,17 +677,31 @@ class RemoteBackupRuntimeTest {
         @Volatile
         var failure: Throwable? = null
 
+        /** Holds a pass open so a test can act while a run is in flight. */
+        @Volatile
+        var gate: CountDownLatch? = null
+
         override suspend fun run(objectStore: CreateOnlyBackupObjectStore): RemoteBackupRunResult {
             val concurrent = active.incrementAndGet()
             maximumConcurrentPasses.updateAndGet { maxOf(it, concurrent) }
             try {
                 passes.incrementAndGet()
                 if (passDelayMillis > 0) delay(passDelayMillis)
+                gate?.let { latch -> while (latch.count > 0L) delay(5) }
                 failure?.let { throw it }
                 return outcome
             } finally {
                 active.decrementAndGet()
             }
+        }
+
+        fun awaitPasses(count: Int): Boolean {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (System.nanoTime() < deadline) {
+                if (passes.get() >= count) return true
+                Thread.sleep(10)
+            }
+            return passes.get() >= count
         }
     }
 
@@ -673,6 +838,17 @@ class RemoteBackupRuntimeTest {
 
     private companion object {
         const val SETTLE_MILLIS = 250L
+
+        /**
+         * A live [PendingIntent] every member of which throws, because the
+         * unit-test Android stubs are unmocked. Passing one proves the runner
+         * never reads the intent it was handed.
+         */
+        fun untouchablePendingIntent(): PendingIntent =
+            PendingIntent::class.java.getDeclaredConstructor()
+                .apply { isAccessible = true }
+                .newInstance()
+
         val VAULT_ID = VaultId("11111111-1111-4111-8111-111111111111")
         val LINEAGE_ID = CloudLineageId.parse("22222222-2222-4222-8222-222222222222")
         val ACCOUNT_DIGEST = ByteArray(32) { index -> (index + 1).toByte() }
