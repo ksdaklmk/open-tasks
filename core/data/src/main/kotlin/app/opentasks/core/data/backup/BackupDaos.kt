@@ -403,16 +403,23 @@ interface BackupCaptureDao {
             activity.taskId IS NULL
             AND activity.projectId IS NULL
             AND (
-                SELECT COUNT(DISTINCT owner.vaultId)
-                FROM backup_journal AS owner
-                WHERE owner.objectId = activity.id
-                    AND owner.objectType = 'ACTIVITY_ENTRY'
-            ) = 1
-            AND EXISTS (
-                SELECT 1 FROM backup_journal AS journal
-                WHERE journal.vaultId = :vaultId
-                    AND journal.objectId = activity.id
-                    AND journal.objectType = 'ACTIVITY_ENTRY'
+                (
+                    (SELECT COUNT(*) FROM vaults) = 1
+                    AND EXISTS (SELECT 1 FROM vaults AS sole WHERE sole.id = :vaultId)
+                ) OR (
+                    (
+                        SELECT COUNT(DISTINCT owner.vaultId)
+                        FROM backup_journal AS owner
+                        WHERE owner.objectId = activity.id
+                            AND owner.objectType = 'ACTIVITY_ENTRY'
+                    ) = 1
+                    AND EXISTS (
+                        SELECT 1 FROM backup_journal AS journal
+                        WHERE journal.vaultId = :vaultId
+                            AND journal.objectId = activity.id
+                            AND journal.objectType = 'ACTIVITY_ENTRY'
+                    )
+                )
             )
         )
         ORDER BY activity.id
@@ -451,26 +458,39 @@ interface BackupCaptureDao {
     )
     suspend fun savedViews(vaultId: String): List<SavedViewEntity>
 
+    /**
+     * Tombstones and relationless activity entries carry no vault column, so a
+     * database holding several vaults attributes them through `backup_journal`
+     * evidence. A database holding exactly one vault owns every row in it, and
+     * needs no evidence: a recovered vault is imported with an empty journal by
+     * design, and would otherwise be unable to capture the fresh complete base
+     * its next remote publication requires.
+     */
     @Query(
         """
         SELECT tombstone.* FROM tombstones AS tombstone
         WHERE (
-            SELECT COUNT(DISTINCT owner.vaultId)
-            FROM backup_journal AS owner
-            WHERE owner.objectId = tombstone.objectId
-                AND (
-                    UPPER(owner.objectType) = UPPER(tombstone.objectType)
-                    OR LOWER(owner.objectType) = LOWER(tombstone.objectType) || '.purge'
-                )
-        ) = 1
-        AND EXISTS (
-            SELECT 1 FROM backup_journal AS journal
-            WHERE journal.vaultId = :vaultId
-                AND journal.objectId = tombstone.objectId
-                AND (
-                    UPPER(journal.objectType) = UPPER(tombstone.objectType)
-                    OR LOWER(journal.objectType) = LOWER(tombstone.objectType) || '.purge'
-                )
+            (SELECT COUNT(*) FROM vaults) = 1
+            AND EXISTS (SELECT 1 FROM vaults AS sole WHERE sole.id = :vaultId)
+        ) OR (
+            (
+                SELECT COUNT(DISTINCT owner.vaultId)
+                FROM backup_journal AS owner
+                WHERE owner.objectId = tombstone.objectId
+                    AND (
+                        UPPER(owner.objectType) = UPPER(tombstone.objectType)
+                        OR LOWER(owner.objectType) = LOWER(tombstone.objectType) || '.purge'
+                    )
+            ) = 1
+            AND EXISTS (
+                SELECT 1 FROM backup_journal AS journal
+                WHERE journal.vaultId = :vaultId
+                    AND journal.objectId = tombstone.objectId
+                    AND (
+                        UPPER(journal.objectType) = UPPER(tombstone.objectType)
+                        OR LOWER(journal.objectType) = LOWER(tombstone.objectType) || '.purge'
+                    )
+            )
         )
         ORDER BY tombstone.objectId, tombstone.objectType
         """,
@@ -504,6 +524,7 @@ interface BackupCaptureDao {
         ) OR (
             activity.taskId IS NULL
             AND activity.projectId IS NULL
+            AND (SELECT COUNT(*) FROM vaults) != 1
             AND (
                 SELECT COUNT(DISTINCT journal.vaultId)
                 FROM backup_journal AS journal
@@ -518,7 +539,8 @@ interface BackupCaptureDao {
     @Query(
         """
         SELECT COUNT(*) FROM tombstones AS tombstone
-        WHERE (
+        WHERE (SELECT COUNT(*) FROM vaults) != 1
+        AND (
             SELECT COUNT(DISTINCT journal.vaultId)
             FROM backup_journal AS journal
             WHERE journal.objectId = tombstone.objectId

@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,10 +111,59 @@ class RoomBackupCaptureSourceInstrumentedTest {
     }
 
     @Test
+    fun aRecoveredVaultWithNoJournalStillCapturesEveryRecord() = runBlocking {
+        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+        seedRemainingInboxStatuses(scope = "alpha")
+        // A recovered vault carries no journal by design, so the evidence that
+        // normally attributes tombstones and relationless activity entries is
+        // gone. One vault owns every row in its own database.
+        database.openHelper.writableDatabase.execSQL("DELETE FROM backup_journal")
+
+        val capture = RoomBackupCaptureSource(database, VaultId("vault-alpha")).capture()
+
+        val identities = capture.identitySets()
+        expectedIdentities("alpha").forEach { (family, expected) ->
+            assertTrue("$family", identities.getValue(family).containsAll(expected))
+        }
+        BackupSnapshotCodec.encode(BackupSnapshotCodec.fromCapture(capture)).fill(0)
+    }
+
+    @Test
+    fun aSoleVaultAttributesRowsAJournalWasNeverWrittenFor() = runBlocking {
+        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+        insertActivity(id = "activity-recovered", taskId = null, projectId = null, scope = "alpha")
+        insert(
+            "tombstones",
+            "objectId" to "tombstone-recovered",
+            "objectType" to "task",
+            "deletedAtEpochMillis" to 1L,
+            "purgeAfterEpochMillis" to 2L,
+            "revisionWallMillis" to 3L,
+            "revisionLogical" to 0,
+            "revisionDeviceId" to "device-alpha",
+        )
+
+        val capture = RoomBackupCaptureSource(database, VaultId("vault-alpha")).capture()
+
+        val identities = capture.identitySets()
+        assertTrue(
+            identities.getValue(BackupRecordFamily.ACTIVITY_ENTRY)
+                .contains(listOf("activity-recovered")),
+        )
+        assertTrue(
+            identities.getValue(BackupRecordFamily.TOMBSTONE)
+                .contains(listOf("tombstone-recovered", "task")),
+        )
+    }
+
+    @Test
     fun relationlessActivityWithoutJournalOwnershipIsRejected() {
         runBlocking {
             seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
         }
+        // A second vault is what makes the orphan genuinely unattributable: a
+        // database holding one vault owns every row in it.
+        insertBareVault("vault-beta")
         insertActivity(
             id = "activity-without-owner",
             taskId = null,
@@ -133,6 +183,7 @@ class RoomBackupCaptureSourceInstrumentedTest {
         runBlocking {
             seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
         }
+        insertBareVault("vault-beta")
         insert(
             "tombstones",
             "objectId" to "tombstone-without-owner",
@@ -636,6 +687,19 @@ class RoomBackupCaptureSourceInstrumentedTest {
             "kind" to "UPDATED",
             "bodyCiphertext" to byteArrayOf(5),
             "createdAtEpochMillis" to 1L,
+        )
+    }
+
+    /** A vault row alone, which makes single-vault attribution ambiguous. */
+    private fun insertBareVault(vaultId: String) {
+        insert(
+            "vaults",
+            "id" to vaultId,
+            "storageMode" to "LOCAL",
+            "createdAtEpochMillis" to 1L,
+            "schemaVersion" to 6,
+            "cryptoVersion" to 1,
+            "minimumReaderVersion" to 1,
         )
     }
 

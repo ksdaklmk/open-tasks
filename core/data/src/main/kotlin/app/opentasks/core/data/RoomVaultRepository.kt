@@ -2749,7 +2749,7 @@ class RoomVaultRepository(
         val at: Instant,
     )
 
-    private companion object {
+    internal companion object {
         const val OWNER_ID = "member-owner"
         const val HOME_TASK_LIMIT = 3
         const val MAX_SEARCH_RESULTS = 50

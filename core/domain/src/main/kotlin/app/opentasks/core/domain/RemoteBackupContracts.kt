@@ -6,6 +6,7 @@ import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.OwnershipClaimRef
 import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.PublicationRef
+import app.opentasks.core.model.RecoveryFailureCategory
 import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
@@ -457,6 +458,100 @@ interface BackupWorkScheduler {
  */
 interface RemoteBackupRunner {
     suspend fun run(): RemoteBackupRunResult
+}
+
+enum class RecoverySource {
+    GOOGLE_DRIVE,
+    ANDROID_BACKUP_PACKAGE,
+}
+
+/**
+ * One offer a recovery may be attempted from.
+ *
+ * [handle] is random, process-local, and bounded: it is minted per discovery
+ * pass and resolves to nothing outside the coordinator that issued it, so it
+ * reveals no lineage, provider identity, timestamp, content, generation, or
+ * account. A handle from an earlier pass, or from another coordinator, is
+ * simply unknown.
+ */
+data class RecoveryCandidate(
+    val handle: String,
+    val source: RecoverySource,
+)
+
+/**
+ * The bounded outcome of one recovery step.
+ *
+ * Every case carries a redacted category at most, so a result may be surfaced
+ * in product state without further filtering.
+ */
+sealed interface RecoveryResult {
+    /**
+     * The source is authenticated, the staged vault is verified, and the epoch
+     * baseline that [nextWriterEpoch] will bind exists — but no ownership has
+     * been taken. Only an explicit confirmation may continue.
+     *
+     * [generation] is the generation the authenticated backup describes.
+     */
+    data class TakeoverConfirmationRequired(
+        val operationId: String,
+        val generation: BackupGeneration,
+        val nextWriterEpoch: WriterEpoch,
+    ) : RecoveryResult
+
+    /**
+     * The recovered vault is the live vault. [generation] is what it actually
+     * holds, which may be one ahead of the recovered payload when opening it
+     * purged retention-expired trash. [lineageId] is null for a portable
+     * package, which carries no remote lineage and must be connected later.
+     */
+    data class Activated(
+        val generation: BackupGeneration,
+        val lineageId: CloudLineageId?,
+    ) : RecoveryResult
+
+    data class Failed(val reason: RecoveryFailureCategory) : RecoveryResult
+}
+
+/**
+ * The only path from backup data back into a live vault.
+ *
+ * Recovery never mutates the running vault: it reconstructs a separate
+ * inactive staging slot, proves it, takes ownership of the remote lineage at
+ * an exact reserved successor, and only then publishes the slot. The
+ * implementation lives in `core:data` beside the codecs and the staged-vault
+ * verifier it composes, so product code never depends on a provider.
+ */
+interface RecoveryCoordinator {
+    /**
+     * Lists what this account and this device offer, without deriving a key,
+     * downloading an object, or creating anything. Drive discovery lists both
+     * ownership roots and terminal tombstones, so an authenticated terminal
+     * lineage is offered and then refused rather than silently recreated.
+     */
+    suspend fun discover(
+        objectStore: CreateOnlyBackupObjectStore?,
+        portablePackage: File?,
+    ): List<RecoveryCandidate>
+
+    /**
+     * Authenticates one candidate, reconstructs and verifies staging, and — for
+     * a Drive lineage — prepares the successor epoch up to the point where
+     * ownership would change. A portable package has no lineage to take over
+     * and activates here.
+     */
+    suspend fun prepare(
+        candidate: RecoveryCandidate,
+        passphrase: CharArray,
+        objectStore: CreateOnlyBackupObjectStore?,
+        accountBindingDigest: ByteArray?,
+    ): RecoveryResult
+
+    /** Creates the exact reserved successor claim and, only if it wins, activates. */
+    suspend fun confirmTakeover(
+        operationId: String,
+        objectStore: CreateOnlyBackupObjectStore,
+    ): RecoveryResult
 }
 
 interface CreateOnlyBackupObjectStore {

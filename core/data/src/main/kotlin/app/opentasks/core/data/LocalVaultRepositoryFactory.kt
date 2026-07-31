@@ -4,22 +4,33 @@ import android.content.Context
 import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultCrypto
+import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.data.backup.DefaultBackupCoordinator
+import app.opentasks.core.data.backup.DefaultRecoveryCoordinator
 import app.opentasks.core.data.backup.DefaultRemoteBackupConfigurator
+import app.opentasks.core.data.backup.DefaultStagedVaultVerifier
 import app.opentasks.core.data.backup.LocalBackupObjectStore
 import app.opentasks.core.data.backup.OwnershipClaimCodec
+import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PublicationCodec
+import app.opentasks.core.data.backup.RecoveryImportRequest
+import app.opentasks.core.data.backup.RecoveryStagingFactory
+import app.opentasks.core.data.backup.RecoveryStagingSession
+import app.opentasks.core.data.backup.RemoteBackupStateStore
 import app.opentasks.core.data.backup.RemoteObjectCodec
 import app.opentasks.core.data.backup.RoomBackupCaptureSource
 import app.opentasks.core.data.backup.RoomBackupJournalStore
+import app.opentasks.core.data.backup.RoomBackupRecordImporter
 import app.opentasks.core.data.backup.RoomBackupStateStore
 import app.opentasks.core.data.backup.RoomRecoveryEnvelopeStore
 import app.opentasks.core.data.backup.RoomRemoteBackupStore
+import app.opentasks.core.data.backup.expectedCapture
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.BackupJournalEntry
 import app.opentasks.core.domain.BackupJournalReader
 import app.opentasks.core.domain.BackupMutationKind
+import app.opentasks.core.domain.RecoveryCoordinator
 import app.opentasks.core.domain.RemoteBackupConfigurator
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.BackupGeneration
@@ -126,6 +137,41 @@ object LocalVaultRepositoryFactory {
     )
 
     /**
+     * Wires the only path from backup data back into a live vault.
+     *
+     * The provider object store is supplied per call rather than held here,
+     * because authorization is established outside this factory and no remote
+     * work may start from opening a vault slot. [expectedAccountBindingDigest]
+     * is the account a lineage this installation already knows is bound to, so
+     * a recovery of a known lineage refuses a different account before it
+     * touches it; it is null when nothing is known.
+     */
+    fun createRecoveryCoordinator(
+        context: Context,
+        crypto: VaultCrypto,
+        runtimeManager: VaultRuntimeManager,
+        authenticatedCodec: AuthenticatedCloudObjectCodec,
+        recoveryStagingRoot: File,
+        expectedAccountBindingDigest: ByteArray? = null,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ): RecoveryCoordinator = DefaultRecoveryCoordinator(
+        expectedVaultId = RoomVaultRepository.VAULT_ID,
+        crypto = crypto,
+        authenticatedCodec = authenticatedCodec,
+        ownershipCodec = OwnershipClaimCodec(authenticatedCodec),
+        publicationCodec = PublicationCodec(authenticatedCodec),
+        portableCodec = PortableBackupCodec(authenticatedCodec),
+        staging = LocalRecoveryStagingFactory(
+            context = context,
+            crypto = crypto,
+            runtimeManager = runtimeManager,
+            keyManager = keyManager,
+        ),
+        stagingRoot = recoveryStagingRoot,
+        expectedAccountBindingDigest = expectedAccountBindingDigest,
+    )
+
+    /**
      * Creates a staged slot's database under a brand-new SQLCipher key.
      *
      * No repository, journal, or content-key service is built on top: only the
@@ -229,6 +275,124 @@ object LocalVaultRepositoryFactory {
             }
 
     private val DEFAULT_VAULT_ID = VaultId("vault-primary")
+}
+
+/**
+ * The staged slot a recovery reconstructs into, backed by this device.
+ *
+ * A staged slot is a complete vault database under its own SQLCipher key and
+ * its own content-key namespace, so the takeover's durable identities live in
+ * the vault that will keep them and a device holding no vault at all still has
+ * somewhere crash-safe to record what it reserved.
+ */
+internal class LocalRecoveryStagingFactory(
+    context: Context,
+    private val crypto: VaultCrypto,
+    private val runtimeManager: VaultRuntimeManager,
+    private val keyManager: AndroidVaultKeyManager,
+) : RecoveryStagingFactory {
+    private val context = context.applicationContext
+    private val registry = RecoveryRegistry(this.context)
+
+    override suspend fun begin(operationId: String): RecoveryStagingSession =
+        LocalRecoveryStagingSession(
+            context = context,
+            operationId = operationId,
+            slot = runtimeManager.beginRecovery(operationId),
+            crypto = crypto,
+            keyManager = keyManager,
+            database = null,
+        )
+
+    override suspend fun resume(operationId: String): RecoveryStagingSession? {
+        val record = try {
+            registry.readOrDiscard()
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        if (record.operationId != operationId) return null
+        val database = runCatching {
+            LocalVaultRepositoryFactory.openStagingDatabase(context, record.stagedSlot, keyManager)
+        }.getOrNull() ?: return null
+        return LocalRecoveryStagingSession(
+            context = context,
+            operationId = operationId,
+            slot = record.stagedSlot,
+            crypto = crypto,
+            keyManager = keyManager,
+            database = database,
+        )
+    }
+
+    override suspend fun activate(
+        session: RecoveryStagingSession,
+        staged: VerifiedStagedVault,
+    ): RemoteBackupStateStore {
+        session.close()
+        runtimeManager.activate(staged)
+        return runtimeManager.requireActive().remoteBackupStore
+    }
+
+    override suspend fun abandon(session: RecoveryStagingSession) {
+        session.close()
+        runtimeManager.abandonRecovery(session.operationId)
+    }
+}
+
+internal class LocalRecoveryStagingSession(
+    context: Context,
+    override val operationId: String,
+    override val slot: VaultSlot,
+    private val crypto: VaultCrypto,
+    private val keyManager: AndroidVaultKeyManager,
+    private var database: VaultDatabase?,
+) : RecoveryStagingSession {
+    private val context = context.applicationContext
+    private val contentKeys = AndroidVaultContentKeyStore(
+        context = this.context,
+        crypto = crypto,
+        storageNamespace = LocalVaultRepositoryFactory.storageNamespace(slot),
+    )
+
+    override val remoteStateStore: RemoteBackupStateStore
+        get() = RoomRemoteBackupStore(
+            checkNotNull(database) { "The staging slot is not open" },
+        )
+
+    override suspend fun reconstruct(
+        request: RecoveryImportRequest,
+        contentKey: VaultKey,
+    ): VerifiedStagedVault {
+        check(database == null) { "The staging slot is already open" }
+        val vaultId = VaultId(request.snapshot.vaultId)
+        val created = LocalVaultRepositoryFactory.createStagingDatabase(context, slot, keyManager)
+        try {
+            // The records and the recovery envelope are sealed under this key,
+            // so the slot must be able to open it before it can be proved.
+            contentKeys.replace(vaultId, contentKey)
+            RoomBackupRecordImporter(created, created.recoveryImportDao())
+                .importInto(created, request)
+        } finally {
+            // Verification opens this slot several times and builds a runtime
+            // over it, so no handle of ours may still hold the file.
+            created.close()
+        }
+        val verified = DefaultStagedVaultVerifier(context, crypto, keyManager).verify(
+            slot = slot,
+            expectedVaultId = vaultId,
+            expectedGeneration = request.expectedGeneration,
+            expectedCapture = request.expectedCapture(),
+        )
+        database = LocalVaultRepositoryFactory.openStagingDatabase(context, slot, keyManager)
+        return verified
+    }
+
+    override fun openContentKey(vaultId: VaultId): VaultKey = contentKeys.openExisting(vaultId)
+
+    override fun close() {
+        database?.close()
+        database = null
+    }
 }
 
 private class RoomBackupJournalReader(

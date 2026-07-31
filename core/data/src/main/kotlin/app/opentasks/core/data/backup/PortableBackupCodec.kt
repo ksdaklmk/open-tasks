@@ -1,16 +1,19 @@
 package app.opentasks.core.data.backup
 
+import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.AuthenticatedCloudObjectCodec
 import app.opentasks.core.data.CloudDecodeResult
 import app.opentasks.core.data.DecryptedCloudObject
 import app.opentasks.core.domain.BackupPolicy
+import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.sync.CloudBounds
 import app.opentasks.core.sync.CloudHeaderIdentity
 import app.opentasks.core.sync.CloudObjectFamily
 import app.opentasks.core.sync.CloudObjectHeader
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -67,6 +70,16 @@ data class VerifiedPortableBackup(
 
 class PortablePackageTooLargeException :
     IllegalArgumentException("Portable package exceeds its byte bound")
+
+/**
+ * The recovery envelope did not unlock under the passphrase offered.
+ *
+ * Distinguished from every other decode failure so a caller can tell a user to
+ * try another passphrase rather than that the backup is unreadable. It carries
+ * no detail of the envelope, the derivation, or the package.
+ */
+class RecoveryPassphraseException :
+    IllegalArgumentException("The recovery passphrase does not unlock this backup")
 
 interface PortablePackageCodec {
     fun encode(
@@ -241,7 +254,22 @@ class PortableBackupCodec(
         source: InputStream,
         totalLength: Long,
         key: VaultKey,
-    ): VerifiedPortableBackup {
+    ): VerifiedPortableBackup = decodeVerified(source, totalLength, key).verified
+
+    /**
+     * Authenticates the complete package exactly as [verifyComplete] does and
+     * keeps the snapshot it already decoded.
+     *
+     * Verification has to decode the snapshot to check it against the manifest
+     * and the bootstrap, so recovery would otherwise authenticate the same
+     * bytes twice. Every byte read, every bound, and every agreement check is
+     * the one [verifyComplete] performs; only the decoded payload survives.
+     */
+    internal fun decodeVerified(
+        source: InputStream,
+        totalLength: Long,
+        key: VaultKey,
+    ): DecodedPortablePackage {
         val header = readBootstrap(source, totalLength)
         var manifestFrame: ByteArray? = null
         var snapshotFrame: ByteArray? = null
@@ -279,12 +307,15 @@ class PortableBackupCodec(
             )
             val snapshot = snapshotObject.usePlaintext(snapshotCodec::decodeOwned)
             validateSnapshotAgreement(header, manifest, snapshot)
-            return VerifiedPortableBackup(
-                vaultId = header.vaultId,
-                generation = header.generation,
-                producedAtEpochMillis = header.producedAtEpochMillis,
-                recoveryEnvelopeSha256 = manifest.recoveryEnvelopeSha256,
-                totalPackageLength = header.totalPackageLength,
+            return DecodedPortablePackage(
+                verified = VerifiedPortableBackup(
+                    vaultId = header.vaultId,
+                    generation = header.generation,
+                    producedAtEpochMillis = header.producedAtEpochMillis,
+                    recoveryEnvelopeSha256 = manifest.recoveryEnvelopeSha256,
+                    totalPackageLength = header.totalPackageLength,
+                ),
+                snapshot = snapshot,
             )
         } finally {
             snapshotFrame?.fill(0)
@@ -615,6 +646,78 @@ class PortableBackupCodec(
     private fun manifestObjectId(generation: Long): String = "portable-manifest:$generation"
 
     private fun snapshotObjectId(generation: Long): String = "snapshot:$generation"
+}
+
+/** The authenticated package, still holding the snapshot verification decoded. */
+internal class DecodedPortablePackage(
+    val verified: VerifiedPortableBackup,
+    val snapshot: BackupSnapshotPayloadV1,
+)
+
+/**
+ * One authenticated portable package, ready to rebuild a staging vault.
+ *
+ * The recovery envelope is a fresh copy this result owns: nothing else holds
+ * those buffers, and [close] is what clears them. The unlocked content key is
+ * deliberately absent — it is derived, used to authenticate, and closed inside
+ * [decodeComplete], so no caller can hold a passphrase-derived key by
+ * accident.
+ */
+data class DecodedPortableBackup(
+    val snapshot: BackupSnapshotPayloadV1,
+    val recoveryEnvelope: VaultKeyEnvelope,
+    val generation: BackupGeneration,
+) : AutoCloseable {
+    override fun close() {
+        recoveryEnvelope.clear()
+    }
+}
+
+/**
+ * Reads the public bootstrap, derives the recovery key from [passphrase], and
+ * authenticates the whole package before anything is decoded for use.
+ *
+ * The bootstrap's KDF parameters and every declared length are validated by
+ * [PortableBackupCodec.readBootstrap] first, so no oversized buffer is
+ * allocated and no key is derived from a weakened envelope. A wrong passphrase
+ * surfaces as the failure [VaultCrypto.unlock] raises; nothing partially
+ * decoded escapes.
+ *
+ * [crypto] is a parameter rather than a codec dependency because the codec is
+ * also constructed where no recovery derivation may happen at all.
+ */
+fun PortableBackupCodec.decodeComplete(
+    source: File,
+    passphrase: CharArray,
+    crypto: VaultCrypto,
+): DecodedPortableBackup {
+    val totalLength = source.length()
+    val header = source.inputStream().use { stream -> readBootstrap(stream, totalLength) }
+    val envelope = RecoveryEnvelopeCodec.fromPayload(header.recoveryEnvelope)
+    var key: VaultKey? = null
+    try {
+        val unlocked = try {
+            crypto.unlock(passphrase, envelope)
+        } catch (_: Exception) {
+            // The provider's own failure is never propagated: it would say how
+            // the derivation failed, and a caller only needs that it did.
+            throw RecoveryPassphraseException()
+        }
+        key = unlocked
+        val decoded = source.inputStream().use { stream ->
+            decodeVerified(stream, totalLength, unlocked)
+        }
+        return DecodedPortableBackup(
+            snapshot = decoded.snapshot,
+            recoveryEnvelope = envelope,
+            generation = BackupGeneration(decoded.verified.generation),
+        )
+    } catch (failure: Throwable) {
+        envelope.clear()
+        throw failure
+    } finally {
+        key?.close()
+    }
 }
 
 private object PortableManifestCodec {

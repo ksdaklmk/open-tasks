@@ -82,6 +82,15 @@ interface VaultRuntimeManager {
 
     suspend fun activate(staged: VerifiedStagedVault)
 
+    /**
+     * Discards a staged recovery that must never be published.
+     *
+     * Losing an ownership race costs the staged slot and nothing else: the
+     * active vault, its marker, and every wrapper are left exactly as they
+     * were, and a device that held no vault stays holding none.
+     */
+    suspend fun abandonRecovery(operationId: String)
+
     fun requireActive(): LocalVaultRuntime
 }
 
@@ -360,6 +369,25 @@ class DefaultVaultRuntimeManager(
                 runCatching { runtimeFactory.discard(priorSlot) }
             }
             recoveryRegistry.clear()
+        }
+    }
+
+    override suspend fun abandonRecovery(operationId: String): Unit = transitions.withLock {
+        val discarded = withContext(Dispatchers.IO) {
+            val record = try {
+                recoveryRegistry.readOrDiscard()
+            } catch (_: Throwable) {
+                null
+            }
+            if (record == null || record.operationId != operationId) return@withContext false
+            recoveryRegistry.clear()
+            runCatching { runtimeFactory.discard(record.stagedSlot) }
+            true
+        }
+        // The device is back to exactly whatever it held before the recovery
+        // began, which the ordinary marker read is already the authority on.
+        if (discarded && mutableState.value is VaultRuntimeState.Recovering) {
+            initializeLocked()
         }
     }
 
