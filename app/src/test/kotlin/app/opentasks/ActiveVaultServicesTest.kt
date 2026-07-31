@@ -27,6 +27,36 @@ class ActiveVaultServicesTest {
     }
 
     @Test
+    fun everyActivationStartsItsOwnBackupRuntimeExactlyOnce() {
+        val factory = CountingSessionFactory()
+        val services = ActiveVaultServices(factory::open)
+
+        services.applyActive(true)
+        services.applyActive(true)
+
+        val first = services.requireSession().backupRuntime as CountingBackupRuntime
+        assertEquals(1, first.starts)
+
+        services.quiesce()
+        services.applyActive(true)
+
+        val second = services.requireSession().backupRuntime as CountingBackupRuntime
+        assertEquals(1, second.starts)
+        assertFalse(first === second)
+    }
+
+    @Test
+    fun aBackupRuntimeThatCannotStartLeavesNoRunningSession() {
+        val factory = CountingSessionFactory(startFailure = ExpectedStartFailure())
+
+        val services = ActiveVaultServices(factory::open)
+
+        assertThrows(ExpectedStartFailure::class.java) { services.applyActive(true) }
+        assertFalse(services.isRunning)
+        assertEquals(1, factory.closed)
+    }
+
+    @Test
     fun nonActiveRuntimeStatesNeverStartServices() {
         val factory = CountingSessionFactory()
         val services = ActiveVaultServices(factory::open)
@@ -40,6 +70,7 @@ class ActiveVaultServicesTest {
 
         assertFalse(services.isRunning)
         assertEquals(0, factory.opened)
+        assertEquals(0, factory.startedRuntimes)
     }
 
     @Test
@@ -104,24 +135,45 @@ class ActiveVaultServicesTest {
         assertSame(factory.last, services.requireSession())
     }
 
-    private class CountingSessionFactory {
+    private class CountingSessionFactory(
+        private val startFailure: RuntimeException? = null,
+    ) {
         var opened: Int = 0
             private set
         var closed: Int = 0
+            private set
+        var startedRuntimes: Int = 0
             private set
         var last: ActiveVaultSession? = null
             private set
 
         fun open(): ActiveVaultSession {
             opened += 1
-            return FakeSession { closed += 1 }.also { last = it }
+            val runtime = CountingBackupRuntime(startFailure) { startedRuntimes += 1 }
+            return FakeSession(runtime) { closed += 1 }.also { last = it }
         }
     }
 
-    private class FakeSession(private val onClose: () -> Unit) : ActiveVaultSession {
-        override val backupRuntime: AndroidBackupRuntime
-            get() = error("The fake session exposes no backup runtime")
+    private class CountingBackupRuntime(
+        private val startFailure: RuntimeException?,
+        private val onStart: () -> Unit,
+    ) : AndroidBackupRuntime {
+        var starts: Int = 0
+            private set
 
+        override fun start() {
+            startFailure?.let { throw it }
+            starts += 1
+            onStart()
+        }
+
+        override fun retry() = Unit
+    }
+
+    private class FakeSession(
+        override val backupRuntime: AndroidBackupRuntime,
+        private val onClose: () -> Unit,
+    ) : ActiveVaultSession {
         override val statusSource: AndroidBackupStatusSource
             get() = error("The fake session exposes no status source")
 
@@ -132,4 +184,6 @@ class ActiveVaultServicesTest {
             onClose()
         }
     }
+
+    private class ExpectedStartFailure : RuntimeException()
 }

@@ -88,6 +88,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Re-drives initialisation whenever the user returns to the app.
+     *
+     * An open that failed while the device was locked leaves no runtime; the
+     * call is a no-op once one is active.
+     */
+    override fun onStart() {
+        super.onStart()
+        lifecycleScope.launch {
+            runCatching { vaultRuntimeManager.initialize() }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

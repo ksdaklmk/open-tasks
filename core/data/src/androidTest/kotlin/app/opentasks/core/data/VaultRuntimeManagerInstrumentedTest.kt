@@ -211,26 +211,7 @@ class VaultRuntimeManagerInstrumentedTest {
         seedLegacyVault()
         val staged = VaultSlot.new()
         seedSlotVault(staged)
-        val operations = AtomicFileVaultRegistryOperations()
-        VaultSlotRegistry(registryDirectory, operations).replace(staged)
-        RecoveryRegistry(
-            file = File(registryDirectory, "recovery_registry.bin"),
-            fileOperations = operations,
-            secretBoundary = AndroidKeystoreRegistrySecretBoundary(REGISTRY_TEST_ALIAS),
-        ).write(
-            RecoveryRegistryRecord(
-                operationId = "operation-1",
-                phase = RecoveryPhase.ACTIVATING,
-                priorSlot = VaultSlot.LEGACY,
-                stagedSlot = staged,
-                providerReference = null,
-                claimReference = null,
-                publicationReference = null,
-                claimedEpoch = null,
-                activationState = ActivationState.MARKER_REPLACED,
-                cleanupState = CleanupState.PENDING,
-            ),
-        )
+        writeInterruptedActivation(staged, ActivationState.MARKER_REPLACED)
 
         val manager = manager()
         withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
@@ -240,6 +221,89 @@ class VaultRuntimeManagerInstrumentedTest {
         assertFalse(databaseFile("open_tasks.db").exists())
         assertFalse(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
         assertTrue(databaseFile(slotDatabaseName(staged)).isFile)
+    }
+
+    @Test
+    fun crashAfterMarkerReplacementWithAnUnopenableStagedSlotRestoresThePriorMarker() =
+        runBlocking {
+            seedLegacyVault()
+            val staged = VaultSlot.new()
+            seedSlotVault(staged)
+            writeInterruptedActivation(staged, ActivationState.MARKER_REPLACED)
+            keyStore().deleteEntry(databaseAliasFor(staged))
+
+            val manager = manager()
+            withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+
+            val state = manager.state.value as VaultRuntimeState.Active
+            assertEquals(VaultSlot.LEGACY, state.runtime.slot)
+            assertEquals(
+                VaultSlot.LEGACY,
+                VaultSlotRegistry(registryDirectory, AtomicFileVaultRegistryOperations()).read(),
+            )
+            assertTrue(databaseFile("open_tasks.db").isFile)
+            assertTrue(databaseFile(slotDatabaseName(staged)).isFile)
+        }
+
+    @Test
+    fun aTransientOpenFailureIsRetriedByALaterInitialize() = runBlocking {
+        seedLegacyVault()
+        val flaky = FlakyOpenRuntimeFactory(LocalVaultRuntimeFactory(context, crypto))
+        val manager = manager(runtimeFactory = flaky)
+
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+        assertTrue(manager.state.value is VaultRuntimeState.Unreadable)
+
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+
+        val state = manager.state.value as VaultRuntimeState.Active
+        assertEquals(VaultSlot.LEGACY, state.runtime.slot)
+    }
+
+    @Test
+    fun aFailureBeforeTheMarkerMovesRestoresThePriorRuntime() = runBlocking {
+        seedLegacyVault()
+        val failing = FailingVerifyRuntimeFactory(LocalVaultRuntimeFactory(context, crypto))
+        val manager = manager(runtimeFactory = failing)
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+        val staged = withTimeout(TIMEOUT_MILLIS) { manager.beginRecovery("operation-1") }
+        seedSlotVault(staged)
+        failing.failFor = staged
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { manager.activate(verifiedStagedVault(staged)) }
+        }
+
+        val state = manager.state.value as VaultRuntimeState.Active
+        assertEquals(VaultSlot.LEGACY, state.runtime.slot)
+        assertEquals(
+            VaultSlot.LEGACY,
+            VaultSlotRegistry(registryDirectory, AtomicFileVaultRegistryOperations()).read(),
+        )
+        assertTrue(databaseFile("open_tasks.db").isFile)
+        assertTrue(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
+    }
+
+    @Test
+    fun activationWithoutAStagedContentKeyRollsBackAndKeepsThePriorVault() = runBlocking {
+        seedLegacyVault()
+        val manager = manager()
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+        val staged = withTimeout(TIMEOUT_MILLIS) { manager.beginRecovery("operation-1") }
+        seedSlotVault(staged, withContentKey = false)
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { manager.activate(verifiedStagedVault(staged)) }
+        }
+
+        val state = manager.state.value as VaultRuntimeState.Active
+        assertEquals(VaultSlot.LEGACY, state.runtime.slot)
+        assertEquals(
+            VaultSlot.LEGACY,
+            VaultSlotRegistry(registryDirectory, AtomicFileVaultRegistryOperations()).read(),
+        )
+        assertTrue(databaseFile("open_tasks.db").isFile)
+        assertTrue(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
     }
 
     @Test
@@ -255,13 +319,7 @@ class VaultRuntimeManagerInstrumentedTest {
 
         assertThrows(IllegalStateException::class.java) {
             runBlocking {
-                manager.activate(
-                    VerifiedStagedVault(
-                        slot = staged,
-                        vaultId = VaultId("vault-primary"),
-                        recoveredGeneration = BackupGeneration(0),
-                    ),
-                )
+                manager.activate(verifiedStagedVault(staged))
             }
         }
 
@@ -295,13 +353,7 @@ class VaultRuntimeManagerInstrumentedTest {
         seedSlotVault(staged)
 
         withTimeout(ACTIVATION_TIMEOUT_MILLIS) {
-            manager.activate(
-                VerifiedStagedVault(
-                    slot = staged,
-                    vaultId = VaultId("vault-primary"),
-                    recoveredGeneration = BackupGeneration(0),
-                ),
-            )
+            manager.activate(verifiedStagedVault(staged))
         }
 
         assertEquals(listOf<VaultSlot?>(VaultSlot.LEGACY), observedAtQuiesce)
@@ -377,10 +429,46 @@ class VaultRuntimeManagerInstrumentedTest {
         runtimes.remove(runtime)
     }
 
-    private fun seedSlotVault(slot: VaultSlot) {
+    private fun seedSlotVault(slot: VaultSlot, withContentKey: Boolean = true) {
         val runtime = openedRuntime(slot, create = true)
+        if (withContentKey) runtime.contentKeyStore.getOrCreate(runtime.vaultId).close()
         runtime.close()
         runtimes.remove(runtime)
+    }
+
+    private fun databaseAliasFor(slot: VaultSlot): String =
+        "${LEGACY_DATABASE_ALIAS}_${slot.digest}"
+
+    private fun verifiedStagedVault(slot: VaultSlot) = VerifiedStagedVault(
+        slot = slot,
+        vaultId = VaultId("vault-primary"),
+        recoveredGeneration = BackupGeneration(0),
+    )
+
+    private fun writeInterruptedActivation(
+        staged: VaultSlot,
+        activationState: ActivationState,
+    ) {
+        val operations = AtomicFileVaultRegistryOperations()
+        VaultSlotRegistry(registryDirectory, operations).replace(staged)
+        RecoveryRegistry(
+            file = File(registryDirectory, "recovery_registry.bin"),
+            fileOperations = operations,
+            secretBoundary = AndroidKeystoreRegistrySecretBoundary(REGISTRY_TEST_ALIAS),
+        ).write(
+            RecoveryRegistryRecord(
+                operationId = "operation-1",
+                phase = RecoveryPhase.ACTIVATING,
+                priorSlot = VaultSlot.LEGACY,
+                stagedSlot = staged,
+                providerReference = null,
+                claimReference = null,
+                publicationReference = null,
+                claimedEpoch = null,
+                activationState = activationState,
+                cleanupState = CleanupState.PENDING,
+            ),
+        )
     }
 
     private fun rewriteLegacyVaultIdentity(vaultId: String) {
@@ -466,6 +554,31 @@ class VaultRuntimeManagerInstrumentedTest {
 
         override fun openExisting(slot: VaultSlot): LocalVaultRuntime {
             if (slot == failFor) error("The staged vault runtime cannot be opened")
+            return delegate.openExisting(slot)
+        }
+    }
+
+    private class FailingVerifyRuntimeFactory(
+        private val delegate: VaultRuntimeFactory,
+    ) : VaultRuntimeFactory by delegate {
+        var failFor: VaultSlot? = null
+
+        override fun verifyStaging(slot: VaultSlot): StagedVaultIdentity {
+            if (slot == failFor) error("The staged vault cannot be verified")
+            return delegate.verifyStaging(slot)
+        }
+    }
+
+    private class FlakyOpenRuntimeFactory(
+        private val delegate: VaultRuntimeFactory,
+    ) : VaultRuntimeFactory by delegate {
+        private var remainingFailures = 1
+
+        override fun openExisting(slot: VaultSlot): LocalVaultRuntime {
+            if (remainingFailures > 0) {
+                remainingFailures -= 1
+                error("The local vault is temporarily unavailable")
+            }
             return delegate.openExisting(slot)
         }
     }

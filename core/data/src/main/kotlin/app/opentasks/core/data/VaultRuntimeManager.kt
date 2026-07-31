@@ -206,10 +206,19 @@ class DefaultVaultRuntimeManager(
         quiescer = quiesce
     }
 
+    /**
+     * Re-entrant from every state that holds no runtime.
+     *
+     * The database wrapping key requires an unlocked device, so an open that
+     * fails in the background must not latch [VaultRuntimeState.Unreadable] for
+     * the life of the process: a later call re-reads the marker and retries.
+     */
     override suspend fun initialize() {
         transitions.withLock {
-            if (mutableState.value !is VaultRuntimeState.Initializing) return
-            initializeLocked()
+            when (mutableState.value) {
+                is VaultRuntimeState.Active, is VaultRuntimeState.Recovering -> return
+                else -> initializeLocked()
+            }
         }
     }
 
@@ -231,7 +240,9 @@ class DefaultVaultRuntimeManager(
             val runtime = try {
                 runtimeFactory.openExisting(slot)
             } catch (_: Throwable) {
-                mutableState.value = VaultRuntimeState.Unreadable(slot)
+                if (!restorePriorSlotAfterFailedActivation(failedSlot = slot)) {
+                    mutableState.value = VaultRuntimeState.Unreadable(slot)
+                }
                 return@withContext
             }
             if (marker == null) {
@@ -304,28 +315,11 @@ class DefaultVaultRuntimeManager(
             priorRuntime?.close()
             mutableState.value = VaultRuntimeState.Recovering(record.operationId)
 
-            val identity = runtimeFactory.verifyStaging(staged.slot)
-            check(identity.vaultId == staged.vaultId) {
-                "The staged vault identity does not match the verified recovery"
-            }
-            check(identity.generation.value >= staged.recoveredGeneration.value) {
-                "The staged vault is behind the verified recovery"
-            }
-
-            val activating = record.copy(
-                phase = RecoveryPhase.ACTIVATING,
-                priorSlot = priorSlot,
-                activationState = ActivationState.PENDING,
-            )
-            recoveryRegistry.write(activating)
-            slotRegistry.stageReplacement(staged.slot)
-            slotRegistry.commitReplacement()
-            recoveryRegistry.write(
-                activating.copy(activationState = ActivationState.MARKER_REPLACED),
-            )
-
+            // Every step from here to the published runtime rolls back to the
+            // prior slot: a failure must never strand the process in
+            // VaultRuntimeState.Recovering with no runtime to return to.
             val runtime = try {
-                runtimeFactory.openExisting(staged.slot)
+                replaceMarkerWithStagedSlot(staged, record, priorSlot)
             } catch (failure: Throwable) {
                 rollbackToPriorSlot(priorSlot)
                 throw failure
@@ -339,9 +333,49 @@ class DefaultVaultRuntimeManager(
         }
     }
 
+    private fun replaceMarkerWithStagedSlot(
+        staged: VerifiedStagedVault,
+        record: RecoveryRegistryRecord,
+        priorSlot: VaultSlot?,
+    ): LocalVaultRuntime {
+        val identity = runtimeFactory.verifyStaging(staged.slot)
+        check(identity.vaultId == staged.vaultId) {
+            "The staged vault identity does not match the verified recovery"
+        }
+        check(identity.generation.value >= staged.recoveredGeneration.value) {
+            "The staged vault is behind the verified recovery"
+        }
+
+        val activating = record.copy(
+            phase = RecoveryPhase.ACTIVATING,
+            priorSlot = priorSlot,
+            activationState = ActivationState.PENDING,
+        )
+        recoveryRegistry.write(activating)
+        slotRegistry.stageReplacement(staged.slot)
+        slotRegistry.commitReplacement()
+        recoveryRegistry.write(
+            activating.copy(activationState = ActivationState.MARKER_REPLACED),
+        )
+
+        val runtime = runtimeFactory.openExisting(staged.slot)
+        return try {
+            // The database key is not enough: the prior slot is about to be
+            // removed, so the staged slot must also prove it can open the
+            // content key its records and recovery envelope are sealed under.
+            runtime.contentKeyStore.openExisting(runtime.vaultId).close()
+            runtime
+        } catch (failure: Throwable) {
+            runtime.close()
+            throw failure
+        }
+    }
+
     override fun requireActive(): LocalVaultRuntime {
         activeRuntime()?.let { return it }
-        if (mutableState.value is VaultRuntimeState.Initializing) {
+        // A caller that arrives before, or after a failed, initialisation gets
+        // one more attempt rather than a state latched by a locked device.
+        if (mutableState.value !is VaultRuntimeState.Recovering) {
             runBlocking { initialize() }
         }
         return activeRuntime() ?: error("The local vault runtime is not active")
@@ -371,6 +405,37 @@ class DefaultVaultRuntimeManager(
         val restored = runCatching { runtimeFactory.openExisting(priorSlot) }.getOrNull()
         mutableState.value = restored?.let(VaultRuntimeState::Active)
             ?: VaultRuntimeState.Unreadable(priorSlot)
+    }
+
+    /**
+     * Rolls a published marker back when its staged slot will not open.
+     *
+     * A process that died between the marker replacement and the first normal
+     * open leaves the marker naming a slot no runtime can be built from. The
+     * registry still records the prior slot, so the guarantee that the first
+     * failed normal open restores the unchanged prior marker survives a crash
+     * as well as a live activation. The prior slot is proved to open before the
+     * marker is moved back to it.
+     */
+    private fun restorePriorSlotAfterFailedActivation(failedSlot: VaultSlot): Boolean {
+        val record = try {
+            recoveryRegistry.readOrDiscard()
+        } catch (_: Throwable) {
+            null
+        } ?: return false
+        if (record.stagedSlot != failedSlot) return false
+        if (record.activationState != ActivationState.MARKER_REPLACED) return false
+        val prior = record.priorSlot ?: return false
+        val restored = runCatching { runtimeFactory.openExisting(prior) }.getOrNull()
+            ?: return false
+        return try {
+            slotRegistry.replace(prior)
+            mutableState.value = VaultRuntimeState.Active(restored)
+            true
+        } catch (_: Throwable) {
+            restored.close()
+            false
+        }
     }
 
     /**

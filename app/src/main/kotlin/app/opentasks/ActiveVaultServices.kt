@@ -67,10 +67,29 @@ class ActiveVaultServices(
         checkNotNull(session) { "The active vault services are not running" }
     }
 
+    /**
+     * Opens a session and starts its backup runtime.
+     *
+     * The runtime is bound to the session's scope, so closing the session is
+     * what stops it again; a session that cannot start is closed rather than
+     * retained half-alive.
+     */
     private fun start() {
         synchronized(lock) {
             if (session != null) return
-            session = openSession()
+            val opened = openSession()
+            session = opened
+            try {
+                opened.backupRuntime.start()
+            } catch (failure: Throwable) {
+                session = null
+                try {
+                    opened.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
+                throw failure
+            }
         }
     }
 }
