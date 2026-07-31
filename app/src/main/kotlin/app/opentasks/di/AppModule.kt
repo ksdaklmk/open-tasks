@@ -12,6 +12,8 @@ import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
 import app.opentasks.backup.RestoredPackageIntake
+import app.opentasks.backup.drive.DefaultGoogleDriveAuthorizationManager
+import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.backup.recordRestoredPackageStatus
 import app.opentasks.backup.requiresEstablishedContentKey
 import app.opentasks.backup.restoredPackagePublicationBlocked
@@ -105,6 +107,14 @@ object AppModule {
     fun provideAndroidBackupFiles(
         @ApplicationContext context: Context,
     ): AndroidBackupFiles = AndroidBackupFiles(context)
+
+    // Device-level Google account authorization, independent of which vault
+    // slot is active: a Drive account binding outlives any single vault.
+    @Provides
+    @Singleton
+    fun provideGoogleDriveAuthorizationManager(
+        @ApplicationContext context: Context,
+    ): GoogleDriveAuthorizationManager = DefaultGoogleDriveAuthorizationManager(context)
 
     @Provides
     @Singleton
