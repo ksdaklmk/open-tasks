@@ -696,6 +696,12 @@ internal class FakeCreateOnlyBackupObjectStore(
     /** Fails the next bounded read of a stored object holding this role exactly once. */
     var failNextReadOfRole: RemoteObjectRoleV1? = null
 
+    /**
+     * Runs immediately before a create is decided, so a test can model another
+     * writer taking the exact slot this one is about to create at.
+     */
+    var beforeCreate: (suspend (ProviderObjectId) -> Unit)? = null
+
     fun put(
         providerObjectId: String,
         bytes: ByteArray,
@@ -854,6 +860,7 @@ internal class FakeCreateOnlyBackupObjectStore(
         bytes: OwnedRemoteBytes,
     ): CreateSmallResult {
         callOrder += "createSmallIfAbsent:${providerObjectId.value}"
+        beforeCreate?.invoke(providerObjectId)
         val content = bytes.take()
         try {
             createFailures[providerObjectId.value]?.let { return CreateSmallResult.Failed(it) }

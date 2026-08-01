@@ -4,6 +4,7 @@ import app.opentasks.core.crypto.TinkVaultCrypto
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
+import app.opentasks.core.data.CloudDecodeResult
 import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.data.VerifiedStagedVault
@@ -28,6 +29,7 @@ import java.nio.file.Files
 import java.util.Base64
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -286,6 +288,52 @@ class DefaultRecoveryCoordinatorTest {
     }
 
     @Test
+    fun aPreparationFailureAfterStagingReleasesTheStagedSlot() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        // The durable phase that records the created baseline does not reach
+        // storage: the preparation cannot be completed or resumed.
+        fixture.staging.remoteStateStore.failTransitionToPhase = "BASELINE_CREATED"
+
+        val result = fixture.prepare(fixture.discoverDrive())
+
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.STAGING_INVARIANT),
+            result,
+        )
+        assertEquals(1, fixture.staging.abandoned)
+        assertTrue(fixture.staging.sessions.single().closed)
+    }
+
+    @Test
+    fun ownershipTakenDuringPreparationReleasesTheStagedSlot() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        fixture.takeOwnershipDuringTheBaselineCreate()
+
+        val result = fixture.prepare(fixture.discoverDrive())
+
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.OWNERSHIP_LOST),
+            result,
+        )
+        assertEquals(1, fixture.staging.abandoned)
+        assertTrue(fixture.staging.sessions.single().closed)
+    }
+
+    @Test
+    fun repeatedFailedPreparationsAccumulateNoStagedSlots() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+
+        repeat(2) {
+            fixture.staging.remoteStateStore.failTransitionToPhase = "BASELINE_CREATED"
+            fixture.prepare(fixture.discoverDrive())
+        }
+
+        assertEquals(2, fixture.staging.sessions.size)
+        assertEquals(2, fixture.staging.abandoned)
+        assertTrue(fixture.staging.sessions.all { it.closed })
+    }
+
+    @Test
     fun insufficientLocalStorageFailsWithoutTakingOwnership() = runRecoveryTest { fixture ->
         fixture.seedLineage()
         fixture.staging.reconstructFailure = { IOException("no space left on device") }
@@ -312,12 +360,23 @@ class DefaultRecoveryCoordinatorTest {
         val baselineCreate = fixture.store.callOrder.indexOfFirst {
             it.startsWith("createSmallIfAbsent:")
         }
+        // Both source bases are downloaded, authenticated, and decoded, and both
+        // successor-epoch bases are uploaded and read back, before anything is
+        // created at the publication slot the claim will bind.
         listOf(
             RecoveryTestLineage.BASE_A_PROVIDER_ID,
             RecoveryTestLineage.BASE_B_PROVIDER_ID,
         ).forEach { providerId ->
             val downloaded = fixture.store.callOrder.indexOf("downloadImmutable:$providerId")
             assertTrue(downloaded in 0 until baselineCreate)
+        }
+        assertEquals(2, fixture.store.baseRequests.size)
+        fixture.store.baseRequests.forEach { uploaded ->
+            val slot = uploaded.providerObjectId.value
+            assertTrue(fixture.store.callOrder.indexOf("uploadImmutable:$slot") in 0..baselineCreate)
+            assertTrue(
+                fixture.store.callOrder.indexOf("downloadImmutable:$slot") in 0..baselineCreate,
+            )
         }
         assertEquals(
             listOf(
@@ -383,26 +442,50 @@ class DefaultRecoveryCoordinatorTest {
     }
 
     @Test
-    fun aReplacementBaseIsUploadedUnderAFreshIndependentIdentity() = runRecoveryTest { fixture ->
-        fixture.storeWithDamagedCurrentAndValidFallback()
+    fun bothCompleteBasesAreCreatedFreshUnderIndependentIdentities() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
 
         fixture.prepare(fixture.discoverDrive())
 
         val baseline = fixture.plannedBaseline()
-        val bases = baseline.manifest.inventory
+        val declared = baseline.manifest.inventory
             .filter { it.role == RemoteObjectRoleV1.SNAPSHOT }
-        assertEquals(2, bases.size)
-        assertEquals(1, fixture.store.baseRequests.size)
-        val uploaded = fixture.store.baseRequests.single()
-        assertNotEquals(RecoveryTestLineage.BASE_A_LOGICAL_ID, uploaded.logicalObjectId.value)
-        assertNotEquals(RecoveryTestLineage.BASE_B_LOGICAL_ID, uploaded.logicalObjectId.value)
-        assertEquals(WriterEpoch(2), uploaded.writerEpoch)
-        assertTrue(
-            bases.map { it.logicalObjectId }.contains(uploaded.logicalObjectId.value),
+        assertEquals(2, declared.size)
+        assertEquals(2, fixture.store.baseRequests.size)
+        val uploads = fixture.store.baseRequests
+        // Nothing the predecessor epoch published is declared again, and the two
+        // copies share no identity, provider slot, or ciphertext.
+        assertEquals(2, uploads.map { it.logicalObjectId.value }.toSet().size)
+        assertEquals(2, uploads.map { it.providerObjectId.value }.toSet().size)
+        assertEquals(2, uploads.map { it.frameSha256.value }.toSet().size)
+        uploads.forEach { uploaded ->
+            assertEquals(WriterEpoch(2), uploaded.writerEpoch)
+            assertNotEquals(RecoveryTestLineage.BASE_A_LOGICAL_ID, uploaded.logicalObjectId.value)
+            assertNotEquals(RecoveryTestLineage.BASE_B_LOGICAL_ID, uploaded.logicalObjectId.value)
+        }
+        assertEquals(
+            uploads.map { it.logicalObjectId.value }.toSet(),
+            declared.map { it.logicalObjectId }.toSet(),
         )
-        assertTrue(
-            bases.map { it.logicalObjectId }.contains(RecoveryTestLineage.BASE_B_LOGICAL_ID),
+        // The two copies decode to the same recovered content.
+        assertEquals(
+            fixture.decodeBase(uploads[0].providerObjectId, uploads[0].logicalObjectId.value),
+            fixture.decodeBase(uploads[1].providerObjectId, uploads[1].logicalObjectId.value),
         )
+    }
+
+    @Test
+    fun twoSourceBasesThatDisagreeAtOneGenerationFailClosed() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        fixture.replaceFallbackBaseContent()
+
+        val result = fixture.prepare(fixture.discoverDrive())
+
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.AMBIGUOUS_REMOTE_STATE),
+            result,
+        )
+        assertTrue(fixture.staging.sessions.isEmpty())
     }
 
     // -- Takeover confirmation -----------------------------------------------------------
@@ -521,18 +604,78 @@ class DefaultRecoveryCoordinatorTest {
     }
 
     @Test
-    fun aConfirmedTakeoverIsIdempotent() = runRecoveryTest { fixture ->
+    fun confirmingAnAlreadyActivatedRecoveryFailsClosed() = runRecoveryTest { fixture ->
         fixture.seedLineage()
         val prepared = fixture.prepare(fixture.discoverDrive())
         val operationId = (prepared as RecoveryResult.TakeoverConfirmationRequired).operationId
         val first = fixture.coordinator.confirmTakeover(operationId, fixture.store)
+        assertTrue(first is RecoveryResult.Activated)
         val createdIds = fixture.store.createdIds.toList()
 
+        // Activation clears the staged-recovery registry, so the operation can
+        // no longer be resumed and nothing is created a second time.
         val second = fixture.coordinator.confirmTakeover(operationId, fixture.store)
 
-        assertEquals(first, second)
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.STAGING_INVARIANT),
+            second,
+        )
         assertEquals(createdIds, fixture.store.createdIds)
         assertEquals(1, fixture.staging.activated.size)
+    }
+
+    @Test
+    fun aCrashBetweenTheClaimCreateAndItsPhaseAdoptsItsOwnOccupant() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        val prepared = fixture.prepare(fixture.discoverDrive())
+        val operationId = (prepared as RecoveryResult.TakeoverConfirmationRequired).operationId
+        fixture.staging.remoteStateStore.failTransitionToPhase = "CLAIM_CREATED"
+
+        val interrupted = fixture.coordinator.confirmTakeover(operationId, fixture.store)
+
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.STAGING_INVARIANT),
+            interrupted,
+        )
+        assertTrue(fixture.store.contains(RecoveryTestLineage.SUCCESSOR_PROVIDER_ID))
+        assertEquals(
+            "CONFIRMATION_REQUIRED",
+            fixture.staging.remoteStateStore.operationPhases.last(),
+        )
+        val claimed = fixture.store.requireBytes(RecoveryTestLineage.SUCCESSOR_PROVIDER_ID)
+
+        val resumed = fixture.coordinator.confirmTakeover(operationId, fixture.store)
+
+        assertTrue(resumed is RecoveryResult.Activated)
+        // Re-encoding produces a fresh nonce, so the occupant is adopted through
+        // authentication at the persisted identity rather than replaced.
+        assertArrayEquals(
+            claimed,
+            fixture.store.requireBytes(RecoveryTestLineage.SUCCESSOR_PROVIDER_ID),
+        )
+        assertEquals(
+            1,
+            fixture.store.createdIds.count { it == RecoveryTestLineage.SUCCESSOR_PROVIDER_ID },
+        )
+    }
+
+    @Test
+    fun anotherWritersClaimTakenDuringTheCreateIsOwnershipLoss() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        val prepared = fixture.prepare(fixture.discoverDrive())
+        val operationId = (prepared as RecoveryResult.TakeoverConfirmationRequired).operationId
+        // The only window this takeover can lose in: the reserved slot is taken
+        // between the predecessor recheck and the create.
+        fixture.takeOwnershipDuringTheSuccessorCreate()
+
+        val result = fixture.coordinator.confirmTakeover(operationId, fixture.store)
+
+        assertEquals(
+            RecoveryResult.Failed(RecoveryFailureCategory.OWNERSHIP_LOST),
+            result,
+        )
+        assertTrue(fixture.staging.activated.isEmpty())
+        assertEquals(1, fixture.staging.abandoned)
     }
 
     @Test
@@ -698,6 +841,11 @@ private class RecoveryFixture(
         putBase(RecoveryTestLineage.BASE_A_PROVIDER_ID, RecoveryTestLineage.BASE_A_LOGICAL_ID)
         putBase(RecoveryTestLineage.BASE_B_PROVIDER_ID, RecoveryTestLineage.BASE_B_LOGICAL_ID)
         putSegment()
+        republishBaselineInventory()
+    }
+
+    /** Publishes the baseline over whatever the inventory objects now hold. */
+    private fun republishBaselineInventory() {
         val baseline = encodedBaseline(
             publicationId = RecoveryTestLineage.BASELINE_PUBLICATION_ID,
             providerFileId = RecoveryTestLineage.BASELINE_PROVIDER_ID,
@@ -827,6 +975,57 @@ private class RecoveryFixture(
         )
     }
 
+    /** Republishes the fallback base with content the current base disagrees with. */
+    fun replaceFallbackBaseContent() {
+        val divergent = snapshot.copy(
+            records = snapshot.records.filterNot { record ->
+                record.family == BackupRecordFamily.CHECKLIST_ITEM
+            },
+        )
+        val plaintext = BackupSnapshotCodec.encode(divergent)
+        val frame = try {
+            authenticatedCodec.encrypt(
+                identity(CloudObjectFamily.SNAPSHOT, RecoveryTestLineage.BASE_B_LOGICAL_ID),
+                plaintext,
+                key(),
+            )
+        } finally {
+            plaintext.fill(0)
+        }
+        store.put(
+            providerObjectId = RecoveryTestLineage.BASE_B_PROVIDER_ID,
+            bytes = frame,
+            metadata = RemoteBackupTestFixtures
+                .publicationMetadata(RecoveryTestLineage.BASE_B_PROVIDER_ID, 1)
+                .copy(role = RemoteObjectRoleV1.SNAPSHOT),
+            lineageId = lineageId(),
+        )
+        // The publication still declares the bytes actually stored, so the two
+        // bases differ only in the content they authenticate to.
+        republishBaselineInventory()
+    }
+
+    /**
+     * Takes the lineage the moment this recovery creates its epoch baseline,
+     * which is the only object a preparation creates.
+     */
+    fun takeOwnershipDuringTheBaselineCreate() {
+        store.beforeCreate = {
+            store.beforeCreate = null
+            seedForeignSuccessorClaim()
+        }
+    }
+
+    /** Takes the reserved successor slot the moment this recovery creates at it. */
+    fun takeOwnershipDuringTheSuccessorCreate() {
+        store.beforeCreate = { providerObjectId ->
+            if (providerObjectId.value == RecoveryTestLineage.SUCCESSOR_PROVIDER_ID) {
+                store.beforeCreate = null
+                seedForeignSuccessorClaim()
+            }
+        }
+    }
+
     /** Rewrites the published baseline's public KDF cost below the supported profile. */
     fun weakenBaselineKdf() {
         val original = store.requireBytes(RecoveryTestLineage.BASELINE_PROVIDER_ID)
@@ -876,6 +1075,22 @@ private class RecoveryFixture(
 
     fun verifiedClaim(providerObjectId: String): VerifiedOwnershipClaim =
         ownershipCodec.verify(store.requireBytes(providerObjectId), key())
+
+    /** The payload one stored base authenticates to at its remote identity. */
+    fun decodeBase(
+        providerObjectId: ProviderObjectId,
+        logicalObjectId: String,
+    ): BackupSnapshotPayloadV1 {
+        val bytes = store.requireBytes(providerObjectId.value)
+        val decoded = authenticatedCodec.decrypt(bytes.inputStream(), bytes.size.toLong(), key())
+        val success = decoded as CloudDecodeResult.Success
+        return success.value.use { value ->
+            check(value.identity == identity(CloudObjectFamily.SNAPSHOT, logicalObjectId)) {
+                "The base is not authenticated at the lineage plus its logical object"
+            }
+            BackupSnapshotCodec.decodeOwned(value.takePlaintext())
+        }
+    }
 
     /** The baseline this recovery reserved a slot for and created. */
     fun plannedBaseline(): VerifiedPublication {
@@ -1188,6 +1403,13 @@ internal class FakeRecoveryStagingFactory(
         private set
     var reconstructFailure: (() -> Throwable)? = null
 
+    /**
+     * Operations whose staged-recovery registry record is gone, exactly as
+     * `VaultRuntimeManager` leaves them once a slot is published or discarded.
+     * Nothing can resume one afterwards.
+     */
+    private val released = mutableSetOf<String>()
+
     override suspend fun begin(operationId: String): RecoveryStagingSession =
         FakeRecoveryStagingSession(
             operationId = operationId,
@@ -1199,19 +1421,21 @@ internal class FakeRecoveryStagingFactory(
         ).also { sessions += it }
 
     override suspend fun resume(operationId: String): RecoveryStagingSession? =
-        sessions.lastOrNull { it.operationId == operationId }
+        sessions.lastOrNull { it.operationId == operationId && it.operationId !in released }
 
     override suspend fun activate(
         session: RecoveryStagingSession,
         staged: VerifiedStagedVault,
     ): RemoteBackupStateStore {
         session.close()
+        released += session.operationId
         activated += staged
         return remoteStateStore
     }
 
     override suspend fun abandon(session: RecoveryStagingSession) {
         session.close()
+        released += session.operationId
         abandoned += 1
     }
 }

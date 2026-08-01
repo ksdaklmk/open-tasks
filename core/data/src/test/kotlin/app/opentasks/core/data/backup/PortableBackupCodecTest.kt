@@ -13,8 +13,10 @@ import app.opentasks.core.sync.CloudBounds
 import app.opentasks.core.sync.CloudHeaderIdentity
 import app.opentasks.core.sync.CloudObjectFamily
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.nio.file.Files
 import java.security.MessageDigest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -490,6 +492,185 @@ class PortableBackupCodecTest {
         failed.fill(0)
     }
 
+
+    // -- Recovery decode -----------------------------------------------------------------
+
+    @Test
+    fun decodeCompleteAuthenticatesExactlyWhatVerifyCompleteDoes() {
+        val recovery = PortableRecoveryCrypto()
+        val recoveryCodec = PortableBackupCodec(DefaultAuthenticatedCloudObjectCodec(recovery))
+        val file = recovery.writePackage(recoveryCodec)
+
+        val decoded = recoveryCodec.decodeComplete(file, PASSPHRASE.copyOf(), recovery)
+
+        val verified = file.inputStream().use { stream ->
+            recoveryCodec.verifyComplete(stream, file.length(), recovery.createKey())
+        }
+        decoded.use {
+            // Decoding canonicalises record order, so the payloads are compared
+            // as the canonical bytes both the encoder and the reader agree on.
+            val expected = BackupSnapshotCodec.encode(snapshot())
+            val actual = BackupSnapshotCodec.encode(decoded.snapshot)
+            try {
+                assertArrayEquals(expected, actual)
+            } finally {
+                expected.fill(0)
+                actual.fill(0)
+            }
+            assertEquals(GENERATION, decoded.generation.value)
+            assertEquals(verified.vaultId, decoded.snapshot.vaultId)
+            assertEquals(verified.generation, decoded.generation.value)
+            val canonicalEnvelope = RecoveryEnvelopeCodec.encode(decoded.recoveryEnvelope)
+            try {
+                assertEquals(verified.recoveryEnvelopeSha256, sha256(canonicalEnvelope))
+            } finally {
+                canonicalEnvelope.fill(0)
+            }
+            assertEquals(file.length(), verified.totalPackageLength)
+        }
+        recovery.close()
+    }
+
+    @Test
+    fun decodeCompleteOwnsItsEnvelopeAndClosesTheKeyItDerived() {
+        val recovery = PortableRecoveryCrypto()
+        val recoveryCodec = PortableBackupCodec(DefaultAuthenticatedCloudObjectCodec(recovery))
+        val file = recovery.writePackage(recoveryCodec)
+
+        val decoded = recoveryCodec.decodeComplete(file, PASSPHRASE.copyOf(), recovery)
+
+        assertEquals(1, recovery.unlockCount)
+        // The derived key never escapes: everything the derivation issued is
+        // closed by the time the decoded package is returned.
+        assertTrue(recovery.issued.isNotEmpty())
+        assertTrue(recovery.issued.all(recovery::isClosed))
+        // The envelope is this result's own copy, and closing it clears it.
+        val envelope = decoded.recoveryEnvelope
+        assertTrue(envelope.kdf.salt.any { it != 0.toByte() })
+        assertTrue(envelope.wrappedKeyset.any { it != 0.toByte() })
+        decoded.close()
+        assertTrue(allZero(envelope.kdf.salt))
+        assertTrue(allZero(envelope.nonce))
+        assertTrue(allZero(envelope.wrappedKeyset))
+        // Clearing it changed nothing the package still holds.
+        file.inputStream().use { stream ->
+            recoveryCodec.verifyComplete(stream, file.length(), recovery.createKey())
+        }
+        recovery.close()
+    }
+
+    @Test
+    fun decodeCompleteRejectsAPackageOutsideItsBoundBeforeDeriving() {
+        val recovery = PortableRecoveryCrypto()
+        val recoveryCodec = PortableBackupCodec(DefaultAuthenticatedCloudObjectCodec(recovery))
+        val file = recovery.writePackage(recoveryCodec)
+        file.writeBytes(file.readBytes().copyOf(MINIMUM_PACKAGE_BYTES - 1))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            recoveryCodec.decodeComplete(file, PASSPHRASE.copyOf(), recovery)
+        }
+
+        assertEquals(0, recovery.unlockCount)
+        recovery.close()
+    }
+
+    @Test
+    fun decodeCompleteSeparatesAWrongPassphraseFromACorruptPackage() {
+        val recovery = PortableRecoveryCrypto()
+        val recoveryCodec = PortableBackupCodec(DefaultAuthenticatedCloudObjectCodec(recovery))
+        val file = recovery.writePackage(recoveryCodec)
+
+        assertThrows(RecoveryPassphraseException::class.java) {
+            recoveryCodec.decodeComplete(file, "not-the-passphrase".toCharArray(), recovery)
+        }
+
+        val corrupted = recovery.writePackage(recoveryCodec, name = "corrupt.otbk")
+        corrupted.writeBytes(
+            corrupted.readBytes().also { it[it.lastIndex] = (it.last().toInt() xor 1).toByte() },
+        )
+        val failure = assertThrows(IllegalArgumentException::class.java) {
+            recoveryCodec.decodeComplete(corrupted, PASSPHRASE.copyOf(), recovery)
+        }
+        assertTrue(failure !is RecoveryPassphraseException)
+        recovery.close()
+    }
+
+    /**
+     * Addresses one vault's content under every handle it issues, so a package
+     * encoded here decodes under a derivation this test can observe without
+     * paying for Argon2id.
+     */
+    private inner class PortableRecoveryCrypto : app.opentasks.core.crypto.VaultCrypto {
+        private val delegate = TinkVaultCrypto()
+        private val established: VaultKey = delegate.createKey()
+        val issued = mutableListOf<VaultKey>()
+        var unlockCount = 0
+            private set
+
+        override fun createKey(): VaultKey = delegate.createKey()
+
+        override fun wrapForRecovery(
+            unlockedKey: VaultKey,
+            passphrase: CharArray,
+        ): VaultKeyEnvelope = error("Recovery decode must not wrap an envelope")
+
+        override fun unlock(
+            passphrase: CharArray,
+            envelope: VaultKeyEnvelope,
+        ): VaultKey {
+            unlockCount += 1
+            require(passphrase.concatToString() == PASSPHRASE.concatToString()) {
+                "The recovery passphrase does not unlock this envelope"
+            }
+            return delegate.createKey().also { issued += it }
+        }
+
+        override fun changePassphrase(
+            unlockedKey: VaultKey,
+            newPassphrase: CharArray,
+        ): VaultKeyEnvelope = error("Recovery decode must not rotate a passphrase")
+
+        override fun encryptBytes(
+            key: VaultKey,
+            plaintext: ByteArray,
+            associatedData: ByteArray,
+        ): ByteArray = delegate.encryptBytes(established, plaintext, associatedData)
+
+        override fun decryptBytes(
+            key: VaultKey,
+            ciphertext: ByteArray,
+            associatedData: ByteArray,
+        ): ByteArray = delegate.decryptBytes(established, ciphertext, associatedData)
+
+        fun isClosed(key: VaultKey): Boolean =
+            runCatching { delegate.encryptBytes(key, ByteArray(1), ByteArray(0)) }.isFailure
+
+        fun writePackage(
+            codec: PortableBackupCodec,
+            name: String = "package.otbk",
+        ): File {
+            val key = createKey()
+            val envelope = envelope()
+            val encoded = try {
+                codec.encode(envelope, snapshot(), PRODUCED_AT, key)
+            } finally {
+                key.close()
+                clearEnvelope(envelope)
+            }
+            val directory = Files.createTempDirectory("portable-recovery-test").toFile()
+            temporaryDirectories += directory
+            return File(directory, name).also { it.writeBytes(encoded) }
+        }
+
+        fun close() {
+            established.close()
+            temporaryDirectories.forEach { it.deleteRecursively() }
+            temporaryDirectories.clear()
+        }
+    }
+
+    private val temporaryDirectories = mutableListOf<File>()
+
     private fun bootstrapOnlyPackage(totalLength: Long): ByteArray {
         val manifestLength = 100L
         var headerLength = 0
@@ -818,6 +999,8 @@ class PortableBackupCodecTest {
     }
 
     private companion object {
+        const val MINIMUM_PACKAGE_BYTES = 6
+        val PASSPHRASE: CharArray = "correct horse battery".toCharArray()
         const val GENERATION = 7L
         const val PRODUCED_AT = 1_754_000_000_000L
         val TEST_JSON = Json {

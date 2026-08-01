@@ -170,14 +170,18 @@ class RecoveryActivationInstrumentedTest {
     }
 
     @Test
-    fun anAbandonedRecoveryDiscardsOnlyTheStagedSlot() = runBlocking {
+    fun anAbandonedRecoveryDiscardsOnlyTheStagedSlotAndReleasesTheRuntime() = runBlocking {
         val manager = manager()
         withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
         val staged = reconstruct(manager)
 
         withTimeout(TIMEOUT_MILLIS) { stagingFactory(manager).abandon(staged.session) }
 
+        // The runtime is usable again in this same process: a recovery that
+        // cannot be finished never strands the device in Recovering.
         assertEquals(VaultRuntimeState.NoVault, manager.state.value)
+        withTimeout(TIMEOUT_MILLIS) { manager.createNewVault() }
+        assertTrue(manager.state.value is VaultRuntimeState.Active)
         assertFalse(
             LocalVaultRuntimeFactory(context, crypto)
                 .listStagedSlots()

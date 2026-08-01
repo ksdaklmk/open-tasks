@@ -72,12 +72,11 @@ internal enum class RecoveryTakeoverPhase {
 /**
  * One object the successor epoch's baseline will name.
  *
- * A retained object is copied forward verbatim from the authenticated
- * predecessor publication and carries no [snapshotPayloadSha256] plan. A
- * replacement base — created only when one of the predecessor's two declared
- * bases no longer authenticates — names the exact bytes this recovery intends
- * to upload, recorded durably before the first network mutation that could
- * create them.
+ * A segment is copied forward verbatim from the authenticated predecessor
+ * publication and carries no [snapshotPayloadSha256] plan. Both complete bases
+ * are always created by this takeover: they name the exact bytes it intends to
+ * upload, recorded durably before the first network mutation that could create
+ * them, and stay null until that record has been persisted.
  */
 @Serializable
 internal data class RecoveryObjectV1(
@@ -89,7 +88,6 @@ internal data class RecoveryObjectV1(
     val frameLength: Long?,
     val frameSha256: String?,
     val snapshotPayloadSha256: String?,
-    val replacement: Boolean,
 ) {
     override fun toString(): String = "RecoveryObjectV1(role=$role)"
 }
@@ -459,29 +457,39 @@ class DefaultRecoveryCoordinator internal constructor(
                 expectedGeneration = decoded.generation,
             )
             val session = staging.begin(portableOperationId())
-            val key = try {
-                crypto.unlock(passphrase, decoded.recoveryEnvelope)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                staging.abandon(session)
-                return@use RecoveryResult.Failed(RecoveryFailureCategory.WRONG_PASSPHRASE)
-            }
-            val staged = try {
-                key.use { session.reconstruct(request, it) }
+            val result = try {
+                activatePortable(session, request, passphrase)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (failure: Exception) {
-                staging.abandon(session)
-                return@use RecoveryResult.Failed(failure.toStagingReason())
+                RecoveryResult.Failed(failure.toStagingReason())
             }
-            markPhase(RecoveryTakeoverPhase.STAGING_RECONSTRUCTED)
-            markPhase(RecoveryTakeoverPhase.STAGING_VERIFIED)
-            staging.activate(session, staged)
-            markPhase(RecoveryTakeoverPhase.ACTIVATED)
-            markPhase(RecoveryTakeoverPhase.COMPLETED)
-            RecoveryResult.Activated(staged.activationGeneration, lineageId = null)
+            // Nothing about a portable recovery is resumable, so a slot that
+            // did not activate is discarded and the runtime released with it.
+            if (result is RecoveryResult.Failed) staging.abandon(session)
+            result
         }
+    }
+
+    private suspend fun activatePortable(
+        session: RecoveryStagingSession,
+        request: RecoveryImportRequest,
+        passphrase: CharArray,
+    ): RecoveryResult {
+        val key = try {
+            crypto.unlock(passphrase, request.recoveryEnvelope)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return RecoveryResult.Failed(RecoveryFailureCategory.WRONG_PASSPHRASE)
+        }
+        val staged = key.use { session.reconstruct(request, it) }
+        markPhase(RecoveryTakeoverPhase.STAGING_RECONSTRUCTED)
+        markPhase(RecoveryTakeoverPhase.STAGING_VERIFIED)
+        staging.activate(session, staged)
+        markPhase(RecoveryTakeoverPhase.ACTIVATED)
+        markPhase(RecoveryTakeoverPhase.COMPLETED)
+        return RecoveryResult.Activated(staged.activationGeneration, lineageId = null)
     }
 
     // -- Drive ---------------------------------------------------------------------------
@@ -663,13 +671,13 @@ class DefaultRecoveryCoordinator internal constructor(
                 return RecoveryResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             }
             val manifest = publication.manifest
-            val bases = when (val downloaded = downloadBases(lineageId, manifest)) {
+            val source = when (val downloaded = downloadBases(lineageId, manifest)) {
                 is StepResult.Failed -> return RecoveryResult.Failed(downloaded.reason)
                 is StepResult.Ok -> downloaded.value
             }
-            baseUsed = bases.chosen.item.logicalObjectId
+            baseUsed = source.item.logicalObjectId
             val segments = when (
-                val downloaded = downloadSegments(lineageId, manifest, bases.chosen)
+                val downloaded = downloadSegments(lineageId, manifest, source)
             ) {
                 is StepResult.Failed -> return RecoveryResult.Failed(downloaded.reason)
                 is StepResult.Ok -> downloaded.value
@@ -685,7 +693,7 @@ class DefaultRecoveryCoordinator internal constructor(
                     tip = tip,
                     claimProviderId = claimProviderId,
                     manifest = manifest,
-                    bases = bases,
+                    source = source,
                     segments = segments,
                     envelope = envelope,
                     accountBindingDigest = accountBindingDigest,
@@ -698,6 +706,14 @@ class DefaultRecoveryCoordinator internal constructor(
             }
         }
 
+        /**
+         * Reserves the staged slot and prepares the successor epoch in it.
+         *
+         * A preparation that does not reach confirmation is never resumable:
+         * every attempt begins its own slot, so a failure here abandons that
+         * slot rather than leaving the runtime stuck recovering into a staged
+         * database no later call can name.
+         */
         @Suppress("LongParameterList")
         private suspend fun stage(
             lineageId: CloudLineageId,
@@ -705,17 +721,53 @@ class DefaultRecoveryCoordinator internal constructor(
             tip: VerifiedOwnershipClaim,
             claimProviderId: ProviderObjectId,
             manifest: PublicationManifestV1,
-            bases: BasePair,
+            source: AuthenticatedBase,
             segments: List<BackupOperationSegmentPayloadV1>,
             envelope: VaultKeyEnvelope,
             accountBindingDigest: ByteArray,
         ): RecoveryResult {
             val opened = staging.begin(driveOperationId())
             session = opened
+            val result = try {
+                prepareStaged(
+                    lineageId = lineageId,
+                    rootProviderId = rootProviderId,
+                    tip = tip,
+                    claimProviderId = claimProviderId,
+                    manifest = manifest,
+                    source = source,
+                    segments = segments,
+                    envelope = envelope,
+                    accountBindingDigest = accountBindingDigest,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                RecoveryResult.Failed(failure.toRecoveryReason())
+            }
+            if (result is RecoveryResult.Failed) {
+                session?.let { staging.abandon(it) }
+                session = null
+            }
+            return result
+        }
+
+        @Suppress("LongParameterList")
+        private suspend fun prepareStaged(
+            lineageId: CloudLineageId,
+            rootProviderId: ProviderObjectId,
+            tip: VerifiedOwnershipClaim,
+            claimProviderId: ProviderObjectId,
+            manifest: PublicationManifestV1,
+            source: AuthenticatedBase,
+            segments: List<BackupOperationSegmentPayloadV1>,
+            envelope: VaultKeyEnvelope,
+            accountBindingDigest: ByteArray,
+        ): RecoveryResult {
             val staged = try {
-                opened.reconstruct(
+                requireSession().reconstruct(
                     request = RecoveryImportRequest(
-                        snapshot = bases.chosen.snapshot,
+                        snapshot = source.snapshot,
                         segments = segments,
                         recoveryEnvelope = envelope,
                         expectedGeneration = BackupGeneration(manifest.localGeneration),
@@ -725,8 +777,6 @@ class DefaultRecoveryCoordinator internal constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (failure: Exception) {
-                staging.abandon(opened)
-                session = null
                 return RecoveryResult.Failed(failure.toStagingReason())
             }
             markPhase(RecoveryTakeoverPhase.STAGING_RECONSTRUCTED)
@@ -738,13 +788,12 @@ class DefaultRecoveryCoordinator internal constructor(
                 tip = tip,
                 claimProviderId = claimProviderId,
                 manifest = manifest,
-                bases = bases,
                 staged = staged,
                 accountBindingDigest = accountBindingDigest,
             )
-            if (stored is StepResult.Failed) return failed(stored.reason)
-            failure(verifyBase(bases, first = true))?.let { return it }
-            failure(verifyBase(bases, first = false))?.let { return it }
+            if (stored is StepResult.Failed) return RecoveryResult.Failed(stored.reason)
+            failure(publishBase(source, first = true))?.let { return it }
+            failure(publishBase(source, first = false))?.let { return it }
             failure(createBaseline(envelope))?.let { return it }
             failure(verifyBaseline())?.let { return it }
             failure(recheckPredecessor(RecoveryTakeoverPhase.PREDECESSOR_RECHECKED))?.let {
@@ -761,13 +810,6 @@ class DefaultRecoveryCoordinator internal constructor(
         }
 
         suspend fun confirm(): RecoveryResult {
-            val current = requireState()
-            if (RecoveryTakeoverPhase.valueOf(current.phase) == RecoveryTakeoverPhase.COMPLETED) {
-                return RecoveryResult.Activated(
-                    generation = BackupGeneration(current.activationGeneration),
-                    lineageId = CloudLineageId.parse(current.lineageId),
-                )
-            }
             (recheckPredecessor(null) as? StepResult.Failed)?.let { return failed(it.reason) }
             (createClaim() as? StepResult.Failed)?.let { return failed(it.reason) }
             (verifyClaim() as? StepResult.Failed)?.let { return failed(it.reason) }
@@ -777,18 +819,20 @@ class DefaultRecoveryCoordinator internal constructor(
         // -- Inventory ------------------------------------------------------------------
 
         /**
-         * Downloads and authenticates both declared complete bases at their
-         * exact provider files, digests, and remote logical identities.
+         * Downloads, authenticates, decodes, and compares both declared complete
+         * bases at their exact provider files, digests, and remote logical
+         * identities, and returns the one this recovery rebuilds from.
          *
-         * Both are proved before anything is reserved: the successor epoch's
-         * baseline has to declare two independent bases, and a base that no
-         * longer authenticates is replaced by a fresh copy of the one that
-         * does rather than silently declared twice.
+         * Two copies of the same generation are meant to hold identical content,
+         * so a disagreement between them is ambiguity and fails closed rather
+         * than being resolved by preferring the declared current base. Two bases
+         * covering different generations are independent bases the format
+         * permits and carry no content the other can be compared with.
          */
         private suspend fun downloadBases(
             lineageId: CloudLineageId,
             manifest: PublicationManifestV1,
-        ): StepResult<BasePair> {
+        ): StepResult<AuthenticatedBase> {
             val currentItem = manifest.inventory
                 .firstOrNull { it.logicalObjectId == manifest.currentBaseObjectId }
                 ?: return StepResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
@@ -797,11 +841,16 @@ class DefaultRecoveryCoordinator internal constructor(
                 ?: return StepResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             val current = downloadBase(lineageId, currentItem)
             val fallback = downloadBase(lineageId, fallbackItem)
+            if (current != null &&
+                fallback != null &&
+                current.item.lastGeneration == fallback.item.lastGeneration &&
+                current.payloadSha256 != fallback.payloadSha256
+            ) {
+                return StepResult.Failed(RecoveryFailureCategory.AMBIGUOUS_REMOTE_STATE)
+            }
             val chosen = current ?: fallback
                 ?: return StepResult.Failed(RecoveryFailureCategory.MISSING_REQUIRED_OBJECT)
-            return StepResult.Ok(
-                BasePair(current = current, fallback = fallback, chosen = chosen),
-            )
+            return StepResult.Ok(chosen)
         }
 
         private suspend fun downloadBase(
@@ -816,7 +865,13 @@ class DefaultRecoveryCoordinator internal constructor(
             val snapshot = runBounded { BackupSnapshotCodec.decodeOwned(plaintext) }
                 ?: return null
             if (snapshot.coveredGeneration != item.lastGeneration) return null
-            return AuthenticatedBase(item, snapshot)
+            val canonical = BackupSnapshotCodec.encode(snapshot)
+            val payloadSha256 = try {
+                sha256Hex(canonical)
+            } finally {
+                canonical.fill(0)
+            }
+            return AuthenticatedBase(item, snapshot, payloadSha256)
         }
 
         /**
@@ -922,15 +977,16 @@ class DefaultRecoveryCoordinator internal constructor(
             tip: VerifiedOwnershipClaim,
             claimProviderId: ProviderObjectId,
             manifest: PublicationManifestV1,
-            bases: BasePair,
             staged: VerifiedStagedVault,
             accountBindingDigest: ByteArray,
         ): StepResult<Unit> {
-            val replacements = listOf(bases.current, bases.fallback).count { it == null }
             val reserved = mutableListOf<ProviderObjectId>()
             reserved += generateId(RemoteObjectRoleV1.OWNERSHIP_CLAIM)
             reserved += generateId(RemoteObjectRoleV1.PUBLICATION)
-            repeat(replacements) { reserved += generateId(RemoteObjectRoleV1.SNAPSHOT) }
+            // The successor epoch always creates its own two complete bases: a
+            // takeover proves two independently identified copies of the content
+            // it is about to own, never copies another epoch published.
+            repeat(2) { reserved += generateId(RemoteObjectRoleV1.SNAPSHOT) }
             // A provider that repeats a generated ID would let one object
             // occupy another's exact slot.
             if (reserved.distinct().size != reserved.size || claimProviderId in reserved) {
@@ -938,16 +994,9 @@ class DefaultRecoveryCoordinator internal constructor(
             }
             val nextSuccessorProviderId = reserved[0]
             val publicationProviderId = reserved[1]
-            var replacementIndex = 2
 
-            val currentObject = bases.current?.let(::retained) ?: replacement(
-                reserved[replacementIndex++],
-                bases.chosen.item.lastGeneration,
-            )
-            val fallbackObject = bases.fallback?.let(::retained) ?: replacement(
-                reserved[replacementIndex],
-                bases.chosen.item.lastGeneration,
-            )
+            val currentObject = plannedBase(reserved[2], manifest.localGeneration)
+            val fallbackObject = plannedBase(reserved[3], manifest.localGeneration)
             val segments = manifest.inventory
                 .filter { it.role == RemoteObjectRoleV1.SEGMENT }
                 .map(::retained)
@@ -1011,16 +1060,17 @@ class DefaultRecoveryCoordinator internal constructor(
         }
 
         /**
-         * Proves one of the successor epoch's two declared complete bases.
+         * Creates and proves one of the successor epoch's two complete bases.
          *
-         * A retained base was already downloaded and authenticated at its exact
-         * identity, so nothing is created for it. A replacement is encoded from
-         * the canonical payload the surviving base decoded to, its intended
-         * bytes are recorded durably before the first network mutation, and it
-         * is uploaded and read back under a fresh remote logical identity.
+         * The canonical payload the authenticated source base decoded to — the
+         * same content the staged vault was proved against — is re-encoded under
+         * a fresh remote logical identity into a freshly reserved slot. Its
+         * intended bytes are recorded durably before the first network mutation,
+         * so a restart adopts them instead of uploading a second, differently
+         * nonced copy, and it is read back and decoded before it may count.
          */
-        private suspend fun verifyBase(
-            bases: BasePair,
+        private suspend fun publishBase(
+            source: AuthenticatedBase,
             first: Boolean,
         ): StepResult<Unit> {
             val phase = if (first) {
@@ -1037,13 +1087,11 @@ class DefaultRecoveryCoordinator internal constructor(
             }
             val index = current.objects.indexOfFirst { it.logicalObjectId == logicalObjectId }
             val planned = current.objects[index]
-            if (!planned.replacement) return advance(phase, current)
-
             val staged = try {
-                stageReplacementBase(
+                stageEpochBase(
                     lineageId = CloudLineageId.parse(current.lineageId),
                     logicalObjectId = RemoteLogicalObjectId.of(planned.logicalObjectId),
-                    snapshot = bases.chosen.snapshot,
+                    snapshot = source.snapshot,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -1546,12 +1594,9 @@ class DefaultRecoveryCoordinator internal constructor(
             frameLength = item.frameLength,
             frameSha256 = item.frameSha256,
             snapshotPayloadSha256 = null,
-            replacement = false,
         )
 
-        private fun retained(base: AuthenticatedBase): RecoveryObjectV1 = retained(base.item)
-
-        private fun replacement(
+        private fun plannedBase(
             providerObjectId: ProviderObjectId,
             generation: Long,
         ): RecoveryObjectV1 = RecoveryObjectV1(
@@ -1563,15 +1608,14 @@ class DefaultRecoveryCoordinator internal constructor(
             frameLength = null,
             frameSha256 = null,
             snapshotPayloadSha256 = null,
-            replacement = true,
         )
 
         /**
-         * Encrypts the canonical payload of the base that survived under a
-         * fresh remote logical identity, so the replacement copy shares no
-         * identity, associated data, nonce, or ciphertext with it.
+         * Encrypts the canonical recovered payload under a fresh remote logical
+         * identity, so neither new copy shares an identity, associated data,
+         * nonce, or ciphertext with the other or with any source object.
          */
-        private fun stageReplacementBase(
+        private fun stageEpochBase(
             lineageId: CloudLineageId,
             logicalObjectId: RemoteLogicalObjectId,
             snapshot: BackupSnapshotPayloadV1,
@@ -1647,7 +1691,9 @@ class DefaultRecoveryCoordinator internal constructor(
             )
             if (!applied) return StepResult.Failed(RecoveryFailureCategory.STAGING_INVARIANT)
             state = updated
-            phases += updated.phase
+            // Recording intent inside a phase is a durable write, not a
+            // transition, so it never appears twice in the phase sequence.
+            if (updated.phase != expectedPhase) phases += updated.phase
             return StepResult.Ok(Unit)
         }
 
@@ -1763,12 +1809,8 @@ class DefaultRecoveryCoordinator internal constructor(
     private class AuthenticatedBase(
         val item: RemoteInventoryItemV1,
         val snapshot: BackupSnapshotPayloadV1,
-    )
-
-    private class BasePair(
-        val current: AuthenticatedBase?,
-        val fallback: AuthenticatedBase?,
-        val chosen: AuthenticatedBase,
+        /** Digest of the canonical decoded payload, so two copies compare. */
+        val payloadSha256: String,
     )
 
     private sealed interface StepResult<out T> {
