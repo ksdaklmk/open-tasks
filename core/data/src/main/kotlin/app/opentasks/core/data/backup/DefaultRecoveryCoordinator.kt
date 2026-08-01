@@ -788,6 +788,7 @@ class DefaultRecoveryCoordinator internal constructor(
                 tip = tip,
                 claimProviderId = claimProviderId,
                 manifest = manifest,
+                source = source,
                 staged = staged,
                 accountBindingDigest = accountBindingDigest,
             )
@@ -977,6 +978,7 @@ class DefaultRecoveryCoordinator internal constructor(
             tip: VerifiedOwnershipClaim,
             claimProviderId: ProviderObjectId,
             manifest: PublicationManifestV1,
+            source: AuthenticatedBase,
             staged: VerifiedStagedVault,
             accountBindingDigest: ByteArray,
         ): StepResult<Unit> {
@@ -995,8 +997,14 @@ class DefaultRecoveryCoordinator internal constructor(
             val nextSuccessorProviderId = reserved[0]
             val publicationProviderId = reserved[1]
 
-            val currentObject = plannedBase(reserved[2], manifest.localGeneration)
-            val fallbackObject = plannedBase(reserved[3], manifest.localGeneration)
+            // Both copies carry the authenticated source base's content, so they
+            // are declared at exactly the generation that content covers. The
+            // retained segments bridge that to the published generation, and a
+            // later recovery reading these objects finds the generation they
+            // claim.
+            val baseGeneration = source.snapshot.coveredGeneration
+            val currentObject = plannedBase(reserved[2], baseGeneration)
+            val fallbackObject = plannedBase(reserved[3], baseGeneration)
             val segments = manifest.inventory
                 .filter { it.role == RemoteObjectRoleV1.SEGMENT }
                 .map(::retained)
@@ -1064,10 +1072,13 @@ class DefaultRecoveryCoordinator internal constructor(
          *
          * The canonical payload the authenticated source base decoded to — the
          * same content the staged vault was proved against — is re-encoded under
-         * a fresh remote logical identity into a freshly reserved slot. Its
-         * intended bytes are recorded durably before the first network mutation,
-         * so a restart adopts them instead of uploading a second, differently
-         * nonced copy, and it is read back and decoded before it may count.
+         * a fresh remote logical identity into a freshly reserved slot, declared
+         * at the generation that content actually covers. Its intended bytes are
+         * recorded durably before the first network mutation, so nothing is ever
+         * created that this operation cannot account for, and the copy is read
+         * back and decoded before it may count. A preparation is not resumable —
+         * every attempt reserves its own slots — so a restart re-plans rather
+         * than adopting these bytes.
          */
         private suspend fun publishBase(
             source: AuthenticatedBase,
@@ -1141,7 +1152,11 @@ class DefaultRecoveryCoordinator internal constructor(
                         return StepResult.Failed(upload.reason.toRecoveryReason())
                 }
             }
-            val readBack = downloadPlaintext(
+            // Read back through exactly the path a later recovery takes, so a
+            // base this takeover publishes is proved to be one the next
+            // installation can authenticate, decode, and find at the generation
+            // it declares.
+            val readBack = downloadBase(
                 lineageId = CloudLineageId.parse(current.lineageId),
                 item = RemoteInventoryItemV1(
                     logicalObjectId = record.logicalObjectId,
@@ -1152,17 +1167,8 @@ class DefaultRecoveryCoordinator internal constructor(
                     frameLength = checkNotNull(record.frameLength),
                     frameSha256 = checkNotNull(record.frameSha256),
                 ),
-                family = CloudObjectFamily.SNAPSHOT,
             ) ?: return StepResult.Failed(RecoveryFailureCategory.AMBIGUOUS_REMOTE_STATE)
-            val decoded = runBounded { BackupSnapshotCodec.decodeOwned(readBack) }
-                ?: return StepResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-            val canonical = BackupSnapshotCodec.encode(decoded)
-            val matches = try {
-                sha256Hex(canonical) == record.snapshotPayloadSha256
-            } finally {
-                canonical.fill(0)
-            }
-            if (!matches) {
+            if (readBack.payloadSha256 != record.snapshotPayloadSha256) {
                 return StepResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             }
             return advance(phase, requireState())

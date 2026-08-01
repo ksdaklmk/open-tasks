@@ -520,6 +520,7 @@ class PortableBackupCodecTest {
             assertEquals(GENERATION, decoded.generation.value)
             assertEquals(verified.vaultId, decoded.snapshot.vaultId)
             assertEquals(verified.generation, decoded.generation.value)
+            assertEquals(PRODUCED_AT, verified.producedAtEpochMillis)
             val canonicalEnvelope = RecoveryEnvelopeCodec.encode(decoded.recoveryEnvelope)
             try {
                 assertEquals(verified.recoveryEnvelopeSha256, sha256(canonicalEnvelope))

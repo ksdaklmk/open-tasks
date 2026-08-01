@@ -373,7 +373,9 @@ class DefaultRecoveryCoordinatorTest {
         assertEquals(2, fixture.store.baseRequests.size)
         fixture.store.baseRequests.forEach { uploaded ->
             val slot = uploaded.providerObjectId.value
-            assertTrue(fixture.store.callOrder.indexOf("uploadImmutable:$slot") in 0..baselineCreate)
+            assertTrue(
+                fixture.store.callOrder.indexOf("uploadImmutable:$slot") in 0..baselineCreate,
+            )
             assertTrue(
                 fixture.store.callOrder.indexOf("downloadImmutable:$slot") in 0..baselineCreate,
             )
@@ -472,6 +474,52 @@ class DefaultRecoveryCoordinatorTest {
             fixture.decodeBase(uploads[0].providerObjectId, uploads[0].logicalObjectId.value),
             fixture.decodeBase(uploads[1].providerObjectId, uploads[1].logicalObjectId.value),
         )
+        // Each base is declared at exactly the generation its content covers,
+        // and the retained segments still bridge that to the publication.
+        declared.forEach { item ->
+            val payload = fixture.decodeBase(
+                ProviderObjectId.of(item.providerFileId),
+                item.logicalObjectId,
+            )
+            assertEquals(payload.coveredGeneration, item.firstGeneration)
+            assertEquals(payload.coveredGeneration, item.lastGeneration)
+        }
+        uploads.forEach { uploaded ->
+            assertEquals(BackupGeneration(SNAPSHOT_GENERATION), uploaded.firstGeneration)
+            assertEquals(BackupGeneration(SNAPSHOT_GENERATION), uploaded.lastGeneration)
+        }
+        val segments = baseline.manifest.inventory
+            .filter { it.role == RemoteObjectRoleV1.SEGMENT }
+        assertEquals(SNAPSHOT_GENERATION + 1, segments.minOf { it.firstGeneration })
+        assertEquals(RECOVERED_GENERATION, segments.maxOf { it.lastGeneration })
+        assertEquals(RECOVERED_GENERATION, baseline.manifest.localGeneration)
+    }
+
+    @Test
+    fun aClaimedLineageIsStillRecoverableByTheNextInstallation() = runRecoveryTest { fixture ->
+        fixture.seedLineage()
+        val prepared = fixture.prepare(fixture.discoverDrive())
+        val operationId = (prepared as RecoveryResult.TakeoverConfirmationRequired).operationId
+        assertTrue(
+            fixture.coordinator.confirmTakeover(operationId, fixture.store)
+                is RecoveryResult.Activated,
+        )
+
+        // A second installation recovering the lineage this takeover now owns
+        // reads the bases it published, through the same authentication path.
+        val candidate = fixture.successorCoordinator.discover(fixture.store, null)
+            .single { it.source == RecoverySource.GOOGLE_DRIVE }
+        val result = fixture.successorCoordinator.prepare(
+            candidate,
+            RecoveryTestLineage.PASSPHRASE.copyOf(),
+            fixture.store,
+            RecoveryTestLineage.ACCOUNT_DIGEST,
+        )
+
+        assertTrue("$result", result is RecoveryResult.TakeoverConfirmationRequired)
+        val request = checkNotNull(fixture.successorStaging.sessions.single().request)
+        assertEquals(SNAPSHOT_GENERATION, request.snapshot.coveredGeneration)
+        assertEquals(RECOVERED_GENERATION, request.expectedGeneration.value)
     }
 
     @Test
@@ -801,7 +849,7 @@ internal object RecoveryTestLineage {
 
 private class RecoveryFixture(
     root: File,
-    expectedVaultId: VaultId,
+    private val expectedVaultId: VaultId,
     retentionAdvance: Long,
 ) {
     private val providerRoot = File(root, "provider").also { it.mkdirs() }
@@ -818,14 +866,22 @@ private class RecoveryFixture(
     val store = FakeCreateOnlyBackupObjectStore(providerRoot)
     val staging = FakeRecoveryStagingFactory(retentionAdvance, crypto::createKey)
 
-    val coordinator = DefaultRecoveryCoordinator(
+    val coordinator = coordinatorOver(staging)
+
+    /** A second installation recovering the same lineage from the same provider. */
+    val successorStaging by lazy { FakeRecoveryStagingFactory(0, crypto::createKey) }
+    val successorCoordinator by lazy { coordinatorOver(successorStaging) }
+
+    private fun coordinatorOver(
+        stagingFactory: FakeRecoveryStagingFactory,
+    ): DefaultRecoveryCoordinator = DefaultRecoveryCoordinator(
         expectedVaultId = expectedVaultId,
         crypto = crypto,
         authenticatedCodec = authenticatedCodec,
         ownershipCodec = ownershipCodec,
         publicationCodec = publicationCodec,
         portableCodec = portableCodec,
-        staging = staging,
+        staging = stagingFactory,
         stagingRoot = stagingRoot,
         expectedAccountBindingDigest = RecoveryTestLineage.ACCOUNT_DIGEST,
     )
