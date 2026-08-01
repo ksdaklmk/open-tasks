@@ -2005,7 +2005,12 @@ class RoomVaultRepositoryInstrumentedTest {
         openRepository(now = { deletedAt })
         repository!!.execute(DomainCommand.CreateTask("Expired parent"))
         repository!!.execute(DomainCommand.CreateTask("Surviving child"))
-        val tasks = repository!!.currentWorkspace().tasks.associateBy { it.title }
+        val tasks = withTimeout(5_000) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Expired parent" } &&
+                    snapshot.tasks.any { it.title == "Surviving child" }
+            }
+        }.tasks.associateBy { it.title }
         val parent = checkNotNull(tasks["Expired parent"])
         val child = checkNotNull(tasks["Surviving child"])
         val childEntity = checkNotNull(database!!.taskDao().getById(child.id.value))
