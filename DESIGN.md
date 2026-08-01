@@ -179,11 +179,10 @@ The recovery shell keeps Drive and Android-package recovery independent.
 NoVault also offers Start without restoring; active replacement never does.
 Failures use text plus Error semantics, keep both recovery actions available,
 and do not overwrite an unreadable vault. Passphrase and confirmation fields
-are masked, non-saveable, and cleared after submission. Task 13 remains
-review-incomplete at the current checkpoint: transient provider failures must
-receive truthful retry copy rather than Sign in guidance, and recovery must be
-proved across genuine Activity/production-route recreation before this surface
-is treated as complete.
+are masked, non-saveable, and cleared after submission. Task 13 is complete:
+transient provider failures receive truthful temporary-unavailability retry
+copy rather than Sign in guidance, and genuine `MainActivity` production-route
+recreation coverage proves private passphrase input is not restored.
 
 The programme retains four independent concerns:
 

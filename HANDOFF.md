@@ -2,36 +2,23 @@
 
 - Last updated: 1 August 2026
 - Branch: `main`
-- Session status: **Stage 3 execution is paused at the user's request during
-  Task 13 after `bc1c283`. Task 13 source currently spans `cc2959a`,
-  `6f0cb57`, `d87e1de`, and `bc1c283`: More has the two backup cards; active
-  vaults expose the create-only Drive lifecycle and distinct manual Back up
-  now path; non-active runtime states use an inert recovery shell; known-lineage
-  takeover is account-bound; Drive sessions close after each bounded operation;
-  confirmation routing, runner-backed Backing up state, action-specific
-  lifecycle capabilities, failure actions, and non-saveable passphrase fields
-  are wired. The initial independent review found one Critical and six
-  Important issues. Fix rounds 1 and 2 closed the account-binding security gap
-  and every blocking issue except two Important findings: transient
-  `RETRYABLE` Drive failures still map to `AUTHORIZATION_REQUIRED` and false
-  Sign in copy, and the added restoration test is a fixture-driven Compose
-  state-restoration test rather than a genuine `MainActivity`/production
-  recovery-route recreation. The round-2 host gate passed 530 tasks. The final
-  connected run at `bc1c283` passed 15 app tests total (14 pass and one expected
-  credentialed skip) plus 51/51 feature:more tests on the sole audited API 37
-  disposable; final ADB and emulator-process audits are empty. Task 13 is not
-  complete or review-approved. Resume with fix round 3/5 from `bc1c283`, close
-  those two findings, re-review, rerun affected connected and final repository,
-  release, schema, and diff gates, then close Task 13 before starting Task 14.
-  The historical Google Drive plan amendment plus user-owned `.kotlin/` and
-  `artifacts/` remain untouched and unstaged. The approved Galaxy Z Fold 8
-  trifold-ready adaptive slice remains scheduled immediately after the Stage 3
-  exit gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and
-  independently reviewed.**
-- Current source implementation point: `bc1c283` (`fix: harden recovery
-  failure and restoration paths`), an incomplete Task 13 checkpoint on top of
-  `cc2959a`, `6f0cb57`, and `d87e1de`. The prior Task 12 closure point is
-  `3109108`; the prior Stage 2 correction point is
+- Session status: **Stage 3 Task 13 is complete and review-clean. The closure
+  change maps transient provider authorization failures to a truthful bounded
+  retry category instead of Sign in guidance and replaces the fixture-only
+  recovery restoration check with a genuine `MainActivity` production-route
+  recreation test. The focused host gate, affected connected suites, forced
+  fresh repository/release gates, Room schema check, and diff hygiene all pass.
+  Task 14 is next and still owns live credentialed two-installation,
+  takeover-race, tombstone, privacy, protected-workspace, and final Stage 3
+  qualification. The historical Google Drive plan amendment plus user-owned
+  `.kotlin/` and `artifacts/` remain untouched and unstaged. The approved
+  Galaxy Z Fold 8 trifold-ready adaptive slice remains scheduled immediately
+  after the Stage 3 exit gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
+  remain complete and independently reviewed.**
+- Current source implementation point: the Task 13 closure change containing
+  this handoff, on top of `bc1c283` (`fix: harden recovery failure and
+  restoration paths`), `cc2959a`, `6f0cb57`, and `d87e1de`. The prior Task 12
+  closure point is `3109108`; the prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
@@ -488,7 +475,34 @@ Account derivation/revoke and R8 reachability confirmation. The pre-existing
 historical Google Drive plan amendment and user-owned `.kotlin/` and
 `artifacts/` remain untouched and unstaged.
 
-## Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
+## Stage 3 create-only Task 13 closure checkpoint — 1 August 2026
+
+Task 13 is complete. Fix round 3 added a distinct `RETRYABLE_PROVIDER`
+presentation category shared by discovery, prepare, and confirmation, with
+bounded temporary-unavailability copy and no false Sign in guidance. The
+restoration check now seeds the real recovery inbox before `MainActivity`
+launch, enters the production recovery route, recreates the Activity, and
+proves the private passphrase is not restored. No production test hook or new
+runtime abstraction was added.
+
+Closure evidence:
+
+- the focused host gate passed 530 tasks and the scoped review found no
+  remaining Critical or Important issue;
+- the sole read-only API 37 disposable passed app 14 tests with one expected
+  credentialed-only skip and feature:more 52/52, including the new transient
+  failure and genuine Activity recreation cases;
+- forced fresh debug/unit/lint passed 547/547 executed tasks and forced fresh
+  release/R8 passed 441/441 executed tasks;
+- Room schema drift, working/scoped `git diff --check`, and added-code hygiene
+  checks passed; and
+- the disposable emulator shut down with snapshots disabled and final ADB and
+  emulator-session audits empty.
+
+Task 14 remains the only Stage 3 work and must supply the external credentialed
+two-installation and final qualification evidence before Stage 3 is closed.
+
+## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
 Task 13 began from `3109108` and is paused at `bc1c283`, not complete. Its four
 commits are `cc2959a` (product surfaces), `6f0cb57` (active replacement route),
@@ -1527,15 +1541,15 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 There is no uncommitted Task 13 source implementation. Stage 2 is implemented,
 verified, and reviewed through its task boundaries; Stage 3 create-only Tasks
-1–12 are committed and reviewed through `3109108`. Task 13 product UI and
-recovery routing are committed through `bc1c283` but remain review-incomplete
-with the two Important findings recorded above. Remote merge and attachment
-transport remain absent.
+1–13 are committed, verified, and review-clean through the Task 13 closure
+change containing this handoff. Task 14 external qualification remains open.
+Remote merge and attachment transport remain absent.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
 maintenance commit. The approved Stage 3 execution authority is the
-create-only plan named in the session status; resume Task 13 fix round 3.
+create-only plan named in the session status; proceed with Task 14 only when
+its disposable-account and protected-workspace prerequisites are available.
 
 ## Resume instructions
 
@@ -1551,10 +1565,11 @@ create-only plan named in the session status; resume Task 13 fix round 3.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
-3. With a new explicit user request, resume Task 13 fix round 3/5 from
-   `bc1c283` with the original implementer. Fix only the transient-provider
-   failure semantics and genuine Activity/production recovery-route recreation
-   coverage, then request a fresh focused re-review before final gates.
+3. With a new explicit user request and the required disposable credentials,
+   execute Task 14 from the active create-only plan: deterministic boundary
+   coverage, sole-disposable connected tests, credentialed two-installation
+   acceptance, protected-workspace comparison, privacy audits, and Stage 3
+   qualification documentation.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -1580,7 +1595,7 @@ recorded above.
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
-| 3 | App-managed backup and recovery takeover | Paused during Task 13 after fix round 2 | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
+| 3 | App-managed backup and recovery takeover | Task 13 complete; Task 14 qualification pending | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
@@ -1593,14 +1608,12 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Resume Task 13 fix round 3/5 from `bc1c283`; close the two recorded
-   Important review findings and obtain a clean focused re-review.
-2. Run affected connected and final repository/release/schema/diff gates,
-   update the contracts, and close Task 13 before starting Task 14.
-3. Close Stage 3 with the credentialed two-installation, tombstone,
+1. Execute Task 14 from the active create-only plan when its disposable-account
+   prerequisites are available.
+2. Close Stage 3 with the credentialed two-installation, tombstone,
    protected-workspace, privacy, schema, release, and connected gates
    before any Stage 4 work.
-4. Immediately after the Stage 3 exit gates and before any Stage 4 work,
+3. Immediately after the Stage 3 exit gates and before any Stage 4 work,
    run the approved Galaxy Z Fold 8 trifold-ready adaptive layout slice:
    design
    `docs/superpowers/specs/2026-07-31-galaxy-fold8-trifold-adaptive-design.md`,
@@ -1695,8 +1708,8 @@ explicitly planned, verified boundaries.
 - Android backup and device transfer may include only the `file`-domain
   application-relative path
   `android_backup/open_tasks_portable_v1.otb`. Restored or unknown input moves
-  to the no-backup inbox, remains inert, and exposes no activation action
-  before Stage 3.
+  to the no-backup inbox and remains inert until the explicit recovery path
+  verifies and activates it.
 - Never log private content, account data, Drive IDs, attachment names or
   encryption metadata.
 - Future Drive code receives encrypted objects only and requests only
@@ -1713,11 +1726,11 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-After a new explicit user request, resume Stage 3 Task 13 fix round 3/5 with
-subagent-driven execution from `bc1c283`. Fix the false Sign in treatment for
-transient provider failures and replace the fixture-only restoration case with
-a genuine `MainActivity`/production recovery-route recreation test. Re-review
-that scoped diff before rerunning final gates or starting Task 14.
+After a new explicit user request and with the required disposable credentials,
+execute Stage 3 Task 14 from the active create-only plan. Run the deterministic
+boundary coverage, sole-disposable connected suite, credentialed
+two-installation/takeover/tombstone acceptance, protected-workspace comparison,
+privacy audits, and final Stage 3 documentation and gates.
 Preserve Room as the sole live structured-data authority and treat the Stage 2
 Android package as supplementary recovery input, not upload evidence.
 

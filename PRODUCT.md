@@ -57,11 +57,11 @@ Source now includes explicit Google authorization, create-only
 staging/activation, writer takeover, lifecycle management, and the Task 13
 backup/recovery product surfaces. Normal operation still never downloads or
 merges live structured records, and cloud attachments remain unavailable.
-These cloud surfaces are not release-qualified: Task 13 is paused with two
-Important review findings around transient-provider failure copy and genuine
-Activity recovery-route recreation, and Task 14 still owns live credentialed
-two-installation qualification. Product copy must not claim release-proven
-upload or reinstall recovery until those gates pass.
+These cloud surfaces are not release-qualified. Task 13 is complete and
+review-clean with truthful transient-provider retry copy and genuine
+`MainActivity` production-route recreation coverage. Task 14 still owns live
+credentialed two-installation qualification, so product copy must not claim
+release-proven upload or reinstall recovery until those gates pass.
 
 ## Approved future contract
 

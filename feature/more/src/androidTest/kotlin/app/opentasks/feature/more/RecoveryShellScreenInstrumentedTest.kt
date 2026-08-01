@@ -123,6 +123,25 @@ class RecoveryShellScreenInstrumentedTest {
     }
 
     @Test
+    fun retryableProviderFailureOffersRetryWithoutSignInGuidance() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                RecoveryShellScreen(
+                    mode = RecoveryShellMode.Failed,
+                    failureReason = RecoveryFailureCategory.RETRYABLE_PROVIDER,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Google Drive is temporarily unavailable. Try again.")
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Sign in to Google Drive to continue recovery.")
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag("recovery-drive").assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-portable").assertIsDisplayed()
+    }
+
+    @Test
     fun takeoverShowsVerifiedGenerationAndConfirmationOnlyWhenRequired() {
         composeRule.setContent {
             OpenTasksTheme {

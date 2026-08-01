@@ -149,7 +149,7 @@ class RecoveryUiOperationsTest {
             DriveAuthorizationUnavailableReason.REJECTED to
                 RecoveryFailureCategory.AUTHORIZATION_REQUIRED,
             DriveAuthorizationUnavailableReason.RETRYABLE to
-                RecoveryFailureCategory.AUTHORIZATION_REQUIRED,
+                RecoveryFailureCategory.RETRYABLE_PROVIDER,
             DriveAuthorizationUnavailableReason.PROVIDER_STORAGE to
                 RecoveryFailureCategory.INSUFFICIENT_STORAGE,
             DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE to

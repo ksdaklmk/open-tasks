@@ -197,8 +197,9 @@ private fun DriveAuthorizationUnavailableReason.toRecoveryFailure(): RecoveryFai
     when (this) {
         DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
         DriveAuthorizationUnavailableReason.REJECTED,
-        DriveAuthorizationUnavailableReason.RETRYABLE,
         -> RecoveryFailureCategory.AUTHORIZATION_REQUIRED
+        DriveAuthorizationUnavailableReason.RETRYABLE ->
+            RecoveryFailureCategory.RETRYABLE_PROVIDER
         DriveAuthorizationUnavailableReason.PROVIDER_STORAGE ->
             RecoveryFailureCategory.INSUFFICIENT_STORAGE
         DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE ->

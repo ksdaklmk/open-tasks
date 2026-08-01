@@ -8,6 +8,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -16,14 +17,13 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.opentasks.backup.RecoveryCandidateSummary
-import app.opentasks.backup.RecoveryPresentation
+import androidx.test.platform.app.InstrumentationRegistry
+import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
-import app.opentasks.core.domain.RecoverySource
-import app.opentasks.feature.more.RecoveryShellCandidate
-import app.opentasks.feature.more.RecoveryShellScreen
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicReference
 
@@ -31,57 +31,6 @@ import java.util.concurrent.atomic.AtomicReference
 class ProcessRestorationInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
-
-    @Test
-    fun recoveryRecreationKeepsNoPrivateStateAndReturnsToTruthfulNoVaultRoute() {
-        val restorationTester = StateRestorationTester(composeRule)
-        val presentation = AtomicReference<RecoveryPresentation>(
-            RecoveryPresentation.Candidates(
-                listOf(
-                    RecoveryCandidateSummary("process-private", RecoverySource.GOOGLE_DRIVE),
-                ),
-            ),
-        )
-        restorationTester.setContent {
-            val current = presentation.get()
-            val candidates = (current as? RecoveryPresentation.Candidates)
-                ?.values
-                ?.map { RecoveryShellCandidate(it.handle, drive = true) }
-                .orEmpty()
-            OpenTasksTheme {
-                RecoveryShellScreen(
-                    mode = recoveryShellMode(
-                        runtimeRecovering = false,
-                        presentation = current,
-                        activeReplacement = false,
-                    ),
-                    candidates = candidates,
-                )
-            }
-        }
-
-        composeRule.onNodeWithTag("recovery-passphrase")
-            .performTextReplacement("process private passphrase")
-
-        // Activity recreation keeps the live recovery route, but the secret is not saveable.
-        restorationTester.emulateSavedInstanceStateRestore()
-        composeRule.onNodeWithTag("recovery-passphrase").assert(
-            SemanticsMatcher.expectValue(
-                SemanticsProperties.EditableText,
-                AnnotatedString(""),
-            ),
-        )
-
-        // Process restoration rebuilds from the truthful runtime source, not private candidates.
-        presentation.set(RecoveryPresentation.NoVault)
-        restorationTester.emulateSavedInstanceStateRestore()
-
-        composeRule.onNodeWithTag("recovery-passphrase").assertDoesNotExist()
-        composeRule.onNodeWithText("Restore Google Drive backup").assertDoesNotExist()
-        composeRule.onNodeWithTag("recovery-drive").assertIsDisplayed()
-        composeRule.onNodeWithTag("recovery-portable").assertIsDisplayed()
-        composeRule.onNodeWithText("Start without restoring").assertIsDisplayed()
-    }
 
     @Test
     fun workspaceRouteRestoresAfterSavedInstanceStateRecreation() {
@@ -160,5 +109,56 @@ class ProcessRestorationInstrumentedTest {
 
         composeRule.onNodeWithTag("workspace-search-query")
             .assertTextContains("restored search", substring = true)
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+class MainActivityRecoveryRestorationInstrumentedTest {
+    private val recoveryInbox by lazy {
+        AndroidBackupFiles(InstrumentationRegistry.getInstrumentation().targetContext).recoveryInbox
+    }
+    private val recoveryFixtureRule = object : ExternalResource() {
+        override fun before() {
+            check(!recoveryInbox.exists()) { "The disposable recovery inbox is not empty" }
+            check(
+                recoveryInbox.parentFile?.mkdirs() != false ||
+                    recoveryInbox.parentFile?.isDirectory == true,
+            )
+            recoveryInbox.writeBytes(byteArrayOf(0))
+        }
+
+        override fun after() {
+            check(!recoveryInbox.exists() || recoveryInbox.delete()) {
+                "The disposable recovery fixture was not deleted"
+            }
+        }
+    }
+    private val composeRule = createAndroidComposeRule<MainActivity>()
+
+    @get:Rule
+    val ruleChain: RuleChain = RuleChain.outerRule(recoveryFixtureRule).around(composeRule)
+
+    @Test
+    fun productionRecoveryRouteClearsPassphraseAfterActivityRecreation() {
+        composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-portable").performClick()
+        val passphrase = composeRule.onNodeWithTag("recovery-passphrase")
+            .assertIsDisplayed()
+        passphrase.performTextReplacement("process private passphrase")
+        passphrase.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.InputText,
+                AnnotatedString("process private passphrase"),
+            ),
+        )
+
+        composeRule.activityRule.scenario.recreate()
+
+        composeRule.onNodeWithTag("recovery-passphrase").assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.InputText,
+                AnnotatedString(""),
+            ),
+        )
     }
 }

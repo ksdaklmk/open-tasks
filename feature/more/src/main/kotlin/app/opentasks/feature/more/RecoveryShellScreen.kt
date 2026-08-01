@@ -188,6 +188,8 @@ private fun recoveryFailureMessage(reason: RecoveryFailureCategory): String = st
     when (reason) {
         RecoveryFailureCategory.AUTHORIZATION_REQUIRED ->
             R.string.recovery_failure_authorization
+        RecoveryFailureCategory.RETRYABLE_PROVIDER ->
+            R.string.recovery_failure_retryable_provider
         RecoveryFailureCategory.ACCOUNT_MISMATCH ->
             R.string.recovery_failure_account_mismatch
         RecoveryFailureCategory.WRONG_PASSPHRASE ->

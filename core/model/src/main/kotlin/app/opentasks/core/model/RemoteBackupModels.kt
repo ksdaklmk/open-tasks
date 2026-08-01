@@ -149,6 +149,7 @@ enum class RemoteBackupFailureCategory {
 
 enum class RecoveryFailureCategory {
     AUTHORIZATION_REQUIRED,
+    RETRYABLE_PROVIDER,
     ACCOUNT_MISMATCH,
     WRONG_PASSPHRASE,
     UNSAFE_KDF,

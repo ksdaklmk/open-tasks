@@ -361,9 +361,12 @@ local recovery-object coordinator now consume it. Portable-package
 publication, runtime scheduling, and local package status are implemented.
 Create-only provider transport, staged restore activation, and the
 product-visible app-managed backup/recovery surfaces are implemented in source.
-Task 13 is not yet approved: transient authorization transport failure still
-has false sign-in presentation, and genuine Activity/production recovery-route
-recreation coverage remains open. Attachment flows are not implemented.
+Task 13 is complete and review-clean: transient authorization transport
+failure has a distinct bounded retry presentation with no false sign-in
+guidance, and a genuine `MainActivity` production recovery-route recreation
+test proves private passphrase input is not restored. Task 14 still owns live
+credentialed two-installation and final Stage 3 qualification. Attachment flows
+are not implemented.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry

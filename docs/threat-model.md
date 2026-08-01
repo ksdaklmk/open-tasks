@@ -34,11 +34,12 @@ prove Android upload. Explicit Google authorization, create-only
 `drive.appdata` transport, one-writer publication, lifecycle management, and
 staged recovery/takeover are implemented in source; credentialed
 two-installation upload/restore remains an external Task 14 qualification.
-Task 13 is paused with two open presentation/verification findings: transient
-transport failure still produces false Sign in guidance, and no genuine
-Activity/production recovery-route recreation test exists. Android-restored
-packages remain inert until the explicit recovery path verifies and activates
-them. Attachment transfer and remote merge are not connected.
+Task 13 is complete and review-clean: transient transport failure has truthful
+bounded retry guidance without a Sign in claim, and genuine `MainActivity`
+production recovery-route recreation proves private passphrase input is not
+restored. Android-restored packages remain inert until the explicit recovery
+path verifies and activates them. Attachment transfer and remote merge are not
+connected.
 
 ## Assets
 
@@ -131,7 +132,7 @@ fails safely where practical and must not weaken platform protections.
 | T10 | Logs or telemetry leak private fields | Architecture prohibits private content and sensitive routing data; current review found no application logging calls | Any telemetry requires a separate field allow-list review |
 | T11 | Exported component mutates or leaks data | Only launcher activity is exported; reminder receivers and pending intents are private/immutable; `FileProvider` is private and constrained | Sharesheet/import and attachment paths require explicit validation, grants, and cleanup tests |
 | T12 | Provider reads backup or attachment content | Backup objects are encrypted locally through the provider-independent authenticated codec; explicit authorization requests only `drive.appdata`; create-only Drive transport has no update/PATCH path | Live credentialed two-installation qualification remains Task 14; attachment transport remains Stage 4 |
-| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, and atomic activation fail closed | Task 13 still needs truthful transient-provider presentation and genuine Activity recovery-route recreation evidence |
+| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, atomic activation, truthful transient-provider guidance, and genuine Activity recovery-route recreation evidence fail closed | Live credentialed two-installation recovery remains Task 14 qualification |
 | T14 | Stale writer overwrites a recovered lineage or mutates blob state | Writer epochs, conditional create-only control succession, ownership-loss handling, and explicit account-bound takeover are implemented | Task 14 must prove live two-installation and offline prior-device reconnect behaviour |
 | T15 | Missing/replaced control record recreates a known lineage | A client that observed control state treats absence/replacement as ownership loss and never recreates automatically; divergent work requires an explicit separate lineage | Live provider qualification remains Task 14 |
 | T16 | Backup retention deletes the only recoverable base | Local and provider publication retain authenticated current/previous recoverable bases and bridging segments; promotion uses strict readback; lifecycle deletion is bounded and crash-resumable | Task 14 must prove the live provider tombstone/retention scenarios |
