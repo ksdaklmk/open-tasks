@@ -72,6 +72,24 @@ class RecoveryViewModelTest {
     }
 
     @Test
+    fun recoveryProgressIsNotRestoredFromPrivateProcessState() {
+        val state = SavedStateHandle()
+        val viewModel = viewModel(
+            savedStateHandle = state,
+            discoverPortable = {
+                listOf(RecoveryCandidate("process-local", RecoverySource.ANDROID_BACKUP_PACKAGE))
+            },
+        )
+
+        viewModel.discoverPortable()
+        assertTrue(waitUntil { viewModel.presentation.value is RecoveryPresentation.Candidates })
+        assertTrue(state.keys().isEmpty())
+
+        val restored = viewModel(savedStateHandle = state)
+        assertEquals(RecoveryPresentation.NoVault, restored.presentation.value)
+    }
+
+    @Test
     fun portableDiscoveryDoesNotRequestDriveAuthorization() {
         val driveCalls = AtomicInteger()
         val viewModel = viewModel(

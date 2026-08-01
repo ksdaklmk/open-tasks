@@ -144,6 +144,37 @@ class EncryptedBackupViewModelTest {
     }
 
     @Test
+    fun resolvedForegroundReauthorisationRequestsTheSharedRuntime() {
+        val pending = pendingIntent()
+        val requests = AtomicInteger()
+        val calls = AtomicInteger()
+        val viewModel = viewModel(
+            status = MutableStateFlow(
+                RemoteBackupStatus.ActionRequired(
+                    RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+                ),
+            ),
+            reauthorise = { resolution ->
+                if (calls.getAndIncrement() == 0) {
+                    assertEquals(null, resolution)
+                    EncryptedBackupActionResult.ResolutionRequired(pending)
+                } else {
+                    assertTrue(resolution != null)
+                    EncryptedBackupActionResult.Completed
+                }
+            },
+            requestBackupNow = { requests.incrementAndGet() },
+        )
+
+        viewModel.reauthorise()
+        assertSame(pending, takeResolution(viewModel))
+        viewModel.acceptResolution(Intent())
+
+        assertTrue(waitUntil { calls.get() == 2 })
+        assertEquals(1, requests.get())
+    }
+
+    @Test
     fun ownershipLossOffersTakeoverAndNewLineage() {
         val status = MutableStateFlow<RemoteBackupStatus>(RemoteBackupStatus.OwnershipLost)
         val preserve = AtomicInteger()
@@ -160,12 +191,58 @@ class EncryptedBackupViewModelTest {
 
         assertTrue(viewModel.presentation.value.canTakeOver)
         assertTrue(viewModel.presentation.value.canPreserveAsNewLineage)
+        assertFalse(viewModel.presentation.value.canChangePassphrase)
+        assertFalse(viewModel.presentation.value.canDisconnect)
+        assertFalse(viewModel.presentation.value.canDeleteHistory)
         viewModel.restoreOrTakeOver()
         viewModel.preserveAsNewLineage()
 
         assertEquals(Unit, takeRecoveryRoute(viewModel))
         assertFalse(viewModel.recoveryEffects.tryReceive().isSuccess)
         assertTrue(waitUntil { preserve.get() == 1 })
+    }
+
+    @Test
+    fun actionCapabilitiesOnlyExposeSupportedLifecycleOperations() {
+        val activeStatuses = listOf<RemoteBackupStatus>(
+            RemoteBackupStatus.BackingUp(BackupGeneration(2)),
+            RemoteBackupStatus.Verified(
+                app.opentasks.core.model.RemoteBackupVerifiedInfo(
+                    BackupGeneration(2),
+                    java.time.Instant.EPOCH,
+                ),
+            ),
+            RemoteBackupStatus.RetryScheduled(
+                BackupGeneration(2),
+                RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+            ),
+        )
+        activeStatuses.forEach { active ->
+            val value = viewModel(status = MutableStateFlow(active)).presentation.value
+            assertTrue(value.canChangePassphrase)
+            assertTrue(value.canDisconnect)
+            assertTrue(value.canDeleteHistory)
+        }
+
+        listOf<RemoteBackupStatus>(
+            RemoteBackupStatus.Disabled,
+            RemoteBackupStatus.Preparing,
+            RemoteBackupStatus.ActionRequired(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            RemoteBackupStatus.OwnershipLost,
+            RemoteBackupStatus.AmbiguousRemoteState,
+        ).forEach { unsupported ->
+            val value = viewModel(status = MutableStateFlow(unsupported)).presentation.value
+            assertFalse(value.canChangePassphrase)
+            assertFalse(value.canDisconnect)
+            assertFalse(value.canDeleteHistory)
+        }
+
+        listOf(RemoteBackupStatus.Deleting, RemoteBackupStatus.Terminated).forEach { resumable ->
+            val value = viewModel(status = MutableStateFlow(resumable)).presentation.value
+            assertFalse(value.canChangePassphrase)
+            assertFalse(value.canDisconnect)
+            assertTrue(value.canDeleteHistory)
+        }
     }
 
     @Test

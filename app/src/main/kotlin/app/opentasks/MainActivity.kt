@@ -101,25 +101,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-        val mode = if (runtimeState is VaultRuntimeState.Recovering) {
-            RecoveryShellMode.Activating
-        } else {
-            when (presentation) {
-                RecoveryPresentation.NoVault -> if (activeReplacement) {
-                    RecoveryShellMode.ActiveReplacement
-                } else {
-                    RecoveryShellMode.NoVault
-                }
-                RecoveryPresentation.UnreadableVault -> RecoveryShellMode.UnreadableVault
-                RecoveryPresentation.Discovering -> RecoveryShellMode.Discovering
-                is RecoveryPresentation.Candidates -> RecoveryShellMode.Candidates
-                RecoveryPresentation.Authenticating -> RecoveryShellMode.Authenticating
-                is RecoveryPresentation.TakeoverConfirmation ->
-                    RecoveryShellMode.TakeoverConfirmation
-                RecoveryPresentation.Activating -> RecoveryShellMode.Activating
-                is RecoveryPresentation.Failed -> RecoveryShellMode.Failed
-            }
-        }
+        val mode = recoveryShellMode(
+            runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
+            presentation = presentation,
+            activeReplacement = activeReplacement,
+        )
         val candidates = (presentation as? RecoveryPresentation.Candidates)
             ?.values
             ?.map { RecoveryShellCandidate(it.handle, it.source.name == "GOOGLE_DRIVE") }
@@ -130,6 +116,7 @@ class MainActivity : ComponentActivity() {
                 candidates = candidates,
                 takeoverGeneration =
                     (presentation as? RecoveryPresentation.TakeoverConfirmation)?.generation,
+                failureReason = (presentation as? RecoveryPresentation.Failed)?.reason,
                 onDiscoverDrive = recoveryViewModel::discoverDrive,
                 onDiscoverPortable = recoveryViewModel::discoverPortable,
                 onRestore = recoveryViewModel::restore,
@@ -200,4 +187,24 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"
     }
+}
+
+internal fun recoveryShellMode(
+    runtimeRecovering: Boolean,
+    presentation: RecoveryPresentation,
+    activeReplacement: Boolean,
+): RecoveryShellMode = when {
+    presentation is RecoveryPresentation.TakeoverConfirmation ->
+        RecoveryShellMode.TakeoverConfirmation
+    runtimeRecovering -> RecoveryShellMode.Activating
+    presentation == RecoveryPresentation.NoVault && activeReplacement ->
+        RecoveryShellMode.ActiveReplacement
+    presentation == RecoveryPresentation.NoVault -> RecoveryShellMode.NoVault
+    presentation == RecoveryPresentation.UnreadableVault -> RecoveryShellMode.UnreadableVault
+    presentation == RecoveryPresentation.Discovering -> RecoveryShellMode.Discovering
+    presentation is RecoveryPresentation.Candidates -> RecoveryShellMode.Candidates
+    presentation == RecoveryPresentation.Authenticating -> RecoveryShellMode.Authenticating
+    presentation == RecoveryPresentation.Activating -> RecoveryShellMode.Activating
+    presentation is RecoveryPresentation.Failed -> RecoveryShellMode.Failed
+    else -> RecoveryShellMode.Activating
 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.AnnotatedString
@@ -24,7 +25,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.RecoveryFailureCategory
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Rule
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -63,22 +68,58 @@ class RecoveryShellScreenInstrumentedTest {
     @Test
     fun candidatePassphraseIsMaskedNotSaveableAndImeDoneSubmits() {
         val restoration = StateRestorationTester(composeRule)
+        val submission = AtomicReference<Pair<String, String>>()
         restoration.setContent {
             OpenTasksTheme {
                 RecoveryShellScreen(
                     mode = RecoveryShellMode.Candidates,
                     candidates = listOf(RecoveryShellCandidate("opaque", drive = true)),
+                    onRestore = { handle, passphrase -> submission.set(handle to passphrase) },
                 )
             }
         }
 
-        composeRule.onNodeWithTag("recovery-passphrase")
+        val passphrase = composeRule.onNodeWithTag("recovery-passphrase")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-            .performTextInput("private phrase")
+        passphrase.performTextInput("private phrase")
+        passphrase.performImeAction()
+        composeRule.waitUntil { submission.get() != null }
+        assertEquals("opaque" to "private phrase", submission.get())
+        composeRule.onNodeWithTag("recovery-passphrase").performTextInput("not saved")
         restoration.emulateSavedInstanceStateRestore()
         composeRule.onNodeWithTag("recovery-passphrase").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")),
         )
+    }
+
+    @Test
+    fun failedRecoveryExplainsReasonAndKeepsBothRetriesIndependent() {
+        val drive = AtomicInteger()
+        val portable = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                RecoveryShellScreen(
+                    mode = RecoveryShellMode.Failed,
+                    failureReason = RecoveryFailureCategory.ACCOUNT_MISMATCH,
+                    onDiscoverDrive = { drive.incrementAndGet() },
+                    onDiscoverPortable = { portable.incrementAndGet() },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Choose the Google account used for this backup.")
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.Error,
+                    "Choose the Google account used for this backup.",
+                ),
+            )
+        composeRule.onNodeWithTag("recovery-drive").performClick()
+        assertEquals(1, drive.get())
+        assertEquals(0, portable.get())
+        composeRule.onNodeWithTag("recovery-portable").performClick()
+        assertEquals(1, drive.get())
+        assertEquals(1, portable.get())
     }
 
     @Test

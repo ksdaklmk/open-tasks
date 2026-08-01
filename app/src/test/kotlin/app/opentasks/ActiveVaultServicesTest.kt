@@ -5,14 +5,22 @@ import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RemoteBackupRuntime
+import app.opentasks.di.AppModule
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupRunResult
 import app.opentasks.core.domain.RemoteBackupRunner
 import app.opentasks.core.model.RemoteBackupStatus
+import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.CloudLineageId
+import app.opentasks.core.model.ProviderObjectId
+import app.opentasks.core.model.RemoteBackupLifecycle
+import app.opentasks.core.model.RemoteBackupStateVersion
+import app.opentasks.core.model.VaultId
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,6 +30,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActiveVaultServicesTest {
+    @Test
+    fun runningRemoteBackupIsPresentedWithItsLocalGeneration() {
+        assertEquals(
+            RemoteBackupStatus.BackingUp(BackupGeneration(7)),
+            AppModule.remoteBackupStatus(
+                configuration = activeConfiguration(),
+                runnerInFlight = true,
+                localGeneration = BackupGeneration(7),
+            ),
+        )
+    }
+
     @Test
     fun activeRuntimeStartsTheSessionExactlyOnce() {
         val factory = CountingSessionFactory()
@@ -220,6 +240,8 @@ class ActiveVaultServicesTest {
             RemoteBackupStatus.Disabled,
         )
 
+        override suspend fun recoveryAccountBindingDigest(): ByteArray? = null
+
         override suspend fun connectRemoteBackup(
             allowSeparateLineage: Boolean,
             resolution: Intent?,
@@ -252,6 +274,25 @@ class ActiveVaultServicesTest {
             stops += 1
         }
     }
+
+    private fun activeConfiguration() = RemoteBackupConfiguration(
+        lineageId = CloudLineageId.parse("22222222-2222-4222-8222-222222222222"),
+        vaultId = VaultId("11111111-1111-4111-8111-111111111111"),
+        rootClaimProviderId = ProviderObjectId.of("root-claim"),
+        accountBindingDigest = ByteArray(32),
+        lifecycle = RemoteBackupLifecycle.ACTIVE,
+        activeDeviceId = null,
+        writerEpoch = null,
+        ownershipClaim = null,
+        nextSuccessorProviderId = null,
+        currentPublication = null,
+        previousPublication = null,
+        lastVerifiedGeneration = null,
+        lastVerifiedAt = null,
+        recoveryCredentialGeneration = 0,
+        failureCategory = null,
+        stateVersion = RemoteBackupStateVersion(1),
+    )
 
     private class ExpectedStartFailure : RuntimeException()
 }

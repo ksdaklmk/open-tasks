@@ -98,8 +98,11 @@ class EncryptedBackupViewModel internal constructor(
                 when (pendingAction.also { pendingAction = null }) {
                     PendingAction.CONNECT ->
                         acceptAction(connectBackup(false, data), PendingAction.CONNECT)
-                    PendingAction.REAUTHORISE ->
-                        acceptAction(reauthoriseBackup(data), PendingAction.REAUTHORISE)
+                    PendingAction.REAUTHORISE -> {
+                        val result = reauthoriseBackup(data)
+                        acceptAction(result, PendingAction.REAUTHORISE)
+                        if (result == EncryptedBackupActionResult.Completed) requestBackupNow()
+                    }
                     null -> Unit
                 }
             } finally {
@@ -241,7 +244,9 @@ private fun presentation(
     canPreserveAsNewLineage: Boolean = status is RemoteBackupStatus.OwnershipLost,
     passphraseChangeDisclosureVisible: Boolean = false,
 ): EncryptedBackupPresentation {
-    val enabled = status !is RemoteBackupStatus.Disabled && status !is RemoteBackupStatus.Terminated
+    val activeLifecycle = status is RemoteBackupStatus.BackingUp ||
+        status is RemoteBackupStatus.Verified ||
+        status is RemoteBackupStatus.RetryScheduled
     return EncryptedBackupPresentation(
         status = status,
         canBackUpNow = status is RemoteBackupStatus.RetryScheduled,
@@ -253,9 +258,11 @@ private fun presentation(
             ),
         canTakeOver = status is RemoteBackupStatus.OwnershipLost,
         canPreserveAsNewLineage = canPreserveAsNewLineage,
-        canChangePassphrase = enabled,
-        canDisconnect = enabled,
-        canDeleteHistory = enabled,
+        canChangePassphrase = activeLifecycle,
+        canDisconnect = activeLifecycle,
+        canDeleteHistory = activeLifecycle ||
+            status is RemoteBackupStatus.Deleting ||
+            status is RemoteBackupStatus.Terminated,
         passphraseChangeDisclosureVisible = passphraseChangeDisclosureVisible,
     )
 }

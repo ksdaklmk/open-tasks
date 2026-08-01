@@ -166,4 +166,16 @@
     <string name="recovery_verified_generation">Verified backup generation %1$d</string>
     <string name="recovery_confirm_takeover">Confirm takeover</string>
     <string name="recovery_failed">The backup could not be restored.</string>
+    <string name="recovery_failure_authorization">Sign in to Google Drive to continue recovery.</string>
+    <string name="recovery_failure_account_mismatch">Choose the Google account used for this backup.</string>
+    <string name="recovery_failure_wrong_passphrase">The recovery passphrase is incorrect.</string>
+    <string name="recovery_failure_unsafe_kdf">This backup uses unsupported passphrase protection.</string>
+    <string name="recovery_failure_corrupt">This backup is damaged or incompatible.</string>
+    <string name="recovery_failure_missing">This backup is incomplete.</string>
+    <string name="recovery_failure_storage">There is not enough device storage to restore this backup.</string>
+    <string name="recovery_failure_staging">The restored vault failed safety checks.</string>
+    <string name="recovery_failure_ownership">This backup changed ownership. Discover it again before restoring.</string>
+    <string name="recovery_failure_terminated">This backup history was deleted and cannot be restored.</string>
+    <string name="recovery_failure_ambiguous">The backup state is ambiguous. Recovery stopped safely.</string>
+    <string name="recovery_failure_local_key">This device cannot open the local recovery key.</string>
 </resources>

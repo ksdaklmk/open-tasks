@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -29,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import app.opentasks.core.model.RecoveryFailureCategory
 
 enum class RecoveryShellMode {
     NoVault,
@@ -53,6 +56,7 @@ fun RecoveryShellScreen(
     candidates: List<RecoveryShellCandidate> = emptyList(),
     takeoverGeneration: Long? = null,
     failureText: String? = null,
+    failureReason: RecoveryFailureCategory? = null,
     onDiscoverDrive: () -> Unit = {},
     onDiscoverPortable: () -> Unit = {},
     onRestore: (String, String) -> Unit = { _, _ -> },
@@ -62,6 +66,11 @@ fun RecoveryShellScreen(
     modifier: Modifier = Modifier,
 ) {
     var passphrase by remember { mutableStateOf("") }
+    val submit: (RecoveryShellCandidate) -> Unit = { candidate ->
+        val submitted = passphrase
+        passphrase = ""
+        onRestore(candidate.handle, submitted)
+    }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -120,15 +129,14 @@ fun RecoveryShellScreen(
                             keyboardType = KeyboardType.Password,
                             imeAction = ImeAction.Done,
                         ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { candidates.firstOrNull()?.let(submit) },
+                        ),
                         modifier = Modifier.testTag("recovery-passphrase"),
                     )
                     candidates.forEach { candidate ->
                         Button(
-                            onClick = {
-                                val submitted = passphrase
-                                passphrase = ""
-                                onRestore(candidate.handle, submitted)
-                            },
+                            onClick = { submit(candidate) },
                             modifier = Modifier.heightIn(min = 48.dp),
                         ) {
                             Text(
@@ -158,15 +166,51 @@ fun RecoveryShellScreen(
                 }
             }
             RecoveryShellMode.Failed -> item {
-                Text(
-                    failureText ?: stringResource(R.string.recovery_failed),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                val message = failureReason?.let { recoveryFailureMessage(it) }
+                    ?: failureText
+                    ?: stringResource(R.string.recovery_failed)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.semantics { error(message) },
+                    )
+                    RecoverySources(onDiscoverDrive, onDiscoverPortable)
+                }
             }
         }
     }
 }
+
+@Composable
+private fun recoveryFailureMessage(reason: RecoveryFailureCategory): String = stringResource(
+    when (reason) {
+        RecoveryFailureCategory.AUTHORIZATION_REQUIRED ->
+            R.string.recovery_failure_authorization
+        RecoveryFailureCategory.ACCOUNT_MISMATCH ->
+            R.string.recovery_failure_account_mismatch
+        RecoveryFailureCategory.WRONG_PASSPHRASE ->
+            R.string.recovery_failure_wrong_passphrase
+        RecoveryFailureCategory.UNSAFE_KDF -> R.string.recovery_failure_unsafe_kdf
+        RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE ->
+            R.string.recovery_failure_corrupt
+        RecoveryFailureCategory.MISSING_REQUIRED_OBJECT ->
+            R.string.recovery_failure_missing
+        RecoveryFailureCategory.INSUFFICIENT_STORAGE ->
+            R.string.recovery_failure_storage
+        RecoveryFailureCategory.STAGING_INVARIANT ->
+            R.string.recovery_failure_staging
+        RecoveryFailureCategory.OWNERSHIP_CHANGED,
+        RecoveryFailureCategory.OWNERSHIP_LOST,
+        -> R.string.recovery_failure_ownership
+        RecoveryFailureCategory.TERMINATED -> R.string.recovery_failure_terminated
+        RecoveryFailureCategory.AMBIGUOUS_REMOTE_STATE ->
+            R.string.recovery_failure_ambiguous
+        RecoveryFailureCategory.LOCAL_KEY_UNAVAILABLE ->
+            R.string.recovery_failure_local_key
+    },
+)
 
 @Composable
 private fun RecoverySources(onDrive: () -> Unit, onPortable: () -> Unit) {

@@ -43,6 +43,9 @@ interface ActiveVaultSession : AutoCloseable {
 
     val remoteBackupStatus: StateFlow<RemoteBackupStatus>
 
+    /** The account already bound to this vault's recoverable remote lineage. */
+    suspend fun recoveryAccountBindingDigest(): ByteArray?
+
     suspend fun connectRemoteBackup(
         allowSeparateLineage: Boolean,
         resolution: Intent?,
@@ -61,9 +64,12 @@ class DefaultActiveVaultSession(
     override val recoveryPassphraseChanger: RecoveryPassphraseChanger,
     override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator,
     override val remoteBackupStatus: StateFlow<RemoteBackupStatus>,
+    private val recoveryAccountDigest: suspend () -> ByteArray?,
     private val connectRemote: suspend (Boolean, Intent?) -> EncryptedBackupActionResult,
     private val reauthoriseRemote: suspend (Intent?) -> EncryptedBackupActionResult,
 ) : ActiveVaultSession {
+    override suspend fun recoveryAccountBindingDigest(): ByteArray? = recoveryAccountDigest()
+
     override suspend fun connectRemoteBackup(
         allowSeparateLineage: Boolean,
         resolution: Intent?,

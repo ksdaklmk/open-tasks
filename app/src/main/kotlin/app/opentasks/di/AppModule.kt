@@ -54,7 +54,6 @@ import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.RecoveryPassphraseChanger
-import app.opentasks.core.domain.RecoveryCoordinator
 import app.opentasks.core.domain.RemoteBackupConnectResult
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.VaultRepository
@@ -76,6 +75,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
@@ -148,22 +148,6 @@ object AppModule {
     fun provideGoogleDriveAuthorizationManager(
         @ApplicationContext context: Context,
     ): GoogleDriveAuthorizationManager = DefaultGoogleDriveAuthorizationManager(context)
-
-    @Provides
-    @Singleton
-    fun provideRecoveryCoordinator(
-        @ApplicationContext context: Context,
-        crypto: VaultCrypto,
-        runtimeManager: VaultRuntimeManager,
-        codec: AuthenticatedCloudObjectCodec,
-        files: AndroidBackupFiles,
-    ): RecoveryCoordinator = LocalVaultRepositoryFactory.createRecoveryCoordinator(
-        context = context,
-        crypto = crypto,
-        runtimeManager = runtimeManager,
-        authenticatedCodec = codec,
-        recoveryStagingRoot = files.recoveryRoot,
-    )
 
     // Process-scoped: unique background work outlives any one vault slot.
     @Provides
@@ -353,8 +337,17 @@ object AppModule {
             configurator = remoteConfigurator,
             publicationGate = publicationGate,
         )
-        val remoteStatus = runtime.remoteBackupStore.observeActive(runtime.vaultId)
-            .map(::remoteBackupStatus)
+        val remoteStatus = combine(
+            runtime.remoteBackupStore.observeActive(runtime.vaultId),
+            runtime.backupStateStore.observe(runtime.vaultId),
+            remoteRunner.running,
+        ) { configuration, localState, runnerInFlight ->
+            remoteBackupStatus(
+                configuration = configuration,
+                runnerInFlight = runnerInFlight,
+                localGeneration = BackupGeneration(localState.currentGeneration),
+            )
+        }
             .stateIn(scope, SharingStarted.Eagerly, RemoteBackupStatus.Disabled)
         val authorizeForConnect: suspend (Boolean, Intent?) -> EncryptedBackupActionResult =
             { allowSeparateLineage, resolution ->
@@ -537,15 +530,28 @@ object AppModule {
             recoveryPassphraseChanger = recoveryPassphraseChanger,
             remoteBackupLifecycleCoordinator = lifecycleCoordinator,
             remoteBackupStatus = remoteStatus,
+            recoveryAccountDigest = {
+                runtime.remoteBackupStore.configurations(runtime.vaultId)
+                    .singleOrNull {
+                        it.lifecycle == RemoteBackupLifecycle.ACTIVE ||
+                            it.lifecycle == RemoteBackupLifecycle.OWNERSHIP_LOST
+                    }
+                    ?.accountBindingDigest
+            },
             connectRemote = authorizeForConnect,
             reauthoriseRemote = reauthorise,
         )
     }
 
-    private fun remoteBackupStatus(
+    internal fun remoteBackupStatus(
         configuration: app.opentasks.core.domain.RemoteBackupConfiguration?,
+        runnerInFlight: Boolean,
+        localGeneration: BackupGeneration,
     ): RemoteBackupStatus {
         if (configuration == null) return RemoteBackupStatus.Disabled
+        if (runnerInFlight && configuration.lifecycle == RemoteBackupLifecycle.ACTIVE) {
+            return RemoteBackupStatus.BackingUp(localGeneration)
+        }
         return when (configuration.lifecycle) {
             RemoteBackupLifecycle.CONNECTING -> RemoteBackupStatus.Preparing
             RemoteBackupLifecycle.DORMANT -> RemoteBackupStatus.Disabled
