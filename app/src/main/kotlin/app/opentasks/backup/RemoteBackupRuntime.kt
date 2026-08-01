@@ -83,8 +83,8 @@ class DefaultRemoteBackupRunner(
     private val authorize: suspend (ByteArray) -> DriveAuthorizationResult,
     private val clearToken: suspend (AuthorizedDriveSession) -> Unit,
     private val openObjectStore: (CreateOnlyDriveTransport) -> CreateOnlyBackupObjectStore,
+    private val publicationGate: Mutex = Mutex(),
 ) : RemoteBackupRunner {
-    private val mutex = Mutex()
     private val stopped = AtomicBoolean()
     private val runInFlight = MutableStateFlow(false)
 
@@ -103,7 +103,7 @@ class DefaultRemoteBackupRunner(
 
     override suspend fun run(): RemoteBackupRunResult {
         if (stopped.get()) return RemoteBackupRunResult.NoChanges
-        return mutex.withLock {
+        return publicationGate.withLock {
             // Rechecked under the lock: a run can queue behind another while
             // the slot is being replaced.
             if (stopped.get()) {
@@ -132,6 +132,14 @@ class DefaultRemoteBackupRunner(
         if (configuration == null || configuration.lifecycle != RemoteBackupLifecycle.ACTIVE) {
             return RemoteBackupRunResult.NoChanges
         }
+        val rotationInProgress = try {
+            hasUnfinishedRecoveryPassphraseChange(remoteStateStore, configuration)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return RemoteBackupRunResult.Blocked(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
+        if (rotationInProgress) return RemoteBackupRunResult.NoChanges
         return when (val authorization = authorizeFor(configuration)) {
             is DriveAuthorizationResult.Authorized ->
                 publish(configuration, authorization.session)

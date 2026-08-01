@@ -65,6 +65,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -264,6 +265,7 @@ object AppModule {
         // Exactly one coordinator, and one runner around it, exists per open
         // slot: retention and durable publication both depend on no two runs
         // for a vault ever overlapping.
+        val publicationGate = Mutex()
         val remoteRunner = DefaultRemoteBackupRunner(
             vaultId = runtime.vaultId,
             remoteStateStore = runtime.remoteBackupStore,
@@ -292,6 +294,7 @@ object AppModule {
             },
             clearToken = authorizationManager::clearToken,
             openObjectStore = openRemoteObjectStore,
+            publicationGate = publicationGate,
         )
         val recoveryPassphraseChanger = DefaultRecoveryPassphraseChanger(
             vaultId = runtime.vaultId,
@@ -304,6 +307,7 @@ object AppModule {
             ownershipStore = { DefaultOwnershipChainStore(it, ownershipCodec) },
             publicationCatalog = { DefaultPublicationCatalog(it, publicationCodec) },
             publicationCodec = publicationCodec,
+            publicationGate = publicationGate,
         )
         val lifecycleCoordinator = DefaultRemoteBackupLifecycleCoordinator(
             vaultId = runtime.vaultId,
@@ -316,6 +320,7 @@ object AppModule {
             openObjectStore = openRemoteObjectStore,
             ownershipStore = { DefaultOwnershipChainStore(it, ownershipCodec) },
             ownershipCodec = ownershipCodec,
+            publicationCodec = publicationCodec,
             configurator = remoteConfigurator,
         )
         return DefaultActiveVaultSession(

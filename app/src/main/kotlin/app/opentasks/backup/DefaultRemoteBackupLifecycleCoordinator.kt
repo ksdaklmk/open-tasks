@@ -7,21 +7,27 @@ import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
+import app.opentasks.core.data.backup.DefaultOwnershipChainStore
+import app.opentasks.core.data.backup.DefaultPublicationCatalog
 import app.opentasks.core.data.backup.OwnershipChainStore
 import app.opentasks.core.data.backup.OwnershipClaimCodec
 import app.opentasks.core.data.backup.OwnershipClaimCreateResult
 import app.opentasks.core.data.backup.OwnershipClaimV1
 import app.opentasks.core.data.backup.OwnershipResolution
+import app.opentasks.core.data.backup.PublicationCodec
 import app.opentasks.core.data.backup.RecoveryEnvelopeStore
 import app.opentasks.core.data.backup.RemoteBackupStateStore
 import app.opentasks.core.data.backup.RemoteBackupTransferStore
+import app.opentasks.core.data.backup.RemoteInventoryItemV1
 import app.opentasks.core.data.backup.VerifiedOwnershipClaim
+import app.opentasks.core.data.backup.VerifiedPublication
 import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.CreateOnlyBackupObjectStore
 import app.opentasks.core.domain.DeleteObjectResult
 import app.opentasks.core.domain.LifecycleResult
 import app.opentasks.core.domain.OwnedRemoteBytes
+import app.opentasks.core.domain.ReadSmallResult
 import app.opentasks.core.domain.RemoteBackupConfigurator
 import app.opentasks.core.domain.RemoteBackupConnectResult
 import app.opentasks.core.domain.RemoteBackupConfiguration
@@ -67,8 +73,52 @@ private data class TerminalDeletionStateV1(
     val tombstoneProviderFileId: String?,
     val tombstoneClaimId: String?,
     val encodedTombstoneBase64: String?,
+    val tombstoneSha256: String? = null,
+    val payloadLocalFactsStored: Boolean = false,
+    val payloadRoleIndex: Int = 0,
+    val payloadPageToken: String? = null,
+    val payloadSeenPageTokens: List<String> = emptyList(),
+    val payloadCandidates: List<TerminalPayloadCandidateV1> = emptyList(),
+    val payloadInventory: List<TerminalInventoryFactV1> = emptyList(),
 ) {
     override fun toString(): String = "TerminalDeletionStateV1(phase=$phase)"
+}
+
+@Serializable
+private data class TerminalPayloadCandidateV1(
+    val providerFileId: String,
+    val role: RemoteObjectRoleV1,
+    val firstObservedAtEpochMillis: Long,
+    val authenticatedSha256: String?,
+    val localLogicalObjectId: String?,
+    val deleted: Boolean = false,
+)
+
+@Serializable
+private data class TerminalInventoryFactV1(
+    val providerFileId: String,
+    val role: RemoteObjectRoleV1,
+    val frameLength: Long,
+    val frameSha256: String,
+)
+
+private data class PayloadCleanupResult(
+    val state: TerminalDeletionStateV1,
+    val failure: LifecycleResult?,
+)
+
+private class DeletionBudget(var remaining: Int)
+
+private sealed interface PublicationAuthentication {
+    data class Authenticated(val publication: VerifiedPublication) : PublicationAuthentication
+    data class Failed(val reason: RemoteBackupFailureCategory) : PublicationAuthentication
+    data object Missing : PublicationAuthentication
+    data object Unverified : PublicationAuthentication
+}
+
+private sealed interface TerminalAuthentication {
+    data class Authenticated(val terminal: VerifiedOwnershipClaim) : TerminalAuthentication
+    data class Failed(val result: LifecycleResult) : TerminalAuthentication
 }
 
 class DefaultRemoteBackupLifecycleCoordinator(
@@ -83,6 +133,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
     private val ownershipStore:
         (CreateOnlyBackupObjectStore) -> OwnershipChainStore,
     private val ownershipCodec: OwnershipClaimCodec,
+    private val publicationCodec: PublicationCodec,
     private val configurator: RemoteBackupConfigurator,
     private val now: () -> Instant = Instant::now,
     private val newClaimId: () -> OwnershipClaimId = OwnershipClaimId::new,
@@ -248,19 +299,24 @@ class DefaultRemoteBackupLifecycleCoordinator(
         val objectStore = openObjectStore(session.transport)
         val chainStore = ownershipStore(objectStore)
         var state = initialState
-        var resolution = chainStore.resolve(configuration.rootClaimProviderId, contentKey)
-        var predecessor = (resolution as? OwnershipResolution.Active)?.tip
-        var tombstone = (resolution as? OwnershipResolution.Terminated)?.tombstone
+        var resolution: OwnershipResolution? = null
+        var predecessor: VerifiedOwnershipClaim? = null
+        var tombstone: VerifiedOwnershipClaim? = null
+        if (!reached(state, TerminalDeletionPhase.TOMBSTONE_VERIFIED)) {
+            resolution = chainStore.resolve(configuration.rootClaimProviderId, contentKey)
+            predecessor = (resolution as? OwnershipResolution.Active)?.tip
+            tombstone = (resolution as? OwnershipResolution.Terminated)?.tombstone
 
-        if (predecessor != null && !holds(configuration, predecessor)) {
-            markOwnershipLost(configuration)
-            return LifecycleResult.OwnershipRequired
-        }
-        if (predecessor == null && tombstone == null) {
-            return failed(
-                (resolution as? OwnershipResolution.Blocked)?.reason
-                    ?: RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE,
-            )
+            if (predecessor != null && !holds(configuration, checkNotNull(predecessor))) {
+                markOwnershipLost(configuration)
+                return LifecycleResult.OwnershipRequired
+            }
+            if (predecessor == null && tombstone == null) {
+                return failed(
+                    (resolution as? OwnershipResolution.Blocked)?.reason
+                        ?: RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE,
+                )
+            }
         }
 
         var encodedTombstone: ByteArray? = null
@@ -275,12 +331,17 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 val claimId = newClaimId()
                 val claim = terminalClaim(tip, providerId, claimId, operationId)
                 encodedTombstone = ownershipCodec.encode(claim, contentKey)
+                val authenticatedTombstone = ownershipCodec.verify(
+                    checkNotNull(encodedTombstone),
+                    contentKey,
+                )
                 state = transition(
                     operationId,
                     configuration,
                     state.copy(
                         tombstoneProviderFileId = providerId.value,
                         tombstoneClaimId = claimId.value,
+                        tombstoneSha256 = authenticatedTombstone.completeSha256.value,
                         encodedTombstoneBase64 = Base64.getEncoder().withoutPadding()
                             .encodeToString(checkNotNull(encodedTombstone)),
                     ),
@@ -294,6 +355,25 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 checkNotNull(encodedTombstone),
                 contentKey,
             )
+            if (state.tombstoneSha256 != expectedTombstone.completeSha256.value) {
+                return failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
+            }
+
+            if (reached(state, TerminalDeletionPhase.TOMBSTONE_VERIFIED)) {
+                when (
+                    val authentication = authenticateExpectedTerminal(
+                        expectedTombstone,
+                        state,
+                        objectStore,
+                        contentKey,
+                    )
+                ) {
+                    is TerminalAuthentication.Authenticated -> {
+                        tombstone = authentication.terminal
+                    }
+                    is TerminalAuthentication.Failed -> return authentication.result
+                }
+            }
 
             if (!reached(state, TerminalDeletionPhase.TOMBSTONE_CREATED)) {
                 val tip = predecessor
@@ -376,7 +456,25 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     TerminalDeletionPhase.PAYLOAD_CLEANUP,
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
             }
-            cleanupPayloadBatch(configuration, objectStore)?.let { return it }
+            val deletionBudget = DeletionBudget(MAX_DELETES_PER_BATCH)
+            val payloadCleanup = cleanupPayloadBatch(
+                operationId = operationId,
+                configuration = configuration,
+                initialState = state,
+                objectStore = objectStore,
+                contentKey = contentKey,
+                deletionBudget = deletionBudget,
+                authenticateTerminal = {
+                    authenticateExpectedTerminalResult(
+                        expectedTombstone,
+                        state,
+                        objectStore,
+                        contentKey,
+                    )
+                },
+            )
+            state = payloadCleanup.state
+            payloadCleanup.failure?.let { return it }
 
             if (!reached(state, TerminalDeletionPhase.CLAIM_CLEANUP)) {
                 state = transition(
@@ -390,6 +488,15 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 configuration,
                 ProviderObjectId.of(checkNotNull(state.tombstoneProviderFileId)),
                 objectStore,
+                deletionBudget,
+                authenticateTerminal = {
+                    authenticateExpectedTerminalResult(
+                        expectedTombstone,
+                        state,
+                        objectStore,
+                        contentKey,
+                    )
+                },
             )?.let { return it }
 
             val terminal = tombstone
@@ -433,35 +540,347 @@ class DefaultRemoteBackupLifecycleCoordinator(
     }
 
     private suspend fun cleanupPayloadBatch(
+        operationId: String,
         configuration: RemoteBackupConfiguration,
+        initialState: TerminalDeletionStateV1,
         objectStore: CreateOnlyBackupObjectStore,
-    ): LifecycleResult? {
-        val cutoff = now().minus(MINIMUM_RESIDUE_AGE)
-        val eligible = transferStore.objectsForLineage(configuration.lineageId)
-            .filter { it.role in PAYLOAD_ROLES }
-            .filter { it.verifiedAt != null || !it.createdAt.isAfter(cutoff) }
-            .sortedBy { it.createdAt }
-        for (record in eligible.take(MAX_DELETES_PER_BATCH)) {
-            when (val deletion = objectStore.delete(record.providerObjectId)) {
-                DeleteObjectResult.Deleted, DeleteObjectResult.Missing ->
-                    transferStore.removeObjectState(
-                        configuration.lineageId,
-                        record.logicalObjectId,
-                    )
-                is DeleteObjectResult.Failed -> return failed(deletion.reason)
+        contentKey: VaultKey,
+        deletionBudget: DeletionBudget,
+        authenticateTerminal: suspend () -> LifecycleResult?,
+    ): PayloadCleanupResult {
+        var state = initialState
+        if (!state.payloadLocalFactsStored) {
+            val local = transferStore.objectsForLineage(configuration.lineageId)
+                .filter { it.role in PAYLOAD_ROLES }
+            if (local.size > MAX_PAYLOAD_CANDIDATES) {
+                return payloadFailure(state, RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
             }
+            var candidates = state.payloadCandidates
+            var inventory = state.payloadInventory
+            for (record in local) {
+                candidates = mergeCandidate(
+                    candidates,
+                    TerminalPayloadCandidateV1(
+                        providerFileId = record.providerObjectId.value,
+                        role = record.role,
+                        firstObservedAtEpochMillis = record.createdAt.toEpochMilli(),
+                        authenticatedSha256 = record.frameSha256.value
+                            .takeIf { record.verifiedAt != null },
+                        localLogicalObjectId = record.logicalObjectId.value,
+                    ),
+                ) ?: return payloadFailure(
+                    state,
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+                if (record.verifiedAt != null && record.role != RemoteObjectRoleV1.PUBLICATION) {
+                    inventory = mergeInventory(
+                        inventory,
+                        TerminalInventoryFactV1(
+                            providerFileId = record.providerObjectId.value,
+                            role = record.role,
+                            frameLength = record.frameLength,
+                            frameSha256 = record.frameSha256.value,
+                        ),
+                    ) ?: return payloadFailure(
+                        state,
+                        RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                    )
+                }
+            }
+            state = checkpointDeletion(
+                operationId,
+                configuration,
+                state.copy(
+                    payloadLocalFactsStored = true,
+                    payloadCandidates = candidates,
+                    payloadInventory = inventory,
+                ),
+            ) ?: return payloadFailure(state, RemoteBackupFailureCategory.LOCAL_STORAGE)
         }
-        return if (eligible.size > MAX_DELETES_PER_BATCH) {
-            failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+
+        while (state.payloadRoleIndex < PAYLOAD_ROLES.size) {
+            val role = PAYLOAD_ROLES[state.payloadRoleIndex]
+            val page = try {
+                objectStore.list(
+                    RemoteListRequest(
+                        lineageId = configuration.lineageId,
+                        role = role,
+                        writerEpoch = null,
+                        ownerDeviceId = null,
+                        pageToken = state.payloadPageToken,
+                        pageSize = PAYLOAD_PAGE_SIZE,
+                    ),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return payloadFailure(state, RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+            }
+            if (page.objects.size > PAYLOAD_PAGE_SIZE) {
+                return payloadFailure(
+                    state,
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+            var candidates = state.payloadCandidates
+            var inventory = state.payloadInventory
+            for (listed in page.objects.filter { it.role == role }) {
+                if (candidates.none { it.providerFileId == listed.providerObjectId.value } &&
+                    candidates.size >= MAX_PAYLOAD_CANDIDATES
+                ) {
+                    return payloadFailure(
+                        state,
+                        RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                    )
+                }
+                var authenticatedSha256: String? = inventory.firstOrNull {
+                    it.providerFileId == listed.providerObjectId.value && it.role == role
+                }?.frameSha256
+                if (role == RemoteObjectRoleV1.PUBLICATION) {
+                    when (
+                        val authentication = authenticatePublication(
+                            listed.providerObjectId,
+                            configuration,
+                            objectStore,
+                            contentKey,
+                        )
+                    ) {
+                        is PublicationAuthentication.Authenticated -> {
+                            authenticatedSha256 = authentication.publication.completeSha256.value
+                            for (item in authentication.publication.manifest.inventory) {
+                                inventory = mergeInventory(inventory, item.toTerminalFact())
+                                    ?: return payloadFailure(
+                                        state,
+                                        RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                                    )
+                                if (inventory.size > MAX_PAYLOAD_CANDIDATES) {
+                                    return payloadFailure(
+                                        state,
+                                        RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                                    )
+                                }
+                            }
+                        }
+                        PublicationAuthentication.Missing -> continue
+                        PublicationAuthentication.Unverified -> Unit
+                        is PublicationAuthentication.Failed ->
+                            return payloadFailure(state, authentication.reason)
+                    }
+                }
+                candidates = mergeCandidate(
+                    candidates,
+                    TerminalPayloadCandidateV1(
+                        providerFileId = listed.providerObjectId.value,
+                        role = role,
+                        firstObservedAtEpochMillis = now().toEpochMilli(),
+                        authenticatedSha256 = authenticatedSha256,
+                        localLogicalObjectId = null,
+                    ),
+                ) ?: return payloadFailure(
+                    state,
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+            val nextToken = page.nextPageToken
+            if (nextToken != null &&
+                (nextToken.length > MAX_PAGE_TOKEN_CHARACTERS ||
+                    nextToken in state.payloadSeenPageTokens)
+            ) {
+                return payloadFailure(
+                    state,
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+            val roleComplete = nextToken == null
+            state = checkpointDeletion(
+                operationId,
+                configuration,
+                state.copy(
+                    payloadRoleIndex = if (roleComplete) {
+                        state.payloadRoleIndex + 1
+                    } else {
+                        state.payloadRoleIndex
+                    },
+                    payloadPageToken = nextToken,
+                    payloadSeenPageTokens = if (roleComplete) {
+                        emptyList()
+                    } else {
+                        state.payloadSeenPageTokens + checkNotNull(nextToken)
+                    },
+                    payloadCandidates = candidates,
+                    payloadInventory = inventory,
+                ),
+            ) ?: return payloadFailure(state, RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
+
+        val trustedPublications = listOfNotNull(
+            configuration.currentPublication,
+            configuration.previousPublication,
+        )
+        if (trustedPublications.any { trusted ->
+                state.payloadCandidates.none {
+                    it.role == RemoteObjectRoleV1.PUBLICATION &&
+                        it.providerFileId == trusted.providerId.value &&
+                        it.authenticatedSha256 == trusted.sha256.value
+                }
+            }
+        ) {
+            return payloadFailure(
+                state,
+                RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+            )
+        }
+
+        val cutoff = now().minus(MINIMUM_RESIDUE_AGE)
+        val eligible = state.payloadCandidates
+            .filter {
+                !it.deleted && (
+                    it.authenticatedSha256 != null ||
+                    Instant.ofEpochMilli(it.firstObservedAtEpochMillis) <= cutoff
+                )
+            }
+            .sortedBy(TerminalPayloadCandidateV1::firstObservedAtEpochMillis)
+        if (eligible.isNotEmpty()) {
+            authenticateTerminal()?.let { return PayloadCleanupResult(state, it) }
+        }
+        val batch = eligible.take(deletionBudget.remaining)
+        for (candidate in batch) {
+            when (val deletion = objectStore.delete(ProviderObjectId.of(candidate.providerFileId))) {
+                DeleteObjectResult.Deleted, DeleteObjectResult.Missing -> Unit
+                is DeleteObjectResult.Failed -> return payloadFailure(state, deletion.reason)
+            }
+            deletionBudget.remaining -= 1
+            candidate.localLogicalObjectId?.let { logicalId ->
+                transferStore.removeObjectState(
+                    configuration.lineageId,
+                    app.opentasks.core.model.RemoteLogicalObjectId.of(logicalId),
+                )
+            }
+            state = checkpointDeletion(
+                operationId,
+                configuration,
+                state.copy(
+                    payloadCandidates = state.payloadCandidates.map {
+                        if (it.providerFileId == candidate.providerFileId) {
+                            it.copy(deleted = true)
+                        } else {
+                            it
+                        }
+                    },
+                ),
+            ) ?: return payloadFailure(state, RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
+        return if (eligible.size > batch.size) {
+            payloadFailure(state, RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
         } else {
-            null
+            PayloadCleanupResult(state, null)
         }
     }
+
+    private suspend fun authenticatePublication(
+        providerObjectId: ProviderObjectId,
+        configuration: RemoteBackupConfiguration,
+        objectStore: CreateOnlyBackupObjectStore,
+        contentKey: VaultKey,
+    ): PublicationAuthentication = when (
+        val read = objectStore.readSmall(
+            providerObjectId,
+            DefaultPublicationCatalog.MAX_PUBLICATION_FILE_BYTES,
+        )
+    ) {
+        ReadSmallResult.Missing -> PublicationAuthentication.Missing
+        is ReadSmallResult.Failed -> PublicationAuthentication.Failed(read.reason)
+        is ReadSmallResult.Found -> {
+            val owned = read.bytes
+            val bytes = owned.take()
+            try {
+                val publication = try {
+                    publicationCodec.verify(bytes, contentKey)
+                } catch (_: Exception) {
+                    null
+                }
+                if (publication != null &&
+                    publication.manifest.lineageId == configuration.lineageId.value &&
+                    publication.manifest.publicationProviderFileId == providerObjectId.value
+                ) {
+                    PublicationAuthentication.Authenticated(publication)
+                } else {
+                    PublicationAuthentication.Unverified
+                }
+            } finally {
+                bytes.fill(0)
+                owned.close()
+            }
+        }
+    }
+
+    private fun mergeCandidate(
+        current: List<TerminalPayloadCandidateV1>,
+        incoming: TerminalPayloadCandidateV1,
+    ): List<TerminalPayloadCandidateV1>? {
+        val index = current.indexOfFirst { it.providerFileId == incoming.providerFileId }
+        if (index < 0) return current + incoming
+        val existing = current[index]
+        if (existing.role != incoming.role ||
+            existing.authenticatedSha256 != null && incoming.authenticatedSha256 != null &&
+            existing.authenticatedSha256 != incoming.authenticatedSha256 ||
+            existing.localLogicalObjectId != null && incoming.localLogicalObjectId != null &&
+            existing.localLogicalObjectId != incoming.localLogicalObjectId
+        ) {
+            return null
+        }
+        val merged = existing.copy(
+            firstObservedAtEpochMillis = minOf(
+                existing.firstObservedAtEpochMillis,
+                incoming.firstObservedAtEpochMillis,
+            ),
+            authenticatedSha256 = existing.authenticatedSha256
+                ?: incoming.authenticatedSha256,
+            localLogicalObjectId = existing.localLogicalObjectId
+                ?: incoming.localLogicalObjectId,
+            deleted = existing.deleted || incoming.deleted,
+        )
+        return current.toMutableList().also { it[index] = merged }
+    }
+
+    private fun mergeInventory(
+        current: List<TerminalInventoryFactV1>,
+        incoming: TerminalInventoryFactV1,
+    ): List<TerminalInventoryFactV1>? {
+        val existing = current.firstOrNull { it.providerFileId == incoming.providerFileId }
+            ?: return current + incoming
+        return current.takeIf { existing == incoming }
+    }
+
+    private fun RemoteInventoryItemV1.toTerminalFact() = TerminalInventoryFactV1(
+        providerFileId = providerFileId,
+        role = role,
+        frameLength = frameLength,
+        frameSha256 = frameSha256,
+    )
+
+    private suspend fun checkpointDeletion(
+        operationId: String,
+        configuration: RemoteBackupConfiguration,
+        state: TerminalDeletionStateV1,
+    ): TerminalDeletionStateV1? = transition(
+        operationId,
+        configuration,
+        state,
+        TerminalDeletionPhase.valueOf(state.phase),
+    )
+
+    private fun payloadFailure(
+        state: TerminalDeletionStateV1,
+        reason: RemoteBackupFailureCategory,
+    ) = PayloadCleanupResult(state, failed(reason))
 
     private suspend fun cleanupKnownClaims(
         configuration: RemoteBackupConfiguration,
         terminalProvider: ProviderObjectId,
         objectStore: CreateOnlyBackupObjectStore,
+        deletionBudget: DeletionBudget,
+        authenticateTerminal: suspend () -> LifecycleResult?,
     ): LifecycleResult? {
         val targets = linkedSetOf(configuration.rootClaimProviderId)
         configuration.ownershipClaim?.providerId?.let(targets::add)
@@ -498,17 +917,29 @@ class DefaultRemoteBackupLifecycleCoordinator(
             } while (pageToken != null)
         }
         targets.remove(terminalProvider)
-        targets.take(MAX_DELETES_PER_BATCH).forEach { providerId ->
+        val rootProvider = configuration.rootClaimProviderId
+        val rootPending = rootProvider != terminalProvider
+        targets.remove(rootProvider)
+        if (targets.isNotEmpty() || rootPending) authenticateTerminal()?.let { return it }
+        val batch = targets.take(deletionBudget.remaining)
+        batch.forEach { providerId ->
             when (val deletion = objectStore.delete(providerId)) {
                 DeleteObjectResult.Deleted, DeleteObjectResult.Missing -> Unit
                 is DeleteObjectResult.Failed -> return failed(deletion.reason)
             }
+            deletionBudget.remaining -= 1
         }
-        return if (targets.size > MAX_DELETES_PER_BATCH) {
-            failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
-        } else {
-            null
+        if (targets.size > batch.size || rootPending && deletionBudget.remaining == 0) {
+            return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
         }
+        if (rootPending) {
+            when (val deletion = objectStore.delete(rootProvider)) {
+                DeleteObjectResult.Deleted, DeleteObjectResult.Missing -> Unit
+                is DeleteObjectResult.Failed -> return failed(deletion.reason)
+            }
+            deletionBudget.remaining -= 1
+        }
+        return null
     }
 
     private fun terminalClaim(
@@ -547,6 +978,77 @@ class DefaultRemoteBackupLifecycleCoordinator(
         claim.claim.claimId == state.tombstoneClaimId &&
         claim.claim.tombstoneId == state.tombstoneClaimId &&
         claim.claim.nextSuccessorProviderFileId == null
+
+    private suspend fun authenticateExpectedTerminalResult(
+        expected: VerifiedOwnershipClaim,
+        state: TerminalDeletionStateV1,
+        objectStore: CreateOnlyBackupObjectStore,
+        contentKey: VaultKey,
+    ): LifecycleResult? = when (
+        val authentication = authenticateExpectedTerminal(
+            expected,
+            state,
+            objectStore,
+            contentKey,
+        )
+    ) {
+        is TerminalAuthentication.Authenticated -> null
+        is TerminalAuthentication.Failed -> authentication.result
+    }
+
+    private suspend fun authenticateExpectedTerminal(
+        expected: VerifiedOwnershipClaim,
+        state: TerminalDeletionStateV1,
+        objectStore: CreateOnlyBackupObjectStore,
+        contentKey: VaultKey,
+    ): TerminalAuthentication {
+        val providerId = state.tombstoneProviderFileId?.let(ProviderObjectId::of)
+            ?: return TerminalAuthentication.Failed(
+                failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            )
+        val read = try {
+            objectStore.readSmall(
+                providerId,
+                DefaultOwnershipChainStore.MAX_CLAIM_FILE_BYTES,
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return TerminalAuthentication.Failed(
+                failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            )
+        }
+        return when (read) {
+            ReadSmallResult.Missing -> TerminalAuthentication.Failed(
+                failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+            )
+            is ReadSmallResult.Failed -> TerminalAuthentication.Failed(failed(read.reason))
+            is ReadSmallResult.Found -> {
+                val owned = read.bytes
+                val bytes = owned.take()
+                try {
+                    val verified = try {
+                        ownershipCodec.verify(bytes, contentKey)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (verified != null &&
+                        state.tombstoneSha256 == verified.completeSha256.value &&
+                        isExpectedTerminal(verified, expected, state)
+                    ) {
+                        TerminalAuthentication.Authenticated(verified)
+                    } else {
+                        TerminalAuthentication.Failed(
+                            failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+                        )
+                    }
+                } finally {
+                    bytes.fill(0)
+                    owned.close()
+                }
+            }
+        }
+    }
 
     private fun holds(
         configuration: RemoteBackupConfiguration,
@@ -748,8 +1250,11 @@ class DefaultRemoteBackupLifecycleCoordinator(
         const val MAX_DELETES_PER_BATCH = 32
         const val CLAIM_PAGE_SIZE = 100
         const val MAX_CLAIMS_PER_LINEAGE = 4_096
+        const val PAYLOAD_PAGE_SIZE = 100
+        const val MAX_PAYLOAD_CANDIDATES = 4_096
+        const val MAX_PAGE_TOKEN_CHARACTERS = 1_024
         val MINIMUM_RESIDUE_AGE: Duration = Duration.ofDays(7)
-        val PAYLOAD_ROLES = setOf(
+        val PAYLOAD_ROLES = listOf(
             RemoteObjectRoleV1.PUBLICATION,
             RemoteObjectRoleV1.SNAPSHOT,
             RemoteObjectRoleV1.SEGMENT,

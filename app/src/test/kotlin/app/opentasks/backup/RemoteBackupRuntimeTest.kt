@@ -61,6 +61,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -88,6 +89,52 @@ class RemoteBackupRuntimeTest {
         assertEquals(1, fixture.coordinator.maximumConcurrentPasses.get())
         assertEquals(6, fixture.openedObjectStores.get())
         assertEquals(6, fixture.transport.closes.get())
+    }
+
+    @Test
+    fun anUnfinishedPassphraseRotationPreventsOrdinaryPublication() {
+        val fixture = runnerFixture(outcome = RemoteBackupRunResult.NoChanges)
+        fixture.stateStore.recordOperation(
+            RemoteBackupOperation(
+                operationId = "recovery-passphrase-change:${VAULT_ID.value}:0",
+                lineageId = LINEAGE_ID,
+                kind = "RECOVERY_PASSPHRASE_CHANGE",
+                phase = "REMOTE_PUBLICATION_CREATED",
+                targetEpoch = WriterEpoch(1),
+                targetGeneration = BackupGeneration(1),
+                candidateClaimProviderId = ProviderObjectId.of("claim"),
+                candidatePublicationProviderId = ProviderObjectId.of("rotation-publication"),
+                stateBytes = byteArrayOf(1),
+                startedAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+            ),
+        )
+
+        val result = runBlocking { withTimeout(5_000) { fixture.runner.run() } }
+
+        assertEquals(RemoteBackupRunResult.NoChanges, result)
+        assertEquals(0, fixture.authorizations.get())
+        assertEquals(0, fixture.coordinator.passes.get())
+    }
+
+    @Test
+    fun ordinaryPublicationWaitsForTheVaultPublicationGate() = runBlocking {
+        val gate = Mutex(locked = true)
+        val fixture = runnerFixture(
+            outcome = RemoteBackupRunResult.NoChanges,
+            publicationGate = gate,
+        )
+
+        val result = async(Dispatchers.Default) { fixture.runner.run() }
+        delay(25)
+        assertEquals(0, fixture.authorizations.get())
+        assertEquals(0, fixture.coordinator.passes.get())
+
+        gate.unlock()
+
+        assertEquals(RemoteBackupRunResult.NoChanges, withTimeout(5_000) { result.await() })
+        assertEquals(1, fixture.authorizations.get())
+        assertEquals(1, fixture.coordinator.passes.get())
     }
 
     // -- Runner: authorization ------------------------------------------------------------
@@ -618,6 +665,7 @@ class RemoteBackupRuntimeTest {
         lifecycle: RemoteBackupLifecycle = RemoteBackupLifecycle.ACTIVE,
         configured: Boolean = true,
         storedCategory: RemoteBackupFailureCategory? = null,
+        publicationGate: Mutex = Mutex(),
     ): RunnerFixture {
         val events = mutableListOf<String>()
         val transport = RecordingDriveTransport { events += "transport-close" }
@@ -660,6 +708,7 @@ class RemoteBackupRuntimeTest {
                 fixture.openedObjectStores.incrementAndGet()
                 UnusedObjectStore
             },
+            publicationGate = publicationGate,
         )
         return fixture
     }
@@ -822,8 +871,13 @@ class RemoteBackupRuntimeTest {
         initial: RemoteBackupConfiguration?,
     ) : RemoteBackupStateStore {
         private var current: RemoteBackupConfiguration? = initial
+        private val operations = mutableMapOf<String, RemoteBackupOperation>()
 
         fun stored(): RemoteBackupConfiguration = checkNotNull(current)
+
+        fun recordOperation(operation: RemoteBackupOperation) {
+            operations[operation.operationId] = operation
+        }
 
         override suspend fun active(vaultId: VaultId): RemoteBackupConfiguration? =
             current?.takeIf { it.vaultId == vaultId }
@@ -849,9 +903,12 @@ class RemoteBackupRuntimeTest {
             return true
         }
 
-        override suspend fun operation(operationId: String): RemoteBackupOperation? = null
+        override suspend fun operation(operationId: String): RemoteBackupOperation? =
+            operations[operationId]
 
-        override suspend fun putOperation(operation: RemoteBackupOperation) = Unit
+        override suspend fun putOperation(operation: RemoteBackupOperation) {
+            operations[operation.operationId] = operation
+        }
 
         override suspend fun transitionOperation(
             operationId: String,

@@ -59,6 +59,34 @@ internal enum class PassphraseRotationPhase {
     COMPLETED,
 }
 
+internal const val RECOVERY_PASSPHRASE_OPERATION_KIND = "RECOVERY_PASSPHRASE_CHANGE"
+private const val RECOVERY_PASSPHRASE_OPERATION_PREFIX = "recovery-passphrase-change:"
+
+internal fun recoveryPassphraseOperationId(
+    vaultId: VaultId,
+    recoveryCredentialGeneration: Long,
+): String = RECOVERY_PASSPHRASE_OPERATION_PREFIX + vaultId.value + ":" +
+    recoveryCredentialGeneration
+
+internal suspend fun hasUnfinishedRecoveryPassphraseChange(
+    stateStore: RemoteBackupStateStore,
+    configuration: RemoteBackupConfiguration,
+): Boolean {
+    val generations = buildList {
+        add(configuration.recoveryCredentialGeneration)
+        if (configuration.recoveryCredentialGeneration > 0) {
+            add(configuration.recoveryCredentialGeneration - 1)
+        }
+    }
+    return generations.any { generation ->
+        val operation = stateStore.operation(
+            recoveryPassphraseOperationId(configuration.vaultId, generation),
+        ) ?: return@any false
+        operation.kind != RECOVERY_PASSPHRASE_OPERATION_KIND ||
+            operation.phase != PassphraseRotationPhase.COMPLETED.name
+    }
+}
+
 @Serializable
 private data class PassphraseRotationStateV1(
     val formatVersion: Int = 1,
@@ -66,6 +94,9 @@ private data class PassphraseRotationStateV1(
     val phase: String,
     val publicationProviderFileId: String,
     val publicationId: String,
+    val predecessorPublicationProviderFileId: String? = null,
+    val predecessorPublicationId: String? = null,
+    val predecessorPublicationSha256: String? = null,
     val recoveryEnvelope: RecoveryEnvelopePayloadV1,
     val encodedPublicationBase64: String,
 ) {
@@ -86,14 +117,13 @@ class DefaultRecoveryPassphraseChanger(
     private val publicationCodec: PublicationCodec,
     private val now: () -> Instant = Instant::now,
     private val newPublicationId: () -> PublicationId = PublicationId::new,
+    private val publicationGate: Mutex = Mutex(),
 ) : RecoveryPassphraseChanger {
-    private val mutex = Mutex()
-
     override suspend fun change(
         currentPassphrase: CharArray,
         newPassphrase: CharArray,
     ): PassphraseChangeResult = try {
-        mutex.withLock { changeLocked(currentPassphrase, newPassphrase) }
+        publicationGate.withLock { changeLocked(currentPassphrase, newPassphrase) }
     } finally {
         currentPassphrase.fill('\u0000')
         newPassphrase.fill('\u0000')
@@ -230,6 +260,9 @@ class DefaultRecoveryPassphraseChanger(
             predecessor = previous
             alreadyPublished = resolved.current
         }
+        if (storedState != null && !predecessor.matchesStoredPredecessor(storedState)) {
+            return remoteFailure()
+        }
 
         var replacementEnvelope: VaultKeyEnvelope? = null
         var encodedPublication: ByteArray? = null
@@ -263,6 +296,10 @@ class DefaultRecoveryPassphraseChanger(
                     phase = PassphraseRotationPhase.PENDING_ENVELOPE_STORED.name,
                     publicationProviderFileId = providerId.value,
                     publicationId = publicationId.value,
+                    predecessorPublicationProviderFileId =
+                        predecessor.manifest.publicationProviderFileId,
+                    predecessorPublicationId = predecessor.manifest.publicationId,
+                    predecessorPublicationSha256 = predecessor.completeSha256.value,
                     recoveryEnvelope = RecoveryEnvelopeCodec.toPayload(
                         checkNotNull(replacementEnvelope),
                     ),
@@ -312,7 +349,19 @@ class DefaultRecoveryPassphraseChanger(
             }
 
             if (!reached(currentState, PassphraseRotationPhase.REMOTE_PUBLICATION_CREATED)) {
+                if (!predecessor.matchesStoredPredecessor(currentState)) {
+                    return remoteFailure()
+                }
                 val publication = alreadyPublished ?: run {
+                    val latestPredecessor = resolvePublications(
+                        configuration,
+                        ownership,
+                        catalog,
+                        contentKey,
+                    )?.current ?: return remoteFailure()
+                    if (!latestPredecessor.matchesStoredPredecessor(currentState)) {
+                        return remoteFailure()
+                    }
                     val created = catalog.create(
                         ProviderObjectId.of(currentState.publicationProviderFileId),
                         ownedCopy(checkNotNull(encodedPublication)),
@@ -362,6 +411,9 @@ class DefaultRecoveryPassphraseChanger(
             }
 
             if (!reached(currentState, PassphraseRotationPhase.LOCAL_ENVELOPE_PROMOTED)) {
+                if (resolveHeldOwnership(configuration, chainStore, contentKey) == null) {
+                    return remoteFailure()
+                }
                 val latest = remoteStateStore.known(configuration.lineageId)
                     ?: return localFailure()
                 if (latest.stateVersion != configuration.stateVersion ||
@@ -493,7 +545,7 @@ class DefaultRecoveryPassphraseChanger(
     )
 
     private fun operationId(recoveryCredentialGeneration: Long): String =
-        OPERATION_PREFIX + vaultId.value + ":" + recoveryCredentialGeneration
+        recoveryPassphraseOperationId(vaultId, recoveryCredentialGeneration)
 
     private suspend fun transition(
         operationId: String,
@@ -521,7 +573,7 @@ class DefaultRecoveryPassphraseChanger(
             RemoteBackupOperation(
                 operationId = operationId,
                 lineageId = configuration.lineageId,
-                kind = OPERATION_KIND,
+                kind = RECOVERY_PASSPHRASE_OPERATION_KIND,
                 phase = state.phase,
                 targetEpoch = configuration.writerEpoch,
                 targetGeneration = configuration.lastVerifiedGeneration,
@@ -555,6 +607,13 @@ class DefaultRecoveryPassphraseChanger(
         manifest.publicationProviderFileId == ref.providerId.value &&
             manifest.publicationId == ref.logicalId.value && completeSha256 == ref.sha256
 
+    private fun VerifiedPublication.matchesStoredPredecessor(
+        state: PassphraseRotationStateV1,
+    ): Boolean = manifest.publicationProviderFileId ==
+        state.predecessorPublicationProviderFileId &&
+        manifest.publicationId == state.predecessorPublicationId &&
+        completeSha256.value == state.predecessorPublicationSha256
+
     private fun VerifiedPublication.ref(): PublicationRef = PublicationRef(
         providerId = ProviderObjectId.of(manifest.publicationProviderFileId),
         logicalId = PublicationId.parse(manifest.publicationId),
@@ -564,7 +623,7 @@ class DefaultRecoveryPassphraseChanger(
     )
 
     private fun decodeState(operation: RemoteBackupOperation): PassphraseRotationStateV1? {
-        if (operation.kind != OPERATION_KIND || operation.phase ==
+        if (operation.kind != RECOVERY_PASSPHRASE_OPERATION_KIND || operation.phase ==
             PassphraseRotationPhase.COMPLETED.name
         ) return null
         val bytes = operation.stateBytes
@@ -629,8 +688,6 @@ class DefaultRecoveryPassphraseChanger(
     }
 
     private companion object {
-        const val OPERATION_PREFIX = "recovery-passphrase-change:"
-        const val OPERATION_KIND = "RECOVERY_PASSPHRASE_CHANGE"
         const val ZERO_SHA256 =
             "0000000000000000000000000000000000000000000000000000000000000000"
     }

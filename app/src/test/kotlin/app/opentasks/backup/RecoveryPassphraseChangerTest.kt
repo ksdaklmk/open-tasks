@@ -194,6 +194,50 @@ class RecoveryPassphraseChangerTest {
         fixture.close()
     }
 
+    @Test
+    fun rotationRefusesToCreateWhenItsStoredPredecessorWasSuperseded() = runBlocking {
+        val fixture = RotationFixture()
+        fixture.failPortableOnce = true
+
+        val interrupted = fixture.changer.change(OLD.copyOf(), NEW.copyOf())
+        fixture.advanceOrdinaryPublication()
+        val resumed = fixture.changer.change(OLD.copyOf(), NEW.copyOf())
+
+        assertEquals(
+            PassphraseChangeResult.Failed(PassphraseChangeFailureCategory.PORTABLE_PACKAGE),
+            interrupted,
+        )
+        assertEquals(
+            PassphraseChangeResult.Failed(PassphraseChangeFailureCategory.REMOTE_BACKUP),
+            resumed,
+        )
+        assertEquals(0, fixture.catalog.createCalls)
+        fixture.unlockStored(OLD)
+        fixture.close()
+    }
+
+    @Test
+    fun rotationRechecksOwnershipImmediatelyBeforeResumedLocalPromotion() = runBlocking {
+        val fixture = RotationFixture()
+        fixture.store.failBeforePhase = "LOCAL_ENVELOPE_PROMOTED"
+
+        val interrupted = fixture.changer.change(OLD.copyOf(), NEW.copyOf())
+        fixture.ownershipStore.allowOneResolutionBeforeLoss()
+        val resumed = fixture.changer.change(OLD.copyOf(), NEW.copyOf())
+
+        assertEquals(
+            PassphraseChangeResult.Failed(PassphraseChangeFailureCategory.LOCAL_STORAGE),
+            interrupted,
+        )
+        assertEquals(
+            PassphraseChangeResult.Failed(PassphraseChangeFailureCategory.REMOTE_BACKUP),
+            resumed,
+        )
+        assertEquals(1L, fixture.store.configuration.recoveryCredentialGeneration)
+        fixture.unlockStored(OLD)
+        fixture.close()
+    }
+
     private class RotationFixture {
         val crypto = TinkVaultCrypto()
         private val authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(crypto)
@@ -203,6 +247,7 @@ class RecoveryPassphraseChangerTest {
         private val currentEnvelope = crypto.wrapForRecovery(contentKey, OLD.copyOf())
         private val currentPublication = publication(currentEnvelope)
         private val ownership = ownership()
+        val ownershipStore = TestOwnershipStore(ownership)
         val envelopes = TestEnvelopeStore(currentEnvelope)
         val store = TestRemoteStore(configuration(currentPublication, ownership), envelopes)
         val catalog = TestPublicationCatalog(publicationCodec, currentPublication)
@@ -231,7 +276,7 @@ class RecoveryPassphraseChangerTest {
             },
             authorizationManager = TestAuthorizationManager(),
             openObjectStore = { TestObjectStore },
-            ownershipStore = { TestOwnershipStore(ownership) },
+            ownershipStore = { ownershipStore },
             publicationCatalog = { catalog },
             publicationCodec = publicationCodec,
             now = { NOW },
@@ -245,6 +290,38 @@ class RecoveryPassphraseChangerTest {
             } finally {
                 envelope.clear()
             }
+        }
+
+        fun advanceOrdinaryPublication() {
+            val draft = currentPublication.manifest.copy(
+                bootstrapSha256 = ZERO_SHA256,
+                publicationProviderFileId = ORDINARY_PUBLICATION_PROVIDER,
+                publicationId = ORDINARY_PUBLICATION_ID,
+                publicationSequence = currentPublication.manifest.publicationSequence + 1,
+                predecessorPublicationProviderFileId =
+                    currentPublication.manifest.publicationProviderFileId,
+                predecessorPublicationId = currentPublication.manifest.publicationId,
+                predecessorPublicationSha256 = currentPublication.completeSha256.value,
+                publicationOperationId = "ordinary-publication-operation",
+            )
+            val manifest = draft.copy(
+                bootstrapSha256 = publicationCodec.bootstrapSha256(draft, currentEnvelope),
+            )
+            val encoded = publicationCodec.encode(manifest, currentEnvelope, contentKey)
+            val ordinary = try {
+                publicationCodec.verify(encoded, contentKey)
+            } finally {
+                encoded.fill(0)
+            }
+            catalog.replacePublished(ordinary)
+            store.configuration = store.configuration.copy(
+                currentPublication = ordinary.ref(),
+                previousPublication = currentPublication.ref(),
+                lastVerifiedGeneration = BackupGeneration(ordinary.manifest.localGeneration),
+                stateVersion = RemoteBackupStateVersion(
+                    store.configuration.stateVersion.value + 1,
+                ),
+            )
         }
 
         fun close() {
@@ -456,6 +533,9 @@ class RecoveryPassphraseChangerTest {
         private val initial = initial
         var published = initial
         var createCalls = 0
+        fun replacePublished(value: VerifiedPublication) {
+            published = value
+        }
         override suspend fun discoverBootstraps(
             lineageId: CloudLineageId,
             epoch: WriterEpoch,
@@ -489,9 +569,24 @@ class RecoveryPassphraseChangerTest {
     }
 
     private class TestOwnershipStore(private val ownership: VerifiedOwnershipClaim) : OwnershipChainStore {
+        private var successfulResolutionsBeforeLoss = Int.MAX_VALUE
+
+        fun allowOneResolutionBeforeLoss() {
+            successfulResolutionsBeforeLoss = 1
+        }
+
         override suspend fun discoverPublicRoots() = OwnershipRootDiscovery.Discovered(emptyList())
-        override suspend fun resolve(rootProviderId: ProviderObjectId, contentKey: VaultKey) =
+        override suspend fun resolve(
+            rootProviderId: ProviderObjectId,
+            contentKey: VaultKey,
+        ): OwnershipResolution = if (successfulResolutionsBeforeLoss > 0) {
+            successfulResolutionsBeforeLoss -= 1
             OwnershipResolution.Active(ownership, ownership)
+        } else {
+            OwnershipResolution.Blocked(
+                app.opentasks.core.model.RemoteBackupFailureCategory.OWNERSHIP_LOST,
+            )
+        }
         override suspend fun createClaim(
             expectedPredecessor: VerifiedOwnershipClaim?,
             encodedClaim: OwnedRemoteBytes,
@@ -549,6 +644,8 @@ class RecoveryPassphraseChangerTest {
         const val NEXT_PUBLICATION_ID = "00000000-0000-4000-8000-000000000008"
         const val CURRENT_PUBLICATION_PROVIDER = "provider-publication-7"
         const val NEXT_PUBLICATION_PROVIDER = "provider-publication-8"
+        const val ORDINARY_PUBLICATION_PROVIDER = "provider-publication-ordinary-8"
+        const val ORDINARY_PUBLICATION_ID = "00000000-0000-4000-8000-000000000009"
         const val ZERO_SHA256 =
             "0000000000000000000000000000000000000000000000000000000000000000"
         const val DIGEST =
