@@ -162,16 +162,30 @@ loading, error, and empty states where relevant.
 
 ## Backup & recovery
 
-More now includes the Stage 2 **Backup & recovery** surface for the Android
-backup package. It supports Not prepared, Preparing, Ready, Update pending,
-Unavailable, and Restored package detected states. Setup explains that Android
-backup is supplementary, that the recovery passphrase cannot be recovered,
-and that local package readiness is not an upload claim. Passphrase and
-confirmation fields are masked, non-saveable, and cleared after submission.
-Ready shows local production time, generation, current generation, and bytes.
-A restored package stays inert and exposes no recovery or activation action.
+More includes two independent **Backup & recovery** cards. The Android backup
+package card supports Not prepared, Preparing, Ready, Update pending,
+Unavailable, and Restored package detected. Setup explains that Android backup
+is supplementary, that the recovery passphrase cannot be recovered, and that
+local package readiness is not an upload claim. Ready shows local production
+time, generation, current generation, and bytes.
 
-The later programme retains four independent concerns:
+The Encrypted app backup card exposes explicit connection, Back up now,
+passphrase change, disconnect, permanent history deletion, and ownership-loss
+recovery only when the current lifecycle supports each action. Backing up uses
+the runner's in-flight state and local generation. No active backup service is
+created for NoVault, Unreadable, Activating, or Recovering.
+
+The recovery shell keeps Drive and Android-package recovery independent.
+NoVault also offers Start without restoring; active replacement never does.
+Failures use text plus Error semantics, keep both recovery actions available,
+and do not overwrite an unreadable vault. Passphrase and confirmation fields
+are masked, non-saveable, and cleared after submission. Task 13 remains
+review-incomplete at the current checkpoint: transient provider failures must
+receive truthful retry copy rather than Sign in guidance, and recovery must be
+proved across genuine Activity/production-route recreation before this surface
+is treated as complete.
+
+The programme retains four independent concerns:
 
 - **Encrypted app backup** — enabled state, last verified time, pending
   generation, failure category, retry, and **Back up now**.
@@ -188,10 +202,9 @@ transport is offline or failing. Android Auto Backup and device transfer now
 use the verified exact-file allow-list; the interface still cannot infer
 platform upload or restore success.
 
-No backup indicator is present on Home. A future app-managed backup may show
-attention only after it is configured and blocked or meaningfully overdue.
-The threshold remains future injected product policy, not a format or current
-UI claim.
+No backup indicator is present on Home. App-managed backup may show attention
+only after it is configured and blocked or meaningfully overdue. The threshold
+remains injected product policy, not a format claim.
 
 ## Language and locale
 

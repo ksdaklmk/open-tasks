@@ -1,6 +1,6 @@
 # Threat Model
 
-Last reviewed: 29 July 2026
+Last reviewed: 1 August 2026
 
 This document covers the implemented local-authority foundation and the
 approved backup, recovery-takeover, and cloud-attachment programme. It is a
@@ -21,7 +21,7 @@ attachment data. The security objectives, in order, are:
    vault.
 
 The current application has one structured-data authority: encrypted Room.
-Room v6, local generation journalling, strict snapshot/segment payloads, and a
+Room v7, local generation journalling, strict snapshot/segment payloads, and a
 verified encrypted no-backup recovery-object pipeline are implemented. The
 application now triggers that coordinator, verifies a recovery envelope, and
 atomically publishes one portable encrypted package at most 24 MiB. Android
@@ -30,11 +30,15 @@ WAL/SHM, preferences, Keystore material, credentials, device identity, cache,
 local staging, and attachment bytes remain excluded.
 
 Package readiness proves only local production and eligibility. It does not
-prove Android upload, and encrypted Google-account transport upload/restore
-remains external qualification. Google Identity, Drive transport, writer
-takeover, attachment transfer, remote merge, and recovery activation are not
-connected. Android-restored packages are moved to an inert no-backup inbox and
-cannot activate or mutate Room.
+prove Android upload. Explicit Google authorization, create-only
+`drive.appdata` transport, one-writer publication, lifecycle management, and
+staged recovery/takeover are implemented in source; credentialed
+two-installation upload/restore remains an external Task 14 qualification.
+Task 13 is paused with two open presentation/verification findings: transient
+transport failure still produces false Sign in guidance, and no genuine
+Activity/production recovery-route recreation test exists. Android-restored
+packages remain inert until the explicit recovery path verifies and activates
+them. Attachment transfer and remote merge are not connected.
 
 ## Assets
 
@@ -50,8 +54,8 @@ cannot activate or mutate Room.
 | Local wrapping key | Critical key material | Non-exportable Android Keystore entry |
 | Vault-content key | Critical key material | Independently wrapped by recovery passphrase and per-vault Keystore key |
 | Recovery passphrase | User-held secret | Memory only; never persisted |
-| Writer epoch and opaque device identity | Sensitive metadata | Planned local state and encrypted/conditional control manifest |
-| Provider object identifiers and account data | Sensitive metadata | Not implemented |
+| Writer epoch and opaque device identity | Sensitive metadata | Encrypted local state and authenticated control manifest; never Android backup |
+| Provider object identifiers and account data | Sensitive metadata | Private encrypted operation/configuration state or memory-only authorized session; never logs or Android backup |
 | Build, signing, and OAuth credentials | Release secrets | Not present in this repository |
 
 ## Trust boundaries and data flows
@@ -126,11 +130,11 @@ fails safely where practical and must not weaken platform protections.
 | T09 | Portable package includes excluded data or grows beyond safe platform bounds | The publisher builds from a consistent snapshot, verifies the authenticated container, caps it at 24 MiB, withdraws ineligible generations, and publishes atomically | Future format changes require the same exact-file and bounded-package audit |
 | T10 | Logs or telemetry leak private fields | Architecture prohibits private content and sensitive routing data; current review found no application logging calls | Any telemetry requires a separate field allow-list review |
 | T11 | Exported component mutates or leaks data | Only launcher activity is exported; reminder receivers and pending intents are private/immutable; `FileProvider` is private and constrained | Sharesheet/import and attachment paths require explicit validation, grants, and cleanup tests |
-| T12 | Provider reads backup or attachment content | The implemented authenticated codec is provider-independent; no provider transport or authorisation request exists today | Stage 3 must encrypt locally, request only `drive.appdata`, and prove transport before any provider confidentiality claim |
-| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded canonical outer frames, checksum-before-AEAD, complete identity authentication, typed failures, family limits, and one-shot ciphertext ownership exist | Stage 3 must stage and fully verify records, relations, tombstones, and references before activation |
-| T14 | Stale writer overwrites a recovered lineage or mutates blob state | No cloud writer exists today | Stage 3 requires monotonically increasing epochs, conditional control-manifest updates, ownership-loss handling, and offline prior-device reconnect tests |
-| T15 | Missing/replaced control record recreates a known lineage | No cloud control record exists today | A client that observed control state must treat absence/replacement as ownership loss and never recreate automatically |
-| T16 | Backup retention deletes the only recoverable base | Local object promotion is atomic; checkpoint follows authenticated strict readback; current/previous bases and required segments are retained; injected write/move/checkpoint failures preserve prior bytes; application runtime resumes pending work | Provider backup and recovery activation still require Stage 3 verification |
+| T12 | Provider reads backup or attachment content | Backup objects are encrypted locally through the provider-independent authenticated codec; explicit authorization requests only `drive.appdata`; create-only Drive transport has no update/PATCH path | Live credentialed two-installation qualification remains Task 14; attachment transport remains Stage 4 |
+| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, and atomic activation fail closed | Task 13 still needs truthful transient-provider presentation and genuine Activity recovery-route recreation evidence |
+| T14 | Stale writer overwrites a recovered lineage or mutates blob state | Writer epochs, conditional create-only control succession, ownership-loss handling, and explicit account-bound takeover are implemented | Task 14 must prove live two-installation and offline prior-device reconnect behaviour |
+| T15 | Missing/replaced control record recreates a known lineage | A client that observed control state treats absence/replacement as ownership loss and never recreates automatically; divergent work requires an explicit separate lineage | Live provider qualification remains Task 14 |
+| T16 | Backup retention deletes the only recoverable base | Local and provider publication retain authenticated current/previous recoverable bases and bridging segments; promotion uses strict readback; lifecycle deletion is bounded and crash-resumable | Task 14 must prove the live provider tombstone/retention scenarios |
 | T17 | Attachment blob is deleted while live or retained recovery metadata references it | No attachment transport is operational | Stage 4 requires verified tombstone backup, at least 30-day retention, and zero active/retained inventory references before collection |
 | T18 | Hostile attachment input exhausts disk or memory | Attachments are not operational | Stage 4 caps intake at 100 MiB, chunks at 4 MiB, bounds working storage, verifies every published chunk, and cleans abandoned provisional/share files |
 | T19 | Missing or damaged attachment bytes corrupt structured work | Room remains authoritative and attachments are not operational | Future UI keeps metadata, marks the file unavailable, and never disables task editing or invents content |

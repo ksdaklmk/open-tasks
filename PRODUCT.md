@@ -30,15 +30,15 @@ personal tool.
 
 ## Current Delivery Boundary
 
-The current application remains local-only. Its encrypted workspace is fully
-useful without an account or network connection, and encrypted Room is the
-sole live structured-data authority. The cloud foundation now has an
+The encrypted workspace remains fully useful without an account or network
+connection, and encrypted Room is the sole live structured-data authority.
+The cloud foundation has an
 independently generated vault-content key with separate recovery and local
 Android Keystore wrapping, plus strict bounded canonical frames for manifests,
 snapshots, operation segments and attachment chunks. The implemented internal
 authenticated object codec binds each frame's complete identity as AEAD
 associated data, verifies its checksum before decryption, and returns typed
-untrusted-object failures. Room v6 now also records accepted local generations
+untrusted-object failures. Room v7 also records accepted local generations
 and ordered backup-journal rows atomically. Strict snapshot/segment payloads,
 consistent capture, and verified encrypted current/previous local recovery
 objects are implemented under the no-backup directory.
@@ -52,11 +52,16 @@ package readiness, pending, unavailable, and inert restored-package states.
 It never claims that Android uploaded the package or invents a platform backup
 time.
 
-Google Identity, Drive transport, app-managed cloud backup, recovery
-activation, writer takeover, remote merge, and cloud attachments remain
-unavailable. A restored Android package is preserved as inert input for Stage
-3. Product copy must not imply cloud upload, attachment availability, or
-reinstall recovery until those later flows pass their release gates.
+Source now includes explicit Google authorization, create-only
+`drive.appdata` transport, app-managed backup publication, verified recovery
+staging/activation, writer takeover, lifecycle management, and the Task 13
+backup/recovery product surfaces. Normal operation still never downloads or
+merges live structured records, and cloud attachments remain unavailable.
+These cloud surfaces are not release-qualified: Task 13 is paused with two
+Important review findings around transient-provider failure copy and genuine
+Activity recovery-route recreation, and Task 14 still owns live credentialed
+two-installation qualification. Product copy must not claim release-proven
+upload or reinstall recovery until those gates pass.
 
 ## Approved future contract
 

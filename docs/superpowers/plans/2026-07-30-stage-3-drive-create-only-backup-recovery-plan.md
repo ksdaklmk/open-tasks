@@ -660,6 +660,7 @@ enum class RemoteBackupFailureCategory {
 
 enum class RecoveryFailureCategory {
     AUTHORIZATION_REQUIRED,
+    RETRYABLE_PROVIDER,
     ACCOUNT_MISMATCH,
     WRONG_PASSPHRASE,
     UNSAFE_KDF,
@@ -3217,6 +3218,12 @@ lineage, distinct disconnect/delete, fresh cleared passphrase arrays, opaque
 candidates before authentication, terminal/ambiguous states, and no private
 saved state.
 
+Process-restoration coverage must launch the production activity, enter a real
+runtime-gated recovery route, recreate the activity through the established
+instrumented harness, and prove private recovery input is absent afterwards.
+A directly rendered composable with pre-seeded fixture state does not satisfy
+this gate.
+
 - [ ] **Step 2: Run ViewModel RED**
 
 ```bash
@@ -3282,6 +3289,10 @@ Backup history deleted
 
 Use **active device**, **backup**, and **restore**. Do not use **sync**. Keep
 the existing Android card's package facts and system-settings guidance.
+Recovery authorization `RETRYABLE` failures use a distinct bounded
+`RETRYABLE_PROVIDER` presentation such as **Google Drive is temporarily
+unavailable. Try again.** They must never render Sign in or re-authorisation
+copy unless authorization is actually required.
 
 - [ ] **Step 6: Implement runtime-gated recovery shell routing**
 
@@ -3306,8 +3317,9 @@ usable with the old passphrase.
   :app:connectedDebugAndroidTest --stacktrace
 ```
 
-Expected: ViewModel, two-card, shell, process-restoration, fold, text-scale,
-accessibility, and existing Stage 2 UI tests pass.
+Expected: ViewModel, two-card, shell, genuine production-activity recovery
+recreation, fold, text-scale, accessibility, and existing Stage 2 UI tests
+pass.
 
 - [ ] **Step 9: Commit product surfaces**
 

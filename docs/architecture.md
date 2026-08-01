@@ -15,7 +15,7 @@ updates records and appends ordered backup-journal entries in one transaction.
 The current foundation seeds the sample workspace into SQLCipher once, then
 treats Room as the authority for task, timer/time-entry, Bin, search, and
 backup-journal state.
-Room v6 now also assigns one local generation to each mutation-bearing accepted
+Room v7 assigns one local generation to each mutation-bearing accepted
 command and appends its ordered `BackupJournal` rows in the same transaction.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
@@ -54,11 +54,12 @@ and `LocalBackupObjectStore` are implemented in `core:data`. The application
 runtime starts one process-scoped coordinator, coalesces journal changes, and
 resumes pending work. `PortableBackupPublisher`, verified recovery-envelope
 setup, exact Android backup eligibility, and restored-package quarantine are
-implemented in `app`. Provider stores, the attachment coordinator, and the
-recovery path remain approved but unimplemented. The internal
-`AuthenticatedCloudObjectCodec` shown at their encryption boundary is
-implemented in `core:data`.
-`RecoveryCoordinator` will be the only component allowed to reconstruct Room
+implemented in `app`. The create-only Drive backup store, explicit
+authorization boundary, runtime scheduler, lifecycle coordinator, and staged
+recovery path are implemented. The attachment coordinator remains approved but
+unimplemented. The internal `AuthenticatedCloudObjectCodec` shown at their
+encryption boundary is implemented in `core:data`.
+`RecoveryCoordinator` is the only component allowed to reconstruct Room
 from backup data or a restored portable package. `BackupCoordinator`,
 `PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
 structured product records.
@@ -358,16 +359,21 @@ before decryption, and translates untrusted frame and authentication rejection
 to typed failures. Strict snapshot/operation payload codecs and the verified
 local recovery-object coordinator now consume it. Portable-package
 publication, runtime scheduling, and local package status are implemented.
-Provider transport, restore activation, and product-visible app-managed backup
-or attachment flows are not implemented.
+Create-only provider transport, staged restore activation, and the
+product-visible app-managed backup/recovery surfaces are implemented in source.
+Task 13 is not yet approved: transient authorization transport failure still
+has false sign-in presentation, and genuine Activity/production recovery-route
+recreation coverage remains open. Attachment flows are not implemented.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry
 local backup continuity for one active writer. Normal operation never
 downloads or merges structured records.
 
-Google authorisation and Drive transport are not wired to credentials.
-Approved future transports implement separate `BackupObjectStore` and
-`AttachmentBlobStore` namespaces. Their shared codec remains
-provider-independent, and only `RecoveryCoordinator` may use decoded backup
-data to construct a staged replacement Room vault.
+Google authorisation is explicit and the Drive backup transport requests only
+`drive.appdata`; it lists/reads encrypted lineage objects and creates immutable
+objects without a PATCH/update path. Backup and attachment namespaces remain
+separate `BackupObjectStore` and `AttachmentBlobStore` boundaries. Their shared
+codec is provider-independent, and only `RecoveryCoordinator` may use decoded
+backup data to construct a staged replacement Room vault. Live structured data
+is never synchronized or merged from Drive during normal operation.
