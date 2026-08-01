@@ -171,6 +171,7 @@ fun OpenTasksApp(
     quickAddSignal: Int,
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
+    onOpenRecovery: () -> Unit = {},
     viewModel: WorkspaceViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
     encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
@@ -206,6 +207,9 @@ fun OpenTasksApp(
                     IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
                 )
             }
+        }
+        LaunchedEffect(encryptedBackupViewModel, onOpenRecovery) {
+            for (ignored in encryptedBackupViewModel.recoveryEffects) onOpenRecovery()
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }

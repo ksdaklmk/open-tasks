@@ -157,9 +157,9 @@
     <string name="recovery_drive">Find Google Drive backups</string>
     <string name="recovery_portable">Use Android backup package</string>
     <string name="recovery_start_without_restore">Start without restoring</string>
-    <string name="recovery_unreadable">The existing vault could not be opened. Retry or export the preserved vault for support.</string>
+    <string name="recovery_unreadable">The existing vault could not be opened. Retry opening it. Open Tasks will not overwrite it.</string>
     <string name="recovery_retry_unreadable">Retry opening the vault</string>
-    <string name="recovery_export_unreadable">Export preserved vault</string>
+    <string name="recovery_export_guidance">The preserved vault remains unchanged on this device. This version cannot export it.</string>
     <string name="recovery_passphrase">Recovery passphrase</string>
     <string name="recovery_restore_drive">Restore Google Drive backup</string>
     <string name="recovery_restore_portable">Restore Android backup package</string>

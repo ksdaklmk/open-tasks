@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private var openTaskId by mutableStateOf<String?>(null)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
     private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
+    private var activeRecovery by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,20 +64,28 @@ class MainActivity : ComponentActivity() {
                 is VaultRuntimeState.Recovering,
                 -> RecoverySurface(runtimeState)
                 is VaultRuntimeState.Active -> {
-                    val signal = quickAddSignal
-                    OpenTasksApp(
-                        activity = this,
-                        quickAddSignal = signal,
-                        openTaskSignal = openTaskSignal,
-                        openTaskId = openTaskId,
-                    )
+                    if (activeRecovery) {
+                        RecoverySurface(runtimeState, activeReplacement = true)
+                    } else {
+                        val signal = quickAddSignal
+                        OpenTasksApp(
+                            activity = this,
+                            quickAddSignal = signal,
+                            openTaskSignal = openTaskSignal,
+                            openTaskId = openTaskId,
+                            onOpenRecovery = { activeRecovery = true },
+                        )
+                    }
                 }
             }
         }
     }
 
     @androidx.compose.runtime.Composable
-    private fun RecoverySurface(runtimeState: VaultRuntimeState) {
+    private fun RecoverySurface(
+        runtimeState: VaultRuntimeState,
+        activeReplacement: Boolean = false,
+    ) {
         val recoveryViewModel: RecoveryViewModel = viewModel()
         val presentation by recoveryViewModel.presentation.collectAsStateWithLifecycle()
         val resolutionLauncher = rememberLauncherForActivityResult(
@@ -96,7 +105,11 @@ class MainActivity : ComponentActivity() {
             RecoveryShellMode.Activating
         } else {
             when (presentation) {
-                RecoveryPresentation.NoVault -> RecoveryShellMode.NoVault
+                RecoveryPresentation.NoVault -> if (activeReplacement) {
+                    RecoveryShellMode.ActiveReplacement
+                } else {
+                    RecoveryShellMode.NoVault
+                }
                 RecoveryPresentation.UnreadableVault -> RecoveryShellMode.UnreadableVault
                 RecoveryPresentation.Discovering -> RecoveryShellMode.Discovering
                 is RecoveryPresentation.Candidates -> RecoveryShellMode.Candidates
@@ -148,6 +161,7 @@ class MainActivity : ComponentActivity() {
                 if (next !== activeRuntime) {
                     if (activeRuntime != null) viewModelStore.clear()
                     activeRuntime = next
+                    activeRecovery = false
                 }
                 runtimeState = state
             }

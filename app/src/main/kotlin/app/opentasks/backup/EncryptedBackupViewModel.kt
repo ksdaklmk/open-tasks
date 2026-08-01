@@ -50,7 +50,6 @@ class EncryptedBackupViewModel internal constructor(
     private val connectBackup: suspend (Boolean, Intent?) -> EncryptedBackupActionResult,
     private val reauthoriseBackup: suspend (Intent?) -> EncryptedBackupActionResult,
     private val requestBackupNow: () -> Unit,
-    private val requestRestore: () -> Unit,
     private val preserveDivergentWork: suspend () -> RemoteBackupConnectResult,
     private val changeRecoveryPassphrase: suspend (CharArray, CharArray) -> PassphraseChangeResult,
     private val disconnectBackup: suspend () -> LifecycleResult,
@@ -66,7 +65,6 @@ class EncryptedBackupViewModel internal constructor(
         connectBackup = services.requireSession()::connectRemoteBackup,
         reauthoriseBackup = services.requireSession()::reauthoriseRemoteBackup,
         requestBackupNow = services.requireSession().remoteBackupRuntime::requestNow,
-        requestRestore = {},
         preserveDivergentWork =
             services.requireSession().remoteBackupLifecycleCoordinator::preserveDivergentWorkAsNewLineage,
         changeRecoveryPassphrase = services.requireSession().recoveryPassphraseChanger::change,
@@ -81,6 +79,7 @@ class EncryptedBackupViewModel internal constructor(
 
     val presentation: StateFlow<EncryptedBackupPresentation> = presented.asStateFlow()
     val resolutionEffects = Channel<PendingIntent>(Channel.BUFFERED)
+    val recoveryEffects = Channel<Unit>(Channel.BUFFERED)
 
     init {
         viewModelScope.launch(Dispatchers.Default) {
@@ -127,7 +126,7 @@ class EncryptedBackupViewModel internal constructor(
     fun restoreOrTakeOver() {
         if (!operation.tryLock()) return
         try {
-            requestRestore()
+            recoveryEffects.trySend(Unit)
         } finally {
             operation.unlock()
         }

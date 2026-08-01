@@ -170,24 +170,20 @@ class RecoveryViewModelTest {
     }
 
     @Test
-    fun noVaultCanStartWithoutRestoringAndUnreadableCanRetryOrExport() {
+    fun noVaultCanStartWithoutRestoringAndUnreadableCanRetry() {
         val starts = AtomicInteger()
         val retries = AtomicInteger()
-        val exports = AtomicInteger()
         val noVault = viewModel(createNewVault = { starts.incrementAndGet() })
         val unreadable = viewModel(
             initialPresentation = RecoveryPresentation.UnreadableVault,
             retryUnreadable = { retries.incrementAndGet() },
-            exportUnreadable = { exports.incrementAndGet() },
         )
 
         noVault.startWithoutRestoring()
         unreadable.retryUnreadableVault()
-        unreadable.exportUnreadableVault()
 
         assertTrue(waitUntil { starts.get() == 1 })
         assertEquals(1, retries.get())
-        assertEquals(1, exports.get())
         assertEquals(RecoveryPresentation.UnreadableVault, unreadable.presentation.value)
     }
 
@@ -233,7 +229,6 @@ class RecoveryViewModelTest {
         },
         createNewVault: suspend () -> Unit = {},
         retryUnreadable: () -> Unit = {},
-        exportUnreadable: () -> Unit = {},
     ) = RecoveryViewModel(
         initialPresentation = initialPresentation,
         savedStateHandle = savedStateHandle,
@@ -243,7 +238,6 @@ class RecoveryViewModelTest {
         confirmRecoveryTakeover = confirmTakeover,
         createNewVault = createNewVault,
         retryUnreadable = retryUnreadable,
-        exportUnreadable = exportUnreadable,
     )
 
     private fun takeResolution(viewModel: RecoveryViewModel): PendingIntent {

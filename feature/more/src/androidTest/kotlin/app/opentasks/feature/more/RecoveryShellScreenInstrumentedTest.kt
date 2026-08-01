@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -44,6 +45,19 @@ class RecoveryShellScreenInstrumentedTest {
         composeRule.onNodeWithTag("recovery-drive").assertHeightIsAtLeast(48.dp)
         composeRule.onNodeWithTag("recovery-portable").assertHeightIsAtLeast(48.dp)
         composeRule.onNodeWithText("Start without restoring").assertIsDisplayed()
+    }
+
+    @Test
+    fun activeReplacementOffersRecoveryWithoutStartingOver() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                RecoveryShellScreen(mode = RecoveryShellMode.ActiveReplacement)
+            }
+        }
+
+        composeRule.onNodeWithTag("recovery-drive").assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-portable").assertIsDisplayed()
+        composeRule.onNodeWithText("Start without restoring").assertDoesNotExist()
     }
 
     @Test
@@ -97,7 +111,10 @@ class RecoveryShellScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Retry opening the vault").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Export preserved vault").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-export-guidance")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
         composeRule.onNodeWithText("Start without restoring").assertDoesNotExist()
     }
 }

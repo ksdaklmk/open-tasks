@@ -57,7 +57,6 @@ class RecoveryViewModel internal constructor(
     private val confirmRecoveryTakeover: suspend (String) -> RecoveryResult,
     private val createNewVault: suspend () -> Unit,
     private val retryUnreadable: () -> Unit,
-    private val exportUnreadable: () -> Unit,
     private val closeOperations: () -> Unit = {},
 ) : ViewModel() {
     @Inject
@@ -77,7 +76,6 @@ class RecoveryViewModel internal constructor(
         confirmRecoveryTakeover = operations::confirm,
         createNewVault = runtimeManager::createNewVault,
         retryUnreadable = {},
-        exportUnreadable = {},
         closeOperations = operations::close,
     )
 
@@ -134,10 +132,6 @@ class RecoveryViewModel internal constructor(
 
     fun retryUnreadableVault() {
         retryUnreadable()
-    }
-
-    fun exportUnreadableVault() {
-        exportUnreadable()
     }
 
     internal fun savedStateForTest(): String =

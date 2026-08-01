@@ -146,11 +146,9 @@ class EncryptedBackupViewModelTest {
     @Test
     fun ownershipLossOffersTakeoverAndNewLineage() {
         val status = MutableStateFlow<RemoteBackupStatus>(RemoteBackupStatus.OwnershipLost)
-        val takeover = AtomicInteger()
         val preserve = AtomicInteger()
         val viewModel = viewModel(
             status = status,
-            requestRestore = { takeover.incrementAndGet() },
             preserveDivergent = {
                 preserve.incrementAndGet()
                 RemoteBackupConnectResult.Connected(
@@ -165,7 +163,8 @@ class EncryptedBackupViewModelTest {
         viewModel.restoreOrTakeOver()
         viewModel.preserveAsNewLineage()
 
-        assertEquals(1, takeover.get())
+        assertEquals(Unit, takeRecoveryRoute(viewModel))
+        assertFalse(viewModel.recoveryEffects.tryReceive().isSuccess)
         assertTrue(waitUntil { preserve.get() == 1 })
     }
 
@@ -261,7 +260,6 @@ class EncryptedBackupViewModelTest {
             EncryptedBackupActionResult.Completed
         },
         requestBackupNow: () -> Unit = {},
-        requestRestore: () -> Unit = {},
         preserveDivergent: suspend () -> RemoteBackupConnectResult = {
             RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
         },
@@ -282,7 +280,6 @@ class EncryptedBackupViewModelTest {
         connectBackup = connect,
         reauthoriseBackup = reauthorise,
         requestBackupNow = requestBackupNow,
-        requestRestore = requestRestore,
         preserveDivergentWork = preserveDivergent,
         changeRecoveryPassphrase = changePassphrase,
         disconnectBackup = disconnect,
@@ -297,6 +294,9 @@ class EncryptedBackupViewModelTest {
         }
         error("No resolution effect")
     }
+
+    private fun takeRecoveryRoute(viewModel: EncryptedBackupViewModel) =
+        viewModel.recoveryEffects.tryReceive().getOrThrow()
 
     private fun waitUntil(predicate: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)

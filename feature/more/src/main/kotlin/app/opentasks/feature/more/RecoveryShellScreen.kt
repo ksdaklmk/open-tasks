@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 
 enum class RecoveryShellMode {
     NoVault,
+    ActiveReplacement,
     UnreadableVault,
     Discovering,
     Candidates,
@@ -58,7 +59,6 @@ fun RecoveryShellScreen(
     onConfirmTakeover: () -> Unit = {},
     onStartWithoutRestoring: () -> Unit = {},
     onRetryUnreadable: () -> Unit = {},
-    onExportUnreadable: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var passphrase by remember { mutableStateOf("") }
@@ -87,6 +87,9 @@ fun RecoveryShellScreen(
                     ) { Text(stringResource(R.string.recovery_start_without_restore)) }
                 }
             }
+            RecoveryShellMode.ActiveReplacement -> item {
+                RecoverySources(onDiscoverDrive, onDiscoverPortable)
+            }
             RecoveryShellMode.UnreadableVault -> item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.recovery_unreadable), style = MaterialTheme.typography.bodyLarge)
@@ -94,10 +97,11 @@ fun RecoveryShellScreen(
                         onClick = onRetryUnreadable,
                         modifier = Modifier.heightIn(min = 48.dp),
                     ) { Text(stringResource(R.string.recovery_retry_unreadable)) }
-                    OutlinedButton(
-                        onClick = onExportUnreadable,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text(stringResource(R.string.recovery_export_unreadable)) }
+                    Text(
+                        stringResource(R.string.recovery_export_guidance),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("recovery-export-guidance"),
+                    )
                 }
             }
             RecoveryShellMode.Discovering,
