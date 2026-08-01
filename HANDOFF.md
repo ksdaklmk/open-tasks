@@ -3,57 +3,57 @@
 - Last updated: 1 August 2026
 - Branch: `main`
 - Session status: **Stage 3 execution is paused at the user's request
-  after completing Task 11. This session re-dispatched and closed the
-  interrupted Task 10 independent review (one fix round, `a7e8ce6`:
-  unscoped verifier record count, full snapshot-rule validation of the
-  replayed state, and retention-purge drift accounting surfacing
-  `activationGeneration` as the activation truth), then implemented and
-  closed Task 11 (`46e59ee`, `412fafa`, `b2eb2f6`): recovery discovery,
-  bounded ownership-chain authentication, the fourteen-phase
-  self-contained takeover, exact-successor claims, activation of only
-  the winning staged vault, in-process recovery from failed
-  preparations, the recovered-vault Stage 2 capture fix (sole-vault
-  attribution), and fail-closed foreign-vault-id handling. Both
-  boundaries closed with zero open Critical or Important findings after
-  fix rounds. Session rulings, all in the ignored SDD ledger
-  `.superpowers/sdd/2026-07-30-stage-3-drive-create-only-backup-recovery-plan/progress.md`:
-  the Task 10 single-vault invariant stands with VAULT
-  delete-and-reupsert replay coverage (the apparent plan conflict
-  dissolved without a user ruling); fail-closed-on-any-drift was
-  rejected in favour of provable retention-purge attribution; a takeover
-  uploads two fresh independently identified complete bases declared at
-  the generation they cover, with retained segments bridging to the
-  local generation and round-trip recoverability proven through the
-  coordinator's own download path. Carry-forwards: Task 12 must
-  implement the approved equal-generation codec tightening, resolve the
-  recovery-envelope derivation divergence (highest-credential-generation
-  bootstrap versus resolved current publication — they part after
-  rotation), and decide settled-state capture legitimacy for
-  purge-orphaned parent links; Task 13 must give manual "back up now"
-  its own retry affordance; the Task 14 live Account/R8 confirmations
-  are unchanged. Pause gates at `b2eb2f6`: repository gate 547 tasks and
-  separate release assembly 441 tasks BUILD SUCCESSFUL;
-  `git diff --check` clean. Device work this session used sole audited
-  read-only disposables with clean final audits (connected `:core:data`
-  finished at 141/141). The protected workspace and user-owned
-  `artifacts/` were untouched. The approved Galaxy Z Fold 8
-  trifold-ready adaptive slice remains scheduled immediately after the
-  Stage 3 exit gates. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
-  remain complete and independently reviewed.**
-- Current source implementation point: `b2eb2f6` (`fix: declare
-  recovered bases at the generation they cover`), closing Task 11 on top
-  of `46e59ee` and `412fafa`. The prior Stage 2 correction point is
+  after completing Task 12. Task 12 source closed in `d42ed14`,
+  `1c5b8cf`, `ab9e9ce`, and the device-fixture correction `3109108`:
+  recovery-passphrase rotation re-wraps the existing content key and
+  advances only publication sequence and recovery-credential generation;
+  disconnect persists dormancy before non-interactive authorization
+  cleanup and performs zero Drive storage operations; permanent history
+  deletion publishes and verifies one exact permanent terminal tombstone,
+  removes recoverable history in authenticated crash-resumable batches,
+  and deletes the root last; known divergent work can start only an
+  explicitly separate lineage. Task 11 carry-forwards also closed: equal
+  local generation now requires a strictly newer recovery credential;
+  recovery binds the selected envelope to the resolved current
+  publication; purges detach surviving direct children atomically; the
+  raw NUL spelling was normalised; unreleased obsolete takeover state
+  remains rejected. The initial review found one Critical and four
+  Important lifecycle gaps. Two focused fix rounds closed remote-only
+  payload enumeration, publication races, pre-promotion ownership
+  reauthentication, the shared 32-delete budget, rootless terminal resume,
+  bounded final rescans, and root-last deletion. Fresh re-review reports
+  zero open Critical, Important, or Minor findings. The first connected
+  run exposed one asynchronous test-fixture read before the purge path;
+  `3109108` changed only that fixture, its focused rerun passed, and the
+  full rerun closed at 142/142. Forced pause gates: repository
+  JVM/lint/debug 547/547 tasks and release/R8 441/441 tasks BUILD
+  SUCCESSFUL; Room schema remains v7 with no drift; scoped and working
+  `git diff --check` are clean. The sole API 37 disposable used
+  `-read-only`, no snapshot load/save, and a 1.0 font overlay; final ADB
+  and emulator-process audits are empty. Carry-forwards: Task 13 owns the
+  product surfaces and a distinct manual "back up now" retry affordance;
+  Task 14 retains the live Account derivation/revoke and R8 reachability
+  confirmations. The historical Google Drive plan amendment plus
+  user-owned `.kotlin/` and `artifacts/` remain untouched and unstaged.
+  The approved Galaxy Z Fold 8 trifold-ready adaptive slice remains
+  scheduled immediately after the Stage 3 exit gates. Stage 2, Train 1
+  Tasks 1.1–1.5, and Stage 1 remain complete and independently reviewed.**
+- Current source implementation point: `3109108` (`test: await purge
+  fixture projection`), closing Task 12 on top of `d42ed14`, `1c5b8cf`,
+  and `ab9e9ce`. The prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
   reconciliation, active-loop Retry, durable inbox truth, transient intake
   I/O, bounded threshold selection, and stale Ready presentation. Detailed
   RED/GREEN traces remain in
   `.superpowers/sdd/2026-07-29-stage-2-local-backup-android-auto-backup-plan/final-review-fix-brief.md`
-  and its adjacent ignored `final-review-fix-report.md`. The implemented
+  and its adjacent ignored `final-review-fix-report.md`. The completed Stage 2
   design remains
   `docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md`
-  and the active execution plan is
+  with its closed plan at
   `docs/superpowers/plans/2026-07-29-stage-2-local-backup-android-auto-backup-plan.md`.
+  The active execution authority is
+  `docs/superpowers/plans/2026-07-30-stage-3-drive-create-only-backup-recovery-plan.md`.
   The controller verified the correction on the sole audited API 37
   read-only/no-snapshot disposable and shut it down cleanly. The protected
   workspace was not touched. The user-owned untracked `artifacts/` directory
@@ -110,14 +110,15 @@ protocol verifier covers both Write and Edit payloads. Non-provider secret
 patterns and validity checks are unavailable in the current repository plan
 and remain disabled. Stage 2 local backup and the supplementary Android
 package are implemented and user-visible in More. Stage 3 create-only Tasks
-1–11 are committed and reviewed: qualified transport, frozen formats, Room
+1–12 are committed and reviewed: qualified transport, frozen formats, Room
 v7 remote state, crash-safe vault slot gating, explicit authorization with
 HMAC account binding, byte-bounded create-only object storage,
 crash-resumable epoch-one ownership resolution, immutable successor
 publication with namespace-safe cleanup, unique background scheduling,
-verified staging reconstruction, and recovery with writer takeover and
-activation. Passphrase rotation and remote lifecycle, product UI, cloud
-attachments and Play Console work have not started (plan Tasks 12–14).
+verified staging reconstruction, recovery with writer takeover and activation,
+passphrase rotation, disconnect, permanent remote-history deletion, and
+separate-lineage preservation. Product UI, cloud attachments, and Play Console
+work have not started (plan Tasks 13–14).
 Release gates which depend on those later features remain blocked by their
 listed prerequisites.
 
@@ -132,10 +133,10 @@ backup journal, strict snapshot/segment payloads, consistent capture, verified
 local recovery objects, recovery-envelope preparation, the portable package,
 runtime activation, exact Android eligibility, inert restored input, and
 status UI. The final review's correctness defects are closed in `f9e091b`.
-The recovery and takeover engine is committed (Task 11) with no product
-surface yet; user-facing recovery UI and attachment transport remain
-unimplemented, and the committed Stage 3 Drive transport work is recorded
-above. The historical
+The recovery, takeover, passphrase-rotation, and remote-lifecycle engines are
+committed (Tasks 11–12) with no product surface yet; user-facing recovery UI
+and attachment transport remain unimplemented, and the committed Stage 3
+Drive transport work is recorded above. The historical
 Train 1 Task 1.6 is superseded.
 
 ## Stage 3 provider and replacement-design checkpoint — 30 July 2026
@@ -422,6 +423,79 @@ Subagent-driven execution resumed from `0cf354c` on `main`.
   purge-orphaned parent links, and normalising the raw NUL character
   literal that makes grep treat `DefaultRecoveryCoordinator.kt` as
   binary.
+
+## Stage 3 create-only Task 12 checkpoint — 1 August 2026
+
+Subagent-driven execution resumed from `a14b818` on `main`. Task 12 closed in
+four scoped commits: `d42ed14` (lifecycle implementation), `1c5b8cf` and
+`ab9e9ce` (two review fix rounds), and `3109108` (test-only projection wait
+found by the final device gate).
+
+- `DefaultRecoveryPassphraseChanger` uses the exact seven durable phases. It
+  verifies the current passphrase, publishes and reads back the portable and
+  immutable replacements, reauthenticates the exact ownership tip immediately
+  before promotion, and atomically promotes the SQLCipher envelope last. It
+  retains the same content key, writer epoch, local generation, claim, active
+  device, and inventory; only publication sequence and recovery-credential
+  generation advance. Ordinary publication, rotation, and history deletion
+  share one active-vault publication gate.
+- Disconnect persists `DORMANT` before cancelling work and performing bounded
+  non-interactive token cleanup. It makes zero Drive file list/read/create/
+  delete calls, and revocation failure cannot reactivate the lineage.
+- Permanent deletion creates and authenticates one exact `TERMINATED`
+  successor and never allocates an alternate or deletes the terminal marker.
+  The encrypted operation state durably records exact authenticated inventory,
+  locally known objects, first-observed residue ages, bounded role/page cursors,
+  and deletion progress. Publications, snapshots, and segments are exhausted
+  before claims; a 64-page-per-role cap and final empty full rescan fail closed;
+  one invocation shares a 32-delete budget; the exact terminal reauthenticates
+  every later batch; young unauthenticated residue waits seven days; root is
+  deleted last; resume after root loss reads the exact terminal directly.
+- Divergent-work preservation is available only from locally recorded
+  `OWNERSHIP_LOST`, requires the bound account non-interactively, and calls the
+  existing configurator with an explicitly separate lineage. It imports,
+  merges, or reactivates no lost-lineage record.
+- Task 11 carry-forwards closed at shared roots: equal-generation retained
+  publications require a strictly newer recovery credential; recovery stages
+  the same envelope selected from the authenticated current publication and
+  fails on divergence; permanent and retention purges detach surviving direct
+  children in the same generation and journal their after-images; obsolete
+  unreleased takeover state remains strictly rejected; the raw NUL literal is
+  written as escaped `\u0000`.
+
+The initial independent review found one Critical and four Important issues:
+remote-only history could survive terminal deletion, rotation could race the
+ordinary publisher, promotion could resume without fresh ownership, payload
+and claim cleanup did not share the 32-delete budget, and deleting root first
+made terminal resume fail. Fix round 1 closed four and most of the first; the
+fresh re-review required durable page caps, direct inventory candidates, and a
+final empty rescan. Fix round 2 closed that remainder. The final fresh verdict
+is APPROVED with no open Critical, Important, or Minor finding.
+
+Final evidence:
+
+- The first connected `:core:data` run completed 141/142; its sole failure was
+  the new test reading an asynchronous workspace projection before its second
+  created task appeared, so the purge path had not run. `3109108` changed only
+  that fixture to use the file's established bounded observation wait. Its
+  focused rerun passed 1/1, then the complete sole-disposable API 37 run passed
+  142/142 with zero failures or skips.
+- The emulator was `Pixel_10_Pro_Fold`, API 37 / Android 17, 390 dpi, launched
+  `-read-only`, `-no-snapshot-load`, `-no-snapshot-save`, `-no-window`, and
+  `-no-boot-anim`. Its inherited 2.0 font scale changed only in the disposable
+  overlay to 1.0. Snapshot save was ignored at shutdown; final ADB and qemu
+  process audits were empty.
+- Forced fresh `testDebugUnitTest lintDebug :app:assembleDebug` passed 547/547
+  executed tasks. Forced fresh `:app:assembleRelease` passed 441/441 executed
+  tasks including R8, resource shrinking, and release packaging. The Room
+  schema-drift script passed with database version 7 unchanged. Scoped and
+  working `git diff --check` and the added-code hygiene scan were clean.
+
+Task 13 owns the user-facing backup/recovery surfaces and must keep the
+recorded manual "back up now" retry affordance distinct. Task 14 retains live
+Account derivation/revoke and R8 reachability confirmation. The pre-existing
+historical Google Drive plan amendment and user-owned `.kotlin/` and
+`artifacts/` remain untouched and unstaged.
 
 ## Stage 2 final-review correction checkpoint — 30 July 2026
 
@@ -1402,17 +1476,18 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 There is no uncommitted source implementation. Stage 2 is implemented,
 verified, and reviewed through its task boundaries; Stage 3 create-only
-Tasks 1–11 are committed and reviewed through `b2eb2f6`. The local
+Tasks 1–12 are committed and reviewed through `3109108`. The local
 coordinator and portable Android package are shipped source features, but
 package readiness is only a local fact. Recovery and writer takeover are
-implemented as engine code without a product surface; passphrase
-rotation, remote lifecycle, product UI, remote merge, and attachment
+implemented as engine code without a product surface; passphrase rotation,
+disconnect, permanent remote-history deletion, and separate-lineage
+preservation are also implemented. Product UI, remote merge, and attachment
 transport remain absent.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
 maintenance commit. The approved Stage 3 execution authority is the
-create-only plan named in the session status; resume it at Task 12.
+create-only plan named in the session status; resume it at Task 13.
 
 ## Resume instructions
 
@@ -1429,7 +1504,7 @@ create-only plan named in the session status; resume it at Task 12.
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
 3. With a new explicit user request, resume the approved create-only plan at
-   Task 12 with subagent-driven execution, honouring the ledger's
+   Task 13 from `3109108` with subagent-driven execution, honouring the ledger's
    carry-forwards, pending rulings, and deferred minors.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
@@ -1456,7 +1531,7 @@ recorded above.
 |---:|---|---|---|
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
-| 3 | App-managed backup and recovery takeover | Paused mid-execution after plan Task 11 | Drive backup, retention, recovery, writer epochs, and stale-writer rejection are proven |
+| 3 | App-managed backup and recovery takeover | Paused mid-execution after plan Task 12 | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, and remote lifecycle are proven |
 | 4 | Notes, activity, cloud attachments, and search | Blocked by Stage 3 | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
@@ -1469,10 +1544,10 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Resume the approved Stage 3 create-only plan at Task 12 (Rotate
-   Passphrases and Manage Remote Lifecycle) from `b2eb2f6`.
-2. Continue through Tasks 13–14, applying the approved equal-generation
-   tightening at Task 12 and the recorded Task 12/13/14 carry-forwards.
+1. Resume the approved Stage 3 create-only plan at Task 13 (Build Backup and
+   Recovery Product Surfaces) from `3109108`.
+2. Continue through Tasks 13–14, applying the recorded Task 13/14
+   carry-forwards.
 3. Close Stage 3 with the credentialed two-installation, tombstone,
    protected-workspace, privacy, schema, release, and connected gates
    before any Stage 4 work.
@@ -1590,8 +1665,8 @@ explicitly planned, verified boundaries.
 ## Recommended next action
 
 After a new explicit user request, resume the Stage 3 create-only plan at
-Task 12 (Rotate Passphrases and Manage Remote Lifecycle) with
-subagent-driven execution from `b2eb2f6`.
+Task 13 (Build Backup and Recovery Product Surfaces) with subagent-driven
+execution from `3109108`.
 Preserve Room as the sole live structured-data authority and treat the Stage 2
 Android package as supplementary recovery input, not upload evidence.
 
