@@ -1137,15 +1137,19 @@ class BackupRecordImporterInstrumentedTest {
         assertEquals(BackupGeneration(13), verified.activationGeneration)
         assertEquals(1, verified.retentionPurge.purgedTaskCount)
         assertEquals(EXPIRED_TRASH_RECORDS, verified.retentionPurge.removedRecordCount)
-        assertEquals(EXPIRED_TRASH_RECORDS + 1, verified.retentionPurge.journalEntryCount)
+        assertEquals(EXPIRED_TRASH_RECORDS + 2, verified.retentionPurge.journalEntryCount)
 
         reopenStaging()
         assertEquals(
             verified.activationGeneration.value,
             staging().backupStateDao().require(VAULT_ID).currentGeneration,
         )
-        assertEquals(2, importedCount(staging(), BackupRecordFamily.TASK))
-        assertEquals(EXPIRED_TRASH_RECORDS + 1, tableCount("backup_journal"))
+        assertEquals(3, importedCount(staging(), BackupRecordFamily.TASK))
+        assertEquals(
+            null,
+            checkNotNull(staging().taskDao().getById(EXPIRED_CHILD_TASK_ID)).parentTaskId,
+        )
+        assertEquals(EXPIRED_TRASH_RECORDS + 2, tableCount("backup_journal"))
         assertEquals(EXPIRED_DELETED_AT, tombstoneDeletedAt(EXPIRED_TASK_ID))
     }
 
@@ -1660,6 +1664,14 @@ class BackupRecordImporterInstrumentedTest {
                     title = "Expired task",
                     deletedAtEpochMillis = EXPIRED_DELETED_AT,
                 ).toBackupRecordV1(),
+                completeTask(
+                    id = EXPIRED_CHILD_TASK_ID,
+                    semantic = SemanticStatus.PLANNED,
+                    milestoneId = null,
+                ).copy(
+                    title = "Surviving child",
+                    parentTaskId = EXPIRED_TASK_ID,
+                ).toBackupRecordV1(),
                 ChecklistItemEntity(
                     id = "check-expired",
                     taskId = EXPIRED_TASK_ID,
@@ -2073,6 +2085,7 @@ class BackupRecordImporterInstrumentedTest {
         const val COMPLETE_TASK_ID = "task-complete"
         const val COMPLETE_PREREQUISITE_ID = "task-complete-prerequisite"
         const val EXPIRED_TASK_ID = "task-expired"
+        const val EXPIRED_CHILD_TASK_ID = "task-expired-child"
 
         /** The task itself plus every child record `purgeTask` cascades through. */
         const val EXPIRED_TRASH_RECORDS = 8

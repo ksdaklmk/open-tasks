@@ -132,7 +132,11 @@ class DefaultRemoteBackupConfigurator(
         accountBindingDigest: ByteArray,
         allowSeparateLineage: Boolean,
     ): RemoteBackupConnectResult {
-        val operationId = CONNECT_OPERATION_PREFIX + vaultId.value
+        val operationId = if (allowSeparateLineage) {
+            SEPARATE_CONNECT_OPERATION_PREFIX + vaultId.value
+        } else {
+            CONNECT_OPERATION_PREFIX + vaultId.value
+        }
         val stored = remoteStateStore.operation(operationId)
         val resumed = stored?.let { operation ->
             runBounded {
@@ -876,6 +880,7 @@ class DefaultRemoteBackupConfigurator(
 
     private companion object {
         const val CONNECT_OPERATION_PREFIX = "remote-connect:"
+        const val SEPARATE_CONNECT_OPERATION_PREFIX = "remote-connect-separate:"
         const val CONNECT_OPERATION_KIND = "CONNECT"
         const val BASELINE_SEQUENCE = 0L
         const val INITIAL_RECOVERY_CREDENTIAL_GENERATION = 0L

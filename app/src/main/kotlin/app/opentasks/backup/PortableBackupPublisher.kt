@@ -200,32 +200,44 @@ class PortableBackupPublisher(
             ) {
                 return@withLock status(reconciled)
             }
-            checkNotNull(
-                mutatePackage { current ->
-                    current.copy(
-                        packageState = PACKAGE_PREPARING,
-                        failureCategory = null,
-                    )
-                },
-            ) { "Backup state is unavailable before portable package capture" }
-            try {
-                val published = produce(envelope)
-                val updated = checkNotNull(
-                    mutatePackage { current ->
-                        packageState(current, published).copy(
-                            recoveryEnvelopeReady = true,
-                        )
-                    },
-                ) { "Backup state is unavailable during portable package checkpoint" }
-                status(updated)
-            } catch (failure: PublicationFailure) {
-                val latest = checkNotNull(stateStore.get(vaultId)) {
-                    "Backup state is unavailable"
-                }
-                recordFailure(latest, failure.reason, failure.withdraw)
-            }
+            publishWithEnvelopeLocked(envelope)
         } finally {
             envelope.clear()
+        }
+    }
+
+    /** Publishes and verifies a package without changing the Room recovery envelope. */
+    suspend fun publishWithEnvelope(envelope: VaultKeyEnvelope): AndroidBackupStatus =
+        mutex.withLock {
+            if (isPublicationBlocked()) return@withLock restoredInputStatus()
+            checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
+            publishWithEnvelopeLocked(envelope)
+        }
+
+    private suspend fun publishWithEnvelopeLocked(
+        envelope: VaultKeyEnvelope,
+    ): AndroidBackupStatus {
+        checkNotNull(
+            mutatePackage { current ->
+                current.copy(
+                    packageState = PACKAGE_PREPARING,
+                    failureCategory = null,
+                )
+            },
+        ) { "Backup state is unavailable before portable package capture" }
+        return try {
+            val published = produce(envelope)
+            val updated = checkNotNull(
+                mutatePackage { current ->
+                    packageState(current, published).copy(recoveryEnvelopeReady = true)
+                },
+            ) { "Backup state is unavailable during portable package checkpoint" }
+            status(updated)
+        } catch (failure: PublicationFailure) {
+            val latest = checkNotNull(stateStore.get(vaultId)) {
+                "Backup state is unavailable"
+            }
+            recordFailure(latest, failure.reason, failure.withdraw)
         }
     }
 

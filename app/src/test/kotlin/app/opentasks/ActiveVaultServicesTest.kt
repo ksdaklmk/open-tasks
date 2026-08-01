@@ -6,6 +6,8 @@ import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.domain.AndroidBackupStatusSource
+import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupRunResult
 import app.opentasks.core.domain.RemoteBackupRunner
 import org.junit.Assert.assertEquals
@@ -203,6 +205,12 @@ class ActiveVaultServicesTest {
 
         override val portableBackupPublisher: PortableBackupPublisher
             get() = error("The fake session exposes no publisher")
+
+        override val recoveryPassphraseChanger: RecoveryPassphraseChanger
+            get() = error("The fake session exposes no passphrase changer")
+
+        override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator
+            get() = error("The fake session exposes no lifecycle coordinator")
 
         override fun close() {
             remoteBackupRuntime.stop()

@@ -315,10 +315,18 @@ internal class DefaultStagedVaultVerifier(
             "The staged vault lost records beyond its retention purge"
         }
 
+        val detachedChildren = verified.asSequence()
+            .filter { it.family == BackupRecordFamily.TASK }
+            .filter { it.identity.single() !in purgedTasks.keys }
+            .filter {
+                BackupRecordFields.of(it).nullableString("parentTaskId") in purgedTasks.keys
+            }
+            .associateBy { BackupRecordKey(it) }
+
         val tombstones = purgedTasks.keys.mapTo(mutableSetOf()) { taskId ->
             BackupRecordKey(BackupRecordFamily.TOMBSTONE, listOf(taskId, TASK_OBJECT_TYPE))
         }
-        check(written.all { it in tombstones }) {
+        check(written.all { it in tombstones || it in detachedChildren }) {
             "The staged vault gained a record its retention purge did not write"
         }
         tombstones.forEach { key ->
@@ -332,6 +340,12 @@ internal class DefaultStagedVaultVerifier(
                 "A retention tombstone does not describe the task it replaced"
             }
         }
+        detachedChildren.forEach { (key, before) ->
+            val after = checkNotNull(actualByKey[key]) {
+                "The retention purge removed a surviving direct child"
+            }
+            checkDetachedChild(before, after)
+        }
         check(journalEntryCount == removed.size + written.size) {
             "The staged vault journalled changes beyond its retention purge"
         }
@@ -340,6 +354,39 @@ internal class DefaultStagedVaultVerifier(
             removedRecordCount = removed.size,
             journalEntryCount = journalEntryCount,
         )
+    }
+
+    private fun checkDetachedChild(before: BackupRecordV1, after: BackupRecordV1) {
+        check(before.family == BackupRecordFamily.TASK && after.family == before.family)
+        check(after.identity == before.identity) {
+            "The retention purge changed a surviving child identity"
+        }
+        val mutable = setOf(
+            "parentTaskId",
+            "revisionWallMillis",
+            "revisionLogical",
+            "revisionDeviceId",
+        )
+        check(
+            before.fields.filterNot { it.name in mutable } ==
+                after.fields.filterNot { it.name in mutable },
+        ) {
+            "The retention purge changed a surviving child beyond detaching it"
+        }
+        val previous = BackupRecordFields.of(before)
+        val current = BackupRecordFields.of(after)
+        check(current.nullableString("parentTaskId") == null) {
+            "The retention purge left a surviving child attached"
+        }
+        check(current.long("revisionWallMillis") > previous.long("revisionWallMillis")) {
+            "The retention purge did not advance a surviving child wall revision"
+        }
+        check(current.int("revisionLogical") == previous.int("revisionLogical") + 1) {
+            "The retention purge did not advance a surviving child logical revision"
+        }
+        check(current.string("revisionDeviceId").isNotBlank()) {
+            "The retention purge wrote an invalid surviving child device revision"
+        }
     }
 
     /** The rows `VaultDatabase.purgeTask` removes for each expired task. */

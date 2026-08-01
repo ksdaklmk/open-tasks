@@ -2,6 +2,7 @@ package app.opentasks.core.data.backup
 
 import androidx.room.withTransaction
 import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupObject
 import app.opentasks.core.domain.RemoteBackupOperation
@@ -46,6 +47,9 @@ class RoomRemoteBackupStore(
 
     override suspend fun active(vaultId: VaultId): RemoteBackupConfiguration? =
         database.remoteBackupConfigDao().activeForVault(vaultId.value)?.toDomain()
+
+    override suspend fun configurations(vaultId: VaultId): List<RemoteBackupConfiguration> =
+        database.remoteBackupConfigDao().forVault(vaultId.value).map(RemoteBackupConfigEntity::toDomain)
 
     override suspend fun known(lineageId: CloudLineageId): RemoteBackupConfiguration? =
         database.remoteBackupConfigDao().byLineageId(lineageId.value)?.toDomain()
@@ -164,6 +168,33 @@ class RoomRemoteBackupStore(
                 updatedAtEpochMillis = entity.updatedAtEpochMillis,
             )
             updated == 1
+        }
+    }
+
+    override suspend fun promoteRecoveryEnvelope(
+        lineageId: CloudLineageId,
+        expected: RemoteBackupStateVersion,
+        next: RemoteBackupConfiguration,
+        envelope: VaultKeyEnvelope,
+        operationId: String,
+        expectedOperationPhase: String,
+        nextOperation: RemoteBackupOperation,
+    ): Boolean = database.withTransaction {
+        val operation = database.remoteBackupOperationDao().get(operationId)
+            ?: return@withTransaction false
+        if (operation.phase != expectedOperationPhase) return@withTransaction false
+        if (!compareAndSet(lineageId, expected, next)) return@withTransaction false
+        val entity = RecoveryEnvelopeCodec.toEntity(next.vaultId, envelope)
+        try {
+            database.vaultRecoveryEnvelopeDao().upsert(entity)
+            check(
+                transitionOperation(operationId, expectedOperationPhase, nextOperation),
+            ) { "Recovery-envelope operation changed during promotion" }
+            true
+        } finally {
+            entity.salt.fill(0)
+            entity.nonce.fill(0)
+            entity.wrappedKeyset.fill(0)
         }
     }
 

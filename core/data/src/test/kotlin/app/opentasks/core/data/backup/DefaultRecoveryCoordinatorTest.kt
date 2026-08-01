@@ -193,6 +193,21 @@ class DefaultRecoveryCoordinatorTest {
     }
 
     @Test
+    fun selectedRecoveryEnvelopeMustBelongToTheResolvedCurrentPublication() =
+        runRecoveryTest { fixture ->
+            fixture.seedLineage()
+            fixture.seedHigherCredentialPublicationInAnotherEpoch()
+
+            val result = fixture.prepare(fixture.discoverDrive())
+
+            assertEquals(
+                RecoveryResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+                result,
+            )
+            assertTrue(fixture.staging.sessions.isEmpty())
+        }
+
+    @Test
     fun aForeignVaultIdentityIsRefusedBeforeAnythingIsStaged() = runRecoveryTest(
         expectedVaultId = VaultId("vault-primary"),
     ) { fixture ->
@@ -900,6 +915,36 @@ private class RecoveryFixture(
         republishBaselineInventory()
     }
 
+    fun seedHigherCredentialPublicationInAnotherEpoch() {
+        val original = RemoteBackupTestFixtures.envelope()
+        val envelope = original.copy(
+            kdf = original.kdf.copy(
+                salt = ByteArray(16) { (it + 17).toByte() },
+            ),
+        )
+        original.kdf.salt.fill(0)
+        val providerObjectId = "provider-recovery-newer-credential"
+        val encoded = try {
+            encodedBaseline(
+                publicationId = "00000000-0000-4000-8000-0000000000ee",
+                providerFileId = providerObjectId,
+                writerEpoch = 2,
+                recoveryCredentialGeneration = 1,
+                envelope = envelope,
+            )
+        } finally {
+            envelope.kdf.salt.fill(0)
+            envelope.nonce.fill(0)
+            envelope.wrappedKeyset.fill(0)
+        }
+        store.put(
+            providerObjectId = providerObjectId,
+            bytes = encoded,
+            metadata = RemoteBackupTestFixtures.publicationMetadata(providerObjectId, 2),
+            lineageId = lineageId(),
+        )
+    }
+
     /** Publishes the baseline over whatever the inventory objects now hold. */
     private fun republishBaselineInventory() {
         val baseline = encodedBaseline(
@@ -1268,13 +1313,15 @@ private class RecoveryFixture(
     private fun encodedBaseline(
         publicationId: String,
         providerFileId: String,
+        writerEpoch: Long = 1,
+        recoveryCredentialGeneration: Long = 0,
+        envelope: VaultKeyEnvelope = RemoteBackupTestFixtures.envelope(),
     ): ByteArray {
-        val envelope = RemoteBackupTestFixtures.envelope()
         val draft = PublicationManifestV1(
             bootstrapSha256 = ZERO_SHA256,
             lineageId = RecoveryTestLineage.LINEAGE_ID,
             sourceVaultId = RecoveryTestLineage.VAULT_ID,
-            writerEpoch = 1,
+            writerEpoch = writerEpoch,
             activeDeviceId = RemoteBackupTestFixtures.DEVICE_ID,
             publicationProviderFileId = providerFileId,
             publicationId = publicationId,
@@ -1296,7 +1343,7 @@ private class RecoveryFixture(
             currentBaseObjectId = RecoveryTestLineage.BASE_A_LOGICAL_ID,
             fallbackBaseObjectId = RecoveryTestLineage.BASE_B_LOGICAL_ID,
             inventory = inventory(),
-            recoveryCredentialGeneration = 0,
+            recoveryCredentialGeneration = recoveryCredentialGeneration,
         )
         val manifest = draft.copy(
             bootstrapSha256 = publicationCodec.bootstrapSha256(draft, envelope),

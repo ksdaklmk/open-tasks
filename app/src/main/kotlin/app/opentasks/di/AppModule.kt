@@ -8,6 +8,8 @@ import app.opentasks.backup.AndroidAtomicPackageFile
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.backup.AndroidBackupRuntime
 import app.opentasks.backup.DefaultAndroidBackupRuntime
+import app.opentasks.backup.DefaultRecoveryPassphraseChanger
+import app.opentasks.backup.DefaultRemoteBackupLifecycleCoordinator
 import app.opentasks.backup.DefaultRemoteBackupRunner
 import app.opentasks.backup.DefaultRemoteBackupRuntime
 import app.opentasks.backup.PersistedAndroidBackupStatusSource
@@ -33,17 +35,22 @@ import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.VaultRuntimeManager
 import app.opentasks.core.data.backup.CreateOnlyDriveObjectStore
 import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
+import app.opentasks.core.data.backup.DefaultOwnershipChainStore
+import app.opentasks.core.data.backup.DefaultPublicationCatalog
 import app.opentasks.core.data.backup.DefaultRemoteBackupCoordinator
 import app.opentasks.core.data.backup.OwnershipClaimCodec
 import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PortablePackageCodec
 import app.opentasks.core.data.backup.PublicationCodec
 import app.opentasks.core.data.backup.RemoteObjectCodec
+import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
+import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
@@ -169,6 +176,17 @@ object AppModule {
         services: ActiveVaultServices,
     ): PortableBackupPublisher = services.requireSession().portableBackupPublisher
 
+    @Provides
+    fun provideRecoveryPassphraseChanger(
+        services: ActiveVaultServices,
+    ): RecoveryPassphraseChanger = services.requireSession().recoveryPassphraseChanger
+
+    @Provides
+    fun provideRemoteBackupLifecycleCoordinator(
+        services: ActiveVaultServices,
+    ): RemoteBackupLifecycleCoordinator =
+        services.requireSession().remoteBackupLifecycleCoordinator
+
     /**
      * Builds every vault-bound service for the active slot in one bundle.
      *
@@ -227,6 +245,22 @@ object AppModule {
             contentKeyStore = contentKeyStore,
             codec = packageCodec,
         )
+        val ownershipCodec = OwnershipClaimCodec(codec)
+        val publicationCodec = PublicationCodec(codec)
+        val openRemoteObjectStore = { transport: CreateOnlyDriveTransport ->
+            CreateOnlyDriveObjectStore(
+                transport = transport,
+                transferStore = runtime.remoteBackupStore,
+                stagingRoot = files.remoteTransferRoot,
+            )
+        }
+        val remoteConfigurator = LocalVaultRepositoryFactory.createRemoteBackupConfigurator(
+            runtime = runtime,
+            backupCoordinator = coordinator,
+            localObjectStore = localObjectStore,
+            authenticatedCodec = codec,
+            remoteStagingRoot = files.remoteTransferRoot,
+        )
         // Exactly one coordinator, and one runner around it, exists per open
         // slot: retention and durable publication both depend on no two runs
         // for a vault ever overlapping.
@@ -247,8 +281,8 @@ object AppModule {
                     localObjectStore = localObjectStore,
                     stagingRoot = files.remoteTransferRoot,
                 ),
-                ownershipCodec = OwnershipClaimCodec(codec),
-                publicationCodec = PublicationCodec(codec),
+                ownershipCodec = ownershipCodec,
+                publicationCodec = publicationCodec,
             ),
             authorize = { expectedAccountDigest ->
                 authorizationManager.authorize(
@@ -257,13 +291,32 @@ object AppModule {
                 )
             },
             clearToken = authorizationManager::clearToken,
-            openObjectStore = { transport ->
-                CreateOnlyDriveObjectStore(
-                    transport = transport,
-                    transferStore = runtime.remoteBackupStore,
-                    stagingRoot = files.remoteTransferRoot,
-                )
-            },
+            openObjectStore = openRemoteObjectStore,
+        )
+        val recoveryPassphraseChanger = DefaultRecoveryPassphraseChanger(
+            vaultId = runtime.vaultId,
+            crypto = crypto,
+            recoveryEnvelopeStore = runtime.recoveryEnvelopeStore,
+            remoteStateStore = runtime.remoteBackupStore,
+            publishPortable = publisher::publishWithEnvelope,
+            authorizationManager = authorizationManager,
+            openObjectStore = openRemoteObjectStore,
+            ownershipStore = { DefaultOwnershipChainStore(it, ownershipCodec) },
+            publicationCatalog = { DefaultPublicationCatalog(it, publicationCodec) },
+            publicationCodec = publicationCodec,
+        )
+        val lifecycleCoordinator = DefaultRemoteBackupLifecycleCoordinator(
+            vaultId = runtime.vaultId,
+            crypto = crypto,
+            recoveryEnvelopeStore = runtime.recoveryEnvelopeStore,
+            remoteStateStore = runtime.remoteBackupStore,
+            transferStore = runtime.remoteBackupStore,
+            scheduler = workScheduler,
+            authorizationManager = authorizationManager,
+            openObjectStore = openRemoteObjectStore,
+            ownershipStore = { DefaultOwnershipChainStore(it, ownershipCodec) },
+            ownershipCodec = ownershipCodec,
+            configurator = remoteConfigurator,
         )
         return DefaultActiveVaultSession(
             scope = scope,
@@ -360,6 +413,8 @@ object AppModule {
                 },
             ),
             remoteBackupRunner = remoteRunner,
+            recoveryPassphraseChanger = recoveryPassphraseChanger,
+            remoteBackupLifecycleCoordinator = lifecycleCoordinator,
         )
     }
 }

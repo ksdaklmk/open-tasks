@@ -381,7 +381,7 @@ class DefaultRecoveryCoordinator internal constructor(
         } catch (failure: Exception) {
             RecoveryResult.Failed(failure.toRecoveryReason())
         } finally {
-            passphrase.fill(' ')
+            passphrase.fill('\u0000')
         }
     }
 
@@ -508,73 +508,84 @@ class DefaultRecoveryCoordinator internal constructor(
         val chainStore = DefaultOwnershipChainStore(objectStore, ownershipCodec)
         val catalog = DefaultPublicationCatalog(objectStore, publicationCodec)
 
-        val envelope = when (val read = readRecoveryEnvelope(objectStore, lineageId)) {
+        val selected = when (val read = readRecoveryEnvelope(objectStore, lineageId)) {
             is StepResult.Failed -> return RecoveryResult.Failed(read.reason)
             is StepResult.Ok -> read.value
         }
-        val contentKey = try {
-            crypto.unlock(passphrase, envelope)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Exception) {
-            return RecoveryResult.Failed(RecoveryFailureCategory.WRONG_PASSPHRASE)
-        } finally {
-            envelope.clearEnvelope()
-        }
-        return contentKey.use { key ->
-            val tip = when (val resolution = chainStore.resolve(rootProviderId, key)) {
-                is OwnershipResolution.Blocked ->
-                    return@use RecoveryResult.Failed(resolution.reason.toRecoveryReason())
-
-                is OwnershipResolution.Terminated ->
-                    return@use RecoveryResult.Failed(RecoveryFailureCategory.TERMINATED)
-
-                is OwnershipResolution.Active -> resolution.tip
+        try {
+            val contentKey = try {
+                crypto.unlock(passphrase, selected.envelope)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return RecoveryResult.Failed(RecoveryFailureCategory.WRONG_PASSPHRASE)
             }
-            val epoch = WriterEpoch(tip.claim.writerEpoch)
-            val claimProviderId = runBounded {
-                ProviderObjectId.of(checkNotNull(tip.claim.nextSuccessorProviderFileId))
-            } ?: return@use RecoveryResult.Failed(
-                RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
-            )
-            val candidates = when (
-                val discovery = catalog.discoverBootstraps(
-                    lineageId,
-                    epoch,
-                    runBounded { ProviderObjectId.of(tip.claim.providerFileId) }
-                        ?: return@use RecoveryResult.Failed(
-                            RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
-                        ),
+            return contentKey.use { key ->
+                val tip = when (val resolution = chainStore.resolve(rootProviderId, key)) {
+                    is OwnershipResolution.Blocked ->
+                        return@use RecoveryResult.Failed(resolution.reason.toRecoveryReason())
+
+                    is OwnershipResolution.Terminated ->
+                        return@use RecoveryResult.Failed(RecoveryFailureCategory.TERMINATED)
+
+                    is OwnershipResolution.Active -> resolution.tip
+                }
+                val epoch = WriterEpoch(tip.claim.writerEpoch)
+                val claimProviderId = runBounded {
+                    ProviderObjectId.of(checkNotNull(tip.claim.nextSuccessorProviderFileId))
+                } ?: return@use RecoveryResult.Failed(
+                    RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
                 )
-            ) {
-                is PublicationCandidateDiscovery.Blocked ->
-                    return@use RecoveryResult.Failed(discovery.reason.toRecoveryReason())
+                val candidates = when (
+                    val discovery = catalog.discoverBootstraps(
+                        lineageId,
+                        epoch,
+                        runBounded { ProviderObjectId.of(tip.claim.providerFileId) }
+                            ?: return@use RecoveryResult.Failed(
+                                RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                            ),
+                    )
+                ) {
+                    is PublicationCandidateDiscovery.Blocked ->
+                        return@use RecoveryResult.Failed(discovery.reason.toRecoveryReason())
 
-                is PublicationCandidateDiscovery.Discovered -> discovery.candidates
-            }
-            val resolved = when (val resolution = catalog.resolve(tip, candidates, key)) {
-                is PublicationResolution.Failed ->
-                    return@use RecoveryResult.Failed(resolution.reason.toRecoveryReason())
+                    is PublicationCandidateDiscovery.Discovered -> discovery.candidates
+                }
+                val resolved = when (val resolution = catalog.resolve(tip, candidates, key)) {
+                    is PublicationResolution.Failed ->
+                        return@use RecoveryResult.Failed(resolution.reason.toRecoveryReason())
 
-                is PublicationResolution.Resolved -> resolution.current
+                    is PublicationResolution.Resolved -> resolution.current
+                }
+                if (resolved.bootstrap.recoveryCredentialGeneration !=
+                    selected.bootstrap.recoveryCredentialGeneration ||
+                    resolved.bootstrap.recoveryEnvelope != selected.bootstrap.recoveryEnvelope
+                ) {
+                    return@use RecoveryResult.Failed(
+                        RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                    )
+                }
+                if (resolved.manifest.sourceVaultId != expectedVaultId.value) {
+                    return@use RecoveryResult.Failed(foreignVaultRejection())
+                }
+                markPhase(RecoveryTakeoverPhase.SOURCE_AUTHENTICATED)
+                Takeover(
+                    objectStore = objectStore,
+                    session = null,
+                    contentKey = key,
+                    state = null,
+                ).prepare(
+                    lineageId = lineageId,
+                    rootProviderId = rootProviderId,
+                    tip = tip,
+                    claimProviderId = claimProviderId,
+                    publication = resolved,
+                    envelope = selected.envelope,
+                    accountBindingDigest = accountBindingDigest,
+                )
             }
-            if (resolved.manifest.sourceVaultId != expectedVaultId.value) {
-                return@use RecoveryResult.Failed(foreignVaultRejection())
-            }
-            markPhase(RecoveryTakeoverPhase.SOURCE_AUTHENTICATED)
-            Takeover(
-                objectStore = objectStore,
-                session = null,
-                contentKey = key,
-                state = null,
-            ).prepare(
-                lineageId = lineageId,
-                rootProviderId = rootProviderId,
-                tip = tip,
-                claimProviderId = claimProviderId,
-                publication = resolved,
-                accountBindingDigest = accountBindingDigest,
-            )
+        } finally {
+            selected.envelope.clearEnvelope()
         }
     }
 
@@ -590,7 +601,7 @@ class DefaultRecoveryCoordinator internal constructor(
     private suspend fun readRecoveryEnvelope(
         objectStore: CreateOnlyBackupObjectStore,
         lineageId: CloudLineageId,
-    ): StepResult<VaultKeyEnvelope> {
+    ): StepResult<SelectedRecoveryEnvelope> {
         val listed = try {
             listAllBounded(
                 objectStore,
@@ -638,7 +649,7 @@ class DefaultRecoveryCoordinator internal constructor(
             ?: return StepResult.Failed(RecoveryFailureCategory.MISSING_REQUIRED_OBJECT)
         val envelope = runBounded { RecoveryEnvelopeCodec.fromPayload(bootstrap.recoveryEnvelope) }
             ?: return StepResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-        return StepResult.Ok(envelope)
+        return StepResult.Ok(SelectedRecoveryEnvelope(bootstrap, envelope))
     }
 
     /**
@@ -663,6 +674,7 @@ class DefaultRecoveryCoordinator internal constructor(
             tip: VerifiedOwnershipClaim,
             claimProviderId: ProviderObjectId,
             publication: VerifiedPublication,
+            envelope: VaultKeyEnvelope,
             accountBindingDigest: ByteArray,
         ): RecoveryResult {
             // Epoch overflow fails closed before anything is reserved: a
@@ -682,28 +694,17 @@ class DefaultRecoveryCoordinator internal constructor(
                 is StepResult.Failed -> return RecoveryResult.Failed(downloaded.reason)
                 is StepResult.Ok -> downloaded.value
             }
-            val envelope = runBounded {
-                RecoveryEnvelopeCodec.fromPayload(publication.bootstrap.recoveryEnvelope)
-            } ?: return RecoveryResult.Failed(RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE)
-
-            return try {
-                stage(
-                    lineageId = lineageId,
-                    rootProviderId = rootProviderId,
-                    tip = tip,
-                    claimProviderId = claimProviderId,
-                    manifest = manifest,
-                    source = source,
-                    segments = segments,
-                    envelope = envelope,
-                    accountBindingDigest = accountBindingDigest,
-                )
-            } finally {
-                // The envelope holds wrapped key material; it is cleared as
-                // soon as the staged vault and the epoch baseline that publish
-                // it have been written.
-                envelope.clearEnvelope()
-            }
+            return stage(
+                lineageId = lineageId,
+                rootProviderId = rootProviderId,
+                tip = tip,
+                claimProviderId = claimProviderId,
+                manifest = manifest,
+                source = source,
+                segments = segments,
+                envelope = envelope,
+                accountBindingDigest = accountBindingDigest,
+            )
         }
 
         /**
@@ -1917,6 +1918,11 @@ private object LenientRecoveryBootstrapJson {
 
 @Serializable
 private data class ProbeBootstrapV1(val recoveryEnvelope: RecoveryEnvelopePayloadV1)
+
+private data class SelectedRecoveryEnvelope(
+    val bootstrap: PublicationBootstrapV1,
+    val envelope: VaultKeyEnvelope,
+)
 
 @OptIn(ExperimentalSerializationApi::class)
 private object StrictRecoveryTakeoverJson {

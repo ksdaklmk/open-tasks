@@ -258,18 +258,25 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
 
     override suspend fun revokeAccess(session: AuthorizedDriveSession) {
         val account = session.accountOrNull()
+        val token = session.accessTokenOrNull()
+        var firstFailure: Throwable? = null
         try {
             if (account != null) {
-                identity.revokeAccess(account, DRIVE_APPDATA_SCOPE)
-            } else {
-                // No account handle: nothing to revoke server-side, but the
-                // locally cached token can still be dropped from the Google
-                // token cache so a later authorize() does not silently reuse it.
-                session.accessTokenOrNull()?.let { identity.clearToken(it) }
+                try {
+                    identity.revokeAccess(account, DRIVE_APPDATA_SCOPE)
+                } catch (failure: Throwable) {
+                    firstFailure = failure
+                }
+            }
+            try {
+                token?.let { identity.clearToken(it) }
+            } catch (failure: Throwable) {
+                if (firstFailure == null) firstFailure = failure
             }
         } finally {
             session.close()
         }
+        firstFailure?.let { throw it }
     }
 
     private suspend fun resolveOutcome(

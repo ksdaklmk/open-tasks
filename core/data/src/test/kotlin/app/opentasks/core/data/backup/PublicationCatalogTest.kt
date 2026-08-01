@@ -565,7 +565,7 @@ private class EpochOnePublicationFixture {
         currentBaseObjectId = RemoteBackupTestFixtures.BASE_A_LOGICAL_ID,
         fallbackBaseObjectId = RemoteBackupTestFixtures.BASE_B_LOGICAL_ID,
         inventory = inventory(localGeneration),
-        recoveryCredentialGeneration = 0,
+        recoveryCredentialGeneration = 1,
     )
 
     private fun inventory(generation: Long): List<RemoteInventoryItemV1> = listOf(

@@ -1371,6 +1371,8 @@ class RoomVaultRepository(
         database.purgeTask(
             taskId = entity.id,
             tombstone = tombstone,
+            revisionWallMillis = purgedAt.toEpochMilli(),
+            revisionDeviceId = deviceId.value,
         )
     }
 

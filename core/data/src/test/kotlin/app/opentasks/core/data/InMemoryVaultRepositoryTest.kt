@@ -565,6 +565,43 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun permanentlyPurgingAParentDetachesItsSurvivingChild() = runBlocking {
+        val parent = OpenTasksFixtures.tasks[2]
+        val child = OpenTasksFixtures.tasks[3].copy(parentTaskId = parent.id)
+        val initial = OpenTasksFixtures.snapshot.copy(
+            tasks = OpenTasksFixtures.tasks.map { if (it.id == child.id) child else it },
+        )
+        val repository = InMemoryVaultRepository(initial = initial)
+
+        repository.execute(DomainCommand.DeleteTask(parent.id))
+        repository.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+
+        assertEquals(
+            null,
+            repository.observeWorkspace().value.tasks.single { it.id == child.id }.parentTaskId,
+        )
+    }
+
+    @Test
+    fun expiryPurgingAParentDetachesItsSurvivingChild() = runBlocking {
+        val parent = OpenTasksFixtures.tasks[2]
+        val child = OpenTasksFixtures.tasks[3].copy(parentTaskId = parent.id)
+        val initial = OpenTasksFixtures.snapshot.copy(
+            tasks = OpenTasksFixtures.tasks.map { if (it.id == child.id) child else it },
+        )
+        val repository = InMemoryVaultRepository(initial = initial)
+        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
+
+        repository.execute(DomainCommand.DeleteTask(parent.id, deletedAt))
+        repository.execute(DomainCommand.PurgeExpiredTrash(Instant.parse("2026-07-02T10:00:00Z")))
+
+        assertEquals(
+            null,
+            repository.observeWorkspace().value.tasks.single { it.id == child.id }.parentTaskId,
+        )
+    }
+
+    @Test
     fun searchCoversDescriptionsAndProjects() = runBlocking {
         val descriptionResult = repository.search(SearchQuery("decision-ready"))
         val projectResult = repository.search(SearchQuery("quarterly accounts"))

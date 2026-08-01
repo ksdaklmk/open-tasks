@@ -5,6 +5,8 @@ import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.domain.AndroidBackupStatusSource
+import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -30,6 +32,10 @@ interface ActiveVaultSession : AutoCloseable {
      * joins the run in flight instead of starting a second coordinator.
      */
     val remoteBackupRunner: RemoteBackupRunner
+
+    val recoveryPassphraseChanger: RecoveryPassphraseChanger
+
+    val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator
 }
 
 class DefaultActiveVaultSession(
@@ -39,6 +45,8 @@ class DefaultActiveVaultSession(
     override val portableBackupPublisher: PortableBackupPublisher,
     override val remoteBackupRuntime: RemoteBackupRuntime,
     override val remoteBackupRunner: RemoteBackupRunner,
+    override val recoveryPassphraseChanger: RecoveryPassphraseChanger,
+    override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator,
 ) : ActiveVaultSession {
     /** Cancels scheduled remote work before the observing scope goes away. */
     override fun close() {

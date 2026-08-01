@@ -8,6 +8,7 @@ import androidx.room.Update
 import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupObject
 import app.opentasks.core.domain.RemoteBackupOperation
+import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.RemoteBackupStateVersion
 import app.opentasks.core.model.RemoteLogicalObjectId
@@ -27,6 +28,9 @@ interface RemoteBackupConfigDao {
         """,
     )
     suspend fun activeForVault(vaultId: String): RemoteBackupConfigEntity?
+
+    @Query("SELECT * FROM remote_backup_config WHERE vaultId = :vaultId")
+    suspend fun forVault(vaultId: String): List<RemoteBackupConfigEntity>
 
     @Query(
         """
@@ -210,6 +214,9 @@ interface RemoteBackupObjectDao {
 interface RemoteBackupStateStore {
     suspend fun active(vaultId: VaultId): RemoteBackupConfiguration?
 
+    suspend fun configurations(vaultId: VaultId): List<RemoteBackupConfiguration> =
+        listOfNotNull(active(vaultId))
+
     suspend fun known(lineageId: CloudLineageId): RemoteBackupConfiguration?
 
     fun observeActive(vaultId: VaultId): Flow<RemoteBackupConfiguration?>
@@ -221,6 +228,16 @@ interface RemoteBackupStateStore {
         expected: RemoteBackupStateVersion,
         next: RemoteBackupConfiguration,
     ): Boolean
+
+    suspend fun promoteRecoveryEnvelope(
+        lineageId: CloudLineageId,
+        expected: RemoteBackupStateVersion,
+        next: RemoteBackupConfiguration,
+        envelope: VaultKeyEnvelope,
+        operationId: String,
+        expectedOperationPhase: String,
+        nextOperation: RemoteBackupOperation,
+    ): Boolean = error("Atomic recovery-envelope promotion is unavailable")
 
     /**
      * The durable record a crash-interrupted operation resumes from. Its

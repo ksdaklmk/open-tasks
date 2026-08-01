@@ -148,6 +148,37 @@ class PortableBackupPublisherTest {
     }
 
     @Test
+    fun explicitEnvelopePublicationVerifiesPackageWithoutPromotingEnvelope() = runBlocking {
+        val events = mutableListOf<String>()
+        val activeEnvelope = envelope().also { it.kdf.salt[0] = 99 }
+        val pendingEnvelope = envelope()
+        val stateStore = FakeStateStore(
+            state(
+                generation = 7,
+                packageGeneration = 6,
+                packageState = "UPDATE_PENDING",
+                envelopeReady = true,
+            ),
+        )
+        val envelopeStore = FakeEnvelopeStore(events, activeEnvelope)
+        val status = publisher(
+            stateStore = stateStore,
+            envelopeStore = envelopeStore,
+            file = FakeAtomicPackageFile("package:6".toByteArray(), events),
+            events = events,
+        ).publishWithEnvelope(pendingEnvelope)
+
+        assertTrue(status is AndroidBackupStatus.Ready)
+        assertArrayEquals(
+            RecoveryEnvelopeCodec.encode(activeEnvelope),
+            RecoveryEnvelopeCodec.encode(checkNotNull(envelopeStore.envelope)),
+        )
+        assertEquals(listOf("capture", "encode", "start", "flush", "verify", "finish"), events)
+        activeEnvelope.clear()
+        pendingEnvelope.clear()
+    }
+
+    @Test
     fun transientEncodeVerificationWriteFlushAndFinishFailuresRetainPriorVerifiedFile() {
         val cases = listOf("encode", "verify", "write", "flush", "finish")
         cases.forEach { failurePoint ->

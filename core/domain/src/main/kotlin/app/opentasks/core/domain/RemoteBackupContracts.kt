@@ -554,6 +554,52 @@ interface RecoveryCoordinator {
     ): RecoveryResult
 }
 
+enum class PassphraseChangeFailureCategory {
+    CURRENT_PASSPHRASE_INVALID,
+    PORTABLE_PACKAGE,
+    REMOTE_BACKUP,
+    LOCAL_STORAGE,
+}
+
+interface RecoveryPassphraseChanger {
+    suspend fun change(
+        currentPassphrase: CharArray,
+        newPassphrase: CharArray,
+    ): PassphraseChangeResult
+}
+
+sealed interface PassphraseChangeResult {
+    data class Changed(
+        val olderCopiesRemainUsable: Boolean = true,
+    ) : PassphraseChangeResult
+
+    data class Failed(
+        val reason: PassphraseChangeFailureCategory,
+    ) : PassphraseChangeResult
+}
+
+interface RemoteBackupLifecycleCoordinator {
+    suspend fun disconnect(): LifecycleResult
+
+    suspend fun deleteHistory(passphrase: CharArray): LifecycleResult
+
+    suspend fun preserveDivergentWorkAsNewLineage(): RemoteBackupConnectResult
+}
+
+sealed interface LifecycleResult {
+    data class Disconnected(
+        val authorizationRevoked: Boolean,
+    ) : LifecycleResult
+
+    data object HistoryDeleted : LifecycleResult
+
+    data object OwnershipRequired : LifecycleResult
+
+    data class Failed(
+        val reason: RemoteBackupFailureCategory,
+    ) : LifecycleResult
+}
+
 interface CreateOnlyBackupObjectStore {
     suspend fun generateProviderIds(
         count: Int,

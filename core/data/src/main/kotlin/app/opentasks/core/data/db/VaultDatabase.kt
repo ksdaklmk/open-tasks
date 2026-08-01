@@ -69,6 +69,22 @@ interface TaskDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(task: TaskEntity)
 
+    @Query(
+        """
+        UPDATE tasks SET
+            parentTaskId = NULL,
+            revisionWallMillis = MAX(revisionWallMillis + 1, :revisionWallMillis),
+            revisionLogical = revisionLogical + 1,
+            revisionDeviceId = :revisionDeviceId
+        WHERE parentTaskId = :parentTaskId
+        """,
+    )
+    suspend fun detachChildrenForPurgedParent(
+        parentTaskId: String,
+        revisionWallMillis: Long,
+        revisionDeviceId: String,
+    ): Int
+
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteById(id: String): Int
 }
@@ -425,7 +441,14 @@ abstract class VaultDatabase : RoomDatabase() {
     open suspend fun purgeTask(
         taskId: String,
         tombstone: TombstoneEntity,
+        revisionWallMillis: Long,
+        revisionDeviceId: String,
     ) {
+        taskDao().detachChildrenForPurgedParent(
+            parentTaskId = taskId,
+            revisionWallMillis = revisionWallMillis,
+            revisionDeviceId = revisionDeviceId,
+        )
         workspaceDao().deleteChecklistForTask(taskId)
         workspaceDao().deleteTagsForTask(taskId)
         workspaceDao().deleteDependenciesForTask(taskId)

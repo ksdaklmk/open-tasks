@@ -97,6 +97,25 @@ class DefaultRemoteBackupConfiguratorTest {
     }
 
     @Test
+    fun aSeparateLineageDoesNotAdoptACompletedOrdinaryConnectionOperation() =
+        runConnectTest { fixture ->
+            val original = fixture.configurator.connect(
+                fixture.store,
+                ACCOUNT_DIGEST,
+                false,
+            ) as RemoteBackupConnectResult.Connected
+            fixture.remoteStateStore.dropStoredConfiguration()
+
+            val separate = fixture.configurator.connect(
+                fixture.store,
+                ACCOUNT_DIGEST,
+                true,
+            ) as RemoteBackupConnectResult.Connected
+
+            assertNotEquals(original.lineageId, separate.lineageId)
+        }
+
+    @Test
     fun bothBasesReauthenticateTheSameCompleteCaptureUnderIndependentIdentities() = runConnectTest { fixture ->
         fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
 
@@ -840,6 +859,10 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
     /** Rewrites the stored row as if it belonged to a different vault. */
     fun reassignStoredVault(vaultId: VaultId) {
         stored = checkNotNull(stored).copy(vaultId = vaultId)
+    }
+
+    fun dropStoredConfiguration() {
+        stored = null
     }
 
     override suspend fun compareAndSet(

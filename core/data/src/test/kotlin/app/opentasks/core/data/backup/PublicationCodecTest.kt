@@ -115,7 +115,24 @@ class PublicationCodecTest {
     fun passphraseRotationMayAdvanceSequenceAtSameGeneration() {
         publicationCodec.requireSuccessor(
             previous = manifest(sequence = 7, generation = 42),
-            current = manifest(sequence = 8, generation = 42),
+            current = manifest(sequence = 8, generation = 42).copy(
+                recoveryCredentialGeneration = RECOVERY_CREDENTIAL_GENERATION + 1,
+            ),
+        )
+    }
+
+    @Test
+    fun unchangedGenerationRequiresANewerRecoveryCredential() {
+        assertThrows(IllegalArgumentException::class.java) {
+            publicationCodec.requireSuccessor(
+                previous = manifest(sequence = 7, generation = 42),
+                current = manifest(sequence = 8, generation = 42),
+            )
+        }
+
+        publicationCodec.requireSuccessor(
+            previous = manifest(sequence = 7, generation = 42),
+            current = manifest(sequence = 8, generation = 43),
         )
     }
 

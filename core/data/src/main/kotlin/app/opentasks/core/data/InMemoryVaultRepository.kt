@@ -1197,7 +1197,16 @@ class InMemoryVaultRepository internal constructor(
         }
         tombstones = tombstones.upsert(task.toTombstone(command.purgedAt))
         publish(
-            tasks = current.tasks.filterNot { it.id == task.id },
+            tasks = current.tasks.mapNotNull { candidate ->
+                when {
+                    candidate.id == task.id -> null
+                    candidate.parentTaskId == task.id -> candidate.copy(
+                        parentTaskId = null,
+                        revision = nextRevision(candidate, command.purgedAt),
+                    )
+                    else -> candidate
+                }
+            },
             reminders = current.reminders.filterNot { it.taskId == task.id },
             timeEntries = current.timeEntries.filterNot { it.taskId == task.id },
         )
@@ -1217,7 +1226,16 @@ class InMemoryVaultRepository internal constructor(
                 tombstones = tombstones.upsert(task.toTombstone(command.now))
             }
             publish(
-                tasks = current.tasks.filterNot { it.id in expiredIds },
+                tasks = current.tasks.mapNotNull { task ->
+                    when {
+                        task.id in expiredIds -> null
+                        task.parentTaskId in expiredIds -> task.copy(
+                            parentTaskId = null,
+                            revision = nextRevision(task, command.now),
+                        )
+                        else -> task
+                    }
+                },
                 reminders = current.reminders.filterNot { it.taskId in expiredIds },
                 timeEntries = current.timeEntries.filterNot { it.taskId in expiredIds },
                 at = command.now,

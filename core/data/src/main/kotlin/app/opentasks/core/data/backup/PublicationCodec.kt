@@ -283,6 +283,12 @@ class PublicationCodec(
         ) {
             "Recovery credential generation regressed across the retained pair"
         }
+        require(
+            current.localGeneration > previous.localGeneration ||
+                current.recoveryCredentialGeneration > previous.recoveryCredentialGeneration,
+        ) {
+            "An unchanged local generation requires a newer recovery credential"
+        }
         require(claimProviderFileIdOf(current) == claimProviderFileIdOf(previous)) {
             "Publication successor names another ownership claim provider file"
         }

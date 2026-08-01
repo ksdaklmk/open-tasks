@@ -1865,6 +1865,12 @@ class RoomVaultRepositoryInstrumentedTest {
                 ),
             ) is CommandResult.Success,
         )
+        val dependencyEntity = checkNotNull(
+            database!!.taskDao().getById(dependency.id.value),
+        )
+        database!!.taskDao().upsert(
+            dependencyEntity.copy(parentTaskId = task.id.value),
+        )
         val attachmentId = "room-purge-attachment"
         val activityId = "room-purge-activity"
         database!!.openHelper.writableDatabase.execSQL(
@@ -1947,6 +1953,17 @@ class RoomVaultRepositoryInstrumentedTest {
         )
         assertEquals(1, payloads.count { it.deletedFamily == BackupRecordFamily.TASK })
         assertEquals(
+            null,
+            checkNotNull(database!!.taskDao().getById(dependency.id.value)).parentTaskId,
+        )
+        assertEquals(
+            1,
+            payloads.count {
+                it.record?.family == BackupRecordFamily.TASK &&
+                    it.record.identity.single() == dependency.id.value
+            },
+        )
+        assertEquals(
             1,
             payloads.count { it.record?.family == BackupRecordFamily.TOMBSTONE },
         )
@@ -1979,6 +1996,40 @@ class RoomVaultRepositoryInstrumentedTest {
         assertEquals(rows.indices.toList(), rows.map { it.sequence })
         assertEquals(2, payloads.count { it.deletedFamily == BackupRecordFamily.TASK })
         assertEquals(2, payloads.count { it.record?.family == BackupRecordFamily.TOMBSTONE })
+    }
+
+    @Test
+    fun expiryPurgeDetachesASurvivingDirectChildInTheSameGeneration() = runBlocking {
+        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
+        val purgedAt = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { deletedAt })
+        repository!!.execute(DomainCommand.CreateTask("Expired parent"))
+        repository!!.execute(DomainCommand.CreateTask("Surviving child"))
+        val tasks = repository!!.currentWorkspace().tasks.associateBy { it.title }
+        val parent = checkNotNull(tasks["Expired parent"])
+        val child = checkNotNull(tasks["Surviving child"])
+        val childEntity = checkNotNull(database!!.taskDao().getById(child.id.value))
+        database!!.taskDao().upsert(childEntity.copy(parentTaskId = parent.id.value))
+        repository!!.execute(DomainCommand.DeleteTask(parent.id, deletedAt))
+        val before = database!!.backupStateDao().require("vault-primary")
+
+        repository!!.execute(DomainCommand.PurgeExpiredTrash(purgedAt))
+
+        val after = database!!.backupStateDao().require("vault-primary")
+        val detached = checkNotNull(database!!.taskDao().getById(child.id.value))
+        val payloads = journalRows(after.currentGeneration)
+            .map { BackupMutationCodec.decode(it.payload) }
+        val detachedRecord = payloads.single {
+            it.record?.family == BackupRecordFamily.TASK &&
+                it.record.identity.single() == child.id.value
+        }.record
+        assertEquals(before.currentGeneration + 1, after.currentGeneration)
+        assertEquals(null, detached.parentTaskId)
+        assertTrue(detached.revisionWallMillis > childEntity.revisionWallMillis)
+        assertEquals(childEntity.revisionLogical + 1, detached.revisionLogical)
+        assertEquals(null, checkNotNull(detachedRecord).fields.single {
+            it.name == "parentTaskId"
+        }.value)
     }
 
     @Test
