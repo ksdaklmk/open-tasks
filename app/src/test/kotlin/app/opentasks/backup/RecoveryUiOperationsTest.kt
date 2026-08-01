@@ -4,7 +4,9 @@ import android.content.Intent
 import app.opentasks.backup.drive.AuthorizedDriveSession
 import app.opentasks.backup.drive.DriveAuthorizationMode
 import app.opentasks.backup.drive.DriveAuthorizationResult
+import app.opentasks.backup.drive.DriveAuthorizationUnavailableReason
 import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
+import app.opentasks.di.AppModule
 import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.data.backup.drive.DriveChunkResult
 import app.opentasks.core.data.backup.drive.DriveCreateRequest
@@ -16,13 +18,20 @@ import app.opentasks.core.data.backup.drive.DriveResumableSession
 import app.opentasks.core.domain.CreateOnlyBackupObjectStore
 import app.opentasks.core.domain.RecoveryCandidate
 import app.opentasks.core.domain.RecoveryCoordinator
+import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RecoveryResult
 import app.opentasks.core.domain.RecoverySource
 import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.CloudLineageId
+import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.RecoveryFailureCategory
+import app.opentasks.core.model.RemoteBackupLifecycle
+import app.opentasks.core.model.RemoteBackupStateVersion
+import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -101,6 +110,133 @@ class RecoveryUiOperationsTest {
         )
     }
 
+    @Test
+    fun productionActiveAndOwnershipLostDigestSourceFeedsAuthorizedRecovery() = runBlocking {
+        listOf(RemoteBackupLifecycle.ACTIVE, RemoteBackupLifecycle.OWNERSHIP_LOST)
+            .forEachIndexed { index, lifecycle ->
+                val digest = ByteArray(32) { (index + 3).toByte() }
+                val session = session(digest)
+                val authorization = TestAuthorizationManager(
+                    DriveAuthorizationResult.Authorized(session.session),
+                )
+                var coordinatorDigest: ByteArray? = null
+                val operations = operations(
+                    authorization = authorization,
+                    coordinatorFactory = { expected ->
+                        coordinatorDigest = expected?.copyOf()
+                        TestRecoveryCoordinator()
+                    },
+                    knownDigest = {
+                        AppModule.recoveryAccountBindingDigest(
+                            listOf(configuration(lifecycle, digest)),
+                        )
+                    },
+                )
+
+                operations.discoverDrive(null)
+
+                assertArrayEquals(digest, authorization.expectedDigests.single())
+                assertArrayEquals(digest, coordinatorDigest)
+                assertTrue(session.transport.closed)
+            }
+    }
+
+    @Test
+    fun unavailableAuthorizationReasonsRemainTruthfullyBounded() = runBlocking {
+        listOf(
+            DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED to
+                RecoveryFailureCategory.AUTHORIZATION_REQUIRED,
+            DriveAuthorizationUnavailableReason.REJECTED to
+                RecoveryFailureCategory.AUTHORIZATION_REQUIRED,
+            DriveAuthorizationUnavailableReason.RETRYABLE to
+                RecoveryFailureCategory.AUTHORIZATION_REQUIRED,
+            DriveAuthorizationUnavailableReason.PROVIDER_STORAGE to
+                RecoveryFailureCategory.INSUFFICIENT_STORAGE,
+            DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE to
+                RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+        ).forEach { (reason, expected) ->
+            val operations = operations(
+                authorization = TestAuthorizationManager(
+                    DriveAuthorizationResult.Unavailable(reason),
+                ),
+                coordinatorFactory = { TestRecoveryCoordinator() },
+                knownDigest = { EXPECTED_DIGEST.copyOf() },
+            )
+
+            assertEquals(
+                RecoveryDiscoveryResult.Failed(expected),
+                operations.discoverDrive(null),
+            )
+        }
+    }
+
+    @Test
+    fun discoveryFailureStillClosesItsBoundedSession() = runBlocking {
+        val session = session()
+        val expected = ExpectedFailure()
+        val operations = operations(
+            authorization = TestAuthorizationManager(
+                DriveAuthorizationResult.Authorized(session.session),
+            ),
+            coordinatorFactory = {
+                TestRecoveryCoordinator(onDiscover = { throw expected })
+            },
+            knownDigest = { EXPECTED_DIGEST.copyOf() },
+        )
+
+        val failure = runCatching { operations.discoverDrive(null) }.exceptionOrNull()
+
+        assertTrue(failure === expected)
+        assertTrue(session.transport.closed)
+    }
+
+    @Test
+    fun cancelledPreparationStillClosesItsBoundedSession() = runBlocking {
+        val discovery = session()
+        val preparation = session()
+        val operations = operations(
+            authorization = TestAuthorizationManager(
+                DriveAuthorizationResult.Authorized(discovery.session),
+                DriveAuthorizationResult.Authorized(preparation.session),
+            ),
+            coordinatorFactory = {
+                TestRecoveryCoordinator(onPrepare = { throw CancellationException("cancel") })
+            },
+            knownDigest = { EXPECTED_DIGEST.copyOf() },
+        )
+        operations.discoverDrive(null)
+
+        val failure = runCatching {
+            operations.prepare("drive", "passphrase".toCharArray())
+        }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+        assertTrue(preparation.transport.closed)
+    }
+
+    @Test
+    fun confirmationFailureStillClosesItsBoundedSession() = runBlocking {
+        val discovery = session()
+        val confirmation = session()
+        val expected = ExpectedFailure()
+        val operations = operations(
+            authorization = TestAuthorizationManager(
+                DriveAuthorizationResult.Authorized(discovery.session),
+                DriveAuthorizationResult.Authorized(confirmation.session),
+            ),
+            coordinatorFactory = {
+                TestRecoveryCoordinator(onConfirm = { throw expected })
+            },
+            knownDigest = { EXPECTED_DIGEST.copyOf() },
+        )
+        operations.discoverDrive(null)
+
+        val failure = runCatching { operations.confirm("operation") }.exceptionOrNull()
+
+        assertTrue(failure === expected)
+        assertTrue(confirmation.transport.closed)
+    }
+
     private fun operations(
         authorization: GoogleDriveAuthorizationManager,
         coordinatorFactory: (ByteArray?) -> RecoveryCoordinator,
@@ -114,13 +250,35 @@ class RecoveryUiOperationsTest {
         knownAccountBindingDigest = knownDigest,
     )
 
-    private fun session(): TestSession {
+    private fun session(digest: ByteArray = EXPECTED_DIGEST): TestSession {
         val transport = TestTransport()
         return TestSession(
-            AuthorizedDriveSession(transport, EXPECTED_DIGEST, "token", null),
+            AuthorizedDriveSession(transport, digest, "token", null),
             transport,
         )
     }
+
+    private fun configuration(
+        lifecycle: RemoteBackupLifecycle,
+        digest: ByteArray,
+    ) = RemoteBackupConfiguration(
+        lineageId = CloudLineageId.parse("22222222-2222-4222-8222-222222222222"),
+        vaultId = VaultId("11111111-1111-4111-8111-111111111111"),
+        rootClaimProviderId = ProviderObjectId.of("root-claim"),
+        accountBindingDigest = digest,
+        lifecycle = lifecycle,
+        activeDeviceId = null,
+        writerEpoch = null,
+        ownershipClaim = null,
+        nextSuccessorProviderId = null,
+        currentPublication = null,
+        previousPublication = null,
+        lastVerifiedGeneration = null,
+        lastVerifiedAt = null,
+        recoveryCredentialGeneration = 0,
+        failureCategory = null,
+        stateVersion = RemoteBackupStateVersion(1),
+    )
 
     private data class TestSession(
         val session: AuthorizedDriveSession,
@@ -152,7 +310,11 @@ class RecoveryUiOperationsTest {
         override suspend fun revokeAccess(session: AuthorizedDriveSession) = Unit
     }
 
-    private class TestRecoveryCoordinator : RecoveryCoordinator {
+    private class TestRecoveryCoordinator(
+        private val onDiscover: suspend () -> Unit = {},
+        private val onPrepare: suspend () -> Unit = {},
+        private val onConfirm: suspend () -> Unit = {},
+    ) : RecoveryCoordinator {
         var discoveryCalls = 0
         var prepareDigest: ByteArray? = null
 
@@ -160,6 +322,7 @@ class RecoveryUiOperationsTest {
             objectStore: CreateOnlyBackupObjectStore?,
             portablePackage: File?,
         ): List<RecoveryCandidate> {
+            onDiscover()
             discoveryCalls++
             return listOf(RecoveryCandidate("drive", RecoverySource.GOOGLE_DRIVE))
         }
@@ -170,6 +333,7 @@ class RecoveryUiOperationsTest {
             objectStore: CreateOnlyBackupObjectStore?,
             accountBindingDigest: ByteArray?,
         ): RecoveryResult {
+            onPrepare()
             prepareDigest = accountBindingDigest?.copyOf()
             return RecoveryResult.TakeoverConfirmationRequired(
                 operationId = "operation",
@@ -181,7 +345,10 @@ class RecoveryUiOperationsTest {
         override suspend fun confirmTakeover(
             operationId: String,
             objectStore: CreateOnlyBackupObjectStore,
-        ): RecoveryResult = RecoveryResult.Activated(BackupGeneration(3), null)
+        ): RecoveryResult {
+            onConfirm()
+            return RecoveryResult.Activated(BackupGeneration(3), null)
+        }
     }
 
     private class TestTransport : CreateOnlyDriveTransport {
@@ -202,4 +369,6 @@ class RecoveryUiOperationsTest {
     private companion object {
         val EXPECTED_DIGEST = ByteArray(32) { (it + 1).toByte() }
     }
+
+    private class ExpectedFailure : RuntimeException()
 }

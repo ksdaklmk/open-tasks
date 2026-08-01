@@ -6,6 +6,7 @@ import app.opentasks.ActiveVaultServices
 import app.opentasks.backup.drive.AuthorizedDriveSession
 import app.opentasks.backup.drive.DriveAuthorizationMode
 import app.opentasks.backup.drive.DriveAuthorizationResult
+import app.opentasks.backup.drive.DriveAuthorizationUnavailableReason
 import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.core.data.backup.CreateOnlyDriveObjectStore
 import app.opentasks.core.data.backup.RemoteBackupTransferStore
@@ -90,7 +91,7 @@ internal class RecoveryUiOperations internal constructor(
                 DriveAuthorizationResult.AccountMismatch ->
                     RecoveryDiscoveryResult.Failed(RecoveryFailureCategory.ACCOUNT_MISMATCH)
                 is DriveAuthorizationResult.Unavailable ->
-                    RecoveryDiscoveryResult.Failed(RecoveryFailureCategory.AUTHORIZATION_REQUIRED)
+                    RecoveryDiscoveryResult.Failed(authorization.reason.toRecoveryFailure())
             }
         } finally {
             knownDigest?.fill(0)
@@ -130,9 +131,10 @@ internal class RecoveryUiOperations internal constructor(
                     digest.fill(0)
                 }
             }
-            is DriveAuthorizationResult.ResolutionRequired,
-            is DriveAuthorizationResult.Unavailable,
-            -> RecoveryResult.Failed(RecoveryFailureCategory.AUTHORIZATION_REQUIRED)
+            is DriveAuthorizationResult.ResolutionRequired ->
+                RecoveryResult.Failed(RecoveryFailureCategory.AUTHORIZATION_REQUIRED)
+            is DriveAuthorizationResult.Unavailable ->
+                RecoveryResult.Failed(authorization.reason.toRecoveryFailure())
             DriveAuthorizationResult.AccountMismatch ->
                 RecoveryResult.Failed(RecoveryFailureCategory.ACCOUNT_MISMATCH)
         }
@@ -149,9 +151,10 @@ internal class RecoveryUiOperations internal constructor(
             is DriveAuthorizationResult.Authorized -> authorization.session.use { session ->
                 activeCoordinator.confirmTakeover(operationId, store(session))
             }
-            is DriveAuthorizationResult.ResolutionRequired,
-            is DriveAuthorizationResult.Unavailable,
-            -> RecoveryResult.Failed(RecoveryFailureCategory.AUTHORIZATION_REQUIRED)
+            is DriveAuthorizationResult.ResolutionRequired ->
+                RecoveryResult.Failed(RecoveryFailureCategory.AUTHORIZATION_REQUIRED)
+            is DriveAuthorizationResult.Unavailable ->
+                RecoveryResult.Failed(authorization.reason.toRecoveryFailure())
             DriveAuthorizationResult.AccountMismatch ->
                 RecoveryResult.Failed(RecoveryFailureCategory.ACCOUNT_MISMATCH)
         }
@@ -189,6 +192,18 @@ internal class RecoveryUiOperations internal constructor(
         stagingRoot = recoveryRoot,
     )
 }
+
+private fun DriveAuthorizationUnavailableReason.toRecoveryFailure(): RecoveryFailureCategory =
+    when (this) {
+        DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
+        DriveAuthorizationUnavailableReason.REJECTED,
+        DriveAuthorizationUnavailableReason.RETRYABLE,
+        -> RecoveryFailureCategory.AUTHORIZATION_REQUIRED
+        DriveAuthorizationUnavailableReason.PROVIDER_STORAGE ->
+            RecoveryFailureCategory.INSUFFICIENT_STORAGE
+        DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE ->
+            RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE
+    }
 
 private class EphemeralRecoveryTransferStore : RemoteBackupTransferStore {
     private val values = linkedMapOf<Pair<String, String>, RemoteBackupObject>()

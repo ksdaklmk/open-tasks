@@ -170,7 +170,8 @@ class EncryptedBackupViewModelTest {
         assertSame(pending, takeResolution(viewModel))
         viewModel.acceptResolution(Intent())
 
-        assertTrue(waitUntil { calls.get() == 2 })
+        assertTrue(waitUntil { requests.get() == 1 })
+        assertEquals(2, calls.get())
         assertEquals(1, requests.get())
     }
 

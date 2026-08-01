@@ -76,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
@@ -337,17 +338,12 @@ object AppModule {
             configurator = remoteConfigurator,
             publicationGate = publicationGate,
         )
-        val remoteStatus = combine(
+        val remoteStatus = observeRemoteBackupStatus(
             runtime.remoteBackupStore.observeActive(runtime.vaultId),
-            runtime.backupStateStore.observe(runtime.vaultId),
+            runtime.backupStateStore.observe(runtime.vaultId)
+                .map { BackupGeneration(it.currentGeneration) },
             remoteRunner.running,
-        ) { configuration, localState, runnerInFlight ->
-            remoteBackupStatus(
-                configuration = configuration,
-                runnerInFlight = runnerInFlight,
-                localGeneration = BackupGeneration(localState.currentGeneration),
-            )
-        }
+        )
             .stateIn(scope, SharingStarted.Eagerly, RemoteBackupStatus.Disabled)
         val authorizeForConnect: suspend (Boolean, Intent?) -> EncryptedBackupActionResult =
             { allowSeparateLineage, resolution ->
@@ -531,12 +527,9 @@ object AppModule {
             remoteBackupLifecycleCoordinator = lifecycleCoordinator,
             remoteBackupStatus = remoteStatus,
             recoveryAccountDigest = {
-                runtime.remoteBackupStore.configurations(runtime.vaultId)
-                    .singleOrNull {
-                        it.lifecycle == RemoteBackupLifecycle.ACTIVE ||
-                            it.lifecycle == RemoteBackupLifecycle.OWNERSHIP_LOST
-                    }
-                    ?.accountBindingDigest
+                recoveryAccountBindingDigest(
+                    runtime.remoteBackupStore.configurations(runtime.vaultId),
+                )
             },
             connectRemote = authorizeForConnect,
             reauthoriseRemote = reauthorise,
@@ -590,6 +583,25 @@ object AppModule {
             }
         }
     }
+
+    internal fun observeRemoteBackupStatus(
+        configurations: Flow<app.opentasks.core.domain.RemoteBackupConfiguration?>,
+        localGenerations: Flow<BackupGeneration>,
+        runnerInFlight: Flow<Boolean>,
+    ): Flow<RemoteBackupStatus> = combine(
+        configurations,
+        localGenerations,
+        runnerInFlight,
+    ) { configuration, localGeneration, running ->
+        remoteBackupStatus(configuration, running, localGeneration)
+    }
+
+    internal fun recoveryAccountBindingDigest(
+        configurations: List<app.opentasks.core.domain.RemoteBackupConfiguration>,
+    ): ByteArray? = configurations.singleOrNull {
+        it.lifecycle == RemoteBackupLifecycle.ACTIVE ||
+            it.lifecycle == RemoteBackupLifecycle.OWNERSHIP_LOST
+    }?.accountBindingDigest
 
     private fun DriveAuthorizationUnavailableReason.toRemoteFailure():
         RemoteBackupFailureCategory = when (this) {

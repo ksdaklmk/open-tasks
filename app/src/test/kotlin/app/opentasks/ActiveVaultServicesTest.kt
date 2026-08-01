@@ -21,7 +21,12 @@ import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
 import app.opentasks.core.model.VaultId
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -31,14 +36,21 @@ import org.junit.Test
 
 class ActiveVaultServicesTest {
     @Test
-    fun runningRemoteBackupIsPresentedWithItsLocalGeneration() {
+    fun productionStatusObservationIncludesTheRunnerInFlightState() = runBlocking {
+        val configuration = MutableStateFlow<RemoteBackupConfiguration?>(activeConfiguration())
+        val generation = MutableStateFlow(BackupGeneration(7))
+        val running = MutableStateFlow(false)
+        val observed = async {
+            AppModule.observeRemoteBackupStatus(configuration, generation, running)
+                .first { it is RemoteBackupStatus.BackingUp }
+        }
+
+        yield()
+        running.value = true
+
         assertEquals(
             RemoteBackupStatus.BackingUp(BackupGeneration(7)),
-            AppModule.remoteBackupStatus(
-                configuration = activeConfiguration(),
-                runnerInFlight = true,
-                localGeneration = BackupGeneration(7),
-            ),
+            kotlinx.coroutines.withTimeout(TimeUnit.SECONDS.toMillis(5)) { observed.await() },
         )
     }
 
