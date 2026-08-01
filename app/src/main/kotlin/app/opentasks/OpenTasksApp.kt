@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
@@ -69,6 +70,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -469,6 +471,20 @@ fun OpenTasksApp(
                     }
                 },
             ) { contentPadding ->
+                val contentStartDp =
+                    (if (layout.showNavigationRail) 80 else 0) +
+                        contentPadding
+                            .calculateStartPadding(LocalLayoutDirection.current)
+                            .value
+                            .toInt()
+                val contentWidthDp = maxWidth.value.toInt() - contentStartDp
+                val listPaneFraction = layout.paneSplit?.let { split ->
+                    WorkspaceLayoutPolicy.contentListFraction(
+                        split = split,
+                        contentStartDp = contentStartDp,
+                        contentWidthDp = contentWidthDp,
+                    )
+                } ?: 0.42f
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -546,6 +562,7 @@ fun OpenTasksApp(
                                     milestones = snapshot.milestones,
                                     selectedTaskId = selectedTaskId,
                                     showDetailPane = showDetailPane,
+                                    listPaneFraction = listPaneFraction,
                                     onSelectTask = viewModel::selectTask,
                                     onCloseDetail = viewModel::closeTask,
                                     onCompleteTask = viewModel::completeTask,
@@ -633,6 +650,7 @@ fun OpenTasksApp(
                                     workflowStatuses = snapshot.workflowStatuses,
                                     selectedProjectId = selectedProjectId,
                                     showDetailPane = showDetailPane,
+                                    listPaneFraction = listPaneFraction,
                                     onSelectProject = viewModel::selectProject,
                                     onCloseDetail = viewModel::closeProject,
                                     onUpdateProject = { projectId, edit ->

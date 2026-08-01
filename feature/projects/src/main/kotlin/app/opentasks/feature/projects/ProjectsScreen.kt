@@ -66,6 +66,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -120,6 +121,7 @@ fun ProjectsScreen(
     workflowStatuses: List<WorkflowStatus>,
     selectedProjectId: ProjectId?,
     showDetailPane: Boolean,
+    listPaneFraction: Float = 0.42f,
     onSelectProject: (ProjectId) -> Unit,
     onCloseDetail: () -> Unit,
     onUpdateProject: (ProjectId, ProjectEdit) -> Unit,
@@ -179,7 +181,15 @@ fun ProjectsScreen(
             milestones = milestones,
             selectedProjectId = selectedProjectId,
             onSelectProject = onSelectProject,
-            modifier = if (showDetailPane) Modifier.width(390.dp) else Modifier.fillMaxWidth(),
+            modifier = if (showDetailPane) {
+                Modifier
+                    .weight(listPaneFraction)
+                    .testTag("listPane")
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .testTag("listPane")
+            },
         )
 
         if (showDetailPane) {
@@ -193,8 +203,9 @@ fun ProjectsScreen(
                     icon = Icons.Rounded.FolderOpen,
                     title = "Choose a project",
                     modifier = Modifier
-                        .weight(1f)
-                        .align(Alignment.CenterVertically),
+                        .weight(1f - listPaneFraction)
+                        .align(Alignment.CenterVertically)
+                        .testTag("detailPane"),
                 )
             } else {
                 ProjectWorkbench(
@@ -215,7 +226,9 @@ fun ProjectsScreen(
                     onDeleteMilestone = onDeleteMilestone,
                     onCaptureTemplate = onCaptureTemplate,
                     onOpenTask = onOpenTask,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f - listPaneFraction)
+                        .testTag("detailPane"),
                 )
             }
         }

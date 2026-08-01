@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -167,6 +166,7 @@ fun TasksScreen(
     tags: List<Tag>,
     selectedTaskId: TaskId?,
     showDetailPane: Boolean,
+    listPaneFraction: Float = 0.42f,
     onSelectTask: (TaskId) -> Unit,
     onCloseDetail: () -> Unit,
     onCompleteTask: (Task) -> Unit,
@@ -260,12 +260,7 @@ fun TasksScreen(
         return
     }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val listPaneWidth = when {
-            maxWidth >= 840.dp -> 390.dp
-            maxWidth >= 720.dp -> 360.dp
-            else -> (maxWidth * 0.5f).coerceIn(300.dp, 340.dp)
-        }
+    Box(modifier = modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxSize()) {
             TaskListPane(
                 tasks = visibleTasks,
@@ -276,9 +271,13 @@ fun TasksScreen(
                 onSelectTask = onSelectTask,
                 onCompleteTask = onCompleteTask,
                 modifier = if (showDetailPane) {
-                    Modifier.width(listPaneWidth)
+                    Modifier
+                        .weight(listPaneFraction)
+                        .testTag("listPane")
                 } else {
-                    Modifier.fillMaxWidth()
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("listPane")
                 },
             )
 
@@ -293,8 +292,9 @@ fun TasksScreen(
                         icon = Icons.Rounded.Description,
                         title = "Choose a task",
                         modifier = Modifier
-                            .weight(1f)
-                            .align(Alignment.CenterVertically),
+                            .weight(1f - listPaneFraction)
+                            .align(Alignment.CenterVertically)
+                            .testTag("detailPane"),
                     )
                 } else {
                     TaskDetailPane(
@@ -334,7 +334,9 @@ fun TasksScreen(
                         onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
                         onUpdateTimeEntry = onUpdateTimeEntry,
                         onDeleteTimeEntry = onDeleteTimeEntry,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f - listPaneFraction)
+                            .testTag("detailPane"),
                     )
                 }
             }

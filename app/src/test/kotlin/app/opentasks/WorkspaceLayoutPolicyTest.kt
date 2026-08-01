@@ -200,4 +200,37 @@ class WorkspaceLayoutPolicyTest {
         assertEquals(WorkspaceWindowClass.COMPACT, layout.windowClass)
         assertNull(layout.paneSplit)
     }
+
+    @Test
+    fun contentFractionConvertsWindowSnapToContentCoordinates() {
+        val fraction = WorkspaceLayoutPolicy.contentListFraction(
+            split = PaneSplit(listFraction = 0.5f, snapToFoldPositionDp = 420),
+            contentStartDp = 96,
+            contentWidthDp = 744,
+        )
+
+        assertEquals(0.4355f, fraction, 0.001f)
+    }
+
+    @Test
+    fun contentFractionWithoutSnapKeepsRatio() {
+        val fraction = WorkspaceLayoutPolicy.contentListFraction(
+            split = PaneSplit(listFraction = 0.42f, snapToFoldPositionDp = null),
+            contentStartDp = 96,
+            contentWidthDp = 744,
+        )
+
+        assertEquals(0.42f, fraction, 0.0001f)
+    }
+
+    @Test
+    fun contentFractionIsClampedToUsableRange() {
+        val fraction = WorkspaceLayoutPolicy.contentListFraction(
+            split = PaneSplit(listFraction = 0.5f, snapToFoldPositionDp = 60),
+            contentStartDp = 96,
+            contentWidthDp = 744,
+        )
+
+        assertEquals(0.2f, fraction, 0.0001f)
+    }
 }

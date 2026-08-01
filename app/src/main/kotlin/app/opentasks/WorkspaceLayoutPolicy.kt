@@ -28,6 +28,17 @@ object WorkspaceLayoutPolicy {
     private const val MEDIUM_LIST_FRACTION = 0.42f
     private const val WIDE_LIST_FRACTION = 0.38f
 
+    fun contentListFraction(
+        split: PaneSplit,
+        contentStartDp: Int,
+        contentWidthDp: Int,
+    ): Float {
+        require(contentWidthDp > 0) { "Content width must be positive" }
+        val snap = split.snapToFoldPositionDp ?: return split.listFraction
+        val relative = (snap - contentStartDp).toFloat() / contentWidthDp
+        return relative.coerceIn(0.2f, 0.8f)
+    }
+
     fun calculate(posture: WindowPosture): WorkspaceLayout {
         val widthDp = posture.widthDp
         val windowClass = when {
