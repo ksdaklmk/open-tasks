@@ -2659,7 +2659,7 @@ class RoomVaultRepository(
                     id = VAULT_ID.value,
                     storageMode = "LOCAL",
                     createdAtEpochMillis = now().toEpochMilli(),
-                    schemaVersion = 6,
+                    schemaVersion = 7,
                     cryptoVersion = 1,
                     minimumReaderVersion = 1,
                 ),

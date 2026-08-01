@@ -75,6 +75,9 @@ internal class DriveCreateOnlyQualification(
             permissionDigest.fill(0)
             results += QualificationResult("DRIVE_APPDATA_AUTHORIZATION", true)
 
+            stage = "INTERRUPTED_RUN_CLEANUP"
+            cleanupInterruptedRuns()
+
             repeat(RACE_COUNT) { raceIndex ->
                 stage = "GENERATE_RACE_IDS"
                 val ids = transport.generateAppDataFileIds(IDS_PER_RACE)
@@ -143,6 +146,23 @@ internal class DriveCreateOnlyQualification(
             results += QualificationResult(stage, cleanupPassed)
         }
         return results
+    }
+
+    private suspend fun cleanupInterruptedRuns() {
+        var pageToken: String? = null
+        repeat(MAX_CLEANUP_PAGES) {
+            val page = transport.listAppDataFiles(
+                query = "name = '$QUALIFICATION_FILE_NAME' and trashed = false",
+                pageToken = pageToken,
+                pageSize = CLEANUP_PAGE_SIZE,
+            )
+            page.files.filter { file ->
+                file.name == QUALIFICATION_FILE_NAME &&
+                    file.appProperties["format"] == QUALIFICATION_FORMAT
+            }.forEach { transport.deleteFile(it.providerFileId) }
+            pageToken = page.nextPageToken ?: return
+        }
+        error("interrupted cleanup page bound exceeded")
     }
 
     private suspend fun runRace(
@@ -383,6 +403,9 @@ internal class DriveCreateOnlyQualification(
         private const val HMAC_BYTES = 32
         private const val MAX_FRAME_BYTES = 1L shl 20
         private const val MAX_PROPERTY_NAME_LENGTH = 80
+        private const val MAX_CLEANUP_PAGES = 10
+        private const val CLEANUP_PAGE_SIZE = 100
+        private const val QUALIFICATION_FORMAT = "open-tasks-create-only-qualification-v1"
         private const val QUALIFICATION_FILE_NAME = "stage3-drive-create-only-qualification"
         private const val DOWNLOAD_FILE_NAME = "stage3-drive-create-only-download.bin"
         private const val ROLE_ROOT_BASELINE = "root-baseline"

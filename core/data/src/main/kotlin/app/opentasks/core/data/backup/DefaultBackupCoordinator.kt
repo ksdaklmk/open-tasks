@@ -53,11 +53,17 @@ class DefaultBackupCoordinator(
     private val mutex = Mutex()
     private var running = false
     private var pending = false
+    private var completeSnapshotPending = false
     private var completion: CompletableDeferred<Unit>? = null
 
-    override suspend fun request() {
+    override suspend fun request() = request(completeSnapshot = false)
+
+    override suspend fun requestCompleteSnapshot() = request(completeSnapshot = true)
+
+    private suspend fun request(completeSnapshot: Boolean) {
         var activeCompletion: CompletableDeferred<Unit>? = null
         mutex.withLock {
+            if (completeSnapshot) completeSnapshotPending = true
             if (running) {
                 pending = true
                 activeCompletion = checkNotNull(completion)
@@ -74,11 +80,14 @@ class DefaultBackupCoordinator(
         }
         try {
             while (true) {
-                val needsFollowUp = produceRequiredObjects()
+                val forceCompleteSnapshot = mutex.withLock {
+                    completeSnapshotPending.also { completeSnapshotPending = false }
+                }
+                val needsFollowUp = produceRequiredObjects(forceCompleteSnapshot)
                 lifecycleBoundary.beforeOwnershipRelease()
                 var completed: CompletableDeferred<Unit>? = null
                 val runAgain = mutex.withLock {
-                    if (pending || needsFollowUp) {
+                    if (pending || needsFollowUp || completeSnapshotPending) {
                         pending = false
                         true
                     } else {
@@ -109,7 +118,7 @@ class DefaultBackupCoordinator(
         }
     }
 
-    private suspend fun produceRequiredObjects(): Boolean {
+    private suspend fun produceRequiredObjects(forceCompleteSnapshot: Boolean): Boolean {
         val capture = captureSource.capture()
         require(capture.vaultId == vaultId) { "Backup capture belongs to another vault" }
         val state = checkNotNull(stateStore.get(vaultId)) { "Backup state is unavailable" }
@@ -133,7 +142,7 @@ class DefaultBackupCoordinator(
                 limit = BackupPolicy.SNAPSHOT_OPERATION_INTERVAL,
             )
         }
-        val snapshotRequired = baseOrAgeRequiresSnapshot ||
+        val snapshotRequired = forceCompleteSnapshot || baseOrAgeRequiresSnapshot ||
             BackupPolicy.requiresSnapshot(
                 operationsSinceBase = capturedOperationCount,
                 baseProducedAt = Instant.ofEpochMilli(

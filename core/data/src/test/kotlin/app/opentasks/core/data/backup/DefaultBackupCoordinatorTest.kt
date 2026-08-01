@@ -373,6 +373,47 @@ class DefaultBackupCoordinatorTest {
     }
 
     @Test
+    fun anExplicitCompleteSnapshotCoversNewerWorkEvenWhenRoutinePolicyWouldUseASegment() =
+        runBlocking {
+            val fixture = BackupPayloadTestFixtures.snapshot()
+            var capture = StructuredBackupCapture(
+                VaultId(fixture.vaultId),
+                BackupGeneration(53),
+                fixture.records,
+            )
+            val state = InMemoryBackupStateStore(defaultState(capture))
+            val root = Files.createTempDirectory("backup-coordinator-complete-snapshot").toFile()
+            val crypto = TinkVaultCrypto()
+            val keys = InMemoryVaultContentKeyStore(crypto)
+            val coordinator = DefaultBackupCoordinator(
+                vaultId = capture.vaultId,
+                captureSource = { capture },
+                stateStore = state,
+                journalStore = InMemoryBackupJournalStore(
+                    listOf(journalEntry("newer-work", 54, 0)),
+                ),
+                objectStore = DefaultLocalBackupObjectStore(root),
+                authenticatedCodec = DefaultAuthenticatedCloudObjectCodec(crypto),
+                contentKeyStore = keys,
+                now = { Instant.parse("2026-07-29T00:00:00Z") },
+            )
+            try {
+                coordinator.request()
+                capture = capture.copy(generation = BackupGeneration(54))
+                state.replace(state.value.copy(currentGeneration = 54))
+
+                coordinator.requestCompleteSnapshot()
+
+                assertEquals(54L, state.value.lastVerifiedSnapshotGeneration)
+                assertEquals("snapshot:54", state.value.currentBaseObjectId)
+                assertFalse(root.resolve("segments/segment-54-54.otf").exists())
+            } finally {
+                keys.close()
+                root.deleteRecursively()
+            }
+        }
+
+    @Test
     fun oversizedSingleGenerationRotatesToSnapshotInsteadOfCollidingSegmentRange() = runBlocking<Unit> {
         val fixture = BackupPayloadTestFixtures.snapshot()
         val capture = StructuredBackupCapture(VaultId(fixture.vaultId), BackupGeneration(55), fixture.records)

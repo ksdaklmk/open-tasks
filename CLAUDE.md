@@ -75,6 +75,19 @@ race KSP while release Hilt sources are generated.
   authority, add no bidirectional sync path, encrypt objects locally through
   the provider-neutral authenticated codec, and use separate
   `BackupObjectStore` and `AttachmentBlobStore` boundaries.
+- Room v7 is the remote-backup persistence authority. An active runtime is
+  bound to one active vault slot and must stop when that slot is replaced,
+  ownership is lost, or the lineage terminates.
+- Ownership claims, publications, recovery bases, and the terminal tombstone
+  are immutable create-by-ID objects. Publication sequence is monotonic within
+  one authenticated ownership tip; generation may stay equal only for an
+  explicitly forced complete recovery baseline or passphrase rotation.
+- Remote cleanup is bounded and namespace-safe: it may act only on objects
+  authenticated to the exact lineage, epoch, device, role, and durable
+  operation. Unknown or ambiguous objects fail closed.
+- Permanent remote deletion authenticates the terminal tombstone before
+  recoverable objects are removed, resumes cleanup after process death, and
+  retains that non-recoverable tombstone as the final lineage state.
 
 ## Style
 

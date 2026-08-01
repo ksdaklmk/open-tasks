@@ -348,6 +348,21 @@ class RemoteBackupRuntimeTest {
     }
 
     @Test
+    fun authorityLossPromotesAnActiveLineageOutOfRoutinePublication() {
+        listOf(
+            RemoteBackupRunResult.OwnershipLost to RemoteBackupLifecycle.OWNERSHIP_LOST,
+            RemoteBackupRunResult.Terminated to RemoteBackupLifecycle.TERMINATED,
+        ).forEach { (outcome, lifecycle) ->
+            val fixture = runnerFixture(outcome = outcome)
+
+            val result = runBlocking { withTimeout(5_000) { fixture.runner.run() } }
+
+            assertEquals(outcome, result)
+            assertEquals(lifecycle, fixture.stateStore.stored().lifecycle)
+        }
+    }
+
+    @Test
     fun aFailingCoordinatorStillClosesItsSessionAndBecomesBoundedLocalStorage() {
         val fixture = runnerFixture(outcome = RemoteBackupRunResult.NoChanges)
         fixture.coordinator.failure = IllegalStateException("provider blew up")

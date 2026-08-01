@@ -399,6 +399,77 @@ class DefaultRemoteBackupConfiguratorTest {
     }
 
     @Test
+    fun aDormantCompletedConnectionReactivatesTheSameLineageWithoutProviderMutation() =
+        runConnectTest { fixture ->
+            val first = fixture.configurator.connect(
+                fixture.store,
+                ACCOUNT_DIGEST,
+                false,
+            )
+            fixture.remoteStateStore.makeDormant()
+            val callsBeforeReconnect = fixture.store.callOrder.toList()
+
+            val reconnected = fixture.configurator.connect(
+                fixture.store,
+                ACCOUNT_DIGEST,
+                false,
+            )
+
+            assertEquals(first, reconnected)
+            assertEquals(
+                RemoteBackupLifecycle.ACTIVE,
+                checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+            )
+            assertEquals(callsBeforeReconnect, fixture.store.callOrder)
+        }
+
+    @Test
+    fun aDormantConnectionRejectsTheWrongAccountBeforeProviderAccess() =
+        runConnectTest { fixture ->
+            fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+            fixture.remoteStateStore.makeDormant()
+            val callsBeforeReconnect = fixture.store.callOrder.toList()
+
+            val result = fixture.configurator.connect(
+                fixture.store,
+                ByteArray(ACCOUNT_DIGEST.size) { 99 },
+                false,
+            )
+
+            assertEquals(
+                RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.ACCOUNT_MISMATCH),
+                result,
+            )
+            assertEquals(
+                RemoteBackupLifecycle.DORMANT,
+                checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+            )
+            assertEquals(callsBeforeReconnect, fixture.store.callOrder)
+        }
+
+    @Test
+    fun aRecoveredDormantLineageReconnectsWithoutAnInitialConnectOperation() =
+        runConnectTest { fixture ->
+            val first = fixture.configurator.connect(fixture.store, ACCOUNT_DIGEST, false)
+            fixture.remoteStateStore.makeDormant()
+            fixture.remoteStateStore.dropOperations()
+            val callsBeforeReconnect = fixture.store.callOrder.toList()
+
+            val reconnected = fixture.configurator.connect(
+                fixture.store,
+                ACCOUNT_DIGEST,
+                false,
+            )
+
+            assertEquals(first, reconnected)
+            assertEquals(
+                RemoteBackupLifecycle.ACTIVE,
+                checkNotNull(fixture.remoteStateStore.stored).lifecycle,
+            )
+            assertEquals(callsBeforeReconnect, fixture.store.callOrder)
+        }
+
+    @Test
     fun aRepeatedGeneratedProviderIdentityFailsClosedBeforeAnyCreate() = runConnectTest { fixture ->
         fixture.store.repeatGeneratedIds = true
 
@@ -831,6 +902,9 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
             it.vaultId == vaultId && it.lifecycle == RemoteBackupLifecycle.ACTIVE
         }
 
+    override suspend fun configurations(vaultId: VaultId): List<RemoteBackupConfiguration> =
+        listOfNotNull(stored?.takeIf { it.vaultId == vaultId })
+
     override suspend fun known(lineageId: CloudLineageId): RemoteBackupConfiguration? =
         stored?.takeIf { it.lineageId == lineageId }
 
@@ -863,6 +937,18 @@ internal class InMemoryRemoteBackupStateStore : RemoteBackupStateStore {
 
     fun dropStoredConfiguration() {
         stored = null
+    }
+
+    fun makeDormant() {
+        val current = checkNotNull(stored)
+        stored = current.copy(
+            lifecycle = RemoteBackupLifecycle.DORMANT,
+            stateVersion = RemoteBackupStateVersion(current.stateVersion.value + 1),
+        )
+    }
+
+    fun dropOperations() {
+        operations.clear()
     }
 
     override suspend fun compareAndSet(

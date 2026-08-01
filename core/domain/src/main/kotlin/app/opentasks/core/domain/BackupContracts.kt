@@ -41,6 +41,9 @@ interface BackupJournalReader {
 
 interface BackupCoordinator {
     suspend fun request()
+
+    /** Produces a complete current-generation base for a new remote lineage. */
+    suspend fun requestCompleteSnapshot() = request()
 }
 
 fun interface BackupCaptureSource<T> {

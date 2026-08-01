@@ -1,7 +1,7 @@
 # Stage 3 Google Drive Backup and Recovery Design
 
 **Date:** 30 July 2026
-**Status:** Partially superseded by
+**Status:** Implemented where retained; concurrency superseded by the verified
 [Stage 3 Drive Create-Only Ownership Design](2026-07-30-stage-3-drive-create-only-ownership-design.md)
 **Scope:** One-account Google Drive app-data authorization, encrypted
 app-managed structured backup, conditional single-writer publication,
@@ -160,9 +160,9 @@ The Drive JSON `version` field may be recorded as an observational diagnostic
 but is not the compare-and-swap authority. The strong provider revision is
 kept opaque, encrypted at rest, and never logged.
 
-If any required property is absent or inconsistent across repeated trials,
-Stage 3 remains unimplemented until a safe provider mechanism is selected in a
-new approved design.
+Those required mutable-control properties were absent, so this design stopped
+at its hard gate. The approved create-only ownership replacement named above
+was selected, implemented, and verified without a mutable provider authority.
 
 ## Architecture
 

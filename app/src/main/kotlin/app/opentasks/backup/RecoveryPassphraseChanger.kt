@@ -276,6 +276,7 @@ class DefaultRecoveryPassphraseChanger(
                 replacementEnvelope = crypto.changePassphrase(contentKey, newPassphrase)
                 val draft = successor(
                     predecessor,
+                    ownership,
                     providerId,
                     publicationId,
                     configuration.recoveryCredentialGeneration + 1,
@@ -507,7 +508,7 @@ class DefaultRecoveryPassphraseChanger(
         val discovery = catalog.discoverBootstraps(
             app.opentasks.core.model.CloudLineageId.parse(predecessor.manifest.lineageId),
             app.opentasks.core.model.WriterEpoch(predecessor.manifest.writerEpoch),
-            ProviderObjectId.of(checkNotNull(predecessor.manifest.ownershipClaimProviderFileId)),
+            ProviderObjectId.of(ownership.claim.providerFileId),
         ) as? PublicationCandidateDiscovery.Discovered ?: return null
         val resolution = catalog.resolve(ownership, discovery.candidates, contentKey)
             as? PublicationResolution.Resolved ?: return null
@@ -522,6 +523,7 @@ class DefaultRecoveryPassphraseChanger(
 
     private fun successor(
         predecessor: VerifiedPublication,
+        ownership: VerifiedOwnershipClaim,
         providerId: ProviderObjectId,
         publicationId: PublicationId,
         recoveryCredentialGeneration: Long,
@@ -540,6 +542,9 @@ class DefaultRecoveryPassphraseChanger(
         predecessorClaimProviderFileId = null,
         predecessorClaimId = null,
         predecessorClaimSha256 = null,
+        ownershipClaimProviderFileId = ownership.claim.providerFileId,
+        ownershipClaimId = ownership.claim.claimId,
+        ownershipClaimSha256 = ownership.completeSha256.value,
         publicationOperationId = operationId,
         recoveryCredentialGeneration = recoveryCredentialGeneration,
     )

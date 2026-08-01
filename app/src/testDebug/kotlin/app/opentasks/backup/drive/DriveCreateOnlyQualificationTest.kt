@@ -7,6 +7,7 @@ import app.opentasks.core.data.backup.drive.DriveCreateResult
 import app.opentasks.core.data.backup.drive.DriveDownloadReceipt
 import app.opentasks.core.data.backup.drive.DriveFileMetadata
 import app.opentasks.core.data.backup.drive.DriveListPage
+import app.opentasks.core.data.backup.drive.DriveListedFile
 import app.opentasks.core.data.backup.drive.DriveResumableSession
 import app.opentasks.core.data.backup.drive.DriveTransportException
 import app.opentasks.core.data.backup.drive.DriveTransportFailureCategory
@@ -78,6 +79,23 @@ class DriveCreateOnlyQualificationTest {
     }
 
     @Test
+    fun interruptedQualificationObjectsAreRemovedBeforeAnotherRun() = runBlocking {
+        val transport = FakeCreateOnlyDriveTransport().also {
+            it.seedStaleQualification("stale-qualification")
+        }
+
+        val results = DriveCreateOnlyQualification(
+            transport = transport,
+            directory = temporaryDirectory(),
+            keySupplier = { ByteArray(32) { 5 } },
+        ).run()
+
+        assertTrue(results.all(QualificationResult::passed))
+        assertTrue("stale-qualification" in transport.deleteAttempts)
+        assertTrue(transport.remainingIds().isEmpty())
+    }
+
+    @Test
     fun propertyNamesAndFailureDiagnosticsAreBoundedAndContainNoExceptionMessage() {
         val diagnostic = DriveCreateOnlyQualification.failureDiagnostic(
             stage = "RACE_WINNER_READBACK",
@@ -107,6 +125,7 @@ class DriveCreateOnlyQualificationTest {
     ) : CreateOnlyDriveTransport {
         private val nextId = AtomicInteger()
         private val content = ConcurrentHashMap<String, ByteArray>()
+        private val metadata = ConcurrentHashMap<String, DriveFileMetadata>()
         private val successorCreateCounts = ConcurrentHashMap<String, AtomicInteger>()
         private val downloadCount = AtomicInteger()
 
@@ -132,7 +151,12 @@ class DriveCreateOnlyQualificationTest {
             query: String,
             pageToken: String?,
             pageSize: Int,
-        ): DriveListPage = DriveListPage(emptyList(), null)
+        ): DriveListPage = DriveListPage(
+            metadata.values.map {
+                DriveListedFile(it.providerFileId, it.name, it.role, it.appProperties)
+            },
+            null,
+        )
 
         override suspend fun createFileIfAbsent(request: DriveCreateRequest): DriveCreateResult {
             val copy = request.content.copyOf()
@@ -141,6 +165,7 @@ class DriveCreateOnlyQualificationTest {
                 request.metadata.role == "successor" &&
                     request.metadata.appProperties["claimId"] != "discarded-success"
             if (previous == null) {
+                metadata[request.metadata.providerFileId] = request.metadata
                 if (isRaceSuccessor) {
                     synchronized(this) { raceSuccessorCreates++ }
                 }
@@ -194,6 +219,7 @@ class DriveCreateOnlyQualificationTest {
 
         override suspend fun deleteFile(providerFileId: String): Boolean {
             synchronized(deleteAttempts) { deleteAttempts += providerFileId }
+            metadata.remove(providerFileId)
             return content.remove(providerFileId)?.also { it.fill(0) } != null
         }
 
@@ -201,5 +227,18 @@ class DriveCreateOnlyQualificationTest {
 
         fun contentAt(id: String): ByteArray? = content[id]?.copyOf()
         fun remainingIds(): Set<String> = content.keys.toSet()
+
+        fun seedStaleQualification(id: String) {
+            content[id] = byteArrayOf(1)
+            metadata[id] = DriveFileMetadata(
+                providerFileId = id,
+                name = "stage3-drive-create-only-qualification",
+                role = "successor",
+                appProperties = mapOf(
+                    "format" to "open-tasks-create-only-qualification-v1",
+                    "role" to "successor",
+                ),
+            )
+        }
     }
 }

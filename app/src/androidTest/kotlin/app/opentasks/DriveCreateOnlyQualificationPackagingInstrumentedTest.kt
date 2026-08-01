@@ -81,7 +81,7 @@ class DriveCreateOnlyQualificationPackagingInstrumentedTest {
     private companion object {
         const val QUALIFICATION_ARGUMENT = "driveQualification"
         const val QUALIFICATION_ARGUMENT_VALUE = "run"
-        const val MAX_RESULT_POLLS = 2_400
+        const val MAX_RESULT_POLLS = 4_800
         const val RESULT_POLL_MILLIS = 250L
     }
 }

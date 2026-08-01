@@ -216,24 +216,36 @@ class DefaultRemoteBackupRunner(
         configuration: RemoteBackupConfiguration,
         outcome: RemoteBackupRunResult,
     ): RemoteBackupRunResult {
-        persistCategory(configuration.lineageId, outcome.failureCategory())
+        persistOutcome(configuration.lineageId, outcome)
         return outcome
     }
 
-    private suspend fun persistCategory(
+    private suspend fun persistOutcome(
         lineageId: CloudLineageId,
-        category: RemoteBackupFailureCategory?,
+        outcome: RemoteBackupRunResult,
     ) {
+        val category = outcome.failureCategory()
         try {
             repeat(PERSIST_ATTEMPTS) {
                 // Reread rather than reuse: a verified run has already advanced
                 // the checkpoint this state version guards.
                 val stored = remoteStateStore.known(lineageId) ?: return
-                if (stored.failureCategory == category) return
+                val lifecycle = if (stored.lifecycle == RemoteBackupLifecycle.ACTIVE) {
+                    when (outcome) {
+                        RemoteBackupRunResult.OwnershipLost ->
+                            RemoteBackupLifecycle.OWNERSHIP_LOST
+                        RemoteBackupRunResult.Terminated -> RemoteBackupLifecycle.TERMINATED
+                        else -> stored.lifecycle
+                    }
+                } else {
+                    stored.lifecycle
+                }
+                if (stored.failureCategory == category && stored.lifecycle == lifecycle) return
                 val applied = remoteStateStore.compareAndSet(
                     lineageId = lineageId,
                     expected = stored.stateVersion,
                     next = stored.copy(
+                        lifecycle = lifecycle,
                         failureCategory = category,
                         stateVersion = RemoteBackupStateVersion(stored.stateVersion.value + 1),
                     ),

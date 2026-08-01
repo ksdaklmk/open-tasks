@@ -31,6 +31,7 @@ import app.opentasks.core.model.RemoteObjectRoleV1
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
+import java.security.MessageDigest
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -132,6 +133,22 @@ class DefaultRemoteBackupConfigurator(
         accountBindingDigest: ByteArray,
         allowSeparateLineage: Boolean,
     ): RemoteBackupConnectResult {
+        if (!allowSeparateLineage) {
+            val dormant = try {
+                remoteStateStore.configurations(vaultId).singleOrNull {
+                    it.lifecycle == RemoteBackupLifecycle.DORMANT
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return RemoteBackupConnectResult.Failed(
+                    RemoteBackupFailureCategory.LOCAL_STORAGE,
+                )
+            }
+            if (dormant != null) {
+                return reconnectStored(dormant, accountBindingDigest, fallbackGeneration = null)
+            }
+        }
         val operationId = if (allowSeparateLineage) {
             SEPARATE_CONNECT_OPERATION_PREFIX + vaultId.value
         } else {
@@ -155,10 +172,7 @@ class DefaultRemoteBackupConfigurator(
             )
         }
         if (resumed != null && resumed.phase == RemoteConnectPhase.COMPLETED.name) {
-            return RemoteBackupConnectResult.Connected(
-                lineageId = CloudLineageId.parse(resumed.lineageId),
-                generation = BackupGeneration(checkNotNull(resumed.localGeneration)),
-            )
+            return reconnectCompleted(resumed, accountBindingDigest)
         }
         val contentKey = try {
             contentKeyStore.openExisting(vaultId)
@@ -181,6 +195,73 @@ class DefaultRemoteBackupConfigurator(
         } finally {
             contentKey.close()
         }
+    }
+
+    private suspend fun reconnectCompleted(
+        resumed: RemoteConnectStateV1,
+        accountBindingDigest: ByteArray,
+    ): RemoteBackupConnectResult {
+        val lineageId = CloudLineageId.parse(resumed.lineageId)
+        val stored = remoteStateStore.known(lineageId)
+            ?: return RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        return reconnectStored(
+            stored,
+            accountBindingDigest,
+            BackupGeneration(checkNotNull(resumed.localGeneration)),
+        )
+    }
+
+    private suspend fun reconnectStored(
+        stored: RemoteBackupConfiguration,
+        accountBindingDigest: ByteArray,
+        fallbackGeneration: BackupGeneration?,
+    ): RemoteBackupConnectResult {
+        val expectedDigest = stored.accountBindingDigest
+        val matches = try {
+            MessageDigest.isEqual(expectedDigest, accountBindingDigest)
+        } finally {
+            expectedDigest.fill(0)
+        }
+        if (!matches) {
+            return RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.ACCOUNT_MISMATCH)
+        }
+        when (stored.lifecycle) {
+            RemoteBackupLifecycle.OWNERSHIP_LOST ->
+                return RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.OWNERSHIP_LOST)
+            RemoteBackupLifecycle.TERMINATED,
+            RemoteBackupLifecycle.DELETING,
+            -> return RemoteBackupConnectResult.Failed(RemoteBackupFailureCategory.TERMINATED)
+            RemoteBackupLifecycle.ACTIVE -> Unit
+            RemoteBackupLifecycle.DORMANT -> {
+                val applied = remoteStateStore.compareAndSet(
+                    stored.lineageId,
+                    stored.stateVersion,
+                    stored.copy(
+                        lifecycle = RemoteBackupLifecycle.ACTIVE,
+                        failureCategory = null,
+                        stateVersion = RemoteBackupStateVersion(stored.stateVersion.value + 1),
+                    ),
+                )
+                if (!applied) {
+                    return RemoteBackupConnectResult.Failed(
+                        RemoteBackupFailureCategory.LOCAL_STORAGE,
+                    )
+                }
+            }
+            RemoteBackupLifecycle.CONNECTING,
+            RemoteBackupLifecycle.BLOCKED,
+            -> return RemoteBackupConnectResult.Failed(
+                RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+            )
+        }
+        return RemoteBackupConnectResult.Connected(
+            lineageId = stored.lineageId,
+            generation = stored.lastVerifiedGeneration
+                ?: fallbackGeneration
+                ?: return RemoteBackupConnectResult.Failed(
+                    RemoteBackupFailureCategory.LOCAL_STORAGE,
+                ),
+        )
     }
 
     private inner class Session(
@@ -308,12 +389,14 @@ class DefaultRemoteBackupConfigurator(
         /** Requires a Stage 2 complete base, never a segment-only checkpoint. */
         private suspend fun captureLocalBase(): StepResult<Unit> {
             if (reached(RemoteConnectPhase.LOCAL_BASE_CAPTURED)) return StepResult.Ok(Unit)
-            backupCoordinator.request()
+            backupCoordinator.requestCompleteSnapshot()
             val local = backupStateStore.get(vaultId)
                 ?: return StepResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
             val baseObjectId = local.currentBaseObjectId
             val baseGeneration = local.lastVerifiedSnapshotGeneration
-            if (baseObjectId == null || baseGeneration == null) {
+            if (baseObjectId == null || baseGeneration == null ||
+                baseGeneration != local.currentGeneration
+            ) {
                 return StepResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
             }
             return advance(
