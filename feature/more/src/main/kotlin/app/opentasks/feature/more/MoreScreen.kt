@@ -70,6 +70,7 @@ import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecoveryPassphraseValidation
+import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -103,6 +104,16 @@ fun MoreScreen(
     onUseTemplate: (TemplateId, String, LocalDate) -> Unit = { _, _, _ -> },
     onDeleteTemplate: (TemplateId) -> Unit = {},
     backupStatus: AndroidBackupStatus = AndroidBackupStatus.NotPrepared,
+    remoteBackupStatus: RemoteBackupStatus = RemoteBackupStatus.Disabled,
+    canBackUpNow: Boolean = false,
+    canRestoreRemoteBackup: Boolean = false,
+    canReauthoriseRemoteBackup: Boolean = false,
+    canTakeOverRemoteBackup: Boolean = false,
+    canPreserveRemoteBackup: Boolean = false,
+    canChangeRemotePassphrase: Boolean = false,
+    canDisconnectRemoteBackup: Boolean = false,
+    canDeleteRemoteHistory: Boolean = false,
+    passphraseChangeDisclosureVisible: Boolean = false,
     canReprepareInitialBackup: Boolean = false,
     validateBackupPassphrase: (
         passphrase: String,
@@ -113,6 +124,15 @@ fun MoreScreen(
     onPrepareBackup: (String) -> Unit = {},
     onRetryBackup: () -> Unit = {},
     onOpenSystemSettings: () -> Unit = {},
+    onConnectRemoteBackup: () -> Unit = {},
+    onBackUpNow: () -> Unit = {},
+    onRestoreRemoteBackup: () -> Unit = {},
+    onReauthoriseRemoteBackup: () -> Unit = {},
+    onTakeOverRemoteBackup: () -> Unit = {},
+    onPreserveRemoteBackup: () -> Unit = {},
+    onChangeRemotePassphrase: (String, String) -> Unit = { _, _ -> },
+    onDisconnectRemoteBackup: () -> Unit = {},
+    onDeleteRemoteHistory: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -184,11 +204,30 @@ fun MoreScreen(
             BackHandler { destination = MoreDestination.OVERVIEW }
             BackupRecoveryScreen(
                 status = backupStatus,
+                remoteStatus = remoteBackupStatus,
+                canBackUpNow = canBackUpNow,
+                canRestore = canRestoreRemoteBackup,
+                canReauthorise = canReauthoriseRemoteBackup,
+                canTakeOver = canTakeOverRemoteBackup,
+                canPreserveAsNewLineage = canPreserveRemoteBackup,
+                canChangePassphrase = canChangeRemotePassphrase,
+                canDisconnect = canDisconnectRemoteBackup,
+                canDeleteHistory = canDeleteRemoteHistory,
+                passphraseChangeDisclosureVisible = passphraseChangeDisclosureVisible,
                 canReprepareInitialPackage = canReprepareInitialBackup,
                 validatePassphrase = validateBackupPassphrase,
                 onPrepare = onPrepareBackup,
                 onRetry = onRetryBackup,
                 onOpenSystemSettings = onOpenSystemSettings,
+                onConnect = onConnectRemoteBackup,
+                onBackUpNow = onBackUpNow,
+                onRestore = onRestoreRemoteBackup,
+                onReauthorise = onReauthoriseRemoteBackup,
+                onTakeOver = onTakeOverRemoteBackup,
+                onPreserveAsNewLineage = onPreserveRemoteBackup,
+                onChangePassphrase = onChangeRemotePassphrase,
+                onDisconnect = onDisconnectRemoteBackup,
+                onDeleteHistory = onDeleteRemoteHistory,
                 onBack = { destination = MoreDestination.OVERVIEW },
                 modifier = modifier,
             )

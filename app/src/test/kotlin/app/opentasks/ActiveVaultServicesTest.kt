@@ -1,6 +1,8 @@
 package app.opentasks
 
+import android.content.Intent
 import app.opentasks.backup.AndroidBackupRuntime
+import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
@@ -10,6 +12,8 @@ import app.opentasks.core.domain.RecoveryPassphraseChanger
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupRunResult
 import app.opentasks.core.domain.RemoteBackupRunner
+import app.opentasks.core.model.RemoteBackupStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -211,6 +215,19 @@ class ActiveVaultServicesTest {
 
         override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator
             get() = error("The fake session exposes no lifecycle coordinator")
+
+        override val remoteBackupStatus = MutableStateFlow<RemoteBackupStatus>(
+            RemoteBackupStatus.Disabled,
+        )
+
+        override suspend fun connectRemoteBackup(
+            allowSeparateLineage: Boolean,
+            resolution: Intent?,
+        ): EncryptedBackupActionResult = EncryptedBackupActionResult.Completed
+
+        override suspend fun reauthoriseRemoteBackup(
+            resolution: Intent?,
+        ): EncryptedBackupActionResult = EncryptedBackupActionResult.Completed
 
         override fun close() {
             remoteBackupRuntime.stop()

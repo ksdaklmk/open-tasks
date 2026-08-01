@@ -61,6 +61,8 @@ import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.BackupPackageInfo
 import app.opentasks.core.model.BackupUnavailableReason
 import app.opentasks.core.model.RecoveryPassphraseValidation
+import app.opentasks.core.model.RemoteBackupFailureCategory
+import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RestoredPackageCondition
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -70,6 +72,16 @@ import java.util.Locale
 @Composable
 fun BackupRecoveryScreen(
     status: AndroidBackupStatus,
+    remoteStatus: RemoteBackupStatus = RemoteBackupStatus.Disabled,
+    canBackUpNow: Boolean = false,
+    canRestore: Boolean = false,
+    canReauthorise: Boolean = false,
+    canTakeOver: Boolean = false,
+    canPreserveAsNewLineage: Boolean = false,
+    canChangePassphrase: Boolean = false,
+    canDisconnect: Boolean = false,
+    canDeleteHistory: Boolean = false,
+    passphraseChangeDisclosureVisible: Boolean = false,
     canReprepareInitialPackage: Boolean = false,
     validatePassphrase: (
         passphrase: String,
@@ -78,10 +90,20 @@ fun BackupRecoveryScreen(
     onPrepare: (String) -> Unit,
     onRetry: () -> Unit,
     onOpenSystemSettings: () -> Unit,
+    onConnect: () -> Unit = {},
+    onBackUpNow: () -> Unit = {},
+    onRestore: () -> Unit = {},
+    onReauthorise: () -> Unit = {},
+    onTakeOver: () -> Unit = {},
+    onPreserveAsNewLineage: () -> Unit = {},
+    onChangePassphrase: (String, String) -> Unit = { _, _ -> },
+    onDisconnect: () -> Unit = {},
+    onDeleteHistory: (String) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showPassphraseSheet by remember { mutableStateOf(false) }
+    var remoteSecretAction by remember { mutableStateOf<RemoteSecretAction?>(null) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -126,9 +148,45 @@ fun BackupRecoveryScreen(
                 }
                 Spacer(Modifier.height(24.dp))
                 Text(
+                    stringResource(R.string.backup_encrypted_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .testTag("encrypted-backup-heading")
+                        .semantics { heading() },
+                )
+                Spacer(Modifier.height(12.dp))
+                EncryptedBackupContent(
+                    status = remoteStatus,
+                    canBackUpNow = canBackUpNow,
+                    canRestore = canRestore,
+                    canReauthorise = canReauthorise,
+                    canTakeOver = canTakeOver,
+                    canPreserveAsNewLineage = canPreserveAsNewLineage,
+                    canChangePassphrase = canChangePassphrase,
+                    canDisconnect = canDisconnect,
+                    canDeleteHistory = canDeleteHistory,
+                    passphraseChangeDisclosureVisible = passphraseChangeDisclosureVisible,
+                    onConnect = onConnect,
+                    onBackUpNow = onBackUpNow,
+                    onRestore = onRestore,
+                    onReauthorise = onReauthorise,
+                    onTakeOver = onTakeOver,
+                    onPreserveAsNewLineage = onPreserveAsNewLineage,
+                    onChangePassphrase = {
+                        remoteSecretAction = RemoteSecretAction.CHANGE
+                    },
+                    onDisconnect = onDisconnect,
+                    onDeleteHistory = {
+                        remoteSecretAction = RemoteSecretAction.DELETE
+                    },
+                )
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                Text(
                     stringResource(R.string.backup_android_package_heading),
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.semantics { heading() },
+                    modifier = Modifier
+                        .testTag("android-backup-heading")
+                        .semantics { heading() },
                 )
                 Spacer(Modifier.height(12.dp))
                 BackupStatusContent(
@@ -172,7 +230,264 @@ fun BackupRecoveryScreen(
             },
         )
     }
+    remoteSecretAction?.let { action ->
+        RemoteSecretSheet(
+            action = action,
+            onDismiss = { remoteSecretAction = null },
+            onSubmit = { first, second ->
+                remoteSecretAction = null
+                if (action == RemoteSecretAction.CHANGE) {
+                    onChangePassphrase(first, second)
+                } else {
+                    onDeleteHistory(first)
+                }
+            },
+        )
+    }
 }
+
+@Composable
+private fun EncryptedBackupContent(
+    status: RemoteBackupStatus,
+    canBackUpNow: Boolean,
+    canRestore: Boolean,
+    canReauthorise: Boolean,
+    canTakeOver: Boolean,
+    canPreserveAsNewLineage: Boolean,
+    canChangePassphrase: Boolean,
+    canDisconnect: Boolean,
+    canDeleteHistory: Boolean,
+    passphraseChangeDisclosureVisible: Boolean,
+    onConnect: () -> Unit,
+    onBackUpNow: () -> Unit,
+    onRestore: () -> Unit,
+    onReauthorise: () -> Unit,
+    onTakeOver: () -> Unit,
+    onPreserveAsNewLineage: () -> Unit,
+    onChangePassphrase: () -> Unit,
+    onDisconnect: () -> Unit,
+    onDeleteHistory: () -> Unit,
+) {
+    Text(
+        remoteStatusText(status),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    if (status is RemoteBackupStatus.Verified) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(
+                R.string.backup_remote_verified_facts,
+                status.info.generation.value,
+                status.info.verifiedAt.atZone(ZoneId.systemDefault()).format(PRODUCED_AT_FORMAT),
+            ),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+    if (status is RemoteBackupStatus.Disabled) {
+        BackupAction(R.string.backup_remote_connect, "encrypted-backup-connect", onConnect)
+    }
+    if (canBackUpNow) {
+        BackupAction(R.string.backup_remote_now, "encrypted-backup-now", onBackUpNow)
+    }
+    if (canRestore) {
+        BackupAction(R.string.backup_remote_restore, "encrypted-backup-takeover", onRestore)
+    }
+    if (canReauthorise) {
+        BackupAction(
+            R.string.backup_remote_reauthorise,
+            "encrypted-backup-reauthorize",
+            onReauthorise,
+        )
+    }
+    if (canTakeOver) {
+        BackupAction(R.string.backup_remote_takeover, "encrypted-backup-takeover", onTakeOver)
+    }
+    if (canPreserveAsNewLineage) {
+        BackupAction(
+            R.string.backup_remote_preserve,
+            "encrypted-backup-preserve",
+            onPreserveAsNewLineage,
+        )
+    }
+    if (canChangePassphrase) {
+        BackupAction(
+            R.string.backup_remote_change_passphrase,
+            "encrypted-backup-change-passphrase",
+            onChangePassphrase,
+        )
+        Text(
+            stringResource(R.string.backup_remote_passphrase_disclosure),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (passphraseChangeDisclosureVisible) {
+        Text(
+            stringResource(R.string.backup_remote_passphrase_changed),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+    if (canDisconnect) {
+        BackupAction(
+            R.string.backup_remote_disconnect,
+            "encrypted-backup-disconnect",
+            onDisconnect,
+        )
+        Text(
+            stringResource(R.string.backup_remote_disconnect_disclosure),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (canDeleteHistory) {
+        BackupAction(
+            R.string.backup_remote_delete,
+            "encrypted-backup-delete",
+            onDeleteHistory,
+        )
+        Text(
+            stringResource(R.string.backup_remote_delete_disclosure),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun BackupAction(label: Int, tag: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .testTag(tag),
+    ) {
+        Text(stringResource(label))
+    }
+}
+
+private enum class RemoteSecretAction { CHANGE, DELETE }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RemoteSecretSheet(
+    action: RemoteSecretAction,
+    onDismiss: () -> Unit,
+    onSubmit: (String, String) -> Unit,
+) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+        ) {
+            Text(
+                stringResource(
+                    if (action == RemoteSecretAction.CHANGE) {
+                        R.string.backup_remote_change_passphrase
+                    } else {
+                        R.string.backup_remote_delete
+                    },
+                ),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = first,
+                onValueChange = { first = it },
+                label = {
+                    Text(
+                        stringResource(
+                            if (action == RemoteSecretAction.CHANGE) {
+                                R.string.backup_current_passphrase
+                            } else {
+                                R.string.backup_passphrase_label
+                            },
+                        ),
+                    )
+                },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = if (action == RemoteSecretAction.CHANGE) {
+                        ImeAction.Next
+                    } else {
+                        ImeAction.Done
+                    },
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("encrypted-current-passphrase"),
+            )
+            if (action == RemoteSecretAction.CHANGE) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = second,
+                    onValueChange = { second = it },
+                    label = { Text(stringResource(R.string.backup_new_passphrase)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("encrypted-new-passphrase"),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    val submittedFirst = first
+                    val submittedSecond = second
+                    first = ""
+                    second = ""
+                    onSubmit(submittedFirst, submittedSecond)
+                },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(
+                    stringResource(
+                        if (action == RemoteSecretAction.CHANGE) {
+                            R.string.backup_remote_change_passphrase
+                        } else {
+                            R.string.backup_remote_delete
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun remoteStatusText(status: RemoteBackupStatus): String = stringResource(
+    when (status) {
+        RemoteBackupStatus.Disabled -> R.string.backup_remote_off
+        RemoteBackupStatus.Preparing -> R.string.backup_remote_preparing
+        is RemoteBackupStatus.BackingUp -> R.string.backup_remote_backing_up
+        is RemoteBackupStatus.Verified -> R.string.backup_remote_backed_up
+        is RemoteBackupStatus.RetryScheduled -> R.string.backup_remote_waiting_retry
+        is RemoteBackupStatus.ActionRequired -> when (status.reason) {
+            RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED ->
+                R.string.backup_remote_needs_reauthorisation
+            RemoteBackupFailureCategory.ACCOUNT_MISMATCH -> R.string.backup_remote_wrong_account
+            RemoteBackupFailureCategory.OWNERSHIP_LOST -> R.string.backup_remote_inactive_device
+            RemoteBackupFailureCategory.PROVIDER_STORAGE -> R.string.backup_remote_storage
+            RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE -> R.string.backup_remote_damaged
+            RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE -> R.string.backup_remote_ambiguous
+            else -> R.string.backup_remote_blocked
+        }
+        RemoteBackupStatus.OwnershipLost -> R.string.backup_remote_inactive_device
+        RemoteBackupStatus.AmbiguousRemoteState -> R.string.backup_remote_ambiguous
+        RemoteBackupStatus.Deleting -> R.string.backup_remote_deleting
+        RemoteBackupStatus.Terminated -> R.string.backup_remote_deleted
+    },
+)
 
 @Composable
 private fun BackupStatusContent(

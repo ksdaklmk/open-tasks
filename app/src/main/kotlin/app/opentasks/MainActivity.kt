@@ -4,19 +4,30 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.opentasks.backup.RecoveryPresentation
+import app.opentasks.backup.RecoveryViewModel
 import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.feature.more.RecoveryShellMode
+import app.opentasks.feature.more.RecoveryShellCandidate
+import app.opentasks.feature.more.RecoveryShellScreen
 import app.opentasks.reminders.ReminderIntents
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -34,7 +45,7 @@ class MainActivity : ComponentActivity() {
     private var openTaskSignal by mutableIntStateOf(0)
     private var openTaskId by mutableStateOf<String?>(null)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
-    private var vaultCreationAttempted = false
+    private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,22 +54,80 @@ class MainActivity : ComponentActivity() {
         observeVaultRuntime()
 
         setContent {
-            val runtime = activeRuntime
-            if (runtime == null) {
-                // Nothing that reads vault data is composed before an active
-                // runtime exists; Stage 3 recovery owns this surface next.
-                OpenTasksTheme {
+            when (runtimeState) {
+                VaultRuntimeState.Initializing -> OpenTasksTheme {
                     Surface(modifier = Modifier.fillMaxSize()) {}
                 }
-            } else {
-                val signal = quickAddSignal
-                OpenTasksApp(
-                    activity = this,
-                    quickAddSignal = signal,
-                    openTaskSignal = openTaskSignal,
-                    openTaskId = openTaskId,
+                VaultRuntimeState.NoVault,
+                is VaultRuntimeState.Unreadable,
+                is VaultRuntimeState.Recovering,
+                -> RecoverySurface(runtimeState)
+                is VaultRuntimeState.Active -> {
+                    val signal = quickAddSignal
+                    OpenTasksApp(
+                        activity = this,
+                        quickAddSignal = signal,
+                        openTaskSignal = openTaskSignal,
+                        openTaskId = openTaskId,
+                    )
+                }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun RecoverySurface(runtimeState: VaultRuntimeState) {
+        val recoveryViewModel: RecoveryViewModel = viewModel()
+        val presentation by recoveryViewModel.presentation.collectAsStateWithLifecycle()
+        val resolutionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult(),
+        ) { result ->
+            result.data?.takeIf { result.resultCode == RESULT_OK }
+                ?.let(recoveryViewModel::acceptResolution)
+        }
+        LaunchedEffect(recoveryViewModel) {
+            for (pendingIntent in recoveryViewModel.resolutionEffects) {
+                resolutionLauncher.launch(
+                    IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
                 )
             }
+        }
+        val mode = if (runtimeState is VaultRuntimeState.Recovering) {
+            RecoveryShellMode.Activating
+        } else {
+            when (presentation) {
+                RecoveryPresentation.NoVault -> RecoveryShellMode.NoVault
+                RecoveryPresentation.UnreadableVault -> RecoveryShellMode.UnreadableVault
+                RecoveryPresentation.Discovering -> RecoveryShellMode.Discovering
+                is RecoveryPresentation.Candidates -> RecoveryShellMode.Candidates
+                RecoveryPresentation.Authenticating -> RecoveryShellMode.Authenticating
+                is RecoveryPresentation.TakeoverConfirmation ->
+                    RecoveryShellMode.TakeoverConfirmation
+                RecoveryPresentation.Activating -> RecoveryShellMode.Activating
+                is RecoveryPresentation.Failed -> RecoveryShellMode.Failed
+            }
+        }
+        val candidates = (presentation as? RecoveryPresentation.Candidates)
+            ?.values
+            ?.map { RecoveryShellCandidate(it.handle, it.source.name == "GOOGLE_DRIVE") }
+            .orEmpty()
+        OpenTasksTheme {
+            RecoveryShellScreen(
+                mode = mode,
+                candidates = candidates,
+                takeoverGeneration =
+                    (presentation as? RecoveryPresentation.TakeoverConfirmation)?.generation,
+                onDiscoverDrive = recoveryViewModel::discoverDrive,
+                onDiscoverPortable = recoveryViewModel::discoverPortable,
+                onRestore = recoveryViewModel::restore,
+                onConfirmTakeover = recoveryViewModel::confirmTakeover,
+                onStartWithoutRestoring = recoveryViewModel::startWithoutRestoring,
+                onRetryUnreadable = {
+                    lifecycleScope.launch {
+                        runCatching { vaultRuntimeManager.initialize() }
+                    }
+                },
+            )
         }
     }
 
@@ -80,10 +149,7 @@ class MainActivity : ComponentActivity() {
                     if (activeRuntime != null) viewModelStore.clear()
                     activeRuntime = next
                 }
-                if (state is VaultRuntimeState.NoVault && !vaultCreationAttempted) {
-                    vaultCreationAttempted = true
-                    runCatching { vaultRuntimeManager.createNewVault() }
-                }
+                runtimeState = state
             }
         }
     }

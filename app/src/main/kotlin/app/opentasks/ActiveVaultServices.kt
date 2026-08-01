@@ -1,6 +1,8 @@
 package app.opentasks
 
+import android.content.Intent
 import app.opentasks.backup.AndroidBackupRuntime
+import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
@@ -8,8 +10,10 @@ import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.RecoveryPassphraseChanger
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupRunner
+import app.opentasks.core.model.RemoteBackupStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * The app services that only exist while one vault runtime is active.
@@ -36,6 +40,15 @@ interface ActiveVaultSession : AutoCloseable {
     val recoveryPassphraseChanger: RecoveryPassphraseChanger
 
     val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator
+
+    val remoteBackupStatus: StateFlow<RemoteBackupStatus>
+
+    suspend fun connectRemoteBackup(
+        allowSeparateLineage: Boolean,
+        resolution: Intent?,
+    ): EncryptedBackupActionResult
+
+    suspend fun reauthoriseRemoteBackup(resolution: Intent?): EncryptedBackupActionResult
 }
 
 class DefaultActiveVaultSession(
@@ -47,7 +60,19 @@ class DefaultActiveVaultSession(
     override val remoteBackupRunner: RemoteBackupRunner,
     override val recoveryPassphraseChanger: RecoveryPassphraseChanger,
     override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator,
+    override val remoteBackupStatus: StateFlow<RemoteBackupStatus>,
+    private val connectRemote: suspend (Boolean, Intent?) -> EncryptedBackupActionResult,
+    private val reauthoriseRemote: suspend (Intent?) -> EncryptedBackupActionResult,
 ) : ActiveVaultSession {
+    override suspend fun connectRemoteBackup(
+        allowSeparateLineage: Boolean,
+        resolution: Intent?,
+    ): EncryptedBackupActionResult = connectRemote(allowSeparateLineage, resolution)
+
+    override suspend fun reauthoriseRemoteBackup(
+        resolution: Intent?,
+    ): EncryptedBackupActionResult = reauthoriseRemote(resolution)
+
     /** Cancels scheduled remote work before the observing scope goes away. */
     override fun close() {
         try {

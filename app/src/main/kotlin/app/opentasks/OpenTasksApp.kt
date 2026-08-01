@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -82,6 +83,7 @@ import androidx.navigation3.ui.NavDisplay
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import app.opentasks.backup.BackupViewModel
+import app.opentasks.backup.EncryptedBackupViewModel
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
@@ -171,10 +173,19 @@ fun OpenTasksApp(
     openTaskId: String? = null,
     viewModel: WorkspaceViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
+    encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
         val backupPresentation by backupViewModel.presentation.collectAsStateWithLifecycle()
+        val encryptedBackupPresentation by
+            encryptedBackupViewModel.presentation.collectAsStateWithLifecycle()
+        val backupAuthorizationLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult(),
+        ) { result ->
+            result.data?.takeIf { result.resultCode == Activity.RESULT_OK }
+                ?.let(encryptedBackupViewModel::acceptResolution)
+        }
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
@@ -188,6 +199,14 @@ fun OpenTasksApp(
             shouldShowNavigationLabels(LocalDensity.current.fontScale)
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
+
+        LaunchedEffect(encryptedBackupViewModel) {
+            for (pendingIntent in encryptedBackupViewModel.resolutionEffects) {
+                backupAuthorizationLauncher.launch(
+                    IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                )
+            }
+        }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
         var hasSeparatingFold by remember { mutableStateOf(false) }
@@ -741,6 +760,24 @@ fun OpenTasksApp(
                                         )
                                     },
                                     backupStatus = backupPresentation.status,
+                                    remoteBackupStatus = encryptedBackupPresentation.status,
+                                    canBackUpNow = encryptedBackupPresentation.canBackUpNow,
+                                    canRestoreRemoteBackup =
+                                        encryptedBackupPresentation.canRestore,
+                                    canReauthoriseRemoteBackup =
+                                        encryptedBackupPresentation.canReauthorise,
+                                    canTakeOverRemoteBackup =
+                                        encryptedBackupPresentation.canTakeOver,
+                                    canPreserveRemoteBackup =
+                                        encryptedBackupPresentation.canPreserveAsNewLineage,
+                                    canChangeRemotePassphrase =
+                                        encryptedBackupPresentation.canChangePassphrase,
+                                    canDisconnectRemoteBackup =
+                                        encryptedBackupPresentation.canDisconnect,
+                                    canDeleteRemoteHistory =
+                                        encryptedBackupPresentation.canDeleteHistory,
+                                    passphraseChangeDisclosureVisible =
+                                        encryptedBackupPresentation.passphraseChangeDisclosureVisible,
                                     canReprepareInitialBackup =
                                         backupPresentation.canReprepareInitialPackage,
                                     validateBackupPassphrase =
@@ -748,6 +785,22 @@ fun OpenTasksApp(
                                     onPrepareBackup = backupViewModel::prepare,
                                     onRetryBackup = backupViewModel::retry,
                                     onOpenSystemSettings = ::openSystemSettings,
+                                    onConnectRemoteBackup = encryptedBackupViewModel::connect,
+                                    onBackUpNow = encryptedBackupViewModel::backUpNow,
+                                    onRestoreRemoteBackup =
+                                        encryptedBackupViewModel::restoreOrTakeOver,
+                                    onReauthoriseRemoteBackup =
+                                        encryptedBackupViewModel::reauthorise,
+                                    onTakeOverRemoteBackup =
+                                        encryptedBackupViewModel::restoreOrTakeOver,
+                                    onPreserveRemoteBackup =
+                                        encryptedBackupViewModel::preserveAsNewLineage,
+                                    onChangeRemotePassphrase =
+                                        encryptedBackupViewModel::changePassphrase,
+                                    onDisconnectRemoteBackup =
+                                        encryptedBackupViewModel::disconnect,
+                                    onDeleteRemoteHistory =
+                                        encryptedBackupViewModel::deleteHistory,
                                 )
                             }
                         },

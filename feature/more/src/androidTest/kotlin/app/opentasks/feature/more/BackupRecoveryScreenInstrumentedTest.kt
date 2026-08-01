@@ -40,6 +40,8 @@ import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.BackupPackageInfo
 import app.opentasks.core.model.BackupUnavailableReason
 import app.opentasks.core.model.RecoveryPassphraseValidation
+import app.opentasks.core.model.RemoteBackupFailureCategory
+import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RestoredPackageCondition
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -54,6 +56,85 @@ import org.junit.runner.RunWith
 class BackupRecoveryScreenInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun encryptedAndAndroidBackupAreDistinctCardsWithManualRetry() {
+        val manualRequests = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                BackupRecoveryScreen(
+                    status = AndroidBackupStatus.Ready(PACKAGE_INFO),
+                    remoteStatus = RemoteBackupStatus.RetryScheduled(
+                        BackupGeneration(9),
+                        RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+                    ),
+                    canBackUpNow = true,
+                    validatePassphrase = { _, _ -> RecoveryPassphraseValidation.Valid },
+                    onPrepare = {},
+                    onRetry = {},
+                    onOpenSystemSettings = {},
+                    onBackUpNow = { manualRequests.incrementAndGet() },
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("encrypted-backup-heading")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        composeRule.onNodeWithText("Waiting to retry").assertIsDisplayed()
+        composeRule.onNodeWithTag("encrypted-backup-now")
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.onNodeWithTag("android-backup-heading")
+            .performScrollTo()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        assertEquals(1, manualRequests.get())
+    }
+
+    @Test
+    fun remoteActionsAndLifecycleDisclosuresStayScrollReachableAtLargeText() {
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                OpenTasksTheme {
+                    Box(Modifier.width(320.dp).height(520.dp)) {
+                        BackupRecoveryScreen(
+                            status = AndroidBackupStatus.NotPrepared,
+                            remoteStatus = RemoteBackupStatus.OwnershipLost,
+                            canTakeOver = true,
+                            canPreserveAsNewLineage = true,
+                            canChangePassphrase = true,
+                            canDisconnect = true,
+                            canDeleteHistory = true,
+                            validatePassphrase = { _, _ -> RecoveryPassphraseValidation.Valid },
+                            onPrepare = {},
+                            onRetry = {},
+                            onOpenSystemSettings = {},
+                            onBack = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        listOf(
+            "encrypted-backup-takeover",
+            "encrypted-backup-preserve",
+            "encrypted-backup-change-passphrase",
+            "encrypted-backup-disconnect",
+            "encrypted-backup-delete",
+            "backup-system-settings",
+        ).forEach { tag ->
+            composeRule.onNodeWithTag(tag).performScrollTo().assertHeightIsAtLeast(48.dp)
+        }
+        composeRule.onNodeWithText(
+            "Open Tasks sends no Google Drive file request after disconnecting.",
+        ).assertExists()
+        composeRule.onNodeWithText(
+            "Older Drive backups, Android packages, and copied exports may still work with " +
+                "the old passphrase.",
+        ).assertExists()
+    }
 
     @Test
     fun moreOverviewShowsExactLocalSummaryAndNavigatesToBackupRecovery() {
@@ -124,8 +205,8 @@ class BackupRecoveryScreenInstrumentedTest {
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
             .assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Android backup is supplementary. App-managed cloud backup is not yet " +
-                "available, and a prepared package does not confirm that Android uploaded it.",
+            "Android backup is supplementary. A prepared package does not confirm that " +
+                "Android uploaded it.",
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
 

@@ -1,6 +1,7 @@
 package app.opentasks.di
 
 import android.content.Context
+import android.content.Intent
 import app.opentasks.ActiveVaultServices
 import app.opentasks.ActiveVaultSession
 import app.opentasks.DefaultActiveVaultSession
@@ -12,6 +13,7 @@ import app.opentasks.backup.DefaultRecoveryPassphraseChanger
 import app.opentasks.backup.DefaultRemoteBackupLifecycleCoordinator
 import app.opentasks.backup.DefaultRemoteBackupRunner
 import app.opentasks.backup.DefaultRemoteBackupRuntime
+import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
@@ -19,6 +21,8 @@ import app.opentasks.backup.RemoteBackupWorkerFactory
 import app.opentasks.backup.RestoredPackageIntake
 import app.opentasks.backup.WorkManagerRemoteBackupScheduler
 import app.opentasks.backup.drive.DefaultGoogleDriveAuthorizationManager
+import app.opentasks.backup.drive.DriveAuthorizationResult
+import app.opentasks.backup.drive.DriveAuthorizationUnavailableReason
 import app.opentasks.backup.drive.DriveAuthorizationMode
 import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.backup.recordRestoredPackageStatus
@@ -50,8 +54,15 @@ import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RecoveryCoordinator
+import app.opentasks.core.domain.RemoteBackupConnectResult
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.RemoteBackupFailureCategory
+import app.opentasks.core.model.RemoteBackupLifecycle
+import app.opentasks.core.model.RemoteBackupStatus
+import app.opentasks.core.model.RemoteBackupVerifiedInfo
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
 import dagger.Module
@@ -65,6 +76,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 
 @Module
@@ -135,6 +148,22 @@ object AppModule {
     fun provideGoogleDriveAuthorizationManager(
         @ApplicationContext context: Context,
     ): GoogleDriveAuthorizationManager = DefaultGoogleDriveAuthorizationManager(context)
+
+    @Provides
+    @Singleton
+    fun provideRecoveryCoordinator(
+        @ApplicationContext context: Context,
+        crypto: VaultCrypto,
+        runtimeManager: VaultRuntimeManager,
+        codec: AuthenticatedCloudObjectCodec,
+        files: AndroidBackupFiles,
+    ): RecoveryCoordinator = LocalVaultRepositoryFactory.createRecoveryCoordinator(
+        context = context,
+        crypto = crypto,
+        runtimeManager = runtimeManager,
+        authenticatedCodec = codec,
+        recoveryStagingRoot = files.recoveryRoot,
+    )
 
     // Process-scoped: unique background work outlives any one vault slot.
     @Provides
@@ -324,6 +353,92 @@ object AppModule {
             configurator = remoteConfigurator,
             publicationGate = publicationGate,
         )
+        val remoteStatus = runtime.remoteBackupStore.observeActive(runtime.vaultId)
+            .map(::remoteBackupStatus)
+            .stateIn(scope, SharingStarted.Eagerly, RemoteBackupStatus.Disabled)
+        val authorizeForConnect: suspend (Boolean, Intent?) -> EncryptedBackupActionResult =
+            { allowSeparateLineage, resolution ->
+                val authorization = if (resolution == null) {
+                    authorizationManager.authorize(
+                        DriveAuthorizationMode.EXPLICIT_ACCOUNT,
+                        expectedAccountDigest = null,
+                    )
+                } else {
+                    authorizationManager.acceptResolution(
+                        resolution,
+                        expectedAccountDigest = null,
+                    )
+                }
+                when (authorization) {
+                    is DriveAuthorizationResult.Authorized -> {
+                        val digest = authorization.session.copyAccountBindingDigest()
+                        try {
+                            EncryptedBackupActionResult.ConnectResult(
+                                remoteConfigurator.connect(
+                                    objectStore = openRemoteObjectStore(
+                                        authorization.session.transport,
+                                    ),
+                                    accountBindingDigest = digest,
+                                    allowSeparateLineage = allowSeparateLineage,
+                                ),
+                            )
+                        } finally {
+                            digest.fill(0)
+                            authorization.session.close()
+                        }
+                    }
+                    is DriveAuthorizationResult.ResolutionRequired ->
+                        EncryptedBackupActionResult.ResolutionRequired(
+                            authorization.pendingIntent,
+                        )
+                    DriveAuthorizationResult.AccountMismatch ->
+                        EncryptedBackupActionResult.Failed(
+                            RemoteBackupFailureCategory.ACCOUNT_MISMATCH,
+                        )
+                    is DriveAuthorizationResult.Unavailable ->
+                        EncryptedBackupActionResult.Failed(
+                            authorization.reason.toRemoteFailure(),
+                        )
+                }
+            }
+        val reauthorise: suspend (Intent?) -> EncryptedBackupActionResult = { resolution ->
+            val expected = runtime.remoteBackupStore.active(runtime.vaultId)
+                ?.accountBindingDigest
+            if (expected == null) {
+                EncryptedBackupActionResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            } else {
+                try {
+                    val authorization = if (resolution == null) {
+                        authorizationManager.authorize(
+                            DriveAuthorizationMode.EXPLICIT_ACCOUNT,
+                            expected,
+                        )
+                    } else {
+                        authorizationManager.acceptResolution(resolution, expected)
+                    }
+                    when (authorization) {
+                        is DriveAuthorizationResult.Authorized -> {
+                            authorization.session.close()
+                            EncryptedBackupActionResult.Completed
+                        }
+                        is DriveAuthorizationResult.ResolutionRequired ->
+                            EncryptedBackupActionResult.ResolutionRequired(
+                                authorization.pendingIntent,
+                            )
+                        DriveAuthorizationResult.AccountMismatch ->
+                            EncryptedBackupActionResult.Failed(
+                                RemoteBackupFailureCategory.ACCOUNT_MISMATCH,
+                            )
+                        is DriveAuthorizationResult.Unavailable ->
+                            EncryptedBackupActionResult.Failed(
+                                authorization.reason.toRemoteFailure(),
+                            )
+                    }
+                } finally {
+                    expected.fill(0)
+                }
+            }
+        }
         return DefaultActiveVaultSession(
             scope = scope,
             backupRuntime = DefaultAndroidBackupRuntime(
@@ -421,6 +536,65 @@ object AppModule {
             remoteBackupRunner = remoteRunner,
             recoveryPassphraseChanger = recoveryPassphraseChanger,
             remoteBackupLifecycleCoordinator = lifecycleCoordinator,
+            remoteBackupStatus = remoteStatus,
+            connectRemote = authorizeForConnect,
+            reauthoriseRemote = reauthorise,
         )
+    }
+
+    private fun remoteBackupStatus(
+        configuration: app.opentasks.core.domain.RemoteBackupConfiguration?,
+    ): RemoteBackupStatus {
+        if (configuration == null) return RemoteBackupStatus.Disabled
+        return when (configuration.lifecycle) {
+            RemoteBackupLifecycle.CONNECTING -> RemoteBackupStatus.Preparing
+            RemoteBackupLifecycle.DORMANT -> RemoteBackupStatus.Disabled
+            RemoteBackupLifecycle.OWNERSHIP_LOST -> RemoteBackupStatus.OwnershipLost
+            RemoteBackupLifecycle.DELETING -> RemoteBackupStatus.Deleting
+            RemoteBackupLifecycle.TERMINATED -> RemoteBackupStatus.Terminated
+            RemoteBackupLifecycle.BLOCKED ->
+                RemoteBackupStatus.ActionRequired(
+                    configuration.failureCategory ?: RemoteBackupFailureCategory.LOCAL_STORAGE,
+                )
+            RemoteBackupLifecycle.ACTIVE -> when (val failure = configuration.failureCategory) {
+                RemoteBackupFailureCategory.OWNERSHIP_LOST -> RemoteBackupStatus.OwnershipLost
+                RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE ->
+                    RemoteBackupStatus.AmbiguousRemoteState
+                RemoteBackupFailureCategory.TERMINATED -> RemoteBackupStatus.Terminated
+                RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+                RemoteBackupFailureCategory.PROVIDER_STORAGE,
+                -> RemoteBackupStatus.RetryScheduled(
+                    configuration.lastVerifiedGeneration ?: BackupGeneration(0),
+                    failure,
+                )
+                null -> if (
+                    configuration.lastVerifiedGeneration != null &&
+                    configuration.lastVerifiedAt != null
+                ) {
+                    RemoteBackupStatus.Verified(
+                        RemoteBackupVerifiedInfo(
+                            requireNotNull(configuration.lastVerifiedGeneration),
+                            requireNotNull(configuration.lastVerifiedAt),
+                        ),
+                    )
+                } else {
+                    RemoteBackupStatus.Preparing
+                }
+                else -> RemoteBackupStatus.ActionRequired(failure)
+            }
+        }
+    }
+
+    private fun DriveAuthorizationUnavailableReason.toRemoteFailure():
+        RemoteBackupFailureCategory = when (this) {
+        DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
+        DriveAuthorizationUnavailableReason.REJECTED,
+        -> RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED
+        DriveAuthorizationUnavailableReason.RETRYABLE ->
+            RemoteBackupFailureCategory.RETRYABLE_PROVIDER
+        DriveAuthorizationUnavailableReason.PROVIDER_STORAGE ->
+            RemoteBackupFailureCategory.PROVIDER_STORAGE
+        DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE ->
+            RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE
     }
 }
