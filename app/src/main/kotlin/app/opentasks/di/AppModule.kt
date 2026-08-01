@@ -322,6 +322,7 @@ object AppModule {
             ownershipCodec = ownershipCodec,
             publicationCodec = publicationCodec,
             configurator = remoteConfigurator,
+            publicationGate = publicationGate,
         )
         return DefaultActiveVaultSession(
             scope = scope,

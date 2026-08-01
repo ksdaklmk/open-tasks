@@ -65,9 +65,13 @@ import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
 import java.io.File
 import java.time.Instant
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -269,6 +273,22 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun deletionRemovesAuthenticatedInventoryObjectsOmittedFromProviderListings() = runBlocking {
+        val fixture = DeletionFixture()
+        fixture.seedRemoteOnlyPayloadHistory()
+        fixture.objects.listedByRole[RemoteObjectRoleV1.SNAPSHOT] = emptyList()
+        fixture.objects.listedByRole[RemoteObjectRoleV1.SEGMENT] = emptyList()
+
+        val result = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(LifecycleResult.HistoryDeleted, result)
+        assertTrue(REMOTE_BASE_A_PROVIDER in fixture.objects.deleted)
+        assertTrue(REMOTE_BASE_B_PROVIDER in fixture.objects.deleted)
+        assertTrue(REMOTE_SEGMENT_PROVIDER in fixture.objects.deleted)
+        fixture.close()
+    }
+
+    @Test
     fun deletionRetainsAuthenticatedPublicationFactsAcrossPayloadBatches() = runBlocking {
         val fixture = DeletionFixture(
             RecordingTransferStore((1..29).map { remoteObject(it, verified = true) }),
@@ -286,6 +306,110 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         val resumed = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
 
         assertEquals(LifecycleResult.HistoryDeleted, resumed)
+        fixture.close()
+    }
+
+    @Test
+    fun deletionFinalRescanDefersClaimsForALateAuthenticatedPublication() = runBlocking {
+        val fixture = DeletionFixture()
+        fixture.seedRemoteOnlyPayloadHistory(
+            listPublication = false,
+            listInventory = false,
+            makeCurrent = false,
+        )
+        fixture.objects.listOverride = { request, roleRequestCount ->
+            if (request.role != RemoteObjectRoleV1.PUBLICATION) {
+                null
+            } else {
+                RemoteListPage(
+                    objects = if (
+                        roleRequestCount == 2 &&
+                        REMOTE_PUBLICATION_PROVIDER in fixture.objects.smallFiles
+                    ) {
+                        listOf(
+                            remoteListed(
+                                REMOTE_PUBLICATION_PROVIDER,
+                                RemoteObjectRoleV1.PUBLICATION,
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+                    nextPageToken = null,
+                )
+            }
+        }
+
+        val first = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            first,
+        )
+        assertTrue(REMOTE_PUBLICATION_PROVIDER !in fixture.objects.deleted)
+        assertTrue(OLD_CLAIM_PROVIDER !in fixture.objects.deleted)
+        assertTrue(ROOT_PROVIDER !in fixture.objects.deleted)
+        assertEquals(
+            0,
+            fixture.objects.roleListRequests[RemoteObjectRoleV1.OWNERSHIP_CLAIM] ?: 0,
+        )
+        assertEquals(
+            TerminalDeletionPhase.PAYLOAD_CLEANUP.name,
+            fixture.state.operationPhases.last(),
+        )
+
+        val resumed = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(LifecycleResult.HistoryDeleted, resumed)
+        assertTrue(REMOTE_PUBLICATION_PROVIDER in fixture.objects.deleted)
+        assertEquals(ROOT_PROVIDER, fixture.objects.deleted.last())
+        fixture.close()
+    }
+
+    @Test
+    fun deletionFailsClosedAtTheDurablePerRolePayloadPageLimit() = runBlocking {
+        val fixture = DeletionFixture()
+        fixture.objects.listOverride = { request, roleRequestCount ->
+            if (request.role != RemoteObjectRoleV1.PUBLICATION) {
+                null
+            } else if (roleRequestCount <= 65) {
+                RemoteListPage(
+                    objects = emptyList(),
+                    nextPageToken = "unique-page-$roleRequestCount",
+                )
+            } else {
+                error("The coordinator did not enforce its own page bound")
+            }
+        }
+
+        val result = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            result,
+        )
+        assertEquals(64, fixture.objects.roleListRequests[RemoteObjectRoleV1.PUBLICATION])
+        assertTrue(ROOT_PROVIDER !in fixture.objects.deleted)
+        fixture.close()
+    }
+
+    @Test
+    fun deletionWaitsForTheVaultPublicationGateBeforeStarting() = runBlocking {
+        val publicationGate = Mutex(locked = true)
+        val fixture = DeletionFixture(publicationGate = publicationGate)
+        val deletion = async(start = CoroutineStart.UNDISPATCHED) {
+            fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+        }
+
+        yield()
+        try {
+            assertTrue(!deletion.isCompleted)
+            assertEquals(RemoteBackupLifecycle.ACTIVE, fixture.state.configuration.lifecycle)
+        } finally {
+            publicationGate.unlock()
+        }
+
+        assertEquals(LifecycleResult.HistoryDeleted, deletion.await())
         fixture.close()
     }
 
@@ -328,6 +452,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
 
     private inner class DeletionFixture(
         transferStore: RemoteBackupTransferStore = EmptyTransferStore,
+        publicationGate: Mutex = Mutex(),
     ) {
         val crypto = TinkVaultCrypto()
         private val key = crypto.createKey()
@@ -355,9 +480,14 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             configurator = UnusedConfigurator,
             now = { NOW },
             newClaimId = { OwnershipClaimId.parse(TOMBSTONE_ID) },
+            publicationGate = publicationGate,
         )
 
-        fun seedRemoteOnlyPayloadHistory() {
+        fun seedRemoteOnlyPayloadHistory(
+            listPublication: Boolean = true,
+            listInventory: Boolean = true,
+            makeCurrent: Boolean = true,
+        ) {
             val inventory = listOf(
                 remoteInventory(
                     logicalId = "base-a",
@@ -416,24 +546,36 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             val verified = publicationCodec.verify(encoded, key)
             objects.smallFiles[REMOTE_PUBLICATION_PROVIDER] = encoded.copyOf()
             encoded.fill(0)
-            objects.listedByRole[RemoteObjectRoleV1.PUBLICATION] =
+            objects.listedByRole[RemoteObjectRoleV1.PUBLICATION] = if (listPublication) {
                 listOf(remoteListed(REMOTE_PUBLICATION_PROVIDER, RemoteObjectRoleV1.PUBLICATION))
-            objects.listedByRole[RemoteObjectRoleV1.SNAPSHOT] = listOf(
-                remoteListed(REMOTE_BASE_A_PROVIDER, RemoteObjectRoleV1.SNAPSHOT),
-                remoteListed(REMOTE_BASE_B_PROVIDER, RemoteObjectRoleV1.SNAPSHOT),
-            )
-            objects.listedByRole[RemoteObjectRoleV1.SEGMENT] =
+            } else {
+                emptyList()
+            }
+            objects.listedByRole[RemoteObjectRoleV1.SNAPSHOT] = if (listInventory) {
+                listOf(
+                    remoteListed(REMOTE_BASE_A_PROVIDER, RemoteObjectRoleV1.SNAPSHOT),
+                    remoteListed(REMOTE_BASE_B_PROVIDER, RemoteObjectRoleV1.SNAPSHOT),
+                )
+            } else {
+                emptyList()
+            }
+            objects.listedByRole[RemoteObjectRoleV1.SEGMENT] = if (listInventory) {
                 listOf(remoteListed(REMOTE_SEGMENT_PROVIDER, RemoteObjectRoleV1.SEGMENT))
-            state.configuration = state.configuration.copy(
-                currentPublication = PublicationRef(
-                    providerId = ProviderObjectId.of(REMOTE_PUBLICATION_PROVIDER),
-                    logicalId = PublicationId.parse(REMOTE_PUBLICATION_ID),
-                    sha256 = verified.completeSha256,
-                    sequence = PublicationSequence(1),
-                    generation = BackupGeneration(5),
-                ),
-                lastVerifiedGeneration = BackupGeneration(5),
-            )
+            } else {
+                emptyList()
+            }
+            if (makeCurrent) {
+                state.configuration = state.configuration.copy(
+                    currentPublication = PublicationRef(
+                        providerId = ProviderObjectId.of(REMOTE_PUBLICATION_PROVIDER),
+                        logicalId = PublicationId.parse(REMOTE_PUBLICATION_ID),
+                        sha256 = verified.completeSha256,
+                        sequence = PublicationSequence(1),
+                        generation = BackupGeneration(5),
+                    ),
+                    lastVerifiedGeneration = BackupGeneration(5),
+                )
+            }
         }
 
         fun close() {
@@ -557,8 +699,10 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         val deleted = mutableListOf<String>()
         val listRequests = mutableListOf<RemoteObjectRoleV1>()
         val readSmallRequests = mutableListOf<String>()
+        val roleListRequests = mutableMapOf<RemoteObjectRoleV1, Int>()
         val listedByRole = mutableMapOf<RemoteObjectRoleV1, List<app.opentasks.core.domain.RemoteListedObject>>()
         val smallFiles = mutableMapOf<String, ByteArray>()
+        var listOverride: ((RemoteListRequest, Int) -> RemoteListPage?)? = null
         override suspend fun generateProviderIds(count: Int, role: RemoteObjectRoleV1) =
             error("The terminal must use its predecessor's exact successor slot")
         override suspend fun createSmallIfAbsent(
@@ -578,6 +722,9 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         }
         override suspend fun list(request: RemoteListRequest): RemoteListPage {
             listRequests += request.role
+            val roleRequestCount = roleListRequests.getOrDefault(request.role, 0) + 1
+            roleListRequests[request.role] = roleRequestCount
+            listOverride?.invoke(request, roleRequestCount)?.let { return it }
             return RemoteListPage(
             objects = listedByRole[request.role] ?: if (
                 request.role == RemoteObjectRoleV1.OWNERSHIP_CLAIM &&
