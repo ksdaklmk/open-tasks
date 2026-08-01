@@ -213,7 +213,7 @@ fun OpenTasksApp(
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
-        var hasSeparatingFold by remember { mutableStateOf(false) }
+        var rawFolds by remember { mutableStateOf(emptyList<RawFold>()) }
         var permissionStateVersion by remember { mutableIntStateOf(0) }
         var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
         val lifecycleOwner = LocalLifecycleOwner.current
@@ -316,9 +316,17 @@ fun OpenTasksApp(
             WindowInfoTracker.getOrCreate(activity)
                 .windowLayoutInfo(activity)
                 .collect { layout ->
-                    hasSeparatingFold = layout.displayFeatures
+                    rawFolds = layout.displayFeatures
                         .filterIsInstance<FoldingFeature>()
-                        .any(FoldingFeature::isSeparating)
+                        .map { feature ->
+                            RawFold(
+                                leftPx = feature.bounds.left,
+                                topPx = feature.bounds.top,
+                                widthPx = feature.bounds.width(),
+                                heightPx = feature.bounds.height(),
+                                isSeparating = feature.isSeparating,
+                            )
+                        }
                 }
         }
 
@@ -385,22 +393,13 @@ fun OpenTasksApp(
                 }
                 .focusable(),
         ) {
+            val density = LocalDensity.current.density
             val layout = WorkspaceLayoutPolicy.calculate(
-                WindowPosture(
+                WindowPostureMapper.map(
                     widthDp = maxWidth.value.toInt().coerceAtLeast(1),
                     heightDp = maxHeight.value.toInt().coerceAtLeast(1),
-                    foldLines = if (hasSeparatingFold) {
-                        listOf(
-                            FoldLine(
-                                orientation = FoldOrientation.VERTICAL,
-                                isSeparating = true,
-                                positionDp = (maxWidth.value.toInt() / 2).coerceAtLeast(1),
-                                occludedWidthDp = 0,
-                            ),
-                        )
-                    } else {
-                        emptyList()
-                    },
+                    density = density,
+                    folds = rawFolds,
                 ),
             )
             val compact = layout.windowClass == WorkspaceWindowClass.COMPACT
