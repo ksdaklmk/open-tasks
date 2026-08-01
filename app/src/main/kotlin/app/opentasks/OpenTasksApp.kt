@@ -386,8 +386,22 @@ fun OpenTasksApp(
                 .focusable(),
         ) {
             val layout = WorkspaceLayoutPolicy.calculate(
-                widthDp = maxWidth.value.toInt().coerceAtLeast(1),
-                hasSeparatingFold = hasSeparatingFold,
+                WindowPosture(
+                    widthDp = maxWidth.value.toInt().coerceAtLeast(1),
+                    heightDp = maxHeight.value.toInt().coerceAtLeast(1),
+                    foldLines = if (hasSeparatingFold) {
+                        listOf(
+                            FoldLine(
+                                orientation = FoldOrientation.VERTICAL,
+                                isSeparating = true,
+                                positionDp = (maxWidth.value.toInt() / 2).coerceAtLeast(1),
+                                occludedWidthDp = 0,
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+                ),
             )
             val compact = layout.windowClass == WorkspaceWindowClass.COMPACT
             val expanded =

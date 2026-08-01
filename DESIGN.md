@@ -81,6 +81,13 @@ and 32 dp expanded padding.
 Every touch target is at least 48 dp. Window size and folding posture determine
 structure; hardware model names never do.
 
+`WorkspaceLayoutPolicy` receives a `WindowPosture` (width, height, and fold
+lines). List/detail panes use One UI 42/58 fractions below 960 dp and 38/62 at
+or above 960 dp. A separating vertical hinge snaps the split to the valid fold
+nearest the window centre, breaking a centre tie toward the leading fold; at
+most four fold lines are considered. A separating horizontal fold reserves its
+occlusion band. Posture handling must not assume `HALF_OPENED` state.
+
 ## Shape and Elevation
 
 Material 3 Expressive shapes are restrained:

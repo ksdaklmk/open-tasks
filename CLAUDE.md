@@ -57,7 +57,8 @@ race KSP while release Hilt sources are generated.
   is added, including backup-journal atomicity.
 - Selected task/project identity lives in `SavedStateHandle`, not in composable state.
 - Navigation is **Navigation 3** (`NavDisplay` + `rememberNavBackStack` + `entryProvider`, routes are `@Serializable data object … : NavKey`). Not `navigation-compose`, no `NavHost`.
-- Layout comes from `WorkspaceLayoutPolicy.calculate(widthDp, hasSeparatingFold)`, never from `WindowSizeClass` or device model.
+- Layout comes from `WorkspaceLayoutPolicy.calculate(WindowPosture)`, never
+  from `WindowSizeClass` or device model.
 
 ## Data and security
 
