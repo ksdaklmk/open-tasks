@@ -167,6 +167,7 @@ fun TasksScreen(
     selectedTaskId: TaskId?,
     showDetailPane: Boolean,
     listPaneFraction: Float = 0.42f,
+    hingeExclusionBandDp: IntRange? = null,
     onSelectTask: (TaskId) -> Unit,
     onCloseDetail: () -> Unit,
     onCompleteTask: (Task) -> Unit,
@@ -255,6 +256,7 @@ fun TasksScreen(
                 onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
                 onUpdateTimeEntry = onUpdateTimeEntry,
                 onDeleteTimeEntry = onDeleteTimeEntry,
+                hingeExclusionBandDp = hingeExclusionBandDp,
             )
         }
         return
@@ -334,6 +336,7 @@ fun TasksScreen(
                         onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
                         onUpdateTimeEntry = onUpdateTimeEntry,
                         onDeleteTimeEntry = onDeleteTimeEntry,
+                        hingeExclusionBandDp = hingeExclusionBandDp,
                         modifier = Modifier
                             .weight(1f - listPaneFraction)
                             .testTag("detailPane"),
@@ -465,8 +468,10 @@ private fun TaskDetailPane(
     onAddTimeEntry: (TimeEntryEdit) -> Unit,
     onUpdateTimeEntry: (TimeEntryId, TimeEntryEdit) -> Unit,
     onDeleteTimeEntry: (TimeEntryId) -> Unit,
+    hingeExclusionBandDp: IntRange?,
     modifier: Modifier = Modifier,
 ) {
+    val sheetTopPaddingDp = hingeExclusionBandDp?.last ?: 0
     var title by rememberSaveable(task.id.value) { mutableStateOf(task.title) }
     var description by rememberSaveable(task.id.value) { mutableStateOf(task.description) }
     var projectIdValue by rememberSaveable(task.id.value) {
@@ -689,13 +694,18 @@ private fun TaskDetailPane(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .testTag("task-detail-scroll")
-            .padding(24.dp),
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(top = sheetTopPaddingDp.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .testTag("editorSheetContent")
+                    .padding(24.dp),
+            ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1812,6 +1822,8 @@ private fun TaskDetailPane(
             }
         }
         Spacer(Modifier.height(80.dp))
+            }
+        }
     }
 
     if (showDependencyEditor) {

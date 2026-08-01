@@ -563,6 +563,7 @@ fun OpenTasksApp(
                                     selectedTaskId = selectedTaskId,
                                     showDetailPane = showDetailPane,
                                     listPaneFraction = listPaneFraction,
+                                    hingeExclusionBandDp = layout.hingeExclusionBandDp,
                                     onSelectTask = viewModel::selectTask,
                                     onCloseDetail = viewModel::closeTask,
                                     onCompleteTask = viewModel::completeTask,
