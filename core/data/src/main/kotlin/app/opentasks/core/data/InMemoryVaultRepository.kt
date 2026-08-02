@@ -22,6 +22,8 @@ import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
@@ -211,6 +213,10 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
             is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
             is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
+            is DomainCommand.AddNote -> addNote(command)
+            is DomainCommand.UpdateNote -> updateNote(command)
+            is DomainCommand.DeleteNote -> deleteNote(command)
+            is DomainCommand.RestoreNote -> restoreNote(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -1919,6 +1925,104 @@ class InMemoryVaultRepository internal constructor(
         )
     }
 
+    private fun addNote(command: DomainCommand.AddNote): CommandResult {
+        val current = mutableWorkspace.value
+        if ((command.taskId == null) == (command.projectId == null)) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "A note belongs to exactly one task or project.",
+            )
+        }
+        command.taskId?.let { taskId ->
+            current.tasks.firstOrNull { it.id == taskId && it.deletedAt == null }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        }
+        command.projectId?.let { projectId ->
+            current.projects.firstOrNull { it.id == projectId }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Project no longer exists.")
+        }
+        val body = command.body.trim()
+        validateNoteBody(body)?.let { return it }
+        val owned = current.notes.count {
+            it.taskId == command.taskId && it.projectId == command.projectId
+        }
+        if (owned >= MAX_NOTES_PER_OWNER) {
+            return CommandResult.Rejected(
+                RejectionReason.NOTE_LIMIT_REACHED,
+                "A task or project can hold up to $MAX_NOTES_PER_OWNER notes.",
+            )
+        }
+        val note = Note(
+            id = NoteId.new(),
+            taskId = command.taskId,
+            projectId = command.projectId,
+            body = body,
+            createdAt = command.createdAt,
+            editedAt = null,
+            revision = Revision(sourceDeviceId, command.createdAt.toEpochMilli(), 0),
+        )
+        mutableWorkspace.value = current.copy(notes = current.notes + note)
+        return CommandResult.Success("Note added", undo = DomainCommand.DeleteNote(note.id))
+    }
+
+    private fun updateNote(command: DomainCommand.UpdateNote): CommandResult {
+        val current = mutableWorkspace.value
+        val original = current.notes.firstOrNull { it.id == command.noteId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Note no longer exists.")
+        val body = command.body.trim()
+        validateNoteBody(body)?.let { return it }
+        val updated = original.copy(
+            body = body,
+            editedAt = command.editedAt,
+            revision = Revision(
+                deviceId = original.revision.deviceId,
+                wallTimeMillis = maxOf(
+                    original.revision.wallTimeMillis + 1,
+                    command.editedAt.toEpochMilli(),
+                ),
+                logicalCounter = original.revision.logicalCounter + 1,
+            ),
+        )
+        mutableWorkspace.value = current.copy(
+            notes = current.notes.map { if (it.id == updated.id) updated else it },
+        )
+        return CommandResult.Success(
+            message = "Note saved",
+            undo = DomainCommand.RestoreNote(original),
+        )
+    }
+
+    private fun deleteNote(command: DomainCommand.DeleteNote): CommandResult {
+        val current = mutableWorkspace.value
+        val note = current.notes.firstOrNull { it.id == command.noteId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Note no longer exists.")
+        mutableWorkspace.value = current.copy(notes = current.notes.filterNot { it.id == note.id })
+        return CommandResult.Success(
+            message = "Note deleted",
+            undo = DomainCommand.RestoreNote(note),
+        )
+    }
+
+    private fun restoreNote(command: DomainCommand.RestoreNote): CommandResult {
+        val current = mutableWorkspace.value
+        if (current.notes.any { it.id == command.note.id }) {
+            return CommandResult.Success("Note restored")
+        }
+        command.note.taskId?.let { taskId ->
+            current.tasks.firstOrNull { it.id == taskId && it.deletedAt == null }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        }
+        command.note.projectId?.let { projectId ->
+            current.projects.firstOrNull { it.id == projectId }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Project no longer exists.")
+        }
+        mutableWorkspace.value = current.copy(notes = current.notes + command.note)
+        return CommandResult.Success(
+            message = "Note restored",
+            undo = DomainCommand.DeleteNote(command.note.id),
+        )
+    }
+
     private fun validateTimeEntry(
         taskId: TaskId,
         startedAt: Instant,
@@ -1970,6 +2074,18 @@ class InMemoryVaultRepository internal constructor(
         text.length > MAX_CHECKLIST_ITEM_LENGTH -> CommandResult.Rejected(
             RejectionReason.CHECKLIST_ITEM_TOO_LONG,
             "Keep checklist items under $MAX_CHECKLIST_ITEM_LENGTH characters.",
+        )
+        else -> null
+    }
+
+    private fun validateNoteBody(body: String): CommandResult.Rejected? = when {
+        body.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_NOTE,
+            "A note needs text.",
+        )
+        body.length > MAX_NOTE_BODY_LENGTH -> CommandResult.Rejected(
+            RejectionReason.NOTE_TOO_LONG,
+            "Keep notes under $MAX_NOTE_BODY_LENGTH characters.",
         )
         else -> null
     }
@@ -2229,6 +2345,8 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
+        const val MAX_NOTE_BODY_LENGTH = 10_000
+        const val MAX_NOTES_PER_OWNER = 500
     }
 }
 

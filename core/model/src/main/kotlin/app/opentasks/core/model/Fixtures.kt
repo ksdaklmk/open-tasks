@@ -165,6 +165,30 @@ object OpenTasksFixtures {
         Tag(TagId("tag-admin"), workspaceId, "Admin"),
     )
 
+    // Task-owned fixture note deliberately avoids `tasks.first()` (task-proposal):
+    // InMemoryNoteCommandTest seeds InMemoryVaultRepository() from this snapshot and
+    // relies on tasks.first() starting with zero notes.
+    val notes = listOf(
+        Note(
+            id = NoteId("note-review-feedback"),
+            taskId = TaskId("task-review"),
+            projectId = null,
+            body = "Client approved both case studies; archive the redline copies.",
+            createdAt = Instant.parse("2026-07-20T09:00:00Z"),
+            editedAt = null,
+            revision = revision,
+        ),
+        Note(
+            id = NoteId("note-studio-kickoff"),
+            taskId = null,
+            projectId = studioProject.id,
+            body = "Kickoff deck approved; keep the brand palette locked for launch.",
+            createdAt = Instant.parse("2026-07-15T13:00:00Z"),
+            editedAt = null,
+            revision = revision,
+        ),
+    )
+
     val milestones = listOf(
         Milestone(
             MilestoneId("milestone-launch"),
@@ -201,5 +225,6 @@ object OpenTasksFixtures {
         workflowStatuses = workflowStatuses,
         milestones = milestones,
         tags = tags,
+        notes = notes,
     )
 }

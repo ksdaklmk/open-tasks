@@ -228,6 +228,10 @@ class RoomVaultRepository(
                 is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
                 is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
                 is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
+                is DomainCommand.AddNote -> notesNotYetSupported()
+                is DomainCommand.UpdateNote -> notesNotYetSupported()
+                is DomainCommand.DeleteNote -> notesNotYetSupported()
+                is DomainCommand.RestoreNote -> notesNotYetSupported()
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2177,6 +2181,13 @@ class RoomVaultRepository(
         )
     }
 
+    // Room note persistence lands in a later Stage 4 task; until then these
+    // commands compile against the dispatch `when` but are not yet backed by storage.
+    private fun notesNotYetSupported(): CommandResult = CommandResult.Rejected(
+        RejectionReason.INVALID_STATE,
+        "Notes are not yet available in this build.",
+    )
+
     private suspend fun validateTimeEntry(
         taskId: TaskId,
         startedAt: Instant,
@@ -2772,6 +2783,8 @@ class RoomVaultRepository(
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
+        const val MAX_NOTE_BODY_LENGTH = 10_000
+        const val MAX_NOTES_PER_OWNER = 500
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         val VAULT_ID = VaultId("vault-primary")

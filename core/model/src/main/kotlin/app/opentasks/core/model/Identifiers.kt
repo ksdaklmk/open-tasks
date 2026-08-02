@@ -58,6 +58,13 @@ value class TaskId(val value: String) {
 }
 
 @JvmInline
+value class NoteId(val value: String) {
+    companion object {
+        fun new(): NoteId = NoteId(UUID.randomUUID().toString())
+    }
+}
+
+@JvmInline
 value class TagId(val value: String)
 
 @JvmInline

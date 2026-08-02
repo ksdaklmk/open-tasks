@@ -33,6 +33,7 @@ data class WorkspaceSnapshot(
     val templates: List<Template> = emptyList(),
     val timeEntries: List<TimeEntry> = emptyList(),
     val timeEntryConflicts: List<TimeEntryConflict> = emptyList(),
+    val notes: List<Note> = emptyList(),
 )
 
 data class TimeEntryConflict(

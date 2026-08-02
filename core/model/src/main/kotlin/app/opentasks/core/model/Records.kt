@@ -194,6 +194,16 @@ data class Attachment(
     val keepOffline: Boolean,
 )
 
+data class Note(
+    val id: NoteId,
+    val taskId: TaskId?,
+    val projectId: ProjectId?,
+    val body: String,
+    val createdAt: Instant,
+    val editedAt: Instant?,
+    val revision: Revision,
+)
+
 data class ActivityEntry(
     val id: String,
     val taskId: TaskId?,

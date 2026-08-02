@@ -4,6 +4,8 @@ import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
@@ -283,6 +285,23 @@ sealed interface DomainCommand {
         val entry: TimeEntry,
         val restoredAt: Instant = Instant.now(),
     ) : DomainCommand
+
+    data class AddNote(
+        val taskId: TaskId?,
+        val projectId: ProjectId?,
+        val body: String,
+        val createdAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class UpdateNote(
+        val noteId: NoteId,
+        val body: String,
+        val editedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class DeleteNote(val noteId: NoteId) : DomainCommand
+
+    data class RestoreNote(val note: Note) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
@@ -340,6 +359,9 @@ enum class RejectionReason {
     TIME_ENTRY_LIMIT_REACHED,
     INVALID_STATE,
     REMINDER_IN_PAST,
+    EMPTY_NOTE,
+    NOTE_TOO_LONG,
+    NOTE_LIMIT_REACHED,
 }
 
 interface VaultRepository {
