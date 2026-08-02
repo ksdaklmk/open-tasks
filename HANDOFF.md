@@ -3,30 +3,31 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution and is paused after Task 6 of 14.
+  is in approved subagent-driven execution and is paused after Task 7 of 14.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–6 are complete with independent reviews closed (one
-  fix round each for Tasks 2 and 3; Task 4 closed review-clean after a
+  (`6538dca`). Tasks 1–7 are complete with independent reviews closed (one
+  fix round each for Tasks 2, 3, and 7; Task 4 closed review-clean after a
   pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
   checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 7 (attachment metadata
-  commands) via superpowers:subagent-driven-development; the execution
+  untouched and unstaged. Resume with plan Task 8 (`AttachmentBlobStore`
+  contract and Drive implementation) via
+  superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
   Samsung Remote Test Lab remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `ee28a16` (`feat: search note
-  bodies and attachment names`), the tip of the Stage 4 Task 1–6 range
-  `6538dca..ee28a16`. The prior adaptive-slice closure point
+- Current product source implementation point: `cdea044` (`fix: enforce
+  attachment owner capacity`), the tip of the Stage 4 Task 1–7 range
+  `6538dca..cdea044`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -119,8 +120,8 @@ verified staging reconstruction, recovery with writer takeover and activation,
 passphrase rotation, disconnect, permanent remote-history deletion, and
 separate-lineage preservation, product UI, complete recovery/takeover
 qualification, and final release/privacy/protected-workspace gates. Cloud
-attachments and Play Console work have not started and remain blocked by their
-listed prerequisites.
+attachment metadata commands are implemented; blob transport, attachment
+product surfaces, and Play Console work remain pending.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
 independent of SQLCipher database keys and have separate recovery and per-vault
@@ -781,6 +782,33 @@ Important, Minor, or spec findings and no fix round.
   also passed.
 
 Tasks 7–14 have not started. Resume Task 7 from `ee28a16` with the approved
+plan and execution ledger.
+
+## Stage 4 Task 7 closure checkpoint — 2 August 2026
+
+Task 7 (`24315cb`, corrected by `cdea044`) adds attachment metadata commands
+in both repositories and closed its independent review after one fix round.
+
+- Register validates the active owner task, sanitised bounded display name,
+  bounded MIME type, byte and chunk limits, exact 4 MiB chunk arithmetic,
+  lowercase SHA-256 text, and the 100-active-attachment task cap. Room now
+  observes and seeds attachment rows through the existing v8 DAO and mapper.
+- Delete retains the tombstoned row, emits `ATTACHMENT_REMOVED`, and returns
+  exact `RestoreAttachment` Undo. Restore clears the tombstone without new
+  activity; register emits `ATTACHMENT_ADDED` and deliberately has no Undo.
+  Both accepted Room mutations remain inside the existing atomic journal
+  transaction, with in-memory parity.
+- Review found that reusing an active attachment ID could bypass a full target
+  task's cap. The fix treats an ID as a replacement only for the same owner;
+  the regression fills the destination to 100 and verifies rejection and
+  unchanged ownership.
+- The focused attachment suite passed after its recorded RED/GREEN cycles,
+  `:core:data:compileDebugAndroidTestKotlin` passed, and the final
+  `testDebugUnitTest lintDebug :app:assembleDebug` gate passed with 547
+  actionable tasks and no failures. No emulator, ADB, or connected command
+  ran.
+
+Tasks 8–14 have not started. Resume Task 8 from `cdea044` with the approved
 plan and execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026

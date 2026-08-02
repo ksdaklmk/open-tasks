@@ -23,8 +23,10 @@ column while preserving rows), and durable attachment-transfer session
 state. Note commands, Room persistence, backup records, and
 repository-generated activity history are implemented with in-memory parity.
 Search includes note bodies and active attachment display names through the
-existing bounded in-memory scan. Attachment mutation and blob product flows
-remain Stage 4 work under the approved plan.
+existing bounded in-memory scan. Attachment metadata commands now validate,
+register, tombstone, and restore rows in both repositories with activity and
+atomic journal parity. Attachment blob transport and product flows remain
+Stage 4 work under the approved plan.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a
