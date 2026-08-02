@@ -3,29 +3,30 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution and deliberately paused after
-  Task 4 of 14 at the user's request. The approved design is
+  is in approved subagent-driven execution and is paused after Task 5 of 14.
+  The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–4 are complete with independent reviews closed (one
+  (`6538dca`). Tasks 1–5 are complete with independent reviews closed (one
   fix round each for Tasks 2 and 3; Task 4 closed review-clean after a
-  pre-review parity fix; details in the checkpoints below). No
+  pre-review parity fix; Task 5 closed review-clean; details in the
+  checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 5 (activity history
-  generation) via superpowers:subagent-driven-development; the execution
+  untouched and unstaged. Resume with plan Task 6 (search over notes and
+  attachment names) via superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
   Samsung Remote Test Lab remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `bc4a0ce` (`fix: purge notes
-  with tasks in the in-memory repository`), the tip of the Stage 4
-  Task 1–4 range `6538dca..bc4a0ce`. The prior adaptive-slice closure point
+- Current product source implementation point: `45335ae` (`feat: generate
+  immutable activity history`), the tip of the Stage 4 Task 1–5 range
+  `6538dca..45335ae`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -727,6 +728,36 @@ product surfaces, and the qualification/exit gates) have not started.
 Pause here at the user's request. Resume by re-entering
 superpowers:subagent-driven-development with the plan and ledger above,
 starting at Task 5 (activity history generation) from base `bc4a0ce`.
+
+## Stage 4 Task 5 closure checkpoint — 2 August 2026
+
+Task 5 (`45335ae`) generates immutable activity history in both repositories
+and closed its independent review as Approved with zero Critical, Important,
+Minor, or spec findings and no fix round.
+
+- `ActivityKind` replaces the former free-form kind string and the unused
+  `immutable` flag. Snapshot mapping skips unknown stored kinds instead of
+  crashing, while both repositories now populate
+  `WorkspaceSnapshot.activityEntries`.
+- The specified task and project command handlers emit activity through one
+  repository-local helper. Bodies truncate at 500 characters; each task or
+  project retains the newest 500 entries with deterministic
+  creation-time-then-ID eviction. Note commands emit no activity, and the
+  attachment call sites remain assigned to Task 7.
+- Room inserts and prunes activity inside the command transaction, so the
+  existing before/after journal diff records both upserts and pruning deletes
+  at the command generation. In-memory backup snapshots now include activity
+  and permanently purged tasks lose their activity in parity with Room.
+- Evidence: the focused in-memory suite failed RED on the missing generation
+  behaviour, then passed GREEN. The final
+  `:core:data:testDebugUnitTest :core:data:compileDebugAndroidTestKotlin` gate
+  passed. `RoomActivityGenerationInstrumentedTest` is compile-verified and
+  executes at the Task 14 connected gate; no emulator, ADB, or connected
+  command ran.
+
+The Task 4 deferred snapshot-note ordering minor remains assigned to Task 6.
+Tasks 6–14 have not started. Resume Task 6 from `45335ae` with the approved
+plan and execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
