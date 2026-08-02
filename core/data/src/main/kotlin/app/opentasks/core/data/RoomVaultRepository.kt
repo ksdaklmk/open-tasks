@@ -246,6 +246,17 @@ class RoomVaultRepository(
         val snapshot = mutableWorkspace.value
         val projectNames = snapshot.projects.associate { it.id to it.name }
         val tagNames = snapshot.tags.associate { it.id to it.name }
+        val notesByTask = snapshot.notes.filter { it.taskId != null }.groupBy { it.taskId }
+            .mapValues { (_, notes) ->
+                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
+            }
+        val notesByProject = snapshot.notes.filter { it.projectId != null }.groupBy { it.projectId }
+            .mapValues { (_, notes) ->
+                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
+            }
+        val attachmentNamesByTask = snapshot.attachments
+            .filter { it.deletedAt == null }
+            .groupBy { it.taskId }
 
         val taskResults = snapshot.tasks
             .asSequence()
@@ -261,6 +272,10 @@ class RoomVaultRepository(
                         projectNames[task.projectId],
                         task.checklist.joinToString(" ", transform = ChecklistItem::text),
                         task.tagIds.mapNotNull(tagNames::get).joinToString(" "),
+                        notesByTask[task.id].orEmpty().joinToString(" ") { it.body },
+                        attachmentNamesByTask[task.id]
+                            .orEmpty()
+                            .joinToString(" ") { it.displayName },
                     ).joinToString(" "),
                 )
             }
@@ -272,7 +287,10 @@ class RoomVaultRepository(
             .asSequence()
             .filter { it.archivedAt == null }
             .filter { project ->
-                needle in SearchNormalizer.normalize("${project.name} ${project.summary}")
+                needle in SearchNormalizer.normalize(
+                    "${project.name} ${project.summary} " +
+                        notesByProject[project.id].orEmpty().joinToString(" ") { it.body },
+                )
             }
             .map { project -> SearchResult.ProjectResult(project, "Project") }
 
