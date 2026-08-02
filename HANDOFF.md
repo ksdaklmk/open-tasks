@@ -3,21 +3,22 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution and is paused after Task 7 of 14.
+  is in approved subagent-driven execution. Tasks 1–8 of 14 are complete and
+  Task 9 is next.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–7 are complete with independent reviews closed (one
-  fix round each for Tasks 2, 3, and 7; Task 4 closed review-clean after a
+  (`6538dca`). Tasks 1–8 are complete with independent reviews closed (one
+  fix round each for Tasks 2, 3, 7, and 8; Task 4 closed review-clean after a
   pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
   checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 8 (`AttachmentBlobStore`
-  contract and Drive implementation) via
+  untouched and unstaged. Continue with plan Task 9 (intake coordinator with
+  hostile-input matrix) via
   superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
@@ -25,9 +26,9 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `cdea044` (`fix: enforce
-  attachment owner capacity`), the tip of the Stage 4 Task 1–7 range
-  `6538dca..cdea044`. The prior adaptive-slice closure point
+- Current product source implementation point: `131f6b6` (`fix: harden
+  attachment manifest lookup`), the tip of the Stage 4 Task 1–8 range
+  `6538dca..131f6b6`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -810,6 +811,31 @@ in both repositories and closed its independent review after one fix round.
 
 Tasks 8–14 have not started. Resume Task 8 from `cdea044` with the approved
 plan and execution ledger.
+
+## Stage 4 Task 8 closure checkpoint — 2 August 2026
+
+Task 8 (`da5488d`, corrected by `131f6b6`) adds the provider-neutral
+`AttachmentBlobStore`, strict authenticated blob-set manifest codec, and
+create-only Drive adapter. Its independent review closed after one fix round.
+
+- The manifest codec binds the exact lineage and blob-set identity, uses
+  canonical strict JSON, and enforces the 25-chunk, 4 MiB-per-chunk, and
+  100 MiB aggregate bounds with exact indexes and byte-count sums.
+- The Drive adapter uses only immutable create-by-ID app-data operations,
+  exact attachment role/property tags, pre-transport family ceilings,
+  bounded reads, opaque pagination, and fail-closed duplicate or malformed
+  manifest discovery. Frozen Stage 3 formats and roles remain unchanged.
+- A Node `crypto` generator independently produces the committed manifest
+  frame fixture; `AttachmentGoldenTest` verifies byte and digest identity.
+  Review fix round 1 added malformed-row and long opaque-token regressions.
+- The generated fixture was reproduced deterministically, focused attachment
+  codec/store/golden tests passed, and the final
+  `testDebugUnitTest lintDebug :app:assembleDebug` gate passed with 547
+  actionable tasks and no failures. No emulator, ADB, or connected command
+  ran.
+
+Tasks 9–14 remain. Continue Task 9 from `131f6b6` with the approved plan and
+execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
