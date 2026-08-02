@@ -231,10 +231,14 @@ class AttachmentGarbageCollectorTest {
         ): AttachmentObjectResult = error("not used")
         override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup =
             error("not used")
-        override suspend fun listNamespace(pageToken: String?): Pair<List<AttachmentListedObject>, String?> {
+        override suspend fun listNamespace(
+            pageToken: String?,
+            exactRole: String?,
+        ): Pair<List<AttachmentListedObject>, String?> {
+            val listed = objects.filter { exactRole == null || it.role == exactRole }
             val start = pageToken?.toInt() ?: 0
-            val page = objects.drop(start).take(pageSize)
-            val next = (start + page.size).takeIf { it < objects.size }?.toString()
+            val page = listed.drop(start).take(pageSize)
+            val next = (start + page.size).takeIf { it < listed.size }?.toString()
             return page to next
         }
         override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {

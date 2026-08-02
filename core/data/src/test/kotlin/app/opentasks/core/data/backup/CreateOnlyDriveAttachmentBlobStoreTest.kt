@@ -247,6 +247,22 @@ class CreateOnlyDriveAttachmentBlobStoreTest {
         assertEquals(token, transport.listCalls.single().pageToken)
     }
 
+    @Test
+    fun namespaceListAddsExactAttachmentRoleFilter() = runBlocking {
+        val transport = FakeAttachmentDriveTransport().also {
+            it.listPages += DriveListPage(emptyList(), null)
+        }
+        val store = CreateOnlyDriveAttachmentBlobStore(transport, LINEAGE)
+
+        store.listNamespace(null, "attachment-chunk")
+
+        assertTrue(
+            transport.listCalls.single().query.contains(
+                "key='role' and value='attachment-chunk'",
+            ),
+        )
+    }
+
     private fun listed(id: String) = DriveListedFile(
         providerFileId = id,
         name = "attachment-manifest",

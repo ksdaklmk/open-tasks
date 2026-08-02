@@ -67,6 +67,7 @@ interface AttachmentBlobStore {
     suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup
     suspend fun listNamespace(
         pageToken: String?,
+        exactRole: String? = null,
     ): Pair<List<AttachmentListedObject>, String?>
     suspend fun delete(providerObjectId: ProviderObjectId): Boolean
 }

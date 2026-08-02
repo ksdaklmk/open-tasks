@@ -142,11 +142,19 @@ class CreateOnlyDriveAttachmentBlobStore(
 
     override suspend fun listNamespace(
         pageToken: String?,
+        exactRole: String?,
     ): Pair<List<AttachmentListedObject>, String?> {
+        require(exactRole == null || exactRole == CHUNK_ROLE || exactRole == MANIFEST_ROLE) {
+            "Unsupported attachment role filter"
+        }
         val query = buildString {
             appendProperty(PROPERTY_FORMAT, FORMAT_V1)
             append(" and ")
             appendProperty(PROPERTY_LINEAGE, lineageId.value)
+            if (exactRole != null) {
+                append(" and ")
+                appendProperty(PROPERTY_ROLE, exactRole)
+            }
         }
         val page = transport.listAppDataFiles(query, pageToken, MAX_PAGE_SIZE)
         return page.files.map { file ->

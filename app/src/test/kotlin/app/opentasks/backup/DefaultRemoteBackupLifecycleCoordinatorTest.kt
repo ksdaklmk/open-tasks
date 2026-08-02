@@ -581,6 +581,51 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun chunkInsertedIntoScannedPrefixIsDeletedBeforeAnyManifest() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            *(0 until 10).map {
+                attachmentListed("blob-$it", "manifest-$it", ATTACHMENT_MANIFEST_ROLE)
+            }.toTypedArray(),
+            pageSize = 1,
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf()),
+        )
+        attachments.insertAt(
+            3,
+            attachmentListed("tail-blob", "tail-chunk", ATTACHMENT_CHUNK_ROLE),
+        )
+
+        fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(listOf("tail-chunk"), attachments.deleted)
+        fixture.close()
+    }
+
+    @Test
+    fun incompleteChunkRoleProbeDoesNotAuthorizeManifestDeletion() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+            roleProbeNextPageToken = { token ->
+                ((token?.toInt() ?: -1) + 1).toString()
+            },
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            result,
+        )
+        assertTrue(attachments.deleted.isEmpty())
+        fixture.close()
+    }
+
+    @Test
     fun attachmentContentDeletionResumesPastFourThousandNinetySixListedRows() = runBlocking {
         val attachments = RecordingAttachmentStore(
             *(0 until 4_097).map {
@@ -1033,6 +1078,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         private val pageSize: Int = Int.MAX_VALUE,
         private val pageStart: (String?) -> Int = { it?.toInt() ?: 0 },
         private val nextPageToken: (String?, String?) -> String? = { _, calculated -> calculated },
+        private val roleProbeNextPageToken: ((String?) -> String?)? = null,
     ) :
         AttachmentBlobStore {
         private val objects = initial.toMutableList()
@@ -1041,6 +1087,9 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         var onDelete: (String) -> Unit = {}
         fun add(vararg added: AttachmentListedObject) {
             objects += added
+        }
+        fun insertAt(index: Int, added: AttachmentListedObject) {
+            objects.add(index, added)
         }
         override suspend fun generateObjectIds(count: Int) = error("not used")
         override suspend fun createChunk(
@@ -1061,12 +1110,20 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         ): AttachmentObjectResult = error("not used")
         override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup =
             error("not used")
-        override suspend fun listNamespace(pageToken: String?): Pair<List<AttachmentListedObject>, String?> {
+        override suspend fun listNamespace(
+            pageToken: String?,
+            exactRole: String?,
+        ): Pair<List<AttachmentListedObject>, String?> {
             listCalls += 1
+            val listed = objects.filter { exactRole == null || it.role == exactRole }
             val start = pageStart(pageToken)
-            val page = objects.drop(start).take(pageSize)
-            val calculatedNext = (start + page.size).takeIf { it < objects.size }?.toString()
-            val next = nextPageToken(pageToken, calculatedNext)
+            val page = listed.drop(start).take(pageSize)
+            val calculatedNext = (start + page.size).takeIf { it < listed.size }?.toString()
+            val next = if (exactRole == ATTACHMENT_CHUNK_ROLE && roleProbeNextPageToken != null) {
+                roleProbeNextPageToken(pageToken)
+            } else {
+                nextPageToken(pageToken, calculatedNext)
+            }
             return page to next
         }
         override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {

@@ -162,6 +162,12 @@ private sealed interface RawAttachmentPageRead {
     data class Failed(val reason: RemoteBackupFailureCategory) : RawAttachmentPageRead
 }
 
+private sealed interface AttachmentChunkProbe {
+    data object Absent : AttachmentChunkProbe
+    data object Present : AttachmentChunkProbe
+    data class Failed(val reason: RemoteBackupFailureCategory) : AttachmentChunkProbe
+}
+
 private class DeletionBudget(var remaining: Int)
 
 private sealed interface PublicationAuthentication {
@@ -361,13 +367,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
         var state = initialState
         val budget = DeletionBudget(MAX_DELETES_PER_BATCH)
         var pages = 0
-        // Deliberately in-memory: a resumed MANIFESTS phase must repeat the full preflight.
-        var manifestPreflightComplete = false
-        var extraManifestPageUsed = false
-        while (
-            pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION ||
-            (manifestPreflightComplete && !extraManifestPageUsed)
-        ) {
+        while (pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
             val phase = AttachmentDeletionPhase.valueOf(state.phase)
             if (phase == AttachmentDeletionPhase.COMPLETED) {
                 state = transitionAttachmentDeletion(
@@ -383,23 +383,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
                 continue
             }
-            if (phase == AttachmentDeletionPhase.MANIFESTS && !manifestPreflightComplete) {
-                state = transitionAttachmentDeletion(
-                    operationId,
-                    configuration,
-                    state,
-                    state.copy(
-                        phase = AttachmentDeletionPhase.CHUNKS.name,
-                        pageToken = null,
-                        cycleFastPageToken = null,
-                        cycleFastEnded = false,
-                    ),
-                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
-                continue
-            }
-            if (pages >= MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
-                extraManifestPageUsed = true
-            }
             val read = readAttachmentPage(
                 attachmentStore,
                 state.pageToken,
@@ -414,7 +397,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
             if (phase == AttachmentDeletionPhase.MANIFESTS &&
                 page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
             ) {
-                manifestPreflightComplete = false
                 state = transitionAttachmentDeletion(
                     operationId,
                     configuration,
@@ -459,11 +441,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     state,
                     next,
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
-                if (phase == AttachmentDeletionPhase.CHUNKS &&
-                    next.phase == AttachmentDeletionPhase.MANIFESTS.name
-                ) {
-                    manifestPreflightComplete = true
-                }
                 if (next.phase == AttachmentDeletionPhase.COMPLETED.name) {
                     return LifecycleResult.AttachmentContentDeleted
                 }
@@ -471,6 +448,21 @@ class DefaultRemoteBackupLifecycleCoordinator(
             }
             if (budget.remaining == 0) {
                 return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+            }
+            when (
+                val resolution = chainStore.resolve(
+                    configuration.rootClaimProviderId,
+                    contentKey,
+                )
+            ) {
+                is OwnershipResolution.Active -> if (
+                    resolution.tip.completeSha256 != expectedTip.completeSha256
+                ) {
+                    markOwnershipLost(configuration)
+                    return LifecycleResult.OwnershipRequired
+                }
+                is OwnershipResolution.Terminated -> return LifecycleResult.OwnershipRequired
+                is OwnershipResolution.Blocked -> return failed(resolution.reason)
             }
             state = transitionAttachmentDeletion(
                 operationId,
@@ -488,22 +480,11 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 ),
             ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
             if (phase == AttachmentDeletionPhase.MANIFESTS) {
-                manifestPreflightComplete = false
-            }
-            when (
-                val resolution = chainStore.resolve(
-                    configuration.rootClaimProviderId,
-                    contentKey,
-                )
-            ) {
-                is OwnershipResolution.Active -> if (
-                    resolution.tip.completeSha256 != expectedTip.completeSha256
-                ) {
-                    markOwnershipLost(configuration)
-                    return LifecycleResult.OwnershipRequired
+                when (val probe = probeForAttachmentChunks(attachmentStore)) {
+                    AttachmentChunkProbe.Absent -> Unit
+                    AttachmentChunkProbe.Present -> continue
+                    is AttachmentChunkProbe.Failed -> return failed(probe.reason)
                 }
-                is OwnershipResolution.Terminated -> return LifecycleResult.OwnershipRequired
-                is OwnershipResolution.Blocked -> return failed(resolution.reason)
             }
             val batch = targets.take(budget.remaining)
             for (target in batch) {
@@ -1241,35 +1222,10 @@ class DefaultRemoteBackupLifecycleCoordinator(
     ): TerminalAttachmentCleanupResult {
         var state = initialState
         var pages = 0
-        // Deliberately in-memory: a resumed MANIFESTS phase must repeat the full preflight.
-        var manifestPreflightComplete = false
-        var extraManifestPageUsed = false
-        while (
-            pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION ||
-            (manifestPreflightComplete && !extraManifestPageUsed)
-        ) {
+        while (pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
             val phase = AttachmentDeletionPhase.valueOf(state.attachmentPhase)
             if (phase == AttachmentDeletionPhase.COMPLETED) {
                 return TerminalAttachmentCleanupResult(state, null)
-            }
-            if (phase == AttachmentDeletionPhase.MANIFESTS && !manifestPreflightComplete) {
-                state = checkpointDeletion(
-                    operationId,
-                    configuration,
-                    state.copy(
-                        attachmentPhase = AttachmentDeletionPhase.CHUNKS.name,
-                        attachmentPageToken = null,
-                        attachmentCycleFastPageToken = null,
-                        attachmentCycleFastEnded = false,
-                    ),
-                ) ?: return TerminalAttachmentCleanupResult(
-                    state,
-                    failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
-                )
-                continue
-            }
-            if (pages >= MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
-                extraManifestPageUsed = true
             }
             val read = readAttachmentPage(
                 store,
@@ -1288,7 +1244,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
             if (phase == AttachmentDeletionPhase.MANIFESTS &&
                 page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
             ) {
-                manifestPreflightComplete = false
                 state = checkpointDeletion(
                     operationId,
                     configuration,
@@ -1337,11 +1292,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     state,
                     failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
                 )
-                if (phase == AttachmentDeletionPhase.CHUNKS &&
-                    next.attachmentPhase == AttachmentDeletionPhase.MANIFESTS.name
-                ) {
-                    manifestPreflightComplete = true
-                }
                 if (next.attachmentPhase == AttachmentDeletionPhase.COMPLETED.name) {
                     return TerminalAttachmentCleanupResult(state, null)
                 }
@@ -1352,6 +1302,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     state,
                     failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
                 )
+            }
+            authenticateTerminal()?.let {
+                return TerminalAttachmentCleanupResult(state, it)
             }
             state = checkpointDeletion(
                 operationId,
@@ -1371,10 +1324,14 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
             )
             if (phase == AttachmentDeletionPhase.MANIFESTS) {
-                manifestPreflightComplete = false
-            }
-            authenticateTerminal()?.let {
-                return TerminalAttachmentCleanupResult(state, it)
+                when (val probe = probeForAttachmentChunks(store)) {
+                    AttachmentChunkProbe.Absent -> Unit
+                    AttachmentChunkProbe.Present -> continue
+                    is AttachmentChunkProbe.Failed -> return TerminalAttachmentCleanupResult(
+                        state,
+                        failed(probe.reason),
+                    )
+                }
             }
             val batch = targets.take(deletionBudget.remaining)
             for (target in batch) {
@@ -1461,9 +1418,10 @@ class DefaultRemoteBackupLifecycleCoordinator(
     private suspend fun readRawAttachmentPage(
         store: AttachmentBlobStore,
         pageToken: String?,
+        exactRole: String? = null,
     ): RawAttachmentPageRead {
         val page = try {
-            store.listNamespace(pageToken)
+            store.listNamespace(pageToken, exactRole)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (_: Exception) {
@@ -1471,12 +1429,38 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
             )
         }
-        if (page.first.size > ATTACHMENT_PAGE_SIZE || !attachmentRowsAreUnderstood(page.first)) {
+        if (page.first.size > ATTACHMENT_PAGE_SIZE ||
+            !attachmentRowsAreUnderstood(page.first) ||
+            (exactRole != null && page.first.any { it.role != exactRole })
+        ) {
             return RawAttachmentPageRead.Failed(
                 RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
             )
         }
         return RawAttachmentPageRead.Found(page.first, page.second)
+    }
+
+    private suspend fun probeForAttachmentChunks(
+        store: AttachmentBlobStore,
+    ): AttachmentChunkProbe {
+        val seenTokens = mutableSetOf<String>()
+        var token: String? = null
+        repeat(MAX_ATTACHMENT_ROLE_PROBE_PAGES) {
+            val page = when (
+                val read = readRawAttachmentPage(store, token, ATTACHMENT_CHUNK_ROLE)
+            ) {
+                is RawAttachmentPageRead.Found -> read
+                is RawAttachmentPageRead.Failed -> return AttachmentChunkProbe.Failed(read.reason)
+            }
+            if (page.objects.isNotEmpty()) return AttachmentChunkProbe.Present
+            token = page.nextPageToken ?: return AttachmentChunkProbe.Absent
+            if (!seenTokens.add(token)) {
+                return AttachmentChunkProbe.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+        }
+        return AttachmentChunkProbe.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
     }
 
     private fun attachmentRowsAreUnderstood(objects: List<AttachmentListedObject>): Boolean =
@@ -2020,6 +2004,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
         const val MAX_PAGE_TOKEN_CHARACTERS = 1_024
         const val ATTACHMENT_PAGE_SIZE = 100
         const val MAX_ATTACHMENT_PAGES_PER_INVOCATION = 8
+        const val MAX_ATTACHMENT_ROLE_PROBE_PAGES = 8
         const val ATTACHMENT_CHUNK_ROLE = "attachment-chunk"
         const val ATTACHMENT_MANIFEST_ROLE = "attachment-manifest"
         val MINIMUM_RESIDUE_AGE: Duration = Duration.ofDays(7)

@@ -693,6 +693,7 @@ private class FakeAttachmentBlobStore : AttachmentBlobStore {
 
     override suspend fun listNamespace(
         pageToken: String?,
+        exactRole: String?,
     ): Pair<List<AttachmentListedObject>, String?> = emptyList<AttachmentListedObject>() to null
 
     override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {
