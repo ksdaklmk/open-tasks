@@ -116,6 +116,16 @@ class AttachmentCacheStoreTest {
         assertFalse(blobDirectory.resolve("-1.frame").exists())
     }
 
+    @Test
+    fun nonEmptyDirectoryAtFramePathIsCacheMiss() = withCacheRoot { root ->
+        val store = AttachmentCacheStore(root) { 20_000 }
+        val invalidFrame = root.resolve(blobHash(BLOB_A)).resolve("0.frame")
+        invalidFrame.mkdirs()
+        invalidFrame.resolve("child").writeText("invalid")
+
+        assertNull(store.read(BLOB_A, 0))
+    }
+
     private fun withCacheRoot(block: (File) -> Unit) {
         val root = Files.createTempDirectory("attachment-cache-test").toFile()
         try {

@@ -32,19 +32,26 @@ class AttachmentCacheStore(
     fun read(blobSetId: BlobSetId, chunkIndex: Int): ByteArray? {
         require(chunkIndex >= 0) { "Chunk index is negative" }
         val directory = blobDirectory(blobSetId)
-        if (!isSafeDirectory(directory)) return null
         val file = framePath(directory, chunkIndex)
-        if (!Files.isRegularFile(file, NOFOLLOW_LINKS) || Files.size(file) !in 1..MAX_FRAME_BYTES) {
-            Files.deleteIfExists(file)
-            return null
-        }
         return try {
-            Files.readAllBytes(file).also {
-                Files.setLastModifiedTime(file, FileTime.fromMillis(nextAccessTime()))
+            if (!isSafeDirectory(directory)) {
+                null
+            } else if (
+                !Files.isRegularFile(file, NOFOLLOW_LINKS) ||
+                Files.size(file) !in 1..MAX_FRAME_BYTES
+            ) {
+                deleteFrameIfSafe(directory, file)
+                null
+            } else {
+                Files.readAllBytes(file).also {
+                    Files.setLastModifiedTime(file, FileTime.fromMillis(nextAccessTime()))
+                }
             }
         } catch (_: IOException) {
+            deleteFrameIfSafe(directory, file)
             null
         } catch (_: SecurityException) {
+            deleteFrameIfSafe(directory, file)
             null
         }
     }
@@ -163,6 +170,19 @@ class AttachmentCacheStore(
     private fun requireRoot() {
         if (Files.isSymbolicLink(root) || !Files.isDirectory(root, NOFOLLOW_LINKS)) {
             throw IOException("Attachment cache root is not a regular directory")
+        }
+    }
+
+    private fun deleteFrameIfSafe(directory: Path, file: Path) {
+        try {
+            requireRoot()
+            if (!Files.isSymbolicLink(directory) && Files.isDirectory(directory, NOFOLLOW_LINKS)) {
+                Files.deleteIfExists(file)
+            }
+        } catch (_: IOException) {
+            // A corrupt cache entry is a miss even when best-effort cleanup fails.
+        } catch (_: SecurityException) {
+            // A corrupt cache entry is a miss even when best-effort cleanup fails.
         }
     }
 
