@@ -257,9 +257,13 @@ fun ProjectProgressRow(
         Column(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(project.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    project.name,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     "${project.completedTasks}/${project.totalTasks}",
                     style = MaterialTheme.typography.labelLarge,
