@@ -1,8 +1,8 @@
 package app.opentasks
 
+import android.content.Context
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
-import android.util.AtomicFile
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
@@ -21,7 +21,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.opentasks.core.crypto.AndroidVaultContentKeyStorage
+import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.data.AtomicFileVaultRegistryOperations
 import app.opentasks.core.data.AndroidVaultKeyManager
 import app.opentasks.core.data.LocalVaultRuntimeFactory
@@ -39,39 +39,28 @@ import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import java.io.File
+import java.security.KeyStore
 import kotlinx.coroutines.runBlocking
 
 @RunWith(AndroidJUnit4::class)
 class FoldContinuityInstrumentedTest {
     private var ownedVault: OwnedVault? = null
+    private var baselineClean = false
 
     private val vaultFixtureRule = object : ExternalResource() {
         override fun before() {
+            baselineClean = false
             check(ownedVault == null) { "A continuity fixture is already owned" }
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             val application = context as OpenTasksApplication
             runBlocking { application.vaultRuntimeManager.initialize() }
-            check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
-                "Fold continuity requires a clean NoVault baseline"
-            }
-            check(!context.getDatabasePath("open_tasks.db").exists()) {
-                "Fold continuity refuses to replace an existing legacy database"
-            }
-            check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
-                "Fold continuity refuses to replace an existing legacy database key"
-            }
-            check(!activeSlotMarker(context).exists()) {
-                "Fold continuity refuses to replace an existing active-slot marker"
-            }
-            check(
-                context.getSharedPreferences("vault_content_keys_v1", 0).all.isEmpty(),
-            ) {
-                "Fold continuity refuses to replace existing legacy content keys"
-            }
+            requireCleanLegacyBaseline(context, application)
+            baselineClean = true
         }
 
         override fun after() {
             val owned = ownedVault ?: return
+            check(baselineClean) { "The continuity fixture did not start from a clean baseline" }
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             val application = context as OpenTasksApplication
             val active = application.vaultRuntimeManager.state.value as? VaultRuntimeState.Active
@@ -89,15 +78,20 @@ class FoldContinuityInstrumentedTest {
             check(owned.slot == VaultSlot.LEGACY) {
                 "The production new-vault flow created an unexpected slot"
             }
+            requireExpectedLegacyAliases(owned.vaultId)
             application.activeVaultServices.quiesce()
+            active.runtime.contentKeyStore.delete(owned.vaultId)
+            check(!androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS)) {
+                "The owned continuity content-key alias was not removed"
+            }
             application.vaultRuntimeManager.close()
             val databaseName = LocalVaultRuntimeFactory.databaseName(owned.slot)
             check(context.deleteDatabase(databaseName) || !context.getDatabasePath(databaseName).exists()) {
                 "Unable to delete the owned continuity database"
             }
             AndroidVaultKeyManager(context).deleteDatabaseKey(owned.slot)
-            AndroidVaultContentKeyStorage.deleteLegacyStorage(context)
-            AtomicFile(activeSlotMarker(context)).delete()
+            AtomicFileVaultRegistryOperations().delete(activeSlotMarker(context))
+            requireAbsentOwnedLegacyResources(context, databaseName)
             runBlocking { application.vaultRuntimeManager.initialize() }
             check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
                 "The continuity fixture did not return the process to NoVault"
@@ -108,6 +102,44 @@ class FoldContinuityInstrumentedTest {
 
     @get:Rule
     val ruleChain: RuleChain = RuleChain.outerRule(vaultFixtureRule).around(composeRule)
+
+    @Test
+    fun legacyBaselineRejectsOrphanKeystoreAliasesWithoutDeletingThem() {
+        val context = application()
+        val keyManager = AndroidVaultKeyManager(context)
+        val contentKeyStore = AndroidVaultContentKeyStore(context)
+        keyManager.createDatabaseKey(VaultSlot.LEGACY).fill(0)
+        contentKeyStore.getOrCreate(LEGACY_VAULT_ID).close()
+        check(
+            context.getSharedPreferences(VAULT_KEY_PREFERENCES, Context.MODE_PRIVATE)
+                .edit()
+                .remove(LEGACY_DATABASE_NONCE)
+                .remove(LEGACY_DATABASE_CIPHERTEXT)
+                .commit(),
+        )
+        check(
+            context.getSharedPreferences(CONTENT_KEY_PREFERENCES, Context.MODE_PRIVATE)
+                .edit()
+                .remove(LEGACY_CONTENT_NONCE)
+                .remove(LEGACY_CONTENT_CIPHERTEXT)
+                .commit(),
+        )
+
+        try {
+            val failure = runCatching {
+                requireCleanLegacyBaseline(context, application())
+            }.exceptionOrNull()
+
+            assertTrue("Orphan Keystore aliases must fail the clean baseline", failure != null)
+            assertTrue(androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS))
+            assertTrue(androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS))
+        } finally {
+            contentKeyStore.delete(LEGACY_VAULT_ID)
+            keyManager.deleteDatabaseKey(VaultSlot.LEGACY)
+        }
+        assertTrue(!androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS))
+        assertTrue(!androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS))
+    }
 
     @Test
     fun draftAndSelectionSurviveFoldTransition() {
@@ -235,6 +267,16 @@ class FoldContinuityInstrumentedTest {
         check(runtime.slot == VaultSlot.LEGACY) {
             "The production new-vault flow created an unexpected slot"
         }
+        check(runtime.vaultId == LEGACY_VAULT_ID) {
+            "The production new-vault flow created an unexpected vault identity"
+        }
+        while (
+            !expectedLegacyAliasesExist() &&
+            SystemClock.elapsedRealtime() < deadline
+        ) {
+            SystemClock.sleep(50)
+        }
+        requireExpectedLegacyAliases(runtime.vaultId)
         return OwnedVault(runtime.slot, runtime.vaultId)
     }
 
@@ -279,11 +321,103 @@ class FoldContinuityInstrumentedTest {
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             as OpenTasksApplication
 
+    private fun requireCleanLegacyBaseline(
+        context: android.content.Context,
+        application: OpenTasksApplication,
+    ) {
+        check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
+            "Fold continuity requires a clean NoVault baseline"
+        }
+        check(!context.getDatabasePath("open_tasks.db").exists()) {
+            "Fold continuity refuses to replace an existing legacy database"
+        }
+        check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
+            "Fold continuity refuses to replace an existing legacy database key"
+        }
+        check(!activeSlotMarker(context).exists()) {
+            "Fold continuity refuses to replace an existing active-slot marker"
+        }
+        check(
+            context.getSharedPreferences("vault_content_keys_v1", 0).all.isEmpty(),
+        ) {
+            "Fold continuity refuses to replace existing legacy content keys"
+        }
+        check(!androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS)) {
+            "Fold continuity refuses to reuse an existing legacy database alias"
+        }
+        check(!androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS)) {
+            "Fold continuity refuses to reuse an existing legacy content-key alias"
+        }
+    }
+
     private fun activeSlotMarker(context: android.content.Context): File =
         File(context.filesDir, "vault_runtime/active_slot.json")
+
+    private fun androidKeyStore(): KeyStore =
+        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+
+    private fun expectedLegacyAliasesExist(): Boolean =
+        androidKeyStore().let { keyStore ->
+            keyStore.containsAlias(LEGACY_DATABASE_ALIAS) &&
+                keyStore.containsAlias(LEGACY_CONTENT_ALIAS)
+        }
+
+    private fun requireExpectedLegacyAliases(vaultId: VaultId) {
+        check(vaultId == LEGACY_VAULT_ID) {
+            "The continuity fixture does not own the expected legacy vault identity"
+        }
+        check(expectedLegacyAliasesExist()) {
+            "The continuity fixture does not own both expected legacy aliases"
+        }
+    }
+
+    private fun requireAbsentOwnedLegacyResources(
+        context: Context,
+        databaseName: String,
+    ) {
+        check(!context.getDatabasePath(databaseName).exists()) {
+            "The owned continuity database remains after cleanup"
+        }
+        check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
+            "The owned continuity database-key envelope remains after cleanup"
+        }
+        check(
+            context.getSharedPreferences(CONTENT_KEY_PREFERENCES, Context.MODE_PRIVATE)
+                .all
+                .isEmpty(),
+        ) {
+            "The owned continuity content-key envelope remains after cleanup"
+        }
+        check(!activeSlotMarker(context).exists()) {
+            "The owned continuity active-slot marker remains after cleanup"
+        }
+        check(!androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS)) {
+            "The owned continuity database alias remains after cleanup"
+        }
+        check(!androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS)) {
+            "The owned continuity content-key alias remains after cleanup"
+        }
+    }
 
     private data class OwnedVault(
         val slot: VaultSlot,
         val vaultId: VaultId,
     )
+
+    private companion object {
+        val LEGACY_VAULT_ID = VaultId("vault-primary")
+        const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        const val VAULT_KEY_PREFERENCES = "vault_keys"
+        const val CONTENT_KEY_PREFERENCES = "vault_content_keys_v1"
+        const val LEGACY_DATABASE_NONCE = "database_key_nonce_v1"
+        const val LEGACY_DATABASE_CIPHERTEXT = "database_key_ciphertext_v1"
+        const val LEGACY_CONTENT_NONCE =
+            "nonce_v1_e7fb92d32ce629d2d0db1f93337fb4df409b33e878ae731e6032b3922a1164e0"
+        const val LEGACY_CONTENT_CIPHERTEXT =
+            "ciphertext_v1_e7fb92d32ce629d2d0db1f93337fb4df409b33e878ae731e6032b3922a1164e0"
+        const val LEGACY_DATABASE_ALIAS = "open_tasks_local_vault_wrapper_v1"
+        const val LEGACY_CONTENT_ALIAS =
+            "open_tasks_vault_content_wrapper_v1_" +
+                "e7fb92d32ce629d2d0db1f93337fb4df409b33e878ae731e6032b3922a1164e0"
+    }
 }

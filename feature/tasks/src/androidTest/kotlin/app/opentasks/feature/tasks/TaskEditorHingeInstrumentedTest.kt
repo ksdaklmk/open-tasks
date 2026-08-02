@@ -24,7 +24,7 @@ class TaskEditorHingeInstrumentedTest {
     fun editorContentClearsHingeExclusionBand() {
         setContent(hingeExclusionBandDp = 400..440)
 
-        composeRule.onNodeWithTag("task-detail-scroll").fetchSemanticsNode()
+        assertTwoPaneFixture()
         val top = composeRule.onNodeWithTag("editorSheetContent")
             .getUnclippedBoundsInRoot()
             .top
@@ -36,6 +36,7 @@ class TaskEditorHingeInstrumentedTest {
     fun editorContentIsUnconstrainedWithoutHingeExclusionBand() {
         setContent(hingeExclusionBandDp = null)
 
+        assertTwoPaneFixture()
         val top = composeRule.onNodeWithTag("editorSheetContent")
             .getUnclippedBoundsInRoot()
             .top
@@ -43,7 +44,22 @@ class TaskEditorHingeInstrumentedTest {
         assertTrue("Editor content top $top should remain above 440 dp", top < 440.dp)
     }
 
-    private fun setContent(hingeExclusionBandDp: IntRange?) {
+    @Test
+    fun editorOnlyPaneKeepsLegacyDetailScrollSemantics() {
+        setContent(hingeExclusionBandDp = null, showDetailPane = false)
+
+        composeRule.onNodeWithTag("task-detail-scroll").fetchSemanticsNode()
+    }
+
+    private fun assertTwoPaneFixture() {
+        composeRule.onNodeWithTag("listPane", useUnmergedTree = true).fetchSemanticsNode()
+        composeRule.onNodeWithTag("detailPane", useUnmergedTree = true).fetchSemanticsNode()
+    }
+
+    private fun setContent(
+        hingeExclusionBandDp: IntRange?,
+        showDetailPane: Boolean = true,
+    ) {
         composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
             OpenTasksTheme {
@@ -57,7 +73,7 @@ class TaskEditorHingeInstrumentedTest {
                         tags = emptyList(),
                         milestones = emptyList(),
                         selectedTaskId = OpenTasksFixtures.tasks.first().id,
-                        showDetailPane = false,
+                        showDetailPane = showDetailPane,
                         hingeExclusionBandDp = hingeExclusionBandDp,
                         onSelectTask = {},
                         onCloseDetail = {},
