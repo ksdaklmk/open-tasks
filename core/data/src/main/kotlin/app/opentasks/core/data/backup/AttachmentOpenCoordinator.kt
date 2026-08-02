@@ -32,6 +32,10 @@ class AttachmentOpenCoordinator(
     private val lineageId: CloudLineageId,
     private val contentKey: () -> VaultKey,
 ) {
+    /**
+     * Streams authenticated chunks to [destination]. Any result other than [AttachmentOpenResult.Opened]
+     * may leave partial bytes; the caller must discard or delete the destination in that case.
+     */
     suspend fun open(
         store: AttachmentBlobStore,
         attachment: Attachment,

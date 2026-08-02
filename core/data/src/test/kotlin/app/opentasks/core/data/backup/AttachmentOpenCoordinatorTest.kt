@@ -106,6 +106,19 @@ class AttachmentOpenCoordinatorTest {
         assertNull(fixture.store.readCalls[CHUNK_IDS[0]])
     }
 
+    @Test
+    fun lateUnavailableResultLeavesPartialDestinationForCallerToDiscard() =
+        runOpenTest { cache ->
+            val fixture = fixture(listOf("first".toByteArray(), "missing".toByteArray()))
+            fixture.store.objects.remove(CHUNK_IDS[1])
+            val output = ByteArrayOutputStream()
+
+            val result = coordinator(cache).open(fixture.store, fixture.attachment, output)
+
+            assertEquals(AttachmentOpenResult.Unavailable, result)
+            assertArrayEquals("first".toByteArray(), output.toByteArray())
+        }
+
     private fun runOpenTest(block: suspend (AttachmentCacheStore) -> Unit) = runBlocking {
         withTimeout(5_000) {
             val root = Files.createTempDirectory("attachment-open-test").toFile()
