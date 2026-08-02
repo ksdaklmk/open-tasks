@@ -1215,6 +1215,7 @@ class InMemoryVaultRepository internal constructor(
             },
             reminders = current.reminders.filterNot { it.taskId == task.id },
             timeEntries = current.timeEntries.filterNot { it.taskId == task.id },
+            notes = current.notes.filterNot { it.taskId == task.id },
         )
         return CommandResult.Success("Task permanently deleted")
     }
@@ -1244,6 +1245,7 @@ class InMemoryVaultRepository internal constructor(
                 },
                 reminders = current.reminders.filterNot { it.taskId in expiredIds },
                 timeEntries = current.timeEntries.filterNot { it.taskId in expiredIds },
+                notes = current.notes.filterNot { it.taskId in expiredIds },
                 at = command.now,
             )
         }
@@ -2257,6 +2259,7 @@ class InMemoryVaultRepository internal constructor(
         reminders: List<Reminder> = mutableWorkspace.value.reminders,
         milestones: List<Milestone> = mutableWorkspace.value.milestones,
         timeEntries: List<TimeEntry> = mutableWorkspace.value.timeEntries,
+        notes: List<Note> = mutableWorkspace.value.notes,
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
@@ -2277,6 +2280,7 @@ class InMemoryVaultRepository internal constructor(
                     .thenBy(Milestone::dueDate)
                     .thenBy(Milestone::name),
             ),
+            notes = notes,
         ).withReconciledTimeState(at = at, entries = timeEntries)
     }
 

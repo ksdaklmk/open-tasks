@@ -18,6 +18,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.Base64
 
 class InMemoryBackupJournalTest {
@@ -246,6 +247,64 @@ class InMemoryBackupJournalTest {
         val noteDelete = deletePayloads.single { it.deletedFamily == BackupRecordFamily.NOTE }
         assertEquals(BackupMutationKind.DELETE, noteDelete.mutationKind)
         assertEquals(listOf(note.id.value), noteDelete.deletedIdentity)
+    }
+
+    @Test
+    fun permanentlyDeletingTaskRemovesItsNotesAndJournalsTheNoteDelete() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+
+        repository.execute(
+            DomainCommand.AddNote(taskId = task.id, projectId = null, body = "Goes with the task"),
+        )
+        val note = repository.currentWorkspace().notes.single { it.taskId == task.id }
+
+        repository.execute(DomainCommand.DeleteTask(task.id, now.minusSeconds(60)))
+        repository.execute(DomainCommand.PermanentlyDeleteTask(task.id, now))
+
+        assertTrue(repository.currentWorkspace().notes.none { it.id == note.id })
+        val purgeGeneration = journal.currentGeneration
+        val purgePayloads = journal.entries
+            .filter { it.generation.value == purgeGeneration }
+            .map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(
+            purgePayloads.any {
+                it.mutationKind == BackupMutationKind.DELETE &&
+                    it.deletedFamily == BackupRecordFamily.NOTE &&
+                    it.deletedIdentity == listOf(note.id.value)
+            },
+        )
+    }
+
+    @Test
+    fun expiredTrashPurgeRemovesTaskNotesAndJournalsTheNoteDelete() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+
+        repository.execute(
+            DomainCommand.AddNote(taskId = task.id, projectId = null, body = "Also expires"),
+        )
+        val note = repository.currentWorkspace().notes.single { it.taskId == task.id }
+
+        repository.execute(DomainCommand.DeleteTask(task.id, now.minus(31, ChronoUnit.DAYS)))
+        repository.execute(DomainCommand.PurgeExpiredTrash(now))
+
+        assertTrue(repository.currentWorkspace().notes.none { it.id == note.id })
+        val purgeGeneration = journal.currentGeneration
+        val purgePayloads = journal.entries
+            .filter { it.generation.value == purgeGeneration }
+            .map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(
+            purgePayloads.any {
+                it.mutationKind == BackupMutationKind.DELETE &&
+                    it.deletedFamily == BackupRecordFamily.NOTE &&
+                    it.deletedIdentity == listOf(note.id.value)
+            },
+        )
     }
 
     @Test
