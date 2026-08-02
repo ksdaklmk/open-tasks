@@ -86,6 +86,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
@@ -426,6 +427,9 @@ private fun TaskListPane(
                         selected = selectedTaskId == task.id,
                         onSelect = { onSelectTask(task.id) },
                         onComplete = { onCompleteTask(task) },
+                        modifier = Modifier.semantics {
+                            selected = selectedTaskId == task.id
+                        },
                     )
                 }
             }
@@ -694,18 +698,19 @@ private fun TaskDetailPane(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .testTag("task-detail-scroll")
+            .semantics { stateDescription = "Editing ${task.title}" }
+            .padding(top = sheetTopPaddingDp.dp),
+    ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(top = sheetTopPaddingDp.dp),
+                .testTag("editorSheetContent")
+                .padding(24.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .testTag("editorSheetContent")
-                    .padding(24.dp),
-            ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1822,7 +1827,6 @@ private fun TaskDetailPane(
             }
         }
         Spacer(Modifier.height(80.dp))
-            }
         }
     }
 

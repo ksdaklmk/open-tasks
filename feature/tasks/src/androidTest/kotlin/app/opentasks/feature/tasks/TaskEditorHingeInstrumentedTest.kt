@@ -24,6 +24,7 @@ class TaskEditorHingeInstrumentedTest {
     fun editorContentClearsHingeExclusionBand() {
         setContent(hingeExclusionBandDp = 400..440)
 
+        composeRule.onNodeWithTag("task-detail-scroll").fetchSemanticsNode()
         val top = composeRule.onNodeWithTag("editorSheetContent")
             .getUnclippedBoundsInRoot()
             .top
@@ -56,7 +57,7 @@ class TaskEditorHingeInstrumentedTest {
                         tags = emptyList(),
                         milestones = emptyList(),
                         selectedTaskId = OpenTasksFixtures.tasks.first().id,
-                        showDetailPane = true,
+                        showDetailPane = false,
                         hingeExclusionBandDp = hingeExclusionBandDp,
                         onSelectTask = {},
                         onCloseDetail = {},

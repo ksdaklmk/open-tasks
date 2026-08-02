@@ -4,7 +4,11 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.AtomicFile
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -18,9 +22,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.crypto.AndroidVaultContentKeyStorage
+import app.opentasks.core.data.AtomicFileVaultRegistryOperations
 import app.opentasks.core.data.AndroidVaultKeyManager
+import app.opentasks.core.data.LocalVaultRuntimeFactory
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
+import app.opentasks.core.data.VaultSlotRegistry
+import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.VaultId
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -33,16 +43,61 @@ import kotlinx.coroutines.runBlocking
 
 @RunWith(AndroidJUnit4::class)
 class FoldContinuityInstrumentedTest {
-    private val vaultCleanupRule = object : ExternalResource() {
-        override fun after() {
+    private var ownedVault: OwnedVault? = null
+
+    private val vaultFixtureRule = object : ExternalResource() {
+        override fun before() {
+            check(ownedVault == null) { "A continuity fixture is already owned" }
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             val application = context as OpenTasksApplication
+            runBlocking { application.vaultRuntimeManager.initialize() }
+            check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
+                "Fold continuity requires a clean NoVault baseline"
+            }
+            check(!context.getDatabasePath("open_tasks.db").exists()) {
+                "Fold continuity refuses to replace an existing legacy database"
+            }
+            check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
+                "Fold continuity refuses to replace an existing legacy database key"
+            }
+            check(!activeSlotMarker(context).exists()) {
+                "Fold continuity refuses to replace an existing active-slot marker"
+            }
+            check(
+                context.getSharedPreferences("vault_content_keys_v1", 0).all.isEmpty(),
+            ) {
+                "Fold continuity refuses to replace existing legacy content keys"
+            }
+        }
+
+        override fun after() {
+            val owned = ownedVault ?: return
+            val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+            val application = context as OpenTasksApplication
+            val active = application.vaultRuntimeManager.state.value as? VaultRuntimeState.Active
+                ?: error("The owned continuity vault is no longer active")
+            check(active.runtime.slot == owned.slot && active.runtime.vaultId == owned.vaultId) {
+                "The active vault is not the exact continuity fixture"
+            }
+            val registered = VaultSlotRegistry(
+                directory = File(context.filesDir, "vault_runtime"),
+                fileOperations = AtomicFileVaultRegistryOperations(),
+            ).read()
+            check(registered == owned.slot) {
+                "The active-slot marker is not the exact continuity fixture"
+            }
+            check(owned.slot == VaultSlot.LEGACY) {
+                "The production new-vault flow created an unexpected slot"
+            }
             application.activeVaultServices.quiesce()
             application.vaultRuntimeManager.close()
-            context.deleteDatabase("open_tasks.db")
-            AndroidVaultKeyManager(context).deleteDatabaseKey(VaultSlot.LEGACY)
+            val databaseName = LocalVaultRuntimeFactory.databaseName(owned.slot)
+            check(context.deleteDatabase(databaseName) || !context.getDatabasePath(databaseName).exists()) {
+                "Unable to delete the owned continuity database"
+            }
+            AndroidVaultKeyManager(context).deleteDatabaseKey(owned.slot)
             AndroidVaultContentKeyStorage.deleteLegacyStorage(context)
-            AtomicFile(File(context.filesDir, "vault_runtime/active_slot.json")).delete()
+            AtomicFile(activeSlotMarker(context)).delete()
             runBlocking { application.vaultRuntimeManager.initialize() }
             check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
                 "The continuity fixture did not return the process to NoVault"
@@ -52,7 +107,7 @@ class FoldContinuityInstrumentedTest {
     private val composeRule = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val ruleChain: RuleChain = RuleChain.outerRule(vaultCleanupRule).around(composeRule)
+    val ruleChain: RuleChain = RuleChain.outerRule(vaultFixtureRule).around(composeRule)
 
     @Test
     fun draftAndSelectionSurviveFoldTransition() {
@@ -74,14 +129,10 @@ class FoldContinuityInstrumentedTest {
         shell("wm dismiss-keyguard")
         awaitActivityState(Lifecycle.State.RESUMED)
         composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
-                    .fetchSemanticsNodes()
-                    .isNotEmpty()
+            composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()
         }
-        if (composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithText("Start without restoring").performClick()
-        }
+        composeRule.onNodeWithText("Start without restoring").performClick()
+        ownedVault = awaitCreatedVault()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
                 .fetchSemanticsNodes()
@@ -102,7 +153,13 @@ class FoldContinuityInstrumentedTest {
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithTag("task-list").fetchSemanticsNodes().size == 1
         }
-        composeRule.onNodeWithText("Fold continuity filler 0").performClick()
+        val selectedTitle = "Fold continuity filler 0"
+        val selectedTaskId = activeWorkspaceTaskId(selectedTitle)
+        composeRule.onNodeWithText(selectedTitle).performClick()
+        composeRule.onNode(
+            selectedTaskMatcher(selectedTitle),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
         composeRule.onNodeWithTag("task-list").performScrollToIndex(5)
         val beforeScroll = listScrollPosition()
         assertTrue("Expected a meaningful pre-fold list scroll, was $beforeScroll", beforeScroll > 0f)
@@ -110,15 +167,18 @@ class FoldContinuityInstrumentedTest {
         composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("task-title-field")
             .performTextReplacement("Fold continuity draft")
+        composeRule.onNode(editingTaskMatcher(selectedTitle)).assertIsDisplayed()
+        assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
 
         try {
             shell("cmd device_state state ${checkNotNull(closed)}")
-            awaitActivityState(Lifecycle.State.CREATED)
+            awaitDeviceState(checkNotNull(closed))
             awaitSystemIdle()
             composeRule.mainClock.advanceTimeByFrame()
             composeRule.waitForIdle()
 
             shell("cmd device_state state ${checkNotNull(opened)}")
+            awaitDeviceState(checkNotNull(opened))
             shell("wm dismiss-keyguard")
             awaitActivityState(Lifecycle.State.RESUMED)
             awaitSystemIdle()
@@ -127,6 +187,8 @@ class FoldContinuityInstrumentedTest {
 
             composeRule.onNodeWithTag("task-title-field")
                 .assertTextContains("Fold continuity draft", substring = true)
+            composeRule.onNode(editingTaskMatcher(selectedTitle)).assertIsDisplayed()
+            assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
             val afterScroll = listScrollPosition()
             assertTrue(
                 "Expected the list scroll to survive the fold transition, was $afterScroll",
@@ -145,6 +207,37 @@ class FoldContinuityInstrumentedTest {
             .config[SemanticsProperties.VerticalScrollAxisRange]
             .value()
 
+    private fun selectedTaskMatcher(title: String): SemanticsMatcher =
+        SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)
+            .and(hasAnyDescendant(hasText(title)))
+
+    private fun editingTaskMatcher(title: String): SemanticsMatcher =
+        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Editing $title")
+
+    private fun activeWorkspaceTaskId(title: String): TaskId =
+        activeRuntime().repository.observeWorkspace().value.tasks.single { it.title == title }.id
+
+    private fun repositoryTitle(taskId: TaskId): String =
+        activeRuntime().repository.observeWorkspace().value.tasks.single { it.id == taskId }.title
+
+    private fun activeRuntime() =
+        (application().vaultRuntimeManager.state.value as VaultRuntimeState.Active).runtime
+
+    private fun awaitCreatedVault(): OwnedVault {
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (
+            application().vaultRuntimeManager.state.value !is VaultRuntimeState.Active &&
+            SystemClock.elapsedRealtime() < deadline
+        ) {
+            SystemClock.sleep(50)
+        }
+        val runtime = activeRuntime()
+        check(runtime.slot == VaultSlot.LEGACY) {
+            "The production new-vault flow created an unexpected slot"
+        }
+        return OwnedVault(runtime.slot, runtime.vaultId)
+    }
+
     private fun shell(command: String): String =
         ParcelFileDescriptor.AutoCloseInputStream(
             InstrumentationRegistry.getInstrumentation().uiAutomation
@@ -155,6 +248,17 @@ class FoldContinuityInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.uiAutomation.waitForIdle(500, 10_000)
         instrumentation.waitForIdleSync()
+    }
+
+    private fun awaitDeviceState(expected: String) {
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        var actual: String
+        do {
+            actual = shell("cmd device_state print-state").trim()
+            if (actual == expected) return
+            SystemClock.sleep(50)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        assertEquals("Expected device state $expected", expected, actual)
     }
 
     private fun awaitActivityState(expected: Lifecycle.State) {
@@ -170,4 +274,16 @@ class FoldContinuityInstrumentedTest {
             composeRule.activityRule.scenario.state == expected,
         )
     }
+
+    private fun application(): OpenTasksApplication =
+        InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+            as OpenTasksApplication
+
+    private fun activeSlotMarker(context: android.content.Context): File =
+        File(context.filesDir, "vault_runtime/active_slot.json")
+
+    private data class OwnedVault(
+        val slot: VaultSlot,
+        val vaultId: VaultId,
+    )
 }
