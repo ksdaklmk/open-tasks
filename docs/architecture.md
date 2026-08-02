@@ -15,8 +15,15 @@ updates records and appends ordered backup-journal entries in one transaction.
 The current foundation seeds the sample workspace into SQLCipher once, then
 treats Room as the authority for task, timer/time-entry, Bin, search, and
 backup-journal state.
-Room v7 assigns one local generation to each mutation-bearing accepted
+Room v8 assigns one local generation to each mutation-bearing accepted
 command and appends its ordered `BackupJournal` rows in the same transaction.
+The additive v7→v8 migration adds the first-class `notes` table, the
+finalised attachment metadata shape (dropping the obsolete keep-offline
+column while preserving rows), and durable attachment-transfer session
+state. Note commands are implemented in the in-memory repository and the
+backup-record families; Room note persistence, activity generation, and all
+attachment product flows are Stage 4 work still in progress under its
+approved plan.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a

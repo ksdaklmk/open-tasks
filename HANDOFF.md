@@ -2,28 +2,32 @@
 
 - Last updated: 2 August 2026
 - Branch: `main`
-- Session status: **The approved Galaxy Z Fold 8 trifold-ready adaptive slice
-  is complete through Task 5. Its API 37 Fold 8 cover/main and Fold 8 Ultra
-  main primary matrix passed 38/38 rows at 100% and 200% text. A focused
-  physical-cover pass also passed 8/8 rows at a verified 332×532 dp at both
-  text scales, covering compact navigation, the single-pane task list, editor
-  scrolling and Quick Add with a visible IME. The shared Quick Add sheet now
-  scrolls so its full actions remain reachable above the keyboard. Final
-  review also closed safe-inset hinge alignment, odd-width trifold selection,
-  continuity-fixture sidecar ownership, exact pane-width assertions and
-  draft-aware editor accessibility. Task 3
-  instrumentation proves synthetic 50/50 hinge snapping; the AVD exposed no
-  native folding feature, so no native hinge claim is made. Samsung Remote
-  Test Lab is External-blocked while the user's Samsung developer account
-  approval is pending. The protected Pixel AVD and the historical Google Drive
-  plan amendment plus user-owned `.kotlin/` and `artifacts/` remain untouched
-  and unstaged. Both disposable Fold AVDs are shut down and the final
-  ADB/process audit is empty. Pause here. Stage 4 is ready only after a new
-  explicit user request. Stage 3, Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
-  remain complete and independently reviewed.**
-- Current product source implementation point: `ddbe52a` (`test: guard all
-  continuity database sidecars`) on top of `1194536` (`fix: close fold 8 review
-  gaps`), `74d3064` (`fix: align hinge split with safe insets`) and the accepted
+- Session status: **Stage 4 (notes, activity, cloud attachments, and search)
+  is in approved subagent-driven execution and deliberately paused after
+  Task 3 of 14 at the user's request. The approved design is
+  `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
+  (`7b5af15`); the execution authority is
+  `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
+  (`6538dca`). Tasks 1–3 are complete with independent reviews closed (one
+  fix round each for Tasks 2 and 3; details in the checkpoint below). No
+  emulator, ADB, or connected command ran in this session; the new v7→v8
+  migration and other instrumented tests are compile-verified and execute at
+  the Task 14 device gate. The protected Pixel AVD, the historical Google
+  Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
+  untouched and unstaged. Resume with plan Task 4 (Room note commands and
+  parity) via superpowers:subagent-driven-development; the execution ledger
+  is
+  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
+  Samsung Remote Test Lab remains External-blocked pending the user's
+  developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
+  Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
+  reviewed.**
+- Current product source implementation point: `ab5c3d0` (`test: cover NOTE
+  and ATTACHMENT in-memory backup journal wiring`), the tip of the Stage 4
+  Task 1–3 range `6538dca..ab5c3d0`. The prior adaptive-slice closure point
+  is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
+  `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
+  split with safe insets`) and the accepted
   visual corrections through `0368dcf`. The full adaptive implementation range
   is `7276f90..ddbe52a`. Accepted visual evidence spans
   `f46ce8c..0368dcf`, with affected rows recaptured after each visual fix;
@@ -625,8 +629,63 @@ requested or handled. This recorded external gap does not reopen the completed
 emulator slice, but it must be cleared before real-device or One UI integration
 claims.
 
-Pause after this checkpoint. Stage 4 is now unblocked by the adaptive slice and
-may begin only on a new explicit user request.
+Pause after this checkpoint. Stage 4 was subsequently requested, designed,
+planned, and started; its in-progress state is recorded in the checkpoint
+below.
+
+## Stage 4 Tasks 1–3 in-progress checkpoint — 2 August 2026
+
+The user explicitly requested Stage 4. Brainstorming produced the approved
+combined design (`7b5af15`) covering first-class notes, immutable activity
+history, the create-only cloud attachment blob lifecycle, and search
+extension; its one deliberate supersession replaces the 2026-07-28 design's
+conditional control-manifest wording with the Stage 3 create-only lineage
+model. The fourteen-task execution plan (`6538dca`) was then approved and
+subagent-driven execution began directly on `main`. Each task closed with an
+independent review and, where needed, scoped re-reviewed fix rounds.
+
+- Task 1 (`1e30b3b`) added `NoteId`, the `Note` record,
+  `WorkspaceSnapshot.notes`, the `AddNote`/`UpdateNote`/`DeleteNote`/
+  `RestoreNote` commands with exact repository-produced Undo, bounds
+  (10,000-char body, 500 per owner), three new rejection reasons, complete
+  `InMemoryVaultRepository` behaviour, and fixture notes. Review: approved,
+  no fix round. `RoomVaultRepository` carries compile-only stub arms until
+  Task 4.
+- Task 2 (`bfc51e4`, fix `f4d4451`) shipped Room v8: the `notes` table, the
+  attachments rebuild dropping `keepOffline` and adding
+  `blobSetId`/`chunkCount`/`deletedAtEpochMillis`/revision columns with
+  existing rows preserved, the `attachment_transfer` session table, exported
+  `8.json` (drift script clean), the finalised `Attachment` model with
+  `BlobSetId`, snapshot `attachments`/`activityEntries` fields, mappers, and
+  the v7→v8 preservation migration test. The fix round reshaped two
+  instrumented-test attachment seeds that still used the dropped column.
+- Task 3 (`a887732`, fix `ab5c3d0`) added the `NOTE` backup family
+  end-to-end across the mutation codec, journal session
+  (revision-based note and attachment snapshots), payload referential
+  validation (exactly-one-owner, owner-present), recovery import with
+  ciphertext zeroing, capture DAO, staged-vault verification and
+  retention-purge rules, in-memory journal parity, and regenerated
+  independent fixtures; it also finalised the ATTACHMENT record semantics.
+  The reviewer independently confirmed the pre-Stage 4 attachments table had
+  no write path, so the in-place finalisation of the frozen record shape is
+  safe: no encoded old-shape instance can exist. The fix round added
+  mutation-proven journal-wiring assertion tests. A record carrying
+  `keepOffline` now fails strict decode by test.
+
+Deferred minors and rulings live in the ignored execution ledger
+`.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`;
+notable entries: Task 4 must replace the Room note stub arms' `INVALID_STATE`
+rejection with real persistence, and the plan-mandated `nonNegativeLong`
+NOTE-timestamp strictness was adjudicated defensible. No device suite ran;
+all new instrumented tests are compile-verified only and run at the Task 14
+connected gate. Tasks 4–14 (Room note commands, activity generation, search,
+attachment metadata commands, blob store, intake, open/share/cache, GC and
+destructive deletion, runtime/recovery wiring, product surfaces, and the
+qualification/exit gates) have not started.
+
+Pause here at the user's request. Resume by re-entering
+superpowers:subagent-driven-development with the plan and ledger above,
+starting at Task 4 from base `ab5c3d0`.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
@@ -1680,9 +1739,10 @@ attachment transport remain absent by design.
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
 maintenance commit. The approved Stage 3 and adaptive-slice execution
-authorities are closed. Stage 4 is next in the dependency order, but only after
-a new explicit user request. Samsung RTL remains an External-blocked
-qualification gap, not authority to continue into Stage 4 in this session.
+authorities are closed. Stage 4 execution is now underway under its approved
+design and plan, paused after Task 3 of 14 at the user's request. Samsung RTL
+remains an External-blocked qualification gap independent of Stage 4
+progress.
 
 ## Resume instructions
 
@@ -1698,10 +1758,11 @@ qualification gap, not authority to continue into Stage 4 in this session.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
-3. Task 14, Stage 3 and the approved Galaxy Z Fold 8 trifold-ready adaptive
-   slice are complete. Pause at this checkpoint. Begin Stage 4 only after a new
-   explicit user request; retain the External-blocked Samsung RTL gap until the
-   user's developer-account approval is available.
+3. Stage 4 is in progress and paused after plan Task 3. Resume it with
+   superpowers:subagent-driven-development against the Stage 4 plan and its
+   execution ledger (paths in the Stage 4 checkpoint above), starting at
+   Task 4 from base `ab5c3d0`. Retain the External-blocked Samsung RTL gap
+   until the user's developer-account approval is available.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -1728,7 +1789,7 @@ recorded above.
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Done | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
-| 4 | Notes, activity, cloud attachments, and search | Ready | Cloud-authoritative blob lifecycle and final structured metadata are complete |
+| 4 | Notes, activity, cloud attachments, and search | Paused (Tasks 1–3 of 14 complete) | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
@@ -1740,11 +1801,11 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Pause after the completed Galaxy Z Fold 8 adaptive checkpoint. On a new
-   explicit user request, begin Stage 4 notes, activity, cloud attachments and
-   search from the production master plan. Preserve the adaptive design and
-   plan as closed authorities, and keep Samsung RTL recorded as
-   External-blocked until the approved account is available.
+1. Resume the paused Stage 4 subagent-driven execution at plan Task 4 (Room
+   note commands and parity) from base `ab5c3d0`, using the approved Stage 4
+   plan and its execution ledger. Preserve the adaptive design and plan as
+   closed authorities, and keep Samsung RTL recorded as External-blocked
+   until the approved account is available.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -1849,9 +1910,10 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-Pause after the completed Galaxy Z Fold 8 adaptive Task 5 qualification. On a
-new explicit user request, begin Stage 4 notes, activity, cloud attachments and
-search. Preserve Room as the sole live structured-data authority, treat the
+Resume the paused Stage 4 execution at plan Task 4 from base `ab5c3d0` via
+superpowers:subagent-driven-development, honouring the recorded deferred
+minors (Task 4 replaces the Room note stub arms with real persistence).
+Preserve Room as the sole live structured-data authority, treat the
 Stage 2 Android package as supplementary recovery input rather than upload
 evidence, and retain the External-blocked Samsung RTL rows until real-device
 access is available.
