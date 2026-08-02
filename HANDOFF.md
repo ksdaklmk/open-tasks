@@ -3,22 +3,22 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution. Tasks 1–9 of 14 are complete and
-  Task 10 is next.
+  is in approved subagent-driven execution. Tasks 1–10 of 14 are complete and
+  Task 11 is next.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–9 are complete with independent reviews closed (one
-  fix round each for Tasks 2, 3, 7, 8, and 9; Task 4 closed review-clean after
-  a pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
-  checkpoints below). No
+  (`6538dca`). Tasks 1–10 are complete with independent reviews closed (one
+  fix round each for Tasks 2, 3, 7, 8, and 9; two fix rounds for Task 10; Task
+  4 closed review-clean after a pre-review parity fix; Tasks 5 and 6 closed
+  review-clean; details in the checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Continue with plan Task 10 (bounded local
-  open/share cache) via
+  untouched and unstaged. Continue with plan Task 11 (attachment garbage
+  collection and destructive deletion) via
   superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
@@ -26,9 +26,9 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `00d7786` (`fix: harden
-  attachment intake recovery`), the tip of the Stage 4 Task 1–9 range
-  `6538dca..00d7786`. The prior adaptive-slice closure point
+- Current product source implementation point: `5d9fc19` (`fix: fail closed
+  on invalid attachment cache entries`), the tip of the Stage 4 Task 1–10
+  range `6538dca..5d9fc19`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -863,6 +863,31 @@ and hostile-input matrix. Its independent review closed after one fix round.
   ran.
 
 Tasks 10–14 remain. Continue Task 10 from `00d7786` with the approved plan and
+execution ledger.
+
+## Stage 4 Task 10 closure checkpoint — 2 August 2026
+
+Task 10 (`90643ff`, corrected by `e627925` and `5d9fc19`) adds the
+authenticated attachment open path, bounded ciphertext-frame LRU cache, and
+FileProvider share directory. Its independent review closed after two scoped
+fix rounds.
+
+- Open authenticates the manifest and each chunk, streams one cleared
+  plaintext chunk at a time, and succeeds only after exact byte-count and
+  aggregate-hash checks. Missing bytes are unavailable; corrupt bytes fail
+  closed.
+- The cache stores only verified ciphertext at canonical hashed paths,
+  enforces `min(128 MiB, availableBytes / 20)` by oldest access, and sweeps on
+  construction. Traversal never follows symlinks, writes require atomic
+  replacement, and malformed or unreadable entries are confined cache misses.
+- Non-successful streaming may leave partial caller-owned output, so callers
+  must discard it; Task 13 owns the share-file lifecycle. The focused 14-test
+  cache/open suite and resource processing passed.
+- The final `testDebugUnitTest lintDebug :app:assembleDebug` gate passed with
+  547 actionable tasks and no failures. No emulator, ADB, or connected command
+  ran.
+
+Tasks 11–14 remain. Continue Task 11 from `5d9fc19` with the approved plan and
 execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
