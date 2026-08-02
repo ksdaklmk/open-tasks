@@ -21,12 +21,13 @@
   ADB/process audit is empty. Pause here. Stage 4 is ready only after a new
   explicit user request. Stage 3, Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
   remain complete and independently reviewed.**
-- Current product source implementation point: `1194536` (`fix: close fold 8
-  review gaps`) on top of `74d3064` (`fix: align hinge split with safe insets`)
-  and the accepted visual corrections through `0368dcf`. The full adaptive
-  implementation range is `7276f90..1194536`. Accepted visual evidence spans
+- Current product source implementation point: `ddbe52a` (`test: guard all
+  continuity database sidecars`) on top of `1194536` (`fix: close fold 8 review
+  gaps`), `74d3064` (`fix: align hinge split with safe insets`) and the accepted
+  visual corrections through `0368dcf`. The full adaptive implementation range
+  is `7276f90..ddbe52a`. Accepted visual evidence spans
   `f46ce8c..0368dcf`, with affected rows recaptured after each visual fix;
-  final review tests and repository gates ran at `1194536`. The authoritative
+  final review tests and repository gates ran at `ddbe52a`. The authoritative
   acceptance record is
   `docs/qualification/fold8-adaptive-acceptance.md`; ignored PNG and
   UIAutomator evidence is under
@@ -571,9 +572,9 @@ checkpoint below.
 ## Galaxy Fold 8 trifold-ready adaptive slice closure — 2 August 2026
 
 The approved adaptive slice is complete in the implementation range
-`7276f90..1194536`, including the visual-acceptance corrections `38a84f8`,
+`7276f90..ddbe52a`, including the visual-acceptance corrections `38a84f8`,
 `da75a9e`, `9cc6057` and `0368dcf` and the final-review corrections `74d3064`
-and `1194536`. Its authoritative record is
+through `ddbe52a`. Its authoritative record is
 `docs/qualification/fold8-adaptive-acceptance.md`.
 
 The slice maps AndroidX window layout information to a model-independent
@@ -599,8 +600,9 @@ empty ADB and emulator-process audits. The protected `Pixel_10_Pro_Fold` was
 not started or mutated.
 
 Final review corrected pane snapping for trailing safe insets and odd-width
-trifold centres, made continuity-fixture database and active-slot sidecar
-ownership fail closed, strengthened recreation/configuration/scroll checks,
+trifold centres, made continuity-fixture database deletion targets
+(WAL/SHM/journal/wipecheck/master journals) and active-slot sidecar ownership
+fail closed, strengthened recreation/configuration/scroll checks,
 asserted both pane widths within a 1 dp rounding tolerance, and made the task
 editor's accessibility state use the current localized draft title. Focused
 device reruns passed the continuity fixture's two executable rows (the native
