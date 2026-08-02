@@ -2146,7 +2146,7 @@ class InMemoryVaultRepository internal constructor(
         val displayName = attachment.displayName.trim()
         validateAttachment(displayName, attachment)?.let { return it }
         val replacingActive = current.attachments.any {
-            it.id == attachment.id && it.deletedAt == null
+            it.id == attachment.id && it.taskId == attachment.taskId && it.deletedAt == null
         }
         if (!replacingActive && current.attachments.count {
                 it.taskId == attachment.taskId && it.deletedAt == null

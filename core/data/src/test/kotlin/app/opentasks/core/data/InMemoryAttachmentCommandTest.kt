@@ -72,6 +72,40 @@ class InMemoryAttachmentCommandTest {
     }
 
     @Test
+    fun registerAttachmentDoesNotMoveActiveAttachmentToTaskAtCapacity() = runBlocking {
+        withTimeout(5_000) {
+            val sourceTask = repository.currentWorkspace().tasks.first()
+            val targetTask = repository.currentWorkspace().tasks.first { it.id != sourceTask.id }
+            repository.execute(
+                DomainCommand.RegisterAttachment(attachment(sourceTask, id = "shared")),
+            )
+            repeat(100) { index ->
+                repository.execute(
+                    DomainCommand.RegisterAttachment(attachment(targetTask, id = "target-$index")),
+                )
+            }
+
+            val result = repository.execute(
+                DomainCommand.RegisterAttachment(attachment(targetTask, id = "shared")),
+            )
+
+            assertTrue(result is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.ATTACHMENT_LIMIT_REACHED,
+                (result as CommandResult.Rejected).reason,
+            )
+            assertEquals(
+                100,
+                repository.currentWorkspace().attachments.count { it.taskId == targetTask.id },
+            )
+            assertEquals(
+                sourceTask.id,
+                repository.currentWorkspace().attachments.single { it.id.value == "shared" }.taskId,
+            )
+        }
+    }
+
+    @Test
     fun deleteTombstonesAttachmentProvidesExactRestoreUndoAndRestoreDoesNotAddActivity() = runBlocking {
         withTimeout(5_000) {
             val original = attachment(repository.currentWorkspace().tasks.first())

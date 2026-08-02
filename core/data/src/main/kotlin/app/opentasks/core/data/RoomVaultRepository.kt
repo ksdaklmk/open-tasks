@@ -2440,7 +2440,9 @@ class RoomVaultRepository(
         validateAttachment(displayName, attachment)?.let { return it }
         val existing = database.workspaceDao().getAttachmentById(attachment.id.value)
         if (
-            (existing == null || existing.deletedAtEpochMillis != null) &&
+            (existing == null ||
+                existing.taskId != attachment.taskId.value ||
+                existing.deletedAtEpochMillis != null) &&
             database.workspaceDao().activeAttachmentCountForTask(attachment.taskId.value) >=
             MAX_ATTACHMENTS_PER_TASK
         ) {
