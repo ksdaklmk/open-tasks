@@ -327,6 +327,32 @@ interface WorkspaceDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTimeEntry(value: TimeEntryEntity)
+
+    @Query("SELECT * FROM notes ORDER BY createdAtEpochMillis, id")
+    fun observeNotes(): Flow<List<NoteEntity>>
+
+    @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
+    suspend fun getNoteById(id: String): NoteEntity?
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM notes
+        WHERE taskId IS :taskId AND projectId IS :projectId
+        """,
+    )
+    suspend fun countNotesForOwner(taskId: String?, projectId: String?): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertNote(value: NoteEntity)
+
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun deleteNote(id: String): Int
+
+    @Query("DELETE FROM notes WHERE taskId = :taskId")
+    suspend fun deleteNotesForTask(taskId: String)
+
+    @Query("DELETE FROM notes WHERE projectId = :projectId")
+    suspend fun deleteNotesForProject(projectId: String)
 }
 
 @Dao
@@ -458,6 +484,7 @@ abstract class VaultDatabase : RoomDatabase() {
         workspaceDao().deleteAttachmentsForTask(taskId)
         workspaceDao().deleteActivityForTask(taskId)
         workspaceDao().deleteTimeForTask(taskId)
+        workspaceDao().deleteNotesForTask(taskId)
         taskDao().deleteById(taskId)
         workspaceDao().upsertTombstone(tombstone)
     }

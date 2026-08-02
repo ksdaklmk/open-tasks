@@ -8,6 +8,7 @@ import app.opentasks.core.data.backup.defaultBackupState
 import app.opentasks.core.data.backup.snapshots
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.TagEntity
@@ -45,6 +46,8 @@ import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
@@ -228,10 +231,10 @@ class RoomVaultRepository(
                 is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
                 is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
                 is DomainCommand.RestoreTimeEntry -> restoreTimeEntry(command)
-                is DomainCommand.AddNote -> notesNotYetSupported()
-                is DomainCommand.UpdateNote -> notesNotYetSupported()
-                is DomainCommand.DeleteNote -> notesNotYetSupported()
-                is DomainCommand.RestoreNote -> notesNotYetSupported()
+                is DomainCommand.AddNote -> addNote(command)
+                is DomainCommand.UpdateNote -> updateNote(command)
+                is DomainCommand.DeleteNote -> deleteNote(command)
+                is DomainCommand.RestoreNote -> restoreNote(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2181,12 +2184,128 @@ class RoomVaultRepository(
         )
     }
 
-    // Room note persistence lands in a later Stage 4 task; until then these
-    // commands compile against the dispatch `when` but are not yet backed by storage.
-    private fun notesNotYetSupported(): CommandResult = CommandResult.Rejected(
-        RejectionReason.INVALID_STATE,
-        "Notes are not yet available in this build.",
-    )
+    private suspend fun addNote(command: DomainCommand.AddNote): CommandResult {
+        if ((command.taskId == null) == (command.projectId == null)) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "A note belongs to exactly one task or project.",
+            )
+        }
+        command.taskId?.let { taskId ->
+            val task = database.taskDao().getById(taskId.value)
+            if (task == null || task.deletedAtEpochMillis != null) {
+                return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            }
+        }
+        command.projectId?.let { projectId ->
+            database.workspaceDao().getProjectById(projectId.value)
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "Project no longer exists.",
+                )
+        }
+        val body = command.body.trim()
+        validateNoteBody(body)?.let { return it }
+        val owned = database.workspaceDao().countNotesForOwner(
+            taskId = command.taskId?.value,
+            projectId = command.projectId?.value,
+        )
+        if (owned >= MAX_NOTES_PER_OWNER) {
+            return CommandResult.Rejected(
+                RejectionReason.NOTE_LIMIT_REACHED,
+                "A task or project can hold up to $MAX_NOTES_PER_OWNER notes.",
+            )
+        }
+        val note = Note(
+            id = NoteId.new(),
+            taskId = command.taskId,
+            projectId = command.projectId,
+            body = body,
+            createdAt = command.createdAt,
+            editedAt = null,
+            revision = Revision(deviceId, command.createdAt.toEpochMilli(), 0),
+        )
+        database.withTransaction {
+            database.workspaceDao().upsertNote(note.toEntity())
+        }
+        return CommandResult.Success("Note added", undo = DomainCommand.DeleteNote(note.id))
+    }
+
+    private suspend fun updateNote(command: DomainCommand.UpdateNote): CommandResult {
+        val original = database.workspaceDao().getNoteById(command.noteId.value)?.toModel()
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Note no longer exists.")
+        val body = command.body.trim()
+        validateNoteBody(body)?.let { return it }
+        val updated = original.copy(
+            body = body,
+            editedAt = command.editedAt,
+            revision = Revision(
+                deviceId = original.revision.deviceId,
+                wallTimeMillis = maxOf(
+                    original.revision.wallTimeMillis + 1,
+                    command.editedAt.toEpochMilli(),
+                ),
+                logicalCounter = original.revision.logicalCounter + 1,
+            ),
+        )
+        database.withTransaction {
+            database.workspaceDao().upsertNote(updated.toEntity())
+        }
+        return CommandResult.Success(
+            message = "Note saved",
+            undo = DomainCommand.RestoreNote(original),
+        )
+    }
+
+    private suspend fun deleteNote(command: DomainCommand.DeleteNote): CommandResult {
+        val note = database.workspaceDao().getNoteById(command.noteId.value)?.toModel()
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Note no longer exists.")
+        database.withTransaction {
+            database.workspaceDao().deleteNote(note.id.value)
+        }
+        return CommandResult.Success(
+            message = "Note deleted",
+            undo = DomainCommand.RestoreNote(note),
+        )
+    }
+
+    private suspend fun restoreNote(command: DomainCommand.RestoreNote): CommandResult {
+        if (database.workspaceDao().getNoteById(command.note.id.value) != null) {
+            return CommandResult.Success("Note restored")
+        }
+        command.note.taskId?.let { taskId ->
+            val task = database.taskDao().getById(taskId.value)
+            if (task == null || task.deletedAtEpochMillis != null) {
+                return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            }
+        }
+        command.note.projectId?.let { projectId ->
+            database.workspaceDao().getProjectById(projectId.value)
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "Project no longer exists.",
+                )
+        }
+        database.withTransaction {
+            database.workspaceDao().upsertNote(command.note.toEntity())
+        }
+        return CommandResult.Success(
+            message = "Note restored",
+            undo = DomainCommand.DeleteNote(command.note.id),
+        )
+    }
+
+    private fun validateNoteBody(body: String): CommandResult.Rejected? = when {
+        body.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_NOTE,
+            "A note needs text.",
+        )
+        body.length > MAX_NOTE_BODY_LENGTH -> CommandResult.Rejected(
+            RejectionReason.NOTE_TOO_LONG,
+            "Keep notes under $MAX_NOTE_BODY_LENGTH characters.",
+        )
+        else -> null
+    }
 
     private suspend fun validateTimeEntry(
         taskId: TaskId,
@@ -2548,8 +2667,9 @@ class RoomVaultRepository(
             workspaceDao.observeChecklistItems(),
             workspaceDao.observeReminders(),
             observeTimeEntriesWithClock(),
-        ) { taskTags, checklist, reminders, timeEntries ->
-            RelationRows(taskTags, checklist, reminders, timeEntries)
+            workspaceDao.observeNotes(),
+        ) { taskTags, checklist, reminders, timeEntries, notes ->
+            RelationRows(taskTags, checklist, reminders, timeEntries, notes)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
@@ -2655,6 +2775,7 @@ class RoomVaultRepository(
                     overlap = conflict.overlap,
                 )
             },
+            notes = relations.notes.map(NoteEntity::toModel),
         )
     }
 
@@ -2755,6 +2876,7 @@ class RoomVaultRepository(
         val checklist: List<ChecklistItemEntity>,
         val reminders: List<ReminderEntity>,
         val timeEntries: TimedTimeEntries,
+        val notes: List<NoteEntity> = emptyList(),
     )
 
     private data class TimedTimeEntries(
