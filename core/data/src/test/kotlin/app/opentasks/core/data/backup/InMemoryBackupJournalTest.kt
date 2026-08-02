@@ -5,14 +5,20 @@ import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
+import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Revision
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.util.Base64
 
 class InMemoryBackupJournalTest {
     @Test
@@ -203,6 +209,81 @@ class InMemoryBackupJournalTest {
                     it.deletedIdentity == listOf(task.id.value, tagId.value)
             },
         )
+    }
+
+    @Test
+    fun addAndDeleteNoteJournalUpsertThenDeleteWithNoteFamily() = runBlocking {
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+
+        val addResult = repository.execute(
+            DomainCommand.AddNote(taskId = task.id, projectId = null, body = "Call the venue"),
+        )
+        assertTrue(addResult is CommandResult.Success)
+        val note = repository.currentWorkspace().notes.single { it.taskId == task.id }
+
+        val addPayloads = journal.entries
+            .filter { it.generation.value == 1L }
+            .map { BackupMutationCodec.decode(it.payload) }
+        val noteUpsert = addPayloads.single { it.record?.family == BackupRecordFamily.NOTE }
+        assertEquals(BackupMutationKind.UPSERT, noteUpsert.mutationKind)
+        assertEquals(listOf(note.id.value), noteUpsert.record!!.identity)
+        fun addedField(name: String): String? =
+            noteUpsert.record.fields.single { it.name == name }.value
+        assertEquals(task.id.value, addedField("taskId"))
+        assertEquals(null, addedField("projectId"))
+        assertEquals(
+            "Call the venue",
+            String(Base64.getDecoder().decode(addedField("bodyCiphertext")), Charsets.UTF_8),
+        )
+
+        repository.execute(DomainCommand.DeleteNote(note.id))
+
+        val deletePayloads = journal.entries
+            .filter { it.generation.value == 2L }
+            .map { BackupMutationCodec.decode(it.payload) }
+        val noteDelete = deletePayloads.single { it.deletedFamily == BackupRecordFamily.NOTE }
+        assertEquals(BackupMutationKind.DELETE, noteDelete.mutationKind)
+        assertEquals(listOf(note.id.value), noteDelete.deletedIdentity)
+    }
+
+    @Test
+    fun attachmentParticipatesInBackupRecordsWithFinalisedFields() {
+        val task = OpenTasksFixtures.tasks.first()
+        val attachment = Attachment(
+            id = AttachmentId("attachment-in-memory"),
+            taskId = task.id,
+            displayName = "Contract.pdf",
+            mimeType = "application/pdf",
+            byteCount = 1_024,
+            contentHash = "sha256:fixture",
+            blobSetId = BlobSetId("blob-set-1"),
+            chunkCount = 3,
+            deletedAt = Instant.parse("2026-07-29T10:00:00Z"),
+            revision = Revision(
+                deviceId = DeviceId("device-1"),
+                wallTimeMillis = 5,
+                logicalCounter = 1,
+            ),
+        )
+        val snapshot = OpenTasksFixtures.snapshot.copy(attachments = listOf(attachment))
+
+        val records = snapshot.toBackupRecords()
+
+        val record = records.single { it.family == BackupRecordFamily.ATTACHMENT }
+        assertEquals(listOf("attachment-in-memory"), record.identity)
+        fun field(name: String): String? = record.fields.single { it.name == name }.value
+        assertEquals(task.id.value, field("taskId"))
+        assertEquals("blob-set-1", field("blobSetId"))
+        assertEquals("3", field("chunkCount"))
+        assertEquals(
+            Instant.parse("2026-07-29T10:00:00Z").toEpochMilli().toString(),
+            field("deletedAtEpochMillis"),
+        )
+        assertEquals("5", field("revisionWallMillis"))
+        assertEquals("1", field("revisionLogical"))
+        assertEquals("device-1", field("revisionDeviceId"))
     }
 
     private fun repository(journal: InMemoryBackupJournal): InMemoryVaultRepository =
