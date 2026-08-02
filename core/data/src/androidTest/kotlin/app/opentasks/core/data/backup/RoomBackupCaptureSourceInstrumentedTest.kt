@@ -469,7 +469,12 @@ class RoomBackupCaptureSourceInstrumentedTest {
             "mimeType" to "text/plain",
             "byteCount" to 1L,
             "contentHash" to "hash-$scope",
-            "keepOffline" to 0,
+            "blobSetId" to null,
+            "chunkCount" to 0,
+            "deletedAtEpochMillis" to null,
+            "revisionWallMillis" to 0L,
+            "revisionLogical" to 0,
+            "revisionDeviceId" to "",
         )
         insertActivity("activity-task-$scope", taskId, projectId, scope)
         insertActivity("activity-project-$scope", null, projectId, scope)

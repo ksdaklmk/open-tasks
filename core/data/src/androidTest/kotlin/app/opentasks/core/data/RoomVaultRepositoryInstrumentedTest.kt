@@ -1877,17 +1877,23 @@ class RoomVaultRepositoryInstrumentedTest {
             """
             INSERT INTO attachments (
                 id, taskId, displayNameCiphertext, mimeType, byteCount,
-                contentHash, keepOffline
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                contentHash, blobSetId, chunkCount, deletedAtEpochMillis,
+                revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
-            arrayOf<Any>(
+            arrayOf<Any?>(
                 attachmentId,
                 task.id.value,
                 byteArrayOf(1, 2, 3),
                 "text/plain",
                 3L,
                 "room-purge-content-hash",
-                1,
+                null,
+                0,
+                null,
+                0L,
+                0,
+                "",
             ),
         )
         database!!.openHelper.writableDatabase.execSQL(
