@@ -148,7 +148,14 @@ class FoldContinuityInstrumentedTest {
     @Test
     fun legacyBaselineRejectsOrphanStorageSidecarsWithoutDeletingThem() {
         val context = application()
-        val sidecars = legacyDatabaseFiles(context).drop(1) + activeSlotFiles(context).drop(1)
+        val database = context.getDatabasePath(LEGACY_DATABASE_NAME)
+        val sidecars = listOf(
+            File("${database.path}-wal"),
+            File("${database.path}-shm"),
+            File("${database.path}-journal"),
+            File("${database.path}-wipecheck"),
+            File(checkNotNull(database.parentFile), "${database.name}-mj-continuity-test"),
+        ) + activeSlotFiles(context).drop(1)
 
         sidecars.forEach { sidecar ->
             check(sidecar.parentFile?.let { it.isDirectory || it.mkdirs() } == true)
@@ -415,12 +422,17 @@ class FoldContinuityInstrumentedTest {
         databaseName: String = LEGACY_DATABASE_NAME,
     ): List<File> {
         val database = context.getDatabasePath(databaseName)
+        val masterJournals = database.parentFile
+            ?.listFiles { file -> file.name.startsWith("${database.name}-mj") }
+            ?.toList()
+            .orEmpty()
         return listOf(
             database,
             File("${database.path}-wal"),
             File("${database.path}-shm"),
             File("${database.path}-journal"),
-        )
+            File("${database.path}-wipecheck"),
+        ) + masterJournals
     }
 
     private fun androidKeyStore(): KeyStore =
