@@ -1,23 +1,31 @@
 # Open Tasks Handoff
 
-- Last updated: 1 August 2026
+- Last updated: 2 August 2026
 - Branch: `main`
-- Session status: **Stage 3 Task 14 and Stage 3 are complete. Deterministic
-  production-protocol tests prove two-installation recovery, takeover races,
-  stale-owner rejection, fallback, passphrase rotation, separate-lineage
-  preservation, reconnect/account boundaries, terminal cleanup, and the inert
-  Android package. The credentialed Drive gate passes the live create-only
-  race primitive. Full repository, release/R8, schema, fixture, connected,
-  privacy, and non-destructive protected-workspace gates pass. The historical
-  Google Drive plan amendment plus user-owned `.kotlin/` and `artifacts/`
-  remain untouched and unstaged. Pause here. On a new explicit request, the
-  approved Galaxy Z Fold 8 trifold-ready adaptive slice is next, before Stage
-  4. Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and
-  independently reviewed.**
-- Current source implementation point: the Task 14 qualification change
-  containing this handoff, with subject `docs: verify create-only Stage 3
-  backup`, on top of `a325017` (`fix: close task 13 recovery review`),
-  `bc1c283`, `cc2959a`, `6f0cb57`, and `d87e1de`. The prior Task 12
+- Session status: **The approved Galaxy Z Fold 8 trifold-ready adaptive slice
+  is complete through Task 5. Its API 37 Fold 8 cover/main and Fold 8 Ultra
+  main emulator matrix passed all 38 required rows at 100% and 200% text,
+  including selected-project workbenches, week Schedule, Quick Add and editor
+  coverage. Task 3 instrumentation proves synthetic 50/50 hinge snapping;
+  the AVD exposed no native folding feature, so no native hinge claim is made.
+  Samsung Remote Test Lab is External-blocked while the user's Samsung
+  developer account approval is pending. The protected Pixel AVD and the
+  historical Google Drive plan amendment plus user-owned `.kotlin/` and
+  `artifacts/` remain untouched and unstaged. Both disposable Fold AVDs are
+  shut down and the final ADB/process audit is empty. Pause here. Stage 4 is
+  ready only after a new explicit user request. Stage 3, Stage 2, Train 1 Tasks
+  1.1–1.5, and Stage 1 remain complete and independently reviewed.**
+- Current source implementation point: the Task 5 qualification change
+  containing this handoff, with subject `docs: record fold 8 adaptive
+  acceptance`, on top of `9cc6057` (`fix: stack project status at large
+  text`), `da75a9e` (`fix: keep project progress readable at large text`),
+  `38a84f8` (`fix: show week schedule on medium windows`) and the adaptive
+  implementation range `7276f90..f46ce8c`. The authoritative acceptance record
+  is `docs/qualification/fold8-adaptive-acceptance.md`; ignored PNG and
+  UIAutomator evidence is under
+  `.superpowers/sdd/2026-07-31-galaxy-fold8-trifold-adaptive-plan/task-5-evidence/`.
+  The prior Stage 3 closure point is `216de3e` (`docs: verify create-only Stage
+  3 backup`). The prior Task 12
   closure point is `3109108`; the prior Stage 2 correction point is
   `f9e091b` (`fix: harden stage 2 backup state transitions`); it closes content-key authority, complete
   Inbox capture, same-generation state ownership, initial crash
@@ -550,8 +558,52 @@ account or destructive second physical installation was used, and no broader
 live claim is made. No private identifier, credential, or workspace content is
 recorded.
 
-The next approved action, only after a new explicit request, is the Galaxy Z
-Fold 8 trifold-ready adaptive layout slice. Do not begin Stage 4 first.
+That next approved adaptive action is now complete and recorded in the
+checkpoint below.
+
+## Galaxy Fold 8 trifold-ready adaptive slice closure — 2 August 2026
+
+The approved adaptive slice is complete in the implementation range
+`7276f90..f46ce8c`, the visual-acceptance corrections `38a84f8`, `da75a9e`
+and `9cc6057`, and the Task 5 qualification change with subject
+`docs: record fold 8 adaptive acceptance`. Its authoritative record is
+`docs/qualification/fold8-adaptive-acceptance.md`.
+
+The slice maps AndroidX window layout information to a model-independent
+`WindowPosture`, applies One UI-aligned 42/58 and 38/62 pane fractions, snaps
+vertical separating folds to the hinge, excludes editor content from a
+horizontal tabletop hinge, and preserves bounded drafts and selection across
+fold-driven Activity recreation. Fixture ownership and continuity acceptance
+are isolated from the protected workspace.
+
+Task 5 passed 38/38 visually inspected rows across the API 37
+`Fold8_Acceptance` cover/main displays and `Fold8_Ultra_Acceptance` main
+display at 100% and 200% text. The selected `Client research` workbench was
+verified rather than an empty Projects state. Acceptance found and closed the
+medium-width Schedule routing, large-text project progress and large-text
+cover status defects in `38a84f8`, `da75a9e` and `9cc6057` respectively.
+Both disposable AVDs ran sequentially with read-only, snapshot-disabled flags,
+were shut down, and left empty ADB and emulator-process audits. The protected
+`Pixel_10_Pro_Fold` was not started or mutated.
+
+The AVD exposed physical main and cover displays but no native AndroidX
+`FoldingFeature`, separating fold or hinge. A single bounded fold/unfold probe
+left `cmd device_state` at identifier `0` (`DEFAULT`). Physical-display
+evidence therefore validates adaptive size-class surfaces only; Task 3's
+instrumentation is the independent evidence for synthetic 50/50 hinge snap,
+and no native emulator hinge claim is made.
+
+Samsung Remote Test Lab remains **External-blocked** because the user's
+Samsung developer account approval is pending. Real-device cover-to-main draft
+continuity, One UI taskbar overlap, Samsung keyboard on both displays,
+split-screen one-half and one-third widths, pop-up view, and physical hinge
+alignment remain outstanding. No sign-in page was opened and no credential was
+requested or handled. This recorded external gap does not reopen the completed
+emulator slice, but it must be cleared before real-device or One UI integration
+claims.
+
+Pause after this checkpoint. Stage 4 is now unblocked by the adaptive slice and
+may begin only on a new explicit user request.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
@@ -821,9 +873,12 @@ identity above was unchanged after the module suites.
   groups wrap instead of being clipped.
 - Navigation labels stay readable at 100% and 130% text and deliberately
   collapse before wrapping at 150% and 200%.
-- Final visual acceptance passed on the API 37 Pixel 10 Pro Fold main display
-  at normal density and text scale. Earlier checks covered the compact cover
-  display, fold/unfold, narrow detail panes and 200% text.
+- Final Galaxy Fold 8 visual acceptance passed 38/38 required rows on API 37
+  Fold 8 cover/main and Fold 8 Ultra main displays at 100% and 200% text.
+  Physical-display evidence validates the adaptive surfaces; Task 3 synthetic
+  instrumentation validates 50/50 hinge snapping because the AVD reported no
+  native folding feature. Samsung RTL is External-blocked pending account
+  approval, so no real-device or One UI integration claim is made.
 
 ### Local workspace
 
@@ -1592,14 +1647,16 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
 Stage 2 and Stage 3 are implemented and verified through their task
 boundaries. Stage 3 create-only Tasks 1–14 close with the Task 14 qualification
-change containing this handoff. Remote merge and attachment transport remain
-absent by design.
+change, and the approved Galaxy Fold 8 trifold-ready adaptive slice closes with
+the Task 5 qualification change containing this handoff. Remote merge and
+attachment transport remain absent by design.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
-maintenance commit. The approved Stage 3 execution authority is closed. The
-trifold-ready adaptive plan named below is the next execution authority, but
-only after a new explicit user request.
+maintenance commit. The approved Stage 3 and adaptive-slice execution
+authorities are closed. Stage 4 is next in the dependency order, but only after
+a new explicit user request. Samsung RTL remains an External-blocked
+qualification gap, not authority to continue into Stage 4 in this session.
 
 ## Resume instructions
 
@@ -1615,8 +1672,10 @@ only after a new explicit user request.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
-3. Task 14 and Stage 3 are complete. With a new explicit request, execute the
-   approved Galaxy Z Fold 8 trifold-ready adaptive layout plan before Stage 4.
+3. Task 14, Stage 3 and the approved Galaxy Z Fold 8 trifold-ready adaptive
+   slice are complete. Pause at this checkpoint. Begin Stage 4 only after a new
+   explicit user request; retain the External-blocked Samsung RTL gap until the
+   user's developer-account approval is available.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -1643,7 +1702,7 @@ recorded above.
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Done | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
-| 4 | Notes, activity, cloud attachments, and search | Blocked by approved trifold-ready slice | Cloud-authoritative blob lifecycle and final structured metadata are complete |
+| 4 | Notes, activity, cloud attachments, and search | Ready | Cloud-authoritative blob lifecycle and final structured metadata are complete |
 | 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
@@ -1655,15 +1714,11 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. On a new explicit user request, run the approved Galaxy Z Fold 8
-   trifold-ready adaptive layout slice before any Stage 4 work:
-   design
-   `docs/superpowers/specs/2026-07-31-galaxy-fold8-trifold-adaptive-design.md`,
-   plan
-   `docs/superpowers/plans/2026-07-31-galaxy-fold8-trifold-adaptive-plan.md`
-   (user-approved 31 July 2026; One UI pane ratios, hinge snap,
-   trifold-ready `WindowPosture` contract, fold-continuity acceptance,
-   Fold 8 AVD profiles, External Samsung Remote Test Lab step).
+1. Pause after the completed Galaxy Z Fold 8 adaptive checkpoint. On a new
+   explicit user request, begin Stage 4 notes, activity, cloud attachments and
+   search from the production master plan. Preserve the adaptive design and
+   plan as closed authorities, and keep Samsung RTL recorded as
+   External-blocked until the approved account is available.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -1768,11 +1823,12 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-Pause after the completed Stage 3 Task 14. On a new explicit user request,
-execute the approved Galaxy Z Fold 8 trifold-ready adaptive layout plan before
-Stage 4. Preserve Room as the sole live structured-data authority and treat
-the Stage 2 Android package as supplementary recovery input, not upload
-evidence.
+Pause after the completed Galaxy Z Fold 8 adaptive Task 5 qualification. On a
+new explicit user request, begin Stage 4 notes, activity, cloud attachments and
+search. Preserve Room as the sole live structured-data authority, treat the
+Stage 2 Android package as supplementary recovery input rather than upload
+evidence, and retain the External-blocked Samsung RTL rows until real-device
+access is available.
 
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly
