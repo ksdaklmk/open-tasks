@@ -522,6 +522,65 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun attachmentContentDeletionResumesWithOpaqueTokenLongerThanOneThousandTwentyFourCharacters() =
+        runBlocking {
+            val longToken = "opaque-" + "x".repeat(1_025)
+            val attachments = RecordingAttachmentStore(
+                *(0 until 10).map {
+                    attachmentListed("blob-$it", "manifest-$it", ATTACHMENT_MANIFEST_ROLE)
+                }.toTypedArray(),
+                pageSize = 1,
+                pageStart = { token ->
+                    when (token) {
+                        null -> 0
+                        longToken -> 8
+                        else -> token.toInt()
+                    }
+                },
+                nextPageToken = { _, calculated ->
+                    if (calculated == "8") longToken else calculated
+                },
+            )
+            val fixture = DeletionFixture(attachmentStore = attachments)
+
+            val first = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+            val resumed = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+            assertEquals(
+                LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                first,
+            )
+            assertEquals(
+                LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                resumed,
+            )
+            assertEquals(listOf("manifest-0"), attachments.deleted)
+            fixture.close()
+        }
+
+    @Test
+    fun resumedManifestPhasePreflightsAllPagesBeforeDeletingAManifest() = runBlocking {
+        val attachments = RecordingAttachmentStore(pageSize = 1)
+        val fixture = DeletionFixture(attachmentStore = attachments)
+        fixture.state.failBeforePhase = "COMPLETED"
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf()),
+        )
+        attachments.add(
+            *(0 until 5).map {
+                attachmentListed("blob-$it", "manifest-$it", ATTACHMENT_MANIFEST_ROLE)
+            }.toTypedArray(),
+            attachmentListed("tail-blob", "tail-chunk", ATTACHMENT_CHUNK_ROLE),
+        )
+
+        fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(listOf("tail-chunk"), attachments.deleted)
+        fixture.close()
+    }
+
+    @Test
     fun attachmentContentDeletionResumesPastFourThousandNinetySixListedRows() = runBlocking {
         val attachments = RecordingAttachmentStore(
             *(0 until 4_097).map {
@@ -972,6 +1031,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     private class RecordingAttachmentStore(
         vararg initial: AttachmentListedObject,
         private val pageSize: Int = Int.MAX_VALUE,
+        private val pageStart: (String?) -> Int = { it?.toInt() ?: 0 },
         private val nextPageToken: (String?, String?) -> String? = { _, calculated -> calculated },
     ) :
         AttachmentBlobStore {
@@ -1003,7 +1063,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             error("not used")
         override suspend fun listNamespace(pageToken: String?): Pair<List<AttachmentListedObject>, String?> {
             listCalls += 1
-            val start = pageToken?.toInt() ?: 0
+            val start = pageStart(pageToken)
             val page = objects.drop(start).take(pageSize)
             val calculatedNext = (start + page.size).takeIf { it < objects.size }?.toString()
             val next = nextPageToken(pageToken, calculatedNext)

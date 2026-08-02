@@ -147,7 +147,6 @@ private data class AttachmentPage(
     val nextPageToken: String?,
     val nextCycleFastPageToken: String?,
     val cycleFastEnded: Boolean,
-    val chunkSeenInProbe: Boolean,
 )
 
 private sealed interface AttachmentPageRead {
@@ -362,7 +361,13 @@ class DefaultRemoteBackupLifecycleCoordinator(
         var state = initialState
         val budget = DeletionBudget(MAX_DELETES_PER_BATCH)
         var pages = 0
-        while (pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
+        // Deliberately in-memory: a resumed MANIFESTS phase must repeat the full preflight.
+        var manifestPreflightComplete = false
+        var extraManifestPageUsed = false
+        while (
+            pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION ||
+            (manifestPreflightComplete && !extraManifestPageUsed)
+        ) {
             val phase = AttachmentDeletionPhase.valueOf(state.phase)
             if (phase == AttachmentDeletionPhase.COMPLETED) {
                 state = transitionAttachmentDeletion(
@@ -378,6 +383,23 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
                 continue
             }
+            if (phase == AttachmentDeletionPhase.MANIFESTS && !manifestPreflightComplete) {
+                state = transitionAttachmentDeletion(
+                    operationId,
+                    configuration,
+                    state,
+                    state.copy(
+                        phase = AttachmentDeletionPhase.CHUNKS.name,
+                        pageToken = null,
+                        cycleFastPageToken = null,
+                        cycleFastEnded = false,
+                    ),
+                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+                continue
+            }
+            if (pages >= MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
+                extraManifestPageUsed = true
+            }
             val read = readAttachmentPage(
                 attachmentStore,
                 state.pageToken,
@@ -390,8 +412,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
             }
             pages += 1
             if (phase == AttachmentDeletionPhase.MANIFESTS &&
-                (page.chunkSeenInProbe || page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE })
+                page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
             ) {
+                manifestPreflightComplete = false
                 state = transitionAttachmentDeletion(
                     operationId,
                     configuration,
@@ -436,6 +459,11 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     state,
                     next,
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+                if (phase == AttachmentDeletionPhase.CHUNKS &&
+                    next.phase == AttachmentDeletionPhase.MANIFESTS.name
+                ) {
+                    manifestPreflightComplete = true
+                }
                 if (next.phase == AttachmentDeletionPhase.COMPLETED.name) {
                     return LifecycleResult.AttachmentContentDeleted
                 }
@@ -449,11 +477,19 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 configuration,
                 state,
                 state.copy(
+                    phase = if (phase == AttachmentDeletionPhase.MANIFESTS) {
+                        AttachmentDeletionPhase.CHUNKS.name
+                    } else {
+                        state.phase
+                    },
                     pageToken = null,
                     cycleFastPageToken = null,
                     cycleFastEnded = false,
                 ),
             ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            if (phase == AttachmentDeletionPhase.MANIFESTS) {
+                manifestPreflightComplete = false
+            }
             when (
                 val resolution = chainStore.resolve(
                     configuration.rootClaimProviderId,
@@ -1205,10 +1241,35 @@ class DefaultRemoteBackupLifecycleCoordinator(
     ): TerminalAttachmentCleanupResult {
         var state = initialState
         var pages = 0
-        while (pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
+        // Deliberately in-memory: a resumed MANIFESTS phase must repeat the full preflight.
+        var manifestPreflightComplete = false
+        var extraManifestPageUsed = false
+        while (
+            pages < MAX_ATTACHMENT_PAGES_PER_INVOCATION ||
+            (manifestPreflightComplete && !extraManifestPageUsed)
+        ) {
             val phase = AttachmentDeletionPhase.valueOf(state.attachmentPhase)
             if (phase == AttachmentDeletionPhase.COMPLETED) {
                 return TerminalAttachmentCleanupResult(state, null)
+            }
+            if (phase == AttachmentDeletionPhase.MANIFESTS && !manifestPreflightComplete) {
+                state = checkpointDeletion(
+                    operationId,
+                    configuration,
+                    state.copy(
+                        attachmentPhase = AttachmentDeletionPhase.CHUNKS.name,
+                        attachmentPageToken = null,
+                        attachmentCycleFastPageToken = null,
+                        attachmentCycleFastEnded = false,
+                    ),
+                ) ?: return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+                )
+                continue
+            }
+            if (pages >= MAX_ATTACHMENT_PAGES_PER_INVOCATION) {
+                extraManifestPageUsed = true
             }
             val read = readAttachmentPage(
                 store,
@@ -1225,8 +1286,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
             }
             pages += 1
             if (phase == AttachmentDeletionPhase.MANIFESTS &&
-                (page.chunkSeenInProbe || page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE })
+                page.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
             ) {
+                manifestPreflightComplete = false
                 state = checkpointDeletion(
                     operationId,
                     configuration,
@@ -1275,6 +1337,11 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     state,
                     failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
                 )
+                if (phase == AttachmentDeletionPhase.CHUNKS &&
+                    next.attachmentPhase == AttachmentDeletionPhase.MANIFESTS.name
+                ) {
+                    manifestPreflightComplete = true
+                }
                 if (next.attachmentPhase == AttachmentDeletionPhase.COMPLETED.name) {
                     return TerminalAttachmentCleanupResult(state, null)
                 }
@@ -1290,6 +1357,11 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 operationId,
                 configuration,
                 state.copy(
+                    attachmentPhase = if (phase == AttachmentDeletionPhase.MANIFESTS) {
+                        AttachmentDeletionPhase.CHUNKS.name
+                    } else {
+                        state.attachmentPhase
+                    },
                     attachmentPageToken = null,
                     attachmentCycleFastPageToken = null,
                     attachmentCycleFastEnded = false,
@@ -1298,6 +1370,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 state,
                 failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
             )
+            if (phase == AttachmentDeletionPhase.MANIFESTS) {
+                manifestPreflightComplete = false
+            }
             authenticateTerminal()?.let {
                 return TerminalAttachmentCleanupResult(state, it)
             }
@@ -1341,11 +1416,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     main.nextPageToken,
                     null,
                     true,
-                    false,
                 ),
             )
         }
-        var chunkSeenInProbe = false
         val fastFirst = if (cycleFastPageToken == pageToken) {
             main
         } else {
@@ -1354,10 +1427,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 is RawAttachmentPageRead.Failed -> return AttachmentPageRead.Failed(read.reason)
             }
         }
-        chunkSeenInProbe = fastFirst.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
         val fastFirstNext = fastFirst.nextPageToken
             ?: return AttachmentPageRead.Found(
-                AttachmentPage(main.objects, main.nextPageToken, null, true, chunkSeenInProbe),
+                AttachmentPage(main.objects, main.nextPageToken, null, true),
             )
         val fastSecond = if (fastFirstNext == pageToken) {
             main
@@ -1367,11 +1439,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 is RawAttachmentPageRead.Failed -> return AttachmentPageRead.Failed(read.reason)
             }
         }
-        chunkSeenInProbe = chunkSeenInProbe ||
-            fastSecond.objects.any { it.role == ATTACHMENT_CHUNK_ROLE }
         val fastNext = fastSecond.nextPageToken
             ?: return AttachmentPageRead.Found(
-                AttachmentPage(main.objects, main.nextPageToken, null, true, chunkSeenInProbe),
+                AttachmentPage(main.objects, main.nextPageToken, null, true),
             )
         if (main.nextPageToken != null && main.nextPageToken == fastNext) {
             return AttachmentPageRead.Failed(
@@ -1384,7 +1454,6 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 main.nextPageToken,
                 fastNext,
                 false,
-                chunkSeenInProbe,
             ),
         )
     }
@@ -1402,10 +1471,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
             )
         }
-        if (page.first.size > ATTACHMENT_PAGE_SIZE ||
-            page.second?.length?.let { it > MAX_PAGE_TOKEN_CHARACTERS } == true ||
-            !attachmentRowsAreUnderstood(page.first)
-        ) {
+        if (page.first.size > ATTACHMENT_PAGE_SIZE || !attachmentRowsAreUnderstood(page.first)) {
             return RawAttachmentPageRead.Failed(
                 RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
             )
@@ -1801,8 +1867,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     runCatching {
                         AttachmentDeletionPhase.valueOf(it.attachmentPhase)
                     }.isSuccess &&
-                    validAttachmentCursor(
-                        it.attachmentPageToken,
+                    validAttachmentCycleState(
                         it.attachmentCycleFastPageToken,
                         it.attachmentCycleFastEnded,
                     )
@@ -1829,8 +1894,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
                 it.phase == operation.phase && it.formatVersion == 1 &&
                     it.minimumReaderVersion == 1 &&
                     runCatching { AttachmentDeletionPhase.valueOf(it.phase) }.isSuccess &&
-                    validAttachmentCursor(
-                        it.pageToken,
+                    validAttachmentCycleState(
                         it.cycleFastPageToken,
                         it.cycleFastEnded,
                     )
@@ -1850,14 +1914,10 @@ class DefaultRemoteBackupLifecycleCoordinator(
         null
     }
 
-    private fun validAttachmentCursor(
-        pageToken: String?,
+    private fun validAttachmentCycleState(
         cycleFastPageToken: String?,
         cycleFastEnded: Boolean,
-    ): Boolean =
-        pageToken?.length?.let { it <= MAX_PAGE_TOKEN_CHARACTERS } != false &&
-            cycleFastPageToken?.length?.let { it <= MAX_PAGE_TOKEN_CHARACTERS } != false &&
-            !(cycleFastEnded && cycleFastPageToken != null)
+    ): Boolean = !(cycleFastEnded && cycleFastPageToken != null)
 
     private fun reached(state: TerminalDeletionStateV1, phase: TerminalDeletionPhase) =
         TerminalDeletionPhase.valueOf(state.phase) >= phase
