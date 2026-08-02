@@ -8,7 +8,10 @@
   physical-cover pass also passed 8/8 rows at a verified 332×532 dp at both
   text scales, covering compact navigation, the single-pane task list, editor
   scrolling and Quick Add with a visible IME. The shared Quick Add sheet now
-  scrolls so its full actions remain reachable above the keyboard. Task 3
+  scrolls so its full actions remain reachable above the keyboard. Final
+  review also closed safe-inset hinge alignment, odd-width trifold selection,
+  continuity-fixture sidecar ownership, exact pane-width assertions and
+  draft-aware editor accessibility. Task 3
   instrumentation proves synthetic 50/50 hinge snapping; the AVD exposed no
   native folding feature, so no native hinge claim is made. Samsung Remote
   Test Lab is External-blocked while the user's Samsung developer account
@@ -18,14 +21,13 @@
   ADB/process audit is empty. Pause here. Stage 4 is ready only after a new
   explicit user request. Stage 3, Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
   remain complete and independently reviewed.**
-- Current product source implementation point: `e3afd80` (`chore: remove
-  duplicate projects import`) on top of `0368dcf` (`fix: keep quick add actions
-  reachable`), `9cc6057` (`fix: stack project status at large text`),
-  `da75a9e` (`fix: keep project progress readable at large text`), `38a84f8`
-  (`fix: show week schedule on medium windows`) and the adaptive implementation
-  range `7276f90..f46ce8c`. Accepted visual evidence spans
-  `f46ce8c..0368dcf`, with affected rows recaptured after each fix and final
-  repository gates run at `e3afd80`. The authoritative acceptance record is
+- Current product source implementation point: `1194536` (`fix: close fold 8
+  review gaps`) on top of `74d3064` (`fix: align hinge split with safe insets`)
+  and the accepted visual corrections through `0368dcf`. The full adaptive
+  implementation range is `7276f90..1194536`. Accepted visual evidence spans
+  `f46ce8c..0368dcf`, with affected rows recaptured after each visual fix;
+  final review tests and repository gates ran at `1194536`. The authoritative
+  acceptance record is
   `docs/qualification/fold8-adaptive-acceptance.md`; ignored PNG and
   UIAutomator evidence is under
   `.superpowers/sdd/2026-07-31-galaxy-fold8-trifold-adaptive-plan/task-5-evidence/`.
@@ -569,8 +571,9 @@ checkpoint below.
 ## Galaxy Fold 8 trifold-ready adaptive slice closure — 2 August 2026
 
 The approved adaptive slice is complete in the implementation range
-`7276f90..e3afd80`, including the visual-acceptance corrections `38a84f8`,
-`da75a9e`, `9cc6057` and `0368dcf`. Its authoritative record is
+`7276f90..1194536`, including the visual-acceptance corrections `38a84f8`,
+`da75a9e`, `9cc6057` and `0368dcf` and the final-review corrections `74d3064`
+and `1194536`. Its authoritative record is
 `docs/qualification/fold8-adaptive-acceptance.md`.
 
 The slice maps AndroidX window layout information to a model-independent
@@ -594,6 +597,15 @@ scrolling and Quick Add with Gboard visible. Both disposable AVDs ran
 sequentially with read-only, snapshot-disabled flags, were shut down, and left
 empty ADB and emulator-process audits. The protected `Pixel_10_Pro_Fold` was
 not started or mutated.
+
+Final review corrected pane snapping for trailing safe insets and odd-width
+trifold centres, made continuity-fixture database and active-slot sidecar
+ownership fail closed, strengthened recreation/configuration/scroll checks,
+asserted both pane widths within a 1 dp rounding tolerance, and made the task
+editor's accessibility state use the current localized draft title. Focused
+device reruns passed the continuity fixture's two executable rows (the native
+transition row skipped on the DEFAULT-only AVD), Tasks pane tests 2/2 and
+Projects pane tests 4/4.
 
 The AVD exposed physical main and cover displays but no native AndroidX
 `FoldingFeature`, separating fold or hinge. A single bounded fold/unfold probe
@@ -886,7 +898,9 @@ identity above was unchanged after the module suites.
   37 Fold 8 cover/main and Fold 8 Ultra main displays plus an 8/8 focused
   332×532 dp cover matrix, all at 100% and 200% text. Physical-display evidence
   validates the adaptive surfaces; Task 3 synthetic instrumentation validates
-  50/50 hinge snapping because the AVD reported no native folding feature.
+  50/50 hinge snapping because the AVD reported no native folding feature. The
+  strengthened native transition row skipped because the AVD exposed only
+  DEFAULT, so no native recreation/continuity claim is made.
   Samsung RTL is External-blocked pending account approval, so no real-device
   or One UI integration claim is made.
 

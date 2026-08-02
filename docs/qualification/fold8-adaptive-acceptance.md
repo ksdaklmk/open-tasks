@@ -5,8 +5,8 @@
 - Samsung Remote Test Lab result: **External-blocked**
 - Accepted evidence provenance: `f46ce8c..0368dcf`; affected rows were
   recaptured after each product fix
-- Final product gate source: `e3afd80` (`chore: remove duplicate projects import`)
-- Slice implementation range: `7276f90..e3afd80`
+- Final product gate source: `1194536` (`fix: close fold 8 review gaps`)
+- Slice implementation range: `7276f90..1194536`
 - Ignored evidence root:
   `.superpowers/sdd/2026-07-31-galaxy-fold8-trifold-adaptive-plan/task-5-evidence/`
 
@@ -148,6 +148,22 @@ fixed, and the affected row was recaptured before acceptance continued:
   `fold8-cover-200/quick-add-fixed.png` and the two focused 332 dp Quick Add
   captures.
 
+## Final review corrections
+
+- `74d3064` subtracts both safe-drawing edge insets before converting a hinge
+  position into a pane fraction.
+- `1194536` selects the geometrically nearest fold on odd-width trifold
+  windows, verifies both pane widths within a 1 dp rounding tolerance, and
+  localizes the editor state description using the current draft title.
+- The same commit makes the continuity fixture fail closed on database
+  WAL/SHM/journal files and active-slot `.new`/`.bak` files. Its strengthened
+  transition row requires a new Activity instance, changed window
+  configuration, the exact meaningful scroll position and the unsaved draft.
+- On the sole audited API 37 `Fold8_Acceptance` AVD, the storage/alias rows
+  passed, Tasks pane tests passed 2/2 and Projects pane tests passed 4/4. The
+  native transition row skipped because the AVD exposed only DEFAULT; this is
+  not counted as native fold-continuity evidence.
+
 ## Fold and hinge evidence boundary
 
 The physical main and cover display captures validate the size-class,
@@ -159,9 +175,10 @@ Therefore this qualification makes **no native emulator hinge claim**.
 
 Task 3 instrumentation independently proves the product contract for a
 synthetic vertical separating fold: the two panes use a 50/50 split snapped to
-the supplied hinge. Task 4 instrumentation independently proves horizontal
-hinge exclusion and fold-continuity restoration. Together these tests cover
-the posture policy without misrepresenting the AVD's native fold telemetry.
+the supplied hinge. Task 4 independently proves horizontal hinge exclusion.
+The strengthened physical transition row is retained for hardware that exposes
+CLOSED and OPENED states, but skipped on this DEFAULT-only AVD. These tests
+cover the synthetic posture policy without misrepresenting native telemetry.
 
 ## Samsung Remote Test Lab
 
@@ -186,12 +203,12 @@ gates from the product source above:
 
 ```text
 ./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace --console=plain
-BUILD SUCCESSFUL in 26s
-547 actionable tasks: 41 executed, 506 up-to-date
+BUILD SUCCESSFUL in 25s
+547 actionable tasks: 37 executed, 510 up-to-date
 
 ./gradlew :app:assembleRelease --stacktrace --console=plain
-BUILD SUCCESSFUL in 31s
-441 actionable tasks: 24 executed, 417 up-to-date
+BUILD SUCCESSFUL in 33s
+441 actionable tasks: 32 executed, 4 from cache, 405 up-to-date
 Included minifyReleaseWithR8, resource shrinking/optimisation and packaging.
 
 git diff --check
