@@ -27,6 +27,11 @@ import app.opentasks.core.data.backup.drive.DriveDownloadReceipt
 import app.opentasks.core.data.backup.drive.DriveFileMetadata
 import app.opentasks.core.data.backup.drive.DriveListPage
 import app.opentasks.core.data.backup.drive.DriveResumableSession
+import app.opentasks.core.domain.AttachmentBlobStore
+import app.opentasks.core.domain.AttachmentListedObject
+import app.opentasks.core.domain.AttachmentManifestLookup
+import app.opentasks.core.domain.AttachmentObjectResult
+import app.opentasks.core.domain.AttachmentReadResult
 import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.CreateOnlyBackupObjectStore
 import app.opentasks.core.domain.CreateSmallResult
@@ -45,6 +50,7 @@ import app.opentasks.core.domain.RemoteBackupOperation
 import app.opentasks.core.domain.RemoteListPage
 import app.opentasks.core.domain.RemoteListRequest
 import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.CloudDeviceId
 import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.OwnershipClaimId
@@ -137,6 +143,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
                 "TOMBSTONE_CREATED",
                 "TOMBSTONE_VERIFIED",
                 "PAYLOAD_CLEANUP",
+                "ATTACHMENT_CLEANUP",
                 "CLAIM_CLEANUP",
                 "COMPLETED",
             ),
@@ -414,6 +421,107 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun attachmentContentDeletionKeepsActiveStructuredBackupState() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+            attachmentListed("blob-a", "chunk-a", ATTACHMENT_CHUNK_ROLE),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+        val passphrase = PASSPHRASE.copyOf()
+
+        val result = fixture.coordinator.deleteAttachmentContent(passphrase)
+
+        assertEquals(LifecycleResult.AttachmentContentDeleted, result)
+        assertEquals(RemoteBackupLifecycle.ACTIVE, fixture.state.configuration.lifecycle)
+        assertEquals(listOf("chunk-a", "manifest-a"), attachments.deleted)
+        assertTrue(fixture.objects.deleted.isEmpty())
+        assertTrue(passphrase.all { it == '\u0000' })
+        fixture.close()
+    }
+
+    @Test
+    fun attachmentContentDeletionResumesOneSharedThirtyTwoObjectBudget() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            *(0..32).map {
+                attachmentListed("blob-a", "chunk-$it", ATTACHMENT_CHUNK_ROLE)
+            }.toTypedArray(),
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val first = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+        val resumed = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+            first,
+        )
+        assertEquals(LifecycleResult.AttachmentContentDeleted, resumed)
+        assertEquals(34, attachments.deleted.size)
+        assertEquals("manifest-a", attachments.deleted.last())
+        fixture.close()
+    }
+
+    @Test
+    fun completedAttachmentDeletionDeletesContentAddedBeforeALaterExplicitAction() = runBlocking {
+        val attachments = RecordingAttachmentStore()
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        assertEquals(
+            LifecycleResult.AttachmentContentDeleted,
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf()),
+        )
+        attachments.add(
+            attachmentListed("blob-a", "chunk-a", ATTACHMENT_CHUNK_ROLE),
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+        )
+
+        assertEquals(
+            LifecycleResult.AttachmentContentDeleted,
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf()),
+        )
+        assertEquals(listOf("chunk-a", "manifest-a"), attachments.deleted)
+        fixture.close()
+    }
+
+    @Test
+    fun attachmentContentDeletionBlocksUnknownRowsWithoutDeletingKnownRows() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "chunk-a", ATTACHMENT_CHUNK_ROLE),
+            attachmentListed("blob-a", "unknown-a", "future-role"),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            result,
+        )
+        assertTrue(attachments.deleted.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun terminalDeletionRemovesAttachmentChunksAndManifestsBeforeClaims() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+            attachmentListed("blob-a", "chunk-a", ATTACHMENT_CHUNK_ROLE),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val result = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(LifecycleResult.HistoryDeleted, result)
+        assertEquals(listOf("chunk-a", "manifest-a"), attachments.deleted)
+        assertTrue(
+            fixture.deletionEvents.indexOf("attachment:manifest-a") <
+                fixture.deletionEvents.indexOf("backup:$OLD_CLAIM_PROVIDER"),
+        )
+        fixture.close()
+    }
+
+    @Test
     fun divergentWorkStartsASeparateLineageOnlyFromLocallyKnownOwnershipLoss() = runBlocking {
         val lost = configuration().copy(
             lifecycle = RemoteBackupLifecycle.OWNERSHIP_LOST,
@@ -453,6 +561,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     private inner class DeletionFixture(
         transferStore: RemoteBackupTransferStore = EmptyTransferStore,
         publicationGate: Mutex = Mutex(),
+        attachmentStore: RecordingAttachmentStore = RecordingAttachmentStore(),
     ) {
         val crypto = TinkVaultCrypto()
         private val key = crypto.createKey()
@@ -462,7 +571,8 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         private val root = verifiedRoot(codec, key)
         val state = LifecycleStateStore(deletionConfiguration(root))
         private val envelopes = HoldingEnvelopeStore(envelope)
-        val objects = RecordingObjectStore()
+        val deletionEvents = mutableListOf<String>()
+        val objects = RecordingObjectStore { deletionEvents += "backup:$it" }
         val chain = TerminalChainStore(root, codec, key, objects)
         private val authorization = SuccessfulAuthorization(NoStorageDriveTransport())
         val coordinator = DefaultRemoteBackupLifecycleCoordinator(
@@ -474,6 +584,10 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             scheduler = RecordingScheduler {},
             authorizationManager = authorization,
             openObjectStore = { objects },
+            openAttachmentStore = { _, _ ->
+                attachmentStore.onDelete = { deletionEvents += "attachment:$it" }
+                attachmentStore
+            },
             ownershipStore = { chain },
             ownershipCodec = codec,
             publicationCodec = publicationCodec,
@@ -695,7 +809,9 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         }
     }
 
-    private class RecordingObjectStore : CreateOnlyBackupObjectStore {
+    private class RecordingObjectStore(
+        private val onDelete: (String) -> Unit = {},
+    ) : CreateOnlyBackupObjectStore {
         val deleted = mutableListOf<String>()
         val listRequests = mutableListOf<RemoteObjectRoleV1>()
         val readSmallRequests = mutableListOf<String>()
@@ -754,6 +870,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         ) = ImmutableDownloadResult.Missing
         override suspend fun delete(providerObjectId: ProviderObjectId): DeleteObjectResult {
             deleted += providerObjectId.value
+            onDelete(providerObjectId.value)
             smallFiles.remove(providerObjectId.value)?.fill(0)
             listedByRole.replaceAll { _, values ->
                 values.filterNot { it.providerObjectId == providerObjectId }
@@ -764,6 +881,42 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         fun clear() {
             smallFiles.values.forEach { it.fill(0) }
             smallFiles.clear()
+        }
+    }
+
+    private class RecordingAttachmentStore(vararg initial: AttachmentListedObject) :
+        AttachmentBlobStore {
+        private val objects = initial.toMutableList()
+        val deleted = mutableListOf<String>()
+        var onDelete: (String) -> Unit = {}
+        fun add(vararg added: AttachmentListedObject) {
+            objects += added
+        }
+        override suspend fun generateObjectIds(count: Int) = error("not used")
+        override suspend fun createChunk(
+            providerObjectId: ProviderObjectId,
+            blobSetId: BlobSetId,
+            chunkIndex: Int,
+            chunkCount: Int,
+            frameBytes: ByteArray,
+        ): AttachmentObjectResult = error("not used")
+        override suspend fun readObject(
+            providerObjectId: ProviderObjectId,
+            maximumBytes: Long,
+        ): AttachmentReadResult = error("not used")
+        override suspend fun createManifest(
+            providerObjectId: ProviderObjectId,
+            blobSetId: BlobSetId,
+            frameBytes: ByteArray,
+        ): AttachmentObjectResult = error("not used")
+        override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup =
+            error("not used")
+        override suspend fun listNamespace(pageToken: String?) = objects.toList() to null
+        override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {
+            deleted += providerObjectId.value
+            onDelete(providerObjectId.value)
+            objects.removeAll { it.providerObjectId == providerObjectId }
+            return true
         }
     }
 
@@ -996,6 +1149,14 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             ownerDeviceId = CloudDeviceId.parse(DEVICE_ID),
         )
 
+    private fun attachmentListed(blobSetId: String, providerId: String, role: String) =
+        AttachmentListedObject(
+            providerObjectId = ProviderObjectId.of(providerId),
+            role = role,
+            blobSetId = blobSetId,
+            createdAtEpochMillis = null,
+        )
+
     private fun errorCodec(): app.opentasks.core.data.backup.OwnershipClaimCodec {
         val crypto = TinkVaultCrypto()
         return app.opentasks.core.data.backup.OwnershipClaimCodec(
@@ -1097,6 +1258,8 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         const val REMOTE_BASE_B_PROVIDER = "remote-base-b-provider"
         const val REMOTE_SEGMENT_PROVIDER = "remote-segment-provider"
         const val DEVICE_ID = "00000000-0000-4000-8000-000000000004"
+        const val ATTACHMENT_CHUNK_ROLE = "attachment-chunk"
+        const val ATTACHMENT_MANIFEST_ROLE = "attachment-manifest"
         const val ZERO_SHA256 =
             "0000000000000000000000000000000000000000000000000000000000000000"
         const val DIGEST =

@@ -7,6 +7,7 @@ import app.opentasks.backup.drive.GoogleDriveAuthorizationManager
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.crypto.VaultKeyEnvelope
+import app.opentasks.core.data.backup.CreateOnlyDriveAttachmentBlobStore
 import app.opentasks.core.data.backup.DefaultOwnershipChainStore
 import app.opentasks.core.data.backup.DefaultPublicationCatalog
 import app.opentasks.core.data.backup.OwnershipChainStore
@@ -22,6 +23,8 @@ import app.opentasks.core.data.backup.RemoteInventoryItemV1
 import app.opentasks.core.data.backup.VerifiedOwnershipClaim
 import app.opentasks.core.data.backup.VerifiedPublication
 import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
+import app.opentasks.core.domain.AttachmentBlobStore
+import app.opentasks.core.domain.AttachmentListedObject
 import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.CreateOnlyBackupObjectStore
 import app.opentasks.core.domain.DeleteObjectResult
@@ -34,6 +37,7 @@ import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.RemoteBackupOperation
 import app.opentasks.core.domain.RemoteListRequest
+import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.OwnershipClaimId
 import app.opentasks.core.model.OwnershipClaimRef
 import app.opentasks.core.model.OwnershipStateV1
@@ -42,8 +46,8 @@ import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
 import app.opentasks.core.model.RemoteObjectRoleV1
-import app.opentasks.core.model.WriterEpoch
 import app.opentasks.core.model.VaultId
+import app.opentasks.core.model.WriterEpoch
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -61,6 +65,7 @@ internal enum class TerminalDeletionPhase {
     TOMBSTONE_CREATED,
     TOMBSTONE_VERIFIED,
     PAYLOAD_CLEANUP,
+    ATTACHMENT_CLEANUP,
     CLAIM_CLEANUP,
     COMPLETED,
 }
@@ -83,8 +88,24 @@ private data class TerminalDeletionStateV1(
     val payloadInventory: List<TerminalInventoryFactV1> = emptyList(),
     val payloadFinalScan: Boolean = false,
     val payloadFinalScanCompleted: Boolean = false,
+    val attachmentPhase: String = AttachmentDeletionPhase.CHUNKS.name,
 ) {
     override fun toString(): String = "TerminalDeletionStateV1(phase=$phase)"
+}
+
+private enum class AttachmentDeletionPhase {
+    CHUNKS,
+    MANIFESTS,
+    COMPLETED,
+}
+
+@Serializable
+private data class AttachmentContentDeletionStateV1(
+    val formatVersion: Int = 1,
+    val minimumReaderVersion: Int = 1,
+    val phase: String,
+) {
+    override fun toString(): String = "AttachmentContentDeletionStateV1(phase=$phase)"
 }
 
 @Serializable
@@ -109,6 +130,16 @@ private data class PayloadCleanupResult(
     val state: TerminalDeletionStateV1,
     val failure: LifecycleResult?,
 )
+
+private data class TerminalAttachmentCleanupResult(
+    val state: TerminalDeletionStateV1,
+    val failure: LifecycleResult?,
+)
+
+private sealed interface AttachmentNamespaceScan {
+    data class Found(val objects: List<AttachmentListedObject>) : AttachmentNamespaceScan
+    data class Failed(val reason: RemoteBackupFailureCategory) : AttachmentNamespaceScan
+}
 
 private class DeletionBudget(var remaining: Int)
 
@@ -138,6 +169,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
     private val ownershipCodec: OwnershipClaimCodec,
     private val publicationCodec: PublicationCodec,
     private val configurator: RemoteBackupConfigurator,
+    private val openAttachmentStore:
+        (CreateOnlyDriveTransport, CloudLineageId) -> AttachmentBlobStore =
+        { transport, lineageId -> CreateOnlyDriveAttachmentBlobStore(transport, lineageId) },
     private val now: () -> Instant = Instant::now,
     private val newClaimId: () -> OwnershipClaimId = OwnershipClaimId::new,
     private val publicationGate: Mutex = Mutex(),
@@ -216,6 +250,178 @@ class DefaultRemoteBackupLifecycleCoordinator(
         passphrase.fill('\u0000')
     }
 
+    override suspend fun deleteAttachmentContent(passphrase: CharArray): LifecycleResult = try {
+        publicationGate.withLock {
+            mutex.withLock { deleteAttachmentContentLocked(passphrase) }
+        }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+    } finally {
+        passphrase.fill('\u0000')
+    }
+
+    private suspend fun deleteAttachmentContentLocked(passphrase: CharArray): LifecycleResult {
+        val configuration = remoteStateStore.configurations(vaultId).singleOrNull {
+            it.lifecycle == RemoteBackupLifecycle.ACTIVE
+        } ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        val envelope = recoveryEnvelopeStore.get(vaultId)
+            ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        val contentKey = try {
+            crypto.unlock(passphrase, envelope)
+        } catch (cancellation: CancellationException) {
+            envelope.clearOwned()
+            throw cancellation
+        } catch (_: Exception) {
+            envelope.clearOwned()
+            return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+        }
+        try {
+            val operationId = ATTACHMENT_DELETE_OPERATION_PREFIX + vaultId.value
+            val operation = remoteStateStore.operation(operationId)
+            var state = operation?.let(::decodeAttachmentDeletionState)
+            if (operation != null && state == null) {
+                return failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
+            }
+            if (state == null) {
+                state = AttachmentContentDeletionStateV1(
+                    phase = AttachmentDeletionPhase.CHUNKS.name,
+                )
+                remoteStateStore.putOperation(
+                    attachmentDeletionOperation(operationId, configuration, state),
+                )
+            }
+
+            val authorization = authorize(configuration)
+            val session = (authorization as? DriveAuthorizationResult.Authorized)?.session
+                ?: return authorizationFailure(authorization)
+            return try {
+                deleteAttachmentContentAuthorized(
+                    operationId,
+                    configuration,
+                    state,
+                    contentKey,
+                    session,
+                )
+            } finally {
+                session.close()
+            }
+        } finally {
+            contentKey.close()
+            envelope.clearOwned()
+        }
+    }
+
+    private suspend fun deleteAttachmentContentAuthorized(
+        operationId: String,
+        configuration: RemoteBackupConfiguration,
+        initialState: AttachmentContentDeletionStateV1,
+        contentKey: VaultKey,
+        session: AuthorizedDriveSession,
+    ): LifecycleResult {
+        val objectStore = openObjectStore(session.transport)
+        val chainStore = ownershipStore(objectStore)
+        val expectedTip = when (
+            val resolution = chainStore.resolve(configuration.rootClaimProviderId, contentKey)
+        ) {
+            is OwnershipResolution.Active -> resolution.tip
+            is OwnershipResolution.Terminated -> return LifecycleResult.OwnershipRequired
+            is OwnershipResolution.Blocked -> return failed(resolution.reason)
+        }
+        if (!holds(configuration, expectedTip)) {
+            markOwnershipLost(configuration)
+            return LifecycleResult.OwnershipRequired
+        }
+        val attachmentStore = openAttachmentStore(session.transport, configuration.lineageId)
+        var state = initialState
+        val budget = DeletionBudget(MAX_DELETES_PER_BATCH)
+        while (true) {
+            val scan = scanAttachmentNamespace(attachmentStore)
+            val objects = when (scan) {
+                is AttachmentNamespaceScan.Found -> scan.objects
+                is AttachmentNamespaceScan.Failed -> return failed(scan.reason)
+            }
+            if (!attachmentRowsAreUnderstood(objects)) {
+                return failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
+            }
+            val chunks = objects.filter { it.role == ATTACHMENT_CHUNK_ROLE }
+            val manifests = objects.filter { it.role == ATTACHMENT_MANIFEST_ROLE }
+            val phase = AttachmentDeletionPhase.valueOf(state.phase)
+            if (phase == AttachmentDeletionPhase.MANIFESTS && chunks.isNotEmpty()) {
+                state = transitionAttachmentDeletion(
+                    operationId,
+                    configuration,
+                    state,
+                    AttachmentDeletionPhase.CHUNKS,
+                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+                return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+            }
+            if (phase == AttachmentDeletionPhase.COMPLETED) {
+                if (chunks.isEmpty() && manifests.isEmpty()) {
+                    return LifecycleResult.AttachmentContentDeleted
+                }
+                val restarted = if (chunks.isNotEmpty()) {
+                    AttachmentDeletionPhase.CHUNKS
+                } else {
+                    AttachmentDeletionPhase.MANIFESTS
+                }
+                state = transitionAttachmentDeletion(
+                    operationId,
+                    configuration,
+                    state,
+                    restarted,
+                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+                continue
+            }
+            val targets = when (phase) {
+                AttachmentDeletionPhase.CHUNKS -> chunks
+                AttachmentDeletionPhase.MANIFESTS -> manifests
+                AttachmentDeletionPhase.COMPLETED -> error("handled above")
+            }
+            if (targets.isEmpty()) {
+                val next = if (phase == AttachmentDeletionPhase.CHUNKS) {
+                    AttachmentDeletionPhase.MANIFESTS
+                } else {
+                    AttachmentDeletionPhase.COMPLETED
+                }
+                state = transitionAttachmentDeletion(
+                    operationId,
+                    configuration,
+                    state,
+                    next,
+                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+                if (next == AttachmentDeletionPhase.COMPLETED) {
+                    return LifecycleResult.AttachmentContentDeleted
+                }
+                continue
+            }
+            if (budget.remaining == 0) {
+                return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+            }
+            when (val resolution = chainStore.resolve(configuration.rootClaimProviderId, contentKey)) {
+                is OwnershipResolution.Active -> if (
+                    resolution.tip.completeSha256 != expectedTip.completeSha256
+                ) {
+                    markOwnershipLost(configuration)
+                    return LifecycleResult.OwnershipRequired
+                }
+                is OwnershipResolution.Terminated -> return LifecycleResult.OwnershipRequired
+                is OwnershipResolution.Blocked -> return failed(resolution.reason)
+            }
+            val batch = targets.take(budget.remaining)
+            for (target in batch) {
+                if (!deleteAttachment(attachmentStore, target.providerObjectId)) {
+                    return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+                }
+                budget.remaining -= 1
+            }
+            if (targets.size > batch.size) {
+                return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
+            }
+        }
+    }
+
     private suspend fun deleteLocked(passphrase: CharArray): LifecycleResult {
         var configuration = remoteStateStore.configurations(vaultId).singleOrNull {
             it.lifecycle == RemoteBackupLifecycle.ACTIVE ||
@@ -242,7 +448,8 @@ class DefaultRemoteBackupLifecycleCoordinator(
             }
             if (configuration.lifecycle == RemoteBackupLifecycle.TERMINATED &&
                 operation?.phase == TerminalDeletionPhase.COMPLETED.name &&
-                state?.payloadFinalScanCompleted == true
+                state?.payloadFinalScanCompleted == true &&
+                state.attachmentPhase == AttachmentDeletionPhase.COMPLETED.name
             ) {
                 return LifecycleResult.HistoryDeleted
             }
@@ -482,6 +689,32 @@ class DefaultRemoteBackupLifecycleCoordinator(
             )
             state = payloadCleanup.state
             payloadCleanup.failure?.let { return it }
+
+            if (!reached(state, TerminalDeletionPhase.ATTACHMENT_CLEANUP)) {
+                state = transition(
+                    operationId,
+                    configuration,
+                    state,
+                    TerminalDeletionPhase.ATTACHMENT_CLEANUP,
+                ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            }
+            val attachmentCleanup = cleanupTerminalAttachmentBatch(
+                operationId = operationId,
+                configuration = configuration,
+                initialState = state,
+                store = openAttachmentStore(session.transport, configuration.lineageId),
+                deletionBudget = deletionBudget,
+                authenticateTerminal = {
+                    authenticateExpectedTerminalResult(
+                        expectedTombstone,
+                        state,
+                        objectStore,
+                        contentKey,
+                    )
+                },
+            )
+            state = attachmentCleanup.state
+            attachmentCleanup.failure?.let { return it }
 
             if (!reached(state, TerminalDeletionPhase.CLAIM_CLEANUP)) {
                 state = transition(
@@ -901,6 +1134,160 @@ class DefaultRemoteBackupLifecycleCoordinator(
         }
     }
 
+    private suspend fun cleanupTerminalAttachmentBatch(
+        operationId: String,
+        configuration: RemoteBackupConfiguration,
+        initialState: TerminalDeletionStateV1,
+        store: AttachmentBlobStore,
+        deletionBudget: DeletionBudget,
+        authenticateTerminal: suspend () -> LifecycleResult?,
+    ): TerminalAttachmentCleanupResult {
+        var state = initialState
+        while (true) {
+            val scan = scanAttachmentNamespace(store)
+            val objects = when (scan) {
+                is AttachmentNamespaceScan.Found -> scan.objects
+                is AttachmentNamespaceScan.Failed -> return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(scan.reason),
+                )
+            }
+            if (!attachmentRowsAreUnderstood(objects)) {
+                return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+                )
+            }
+            val chunks = objects.filter { it.role == ATTACHMENT_CHUNK_ROLE }
+            val manifests = objects.filter { it.role == ATTACHMENT_MANIFEST_ROLE }
+            val phase = AttachmentDeletionPhase.valueOf(state.attachmentPhase)
+            if (phase == AttachmentDeletionPhase.COMPLETED) {
+                if (chunks.isEmpty() && manifests.isEmpty()) {
+                    return TerminalAttachmentCleanupResult(state, null)
+                }
+                val restarted = if (chunks.isNotEmpty()) {
+                    AttachmentDeletionPhase.CHUNKS
+                } else {
+                    AttachmentDeletionPhase.MANIFESTS
+                }
+                state = checkpointDeletion(
+                    operationId,
+                    configuration,
+                    state.copy(attachmentPhase = restarted.name),
+                ) ?: return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+                )
+                continue
+            }
+            if (phase == AttachmentDeletionPhase.MANIFESTS && chunks.isNotEmpty()) {
+                state = checkpointDeletion(
+                    operationId,
+                    configuration,
+                    state.copy(attachmentPhase = AttachmentDeletionPhase.CHUNKS.name),
+                ) ?: return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+                )
+                return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                )
+            }
+            val targets = if (phase == AttachmentDeletionPhase.CHUNKS) chunks else manifests
+            if (targets.isEmpty()) {
+                val next = if (phase == AttachmentDeletionPhase.CHUNKS) {
+                    AttachmentDeletionPhase.MANIFESTS
+                } else {
+                    AttachmentDeletionPhase.COMPLETED
+                }
+                state = checkpointDeletion(
+                    operationId,
+                    configuration,
+                    state.copy(attachmentPhase = next.name),
+                ) ?: return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.LOCAL_STORAGE),
+                )
+                continue
+            }
+            if (deletionBudget.remaining == 0) {
+                return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                )
+            }
+            authenticateTerminal()?.let {
+                return TerminalAttachmentCleanupResult(state, it)
+            }
+            val batch = targets.take(deletionBudget.remaining)
+            for (target in batch) {
+                if (!deleteAttachment(store, target.providerObjectId)) {
+                    return TerminalAttachmentCleanupResult(
+                        state,
+                        failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                    )
+                }
+                deletionBudget.remaining -= 1
+            }
+            if (targets.size > batch.size) {
+                return TerminalAttachmentCleanupResult(
+                    state,
+                    failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
+                )
+            }
+        }
+    }
+
+    private suspend fun scanAttachmentNamespace(
+        store: AttachmentBlobStore,
+    ): AttachmentNamespaceScan {
+        val objects = mutableListOf<AttachmentListedObject>()
+        val seenTokens = mutableSetOf<String>()
+        var token: String? = null
+        do {
+            val page = try {
+                store.listNamespace(token)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return AttachmentNamespaceScan.Failed(
+                    RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+                )
+            }
+            if (objects.size + page.first.size > MAX_ATTACHMENT_OBJECTS) {
+                return AttachmentNamespaceScan.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+            objects += page.first
+            token = page.second
+            if (token != null && !seenTokens.add(token)) {
+                return AttachmentNamespaceScan.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
+        } while (token != null)
+        return AttachmentNamespaceScan.Found(objects)
+    }
+
+    private fun attachmentRowsAreUnderstood(objects: List<AttachmentListedObject>): Boolean =
+        objects.all {
+            (it.role == ATTACHMENT_CHUNK_ROLE || it.role == ATTACHMENT_MANIFEST_ROLE) &&
+                !it.blobSetId.isNullOrEmpty()
+        } && objects.map { it.providerObjectId }.distinct().size == objects.size
+
+    private suspend fun deleteAttachment(
+        store: AttachmentBlobStore,
+        providerObjectId: ProviderObjectId,
+    ): Boolean = try {
+        store.delete(providerObjectId)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        false
+    }
+
     private fun mergeCandidate(
         current: List<TerminalPayloadCandidateV1>,
         incoming: TerminalPayloadCandidateV1,
@@ -1192,6 +1579,22 @@ class DefaultRemoteBackupLifecycleCoordinator(
         ) next else null
     }
 
+    private suspend fun transitionAttachmentDeletion(
+        operationId: String,
+        configuration: RemoteBackupConfiguration,
+        current: AttachmentContentDeletionStateV1,
+        phase: AttachmentDeletionPhase,
+    ): AttachmentContentDeletionStateV1? {
+        val next = current.copy(phase = phase.name)
+        return if (
+            remoteStateStore.transitionOperation(
+                operationId,
+                current.phase,
+                attachmentDeletionOperation(operationId, configuration, next),
+            )
+        ) next else null
+    }
+
     private fun deletionOperation(
         operationId: String,
         configuration: RemoteBackupConfiguration,
@@ -1218,6 +1621,31 @@ class DefaultRemoteBackupLifecycleCoordinator(
         }
     }
 
+    private fun attachmentDeletionOperation(
+        operationId: String,
+        configuration: RemoteBackupConfiguration,
+        state: AttachmentContentDeletionStateV1,
+    ): RemoteBackupOperation {
+        val encoded = DeletionJson.json.encodeToString(state).toByteArray(Charsets.UTF_8)
+        return try {
+            RemoteBackupOperation(
+                operationId = operationId,
+                lineageId = configuration.lineageId,
+                kind = ATTACHMENT_DELETE_OPERATION_KIND,
+                phase = state.phase,
+                targetEpoch = configuration.writerEpoch,
+                targetGeneration = configuration.lastVerifiedGeneration,
+                candidateClaimProviderId = null,
+                candidatePublicationProviderId = null,
+                stateBytes = encoded,
+                startedAt = now(),
+                updatedAt = now(),
+            )
+        } finally {
+            encoded.fill(0)
+        }
+    }
+
     private fun decodeDeletionState(operation: RemoteBackupOperation): TerminalDeletionStateV1? {
         if (operation.kind != DELETE_OPERATION_KIND) return null
         val encoded = operation.stateBytes
@@ -1227,7 +1655,34 @@ class DefaultRemoteBackupLifecycleCoordinator(
             )
             state.takeIf {
                 it.phase == operation.phase && it.formatVersion == 1 &&
-                    it.minimumReaderVersion == 1
+                    it.minimumReaderVersion == 1 &&
+                    runCatching { TerminalDeletionPhase.valueOf(it.phase) }.isSuccess &&
+                    runCatching {
+                        AttachmentDeletionPhase.valueOf(it.attachmentPhase)
+                    }.isSuccess
+            }
+        } catch (_: SerializationException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        } finally {
+            encoded.fill(0)
+        }
+    }
+
+    private fun decodeAttachmentDeletionState(
+        operation: RemoteBackupOperation,
+    ): AttachmentContentDeletionStateV1? {
+        if (operation.kind != ATTACHMENT_DELETE_OPERATION_KIND) return null
+        val encoded = operation.stateBytes
+        return try {
+            val state = DeletionJson.json.decodeFromString<AttachmentContentDeletionStateV1>(
+                encoded.toString(Charsets.UTF_8),
+            )
+            state.takeIf {
+                it.phase == operation.phase && it.formatVersion == 1 &&
+                    it.minimumReaderVersion == 1 &&
+                    runCatching { AttachmentDeletionPhase.valueOf(it.phase) }.isSuccess
             }
         } catch (_: SerializationException) {
             null
@@ -1334,6 +1789,8 @@ class DefaultRemoteBackupLifecycleCoordinator(
     private companion object {
         const val DELETE_OPERATION_PREFIX = "remote-history-delete:"
         const val DELETE_OPERATION_KIND = "DELETE_REMOTE_HISTORY"
+        const val ATTACHMENT_DELETE_OPERATION_PREFIX = "remote-attachment-delete:"
+        const val ATTACHMENT_DELETE_OPERATION_KIND = "DELETE_ATTACHMENT_CONTENT"
         const val MAX_DELETES_PER_BATCH = 32
         const val CLAIM_PAGE_SIZE = 100
         const val MAX_CLAIMS_PER_LINEAGE = 4_096
@@ -1341,6 +1798,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
         const val MAX_PAYLOAD_PAGES_PER_ROLE = 64
         const val MAX_PAYLOAD_CANDIDATES = 4_096
         const val MAX_PAGE_TOKEN_CHARACTERS = 1_024
+        const val MAX_ATTACHMENT_OBJECTS = 4_096
+        const val ATTACHMENT_CHUNK_ROLE = "attachment-chunk"
+        const val ATTACHMENT_MANIFEST_ROLE = "attachment-manifest"
         val MINIMUM_RESIDUE_AGE: Duration = Duration.ofDays(7)
         val PAYLOAD_ROLES = listOf(
             RemoteObjectRoleV1.PUBLICATION,

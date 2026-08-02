@@ -583,6 +583,8 @@ interface RemoteBackupLifecycleCoordinator {
 
     suspend fun deleteHistory(passphrase: CharArray): LifecycleResult
 
+    suspend fun deleteAttachmentContent(passphrase: CharArray): LifecycleResult
+
     suspend fun preserveDivergentWorkAsNewLineage(): RemoteBackupConnectResult
 }
 
@@ -592,6 +594,8 @@ sealed interface LifecycleResult {
     ) : LifecycleResult
 
     data object HistoryDeleted : LifecycleResult
+
+    data object AttachmentContentDeleted : LifecycleResult
 
     data object OwnershipRequired : LifecycleResult
 

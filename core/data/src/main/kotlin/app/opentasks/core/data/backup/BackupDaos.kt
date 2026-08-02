@@ -51,6 +51,14 @@ interface BackupJournalDao {
 
     @Query(
         """
+        SELECT MAX(generation) FROM backup_journal
+        WHERE objectType = :objectType AND objectId = :objectId
+        """,
+    )
+    suspend fun latestGenerationFor(objectType: String, objectId: String): Long?
+
+    @Query(
+        """
         SELECT * FROM backup_journal
         WHERE vaultId = :vaultId AND generation > :generation
         ORDER BY generation, sequence
