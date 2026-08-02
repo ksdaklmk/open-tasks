@@ -4,13 +4,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,18 +26,27 @@ class TaskPaneFractionInstrumentedTest {
     fun listPaneOccupiesProvidedFraction() {
         setContent(listPaneFraction = 0.38f)
 
-        composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
-            .assertWidthIsAtLeast(370.dp)
-        composeRule.onNodeWithTag("detailPane", useUnmergedTree = true).assertExists()
+        assertPaneWidths(listWidthDp = 380f, detailWidthDp = 620f)
     }
 
     @Test
     fun listPaneOccupiesHingeSnapFraction() {
         setContent(listPaneFraction = 0.5f)
 
-        composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
-            .assertWidthIsAtLeast(490.dp)
-        composeRule.onNodeWithTag("detailPane", useUnmergedTree = true).assertExists()
+        assertPaneWidths(listWidthDp = 500f, detailWidthDp = 500f)
+    }
+
+    private fun assertPaneWidths(listWidthDp: Float, detailWidthDp: Float) {
+        val listWidth = composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+            .width
+            .value
+        val detailWidth = composeRule.onNodeWithTag("detailPane", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+            .width
+            .value
+        assertEquals(listWidthDp, listWidth, 1f)
+        assertEquals(detailWidthDp, detailWidth, 1f)
     }
 
     private fun setContent(listPaneFraction: Float) {

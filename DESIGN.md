@@ -74,8 +74,8 @@ by 24–32 dp. Screen content uses 16 dp compact padding, 24 dp medium padding,
 and 32 dp expanded padding.
 
 - Compact: navigation bar and one content pane.
-- Medium: navigation rail with list/detail when both panes meet their minimums.
-- Expanded: rail with a 360–420 dp list pane and a flexible detail pane.
+- Medium: navigation rail with a 42/58 list/detail split.
+- Expanded: rail with a 42/58 split below 960 dp and 38/62 at or above 960 dp.
 - Extra wide (at least 1,200 dp): a supporting pane may appear.
 
 Every touch target is at least 48 dp. Window size and folding posture determine
@@ -156,9 +156,9 @@ for floating controls and temporary surfaces.
   prerequisites. A blocked workflow state receives distinct copy. Reminder
   notifications omit Complete while the task is blocked.
 - Schedule: compact windows show one selected-day agenda with previous, Today,
-  next and horizontally scrollable weekday controls. Expanded windows show the
-  ISO Monday–Sunday week as date-grouped timeline columns beside an open-only
-  unscheduled tray. Start time takes precedence over due time for placement;
+  next and horizontally scrollable weekday controls. Medium-and-wider windows
+  show the ISO Monday–Sunday week as date-grouped timeline columns beside an
+  open-only unscheduled tray. Start time takes precedence over due time for placement;
   due-only work is labelled explicitly, and completion, blocking and reminders
   never rely on colour alone.
 - Snackbar: confirms immediate edits and offers Undo where reversible.

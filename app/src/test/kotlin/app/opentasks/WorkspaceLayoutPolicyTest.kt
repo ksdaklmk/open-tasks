@@ -108,6 +108,21 @@ class WorkspaceLayoutPolicyTest {
     }
 
     @Test
+    fun oddWidthSnapsToTheGeometricallyNearestFold() {
+        val layout = WorkspaceLayoutPolicy.calculate(
+            posture(
+                823,
+                folds = listOf(
+                    verticalFold(positionDp = 274),
+                    verticalFold(positionDp = 548),
+                ),
+            ),
+        )
+
+        assertEquals(548, layout.paneSplit?.snapToFoldPositionDp)
+    }
+
+    @Test
     fun trifoldCentreTieSnapsToTheLeadingFold() {
         val layout = WorkspaceLayoutPolicy.calculate(
             posture(

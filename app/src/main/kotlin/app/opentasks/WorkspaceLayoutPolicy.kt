@@ -62,7 +62,7 @@ object WorkspaceLayoutPolicy {
         }
         val snapFold = verticalSeparating.minWithOrNull(
             compareBy(
-                { kotlin.math.abs(it.positionDp - widthDp / 2) },
+                { kotlin.math.abs(2L * it.positionDp - widthDp) },
                 { it.positionDp },
             ),
         )

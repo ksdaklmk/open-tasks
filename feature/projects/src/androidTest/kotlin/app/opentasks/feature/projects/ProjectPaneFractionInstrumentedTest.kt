@@ -6,7 +6,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
@@ -16,11 +15,13 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -35,18 +36,27 @@ class ProjectPaneFractionInstrumentedTest {
     fun listPaneOccupiesProvidedFraction() {
         setContent(listPaneFraction = 0.38f)
 
-        composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
-            .assertWidthIsAtLeast(370.dp)
-        composeRule.onNodeWithTag("detailPane", useUnmergedTree = true).assertExists()
+        assertPaneWidths(listWidthDp = 380f, detailWidthDp = 620f)
     }
 
     @Test
     fun listPaneOccupiesHingeSnapFraction() {
         setContent(listPaneFraction = 0.5f)
 
-        composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
-            .assertWidthIsAtLeast(490.dp)
-        composeRule.onNodeWithTag("detailPane", useUnmergedTree = true).assertExists()
+        assertPaneWidths(listWidthDp = 500f, detailWidthDp = 500f)
+    }
+
+    private fun assertPaneWidths(listWidthDp: Float, detailWidthDp: Float) {
+        val listWidth = composeRule.onNodeWithTag("listPane", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+            .width
+            .value
+        val detailWidth = composeRule.onNodeWithTag("detailPane", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+            .width
+            .value
+        assertEquals(listWidthDp, listWidth, 1f)
+        assertEquals(detailWidthDp, detailWidth, 1f)
     }
 
     @Test

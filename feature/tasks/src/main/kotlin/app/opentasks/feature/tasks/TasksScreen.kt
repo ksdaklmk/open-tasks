@@ -83,6 +83,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -698,12 +699,13 @@ private fun TaskDetailPane(
         }
     }
 
+    val editingStateDescription = stringResource(R.string.task_editing_state_description, title)
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .testTag("task-detail-scroll")
-            .semantics { stateDescription = "Editing ${task.title}" }
+            .semantics { stateDescription = editingStateDescription }
             .padding(top = sheetTopPaddingDp.dp),
     ) {
         Column(

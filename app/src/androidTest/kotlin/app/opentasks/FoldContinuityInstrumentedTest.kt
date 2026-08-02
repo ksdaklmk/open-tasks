@@ -1,5 +1,6 @@
 package app.opentasks
 
+import android.app.Activity
 import android.content.Context
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
@@ -31,6 +32,8 @@ import app.opentasks.core.data.VaultSlotRegistry
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.VaultId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -53,6 +56,7 @@ class FoldContinuityInstrumentedTest {
             check(ownedVault == null) { "A continuity fixture is already owned" }
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             val application = context as OpenTasksApplication
+            requireCleanLegacyStorageBaseline(context)
             runBlocking { application.vaultRuntimeManager.initialize() }
             requireCleanLegacyBaseline(context, application)
             baselineClean = true
@@ -142,6 +146,27 @@ class FoldContinuityInstrumentedTest {
     }
 
     @Test
+    fun legacyBaselineRejectsOrphanStorageSidecarsWithoutDeletingThem() {
+        val context = application()
+        val sidecars = legacyDatabaseFiles(context).drop(1) + activeSlotFiles(context).drop(1)
+
+        sidecars.forEach { sidecar ->
+            check(sidecar.parentFile?.let { it.isDirectory || it.mkdirs() } == true)
+            check(sidecar.createNewFile())
+            try {
+                val failure = runCatching {
+                    requireCleanLegacyBaseline(context, application())
+                }.exceptionOrNull()
+
+                assertTrue("Orphan ${sidecar.name} must fail the clean baseline", failure != null)
+                assertTrue("The refused sidecar must not be deleted", sidecar.exists())
+            } finally {
+                check(sidecar.delete() || !sidecar.exists())
+            }
+        }
+    }
+
+    @Test
     fun draftAndSelectionSurviveFoldTransition() {
         val statesOutput = shell("cmd device_state print-states")
         assertTrue(
@@ -158,56 +183,57 @@ class FoldContinuityInstrumentedTest {
             closed != null && opened != null,
         )
 
-        shell("wm dismiss-keyguard")
-        awaitActivityState(Lifecycle.State.RESUMED)
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithText("Start without restoring").performClick()
-        ownedVault = awaitCreatedVault()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-
-        repeat(6) { index ->
-            composeRule.onNodeWithText("Quick add", useUnmergedTree = true).performClick()
-            composeRule.onNodeWithTag("quick-add-title")
-                .performTextReplacement("Fold continuity filler $index")
-            composeRule.onNodeWithTag("quick-add-title").performImeAction()
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("quick-add-title").fetchSemanticsNodes().isEmpty()
-            }
-        }
-
-        composeRule.onNodeWithText("Tasks").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithTag("task-list").fetchSemanticsNodes().size == 1
-        }
-        val selectedTitle = "Fold continuity filler 0"
-        val selectedTaskId = activeWorkspaceTaskId(selectedTitle)
-        composeRule.onNodeWithText(selectedTitle).performClick()
-        composeRule.onNode(
-            selectedTaskMatcher(selectedTitle),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
-        composeRule.onNodeWithTag("task-list").performScrollToIndex(5)
-        val beforeScroll = listScrollPosition()
-        assertTrue("Expected a meaningful pre-fold list scroll, was $beforeScroll", beforeScroll > 0f)
-
-        composeRule.mainClock.autoAdvance = false
-        composeRule.onNodeWithTag("task-title-field")
-            .performTextReplacement("Fold continuity draft")
-        composeRule.onNode(editingTaskMatcher(selectedTitle)).assertIsDisplayed()
-        assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
-
         try {
             shell("cmd device_state state ${checkNotNull(closed)}")
             awaitDeviceState(checkNotNull(closed))
-            awaitSystemIdle()
-            composeRule.mainClock.advanceTimeByFrame()
-            composeRule.waitForIdle()
+            shell("wm dismiss-keyguard")
+            awaitActivityState(Lifecycle.State.RESUMED)
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("Start without restoring").performClick()
+            ownedVault = awaitCreatedVault()
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+
+            repeat(10) { index ->
+                composeRule.onNodeWithText("Quick add", useUnmergedTree = true).performClick()
+                composeRule.onNodeWithTag("quick-add-title")
+                    .performTextReplacement("Fold continuity filler $index")
+                composeRule.onNodeWithTag("quick-add-title").performImeAction()
+                composeRule.waitUntil(timeoutMillis = 5_000) {
+                    composeRule.onAllNodesWithTag("quick-add-title").fetchSemanticsNodes().isEmpty()
+                }
+            }
+
+            composeRule.onNodeWithText("Tasks").performClick()
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                composeRule.onAllNodesWithTag("task-list").fetchSemanticsNodes().size == 1
+            }
+            val selectedTitle = "Fold continuity filler 0"
+            val selectedTaskId = activeWorkspaceTaskId(selectedTitle)
+            composeRule.onNodeWithText(selectedTitle).performClick()
+            composeRule.onNode(
+                selectedTaskMatcher(selectedTitle),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+            composeRule.onNodeWithTag("task-list").performScrollToIndex(5)
+            val beforeScroll = listScrollPosition()
+            assertTrue(
+                "Expected a meaningful pre-fold list scroll, was $beforeScroll",
+                beforeScroll > 0f,
+            )
+
+            composeRule.mainClock.autoAdvance = false
+            composeRule.onNodeWithTag("task-title-field")
+                .performTextReplacement("Fold continuity draft")
+            composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
+            assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
+            val beforeActivity = currentActivity()
+            val beforeWindow = windowSnapshot(beforeActivity)
 
             shell("cmd device_state state ${checkNotNull(opened)}")
             awaitDeviceState(checkNotNull(opened))
@@ -217,14 +243,21 @@ class FoldContinuityInstrumentedTest {
             composeRule.mainClock.advanceTimeByFrame()
             composeRule.waitForIdle()
 
+            val afterActivity = currentActivity()
+            val afterWindow = windowSnapshot(afterActivity)
+            assertNotSame("Fold transition must recreate MainActivity", beforeActivity, afterActivity)
+            assertNotEquals("Fold transition must change window configuration", beforeWindow, afterWindow)
+
             composeRule.onNodeWithTag("task-title-field")
                 .assertTextContains("Fold continuity draft", substring = true)
-            composeRule.onNode(editingTaskMatcher(selectedTitle)).assertIsDisplayed()
+            composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
             assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
             val afterScroll = listScrollPosition()
-            assertTrue(
-                "Expected the list scroll to survive the fold transition, was $afterScroll",
-                afterScroll > 0f,
+            assertEquals(
+                "The meaningful list position must survive the fold transition",
+                beforeScroll,
+                afterScroll,
+                1f,
             )
         } finally {
             shell("cmd device_state state reset")
@@ -238,6 +271,21 @@ class FoldContinuityInstrumentedTest {
             .fetchSemanticsNode()
             .config[SemanticsProperties.VerticalScrollAxisRange]
             .value()
+
+    private fun currentActivity(): MainActivity {
+        var current: MainActivity? = null
+        composeRule.activityRule.scenario.onActivity { current = it }
+        return checkNotNull(current)
+    }
+
+    private fun windowSnapshot(activity: Activity): WindowSnapshot =
+        activity.resources.configuration.let { configuration ->
+            WindowSnapshot(
+                widthDp = configuration.screenWidthDp,
+                heightDp = configuration.screenHeightDp,
+                densityDpi = configuration.densityDpi,
+            )
+        }
 
     private fun selectedTaskMatcher(title: String): SemanticsMatcher =
         SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)
@@ -328,14 +376,9 @@ class FoldContinuityInstrumentedTest {
         check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
             "Fold continuity requires a clean NoVault baseline"
         }
-        check(!context.getDatabasePath("open_tasks.db").exists()) {
-            "Fold continuity refuses to replace an existing legacy database"
-        }
+        requireCleanLegacyStorageBaseline(context)
         check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
             "Fold continuity refuses to replace an existing legacy database key"
-        }
-        check(!activeSlotMarker(context).exists()) {
-            "Fold continuity refuses to replace an existing active-slot marker"
         }
         check(
             context.getSharedPreferences("vault_content_keys_v1", 0).all.isEmpty(),
@@ -350,8 +393,35 @@ class FoldContinuityInstrumentedTest {
         }
     }
 
+    private fun requireCleanLegacyStorageBaseline(context: Context) {
+        check(legacyDatabaseFiles(context).none(File::exists)) {
+            "Fold continuity refuses to replace existing legacy database files"
+        }
+        check(activeSlotFiles(context).none(File::exists)) {
+            "Fold continuity refuses to replace existing active-slot files"
+        }
+    }
+
     private fun activeSlotMarker(context: android.content.Context): File =
         File(context.filesDir, "vault_runtime/active_slot.json")
+
+    private fun activeSlotFiles(context: Context): List<File> {
+        val marker = activeSlotMarker(context)
+        return listOf(marker, File("${marker.path}.new"), File("${marker.path}.bak"))
+    }
+
+    private fun legacyDatabaseFiles(
+        context: Context,
+        databaseName: String = LEGACY_DATABASE_NAME,
+    ): List<File> {
+        val database = context.getDatabasePath(databaseName)
+        return listOf(
+            database,
+            File("${database.path}-wal"),
+            File("${database.path}-shm"),
+            File("${database.path}-journal"),
+        )
+    }
 
     private fun androidKeyStore(): KeyStore =
         KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
@@ -375,8 +445,8 @@ class FoldContinuityInstrumentedTest {
         context: Context,
         databaseName: String,
     ) {
-        check(!context.getDatabasePath(databaseName).exists()) {
-            "The owned continuity database remains after cleanup"
+        check(legacyDatabaseFiles(context, databaseName).none(File::exists)) {
+            "Owned continuity database files remain after cleanup"
         }
         check(!AndroidVaultKeyManager(context).hasDatabaseKey(VaultSlot.LEGACY)) {
             "The owned continuity database-key envelope remains after cleanup"
@@ -388,8 +458,8 @@ class FoldContinuityInstrumentedTest {
         ) {
             "The owned continuity content-key envelope remains after cleanup"
         }
-        check(!activeSlotMarker(context).exists()) {
-            "The owned continuity active-slot marker remains after cleanup"
+        check(activeSlotFiles(context).none(File::exists)) {
+            "Owned continuity active-slot files remain after cleanup"
         }
         check(!androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS)) {
             "The owned continuity database alias remains after cleanup"
@@ -404,11 +474,18 @@ class FoldContinuityInstrumentedTest {
         val vaultId: VaultId,
     )
 
+    private data class WindowSnapshot(
+        val widthDp: Int,
+        val heightDp: Int,
+        val densityDpi: Int,
+    )
+
     private companion object {
         val LEGACY_VAULT_ID = VaultId("vault-primary")
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val VAULT_KEY_PREFERENCES = "vault_keys"
         const val CONTENT_KEY_PREFERENCES = "vault_content_keys_v1"
+        const val LEGACY_DATABASE_NAME = "open_tasks.db"
         const val LEGACY_DATABASE_NONCE = "database_key_nonce_v1"
         const val LEGACY_DATABASE_CIPHERTEXT = "database_key_ciphertext_v1"
         const val LEGACY_CONTENT_NONCE =
