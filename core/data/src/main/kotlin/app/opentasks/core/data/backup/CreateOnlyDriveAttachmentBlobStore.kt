@@ -4,6 +4,7 @@ import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.data.backup.drive.DriveCreateRequest
 import app.opentasks.core.data.backup.drive.DriveCreateResult
 import app.opentasks.core.data.backup.drive.DriveFileMetadata
+import app.opentasks.core.data.backup.drive.DriveListedFile
 import app.opentasks.core.data.backup.drive.DriveTransportException
 import app.opentasks.core.data.backup.drive.DriveTransportFailureCategory
 import app.opentasks.core.domain.AttachmentBlobStore
@@ -117,10 +118,15 @@ class CreateOnlyDriveAttachmentBlobStore(
             } catch (failure: DriveTransportException) {
                 return AttachmentManifestLookup.Failed(failure.category.toRemoteFailure())
             }
+            if (page.files.any { !it.isExpectedManifest(blobSetId) }) {
+                return AttachmentManifestLookup.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                )
+            }
             matches += page.files.map { it.providerFileId }
             if (matches.size > 1) return AttachmentManifestLookup.Ambiguous
             token = page.nextPageToken
-            if (token != null && (token.length !in 1..MAX_PAGE_TOKEN_CHARACTERS || !seenTokens.add(token))) {
+            if (token != null && !seenTokens.add(token)) {
                 return AttachmentManifestLookup.Failed(
                     RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
                 )
@@ -137,11 +143,6 @@ class CreateOnlyDriveAttachmentBlobStore(
     override suspend fun listNamespace(
         pageToken: String?,
     ): Pair<List<AttachmentListedObject>, String?> {
-        pageToken?.let {
-            require(it.length in 1..MAX_PAGE_TOKEN_CHARACTERS) {
-                "Page token is outside its bound"
-            }
-        }
         val query = buildString {
             appendProperty(PROPERTY_FORMAT, FORMAT_V1)
             append(" and ")
@@ -158,6 +159,16 @@ class CreateOnlyDriveAttachmentBlobStore(
             )
         } to page.nextPageToken
     }
+
+    private fun DriveListedFile.isExpectedManifest(
+        blobSetId: BlobSetId,
+    ): Boolean =
+        name == MANIFEST_ROLE &&
+            role == MANIFEST_ROLE &&
+            appProperties[PROPERTY_FORMAT] == FORMAT_V1 &&
+            appProperties[PROPERTY_ROLE] == MANIFEST_ROLE &&
+            appProperties[PROPERTY_LINEAGE] == lineageId.value &&
+            appProperties[PROPERTY_BLOB_SET] == blobSetId.value
 
     override suspend fun delete(providerObjectId: ProviderObjectId): Boolean = try {
         transport.deleteFile(providerObjectId.value)
@@ -223,7 +234,6 @@ class CreateOnlyDriveAttachmentBlobStore(
         const val PROPERTY_CREATED_AT = "createdAtEpochMillis"
         const val MAX_GENERATED_IDS = 100
         const val MAX_PAGE_SIZE = 100
-        const val MAX_PAGE_TOKEN_CHARACTERS = 1_024
         val HEADER_AND_PREFIX_BYTES = 4L + CloudBounds.MAX_HEADER_BYTES
         val MAX_CHUNK_FRAME_BYTES =
             HEADER_AND_PREFIX_BYTES + CloudBounds.MAX_ATTACHMENT_CHUNK_CIPHERTEXT_BYTES_V1

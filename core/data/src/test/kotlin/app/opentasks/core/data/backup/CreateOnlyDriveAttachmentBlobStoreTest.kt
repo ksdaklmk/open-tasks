@@ -14,6 +14,7 @@ import app.opentasks.core.domain.AttachmentObjectResult
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.ProviderObjectId
+import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.sync.CloudBounds
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -127,6 +128,54 @@ class CreateOnlyDriveAttachmentBlobStoreTest {
     }
 
     @Test
+    fun manifestLookupFailsClosedForUnknownReturnedMetadata() = runBlocking {
+        val valid = listed("manifest-a")
+        val malformed = listOf(
+            valid.copy(name = "future-manifest"),
+            valid.copy(role = "future-role"),
+            valid.copy(appProperties = valid.appProperties - "format"),
+            valid.copy(
+                appProperties = valid.appProperties +
+                    ("lineageId" to "22222222-2222-2222-8222-222222222222"),
+            ),
+            valid.copy(
+                appProperties = valid.appProperties + ("blobSetId" to "another-blob-set"),
+            ),
+        )
+        val transport = FakeAttachmentDriveTransport().also { fake ->
+            malformed.forEach { file ->
+                fake.listPages += DriveListPage(listOf(file), null)
+            }
+        }
+        val store = CreateOnlyDriveAttachmentBlobStore(transport, LINEAGE)
+
+        malformed.forEach {
+            assertEquals(
+                AttachmentManifestLookup.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                ),
+                store.findManifest(BLOB_SET),
+            )
+        }
+    }
+
+    @Test
+    fun manifestLookupPassesLongOpaquePaginationTokenUnchanged() = runBlocking {
+        val token = "opaque".repeat(200)
+        val transport = FakeAttachmentDriveTransport().also {
+            it.listPages += DriveListPage(emptyList(), token)
+            it.listPages += DriveListPage(listOf(listed("manifest-a")), null)
+        }
+        val store = CreateOnlyDriveAttachmentBlobStore(transport, LINEAGE)
+
+        assertEquals(
+            AttachmentManifestLookup.Found(ProviderObjectId.of("manifest-a")),
+            store.findManifest(BLOB_SET),
+        )
+        assertEquals(token, transport.listCalls[1].pageToken)
+    }
+
+    @Test
     fun manifestLookupEscapesOpaqueBlobSetIdInDriveQuery() = runBlocking {
         val transport = FakeAttachmentDriveTransport().also {
             it.listPages += DriveListPage(emptyList(), null)
@@ -185,11 +234,29 @@ class CreateOnlyDriveAttachmentBlobStoreTest {
         )
     }
 
+    @Test
+    fun namespaceListPassesLongOpaquePaginationTokenUnchanged() = runBlocking {
+        val token = "opaque".repeat(200)
+        val transport = FakeAttachmentDriveTransport().also {
+            it.listPages += DriveListPage(emptyList(), null)
+        }
+        val store = CreateOnlyDriveAttachmentBlobStore(transport, LINEAGE)
+
+        store.listNamespace(token)
+
+        assertEquals(token, transport.listCalls.single().pageToken)
+    }
+
     private fun listed(id: String) = DriveListedFile(
         providerFileId = id,
         name = "attachment-manifest",
         role = "attachment-manifest",
-        appProperties = mapOf("blobSetId" to BLOB_SET.value),
+        appProperties = mapOf(
+            "format" to "v1",
+            "role" to "attachment-manifest",
+            "lineageId" to LINEAGE.value,
+            "blobSetId" to BLOB_SET.value,
+        ),
     )
 
     private companion object {
