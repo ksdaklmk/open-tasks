@@ -32,12 +32,13 @@ class BackupPayloadGoldenTest {
             BackupRecordFamily.TIME_ENTRY to 1,
             BackupRecordFamily.TEMPLATE to 1,
             BackupRecordFamily.SAVED_VIEW to 1,
+            BackupRecordFamily.NOTE to 2,
             BackupRecordFamily.TOMBSTONE to 1,
         )
 
         try {
             assertEquals(
-                "1ed29f312e1ecb8438b1f73d7257889d2a103248d282365584f94277613ec2a6",
+                "ce45327286bc1d55a4fa3937fe1c05640a4016b497ff0b7c62d50e772c1a374b",
                 fixture.plaintextSha256,
             )
             assertEquals(fixture.plaintextSha256, plaintext.sha256())
@@ -70,7 +71,7 @@ class BackupPayloadGoldenTest {
 
         try {
             assertEquals(
-                "20c7c2c075ed79dda721d1c841cc92cbb06190548d8f743dae53e1e0f5ea58b6",
+                "21ef8dd2e577f6ae9bc2771a6843c773e12bc058565b5108ece1cd7668491cef",
                 fixture.plaintextSha256,
             )
             assertEquals(fixture.plaintextSha256, plaintext.sha256())
@@ -80,9 +81,9 @@ class BackupPayloadGoldenTest {
             assertEquals("vault-alpha", decoded.vaultId)
             assertEquals(41, decoded.firstGeneration)
             assertEquals(53, decoded.lastGeneration)
-            assertEquals(2, decoded.entryCount)
+            assertEquals(3, decoded.entryCount)
             assertEquals(
-                listOf("operation-1", "operation-2"),
+                listOf("operation-1", "operation-2", "operation-3"),
                 decoded.entries.map(BackupSegmentEntryV1::operationId),
             )
             assertEquals(

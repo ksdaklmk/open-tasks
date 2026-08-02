@@ -23,6 +23,7 @@ internal object BackupMutationCodec {
     private const val MAX_IDENTIFIER_LENGTH = 200
     private const val MAX_GENERAL_STRING_LENGTH = 20_000
     private const val MAX_BINARY_FIELD_BYTES = 2 * 1024 * 1024
+    private const val MAX_NOTE_BODY_CIPHERTEXT_BYTES = 40_000
 
     private val json = Json {
         encodeDefaults = true
@@ -213,6 +214,16 @@ internal object BackupMutationCodec {
                 require(allowEmpty || it.isNotBlank()) { "$name cannot be blank" }
             }
         }
+        fun boundedBytes(name: String, maximumBytes: Int) {
+            value(name)?.let {
+                val decoded = Base64.getDecoder().decode(it)
+                try {
+                    require(decoded.size <= maximumBytes) { "$name exceeds $maximumBytes bytes" }
+                } finally {
+                    decoded.fill(0)
+                }
+            }
+        }
         fun date(name: String) {
             value(name)?.let {
                 val parsed = runCatching { LocalDate.parse(it) }
@@ -346,6 +357,9 @@ internal object BackupMutationCodec {
                 bounded("mimeType", 255, allowEmpty = false)
                 nonNegativeLong("byteCount")
                 bounded("contentHash", 512, allowEmpty = false)
+                identifier("blobSetId")
+                nonNegativeInt("chunkCount")
+                revision()
             }
             BackupRecordFamily.ACTIVITY_ENTRY -> {
                 identifier("taskId")
@@ -370,6 +384,18 @@ internal object BackupMutationCodec {
             BackupRecordFamily.SAVED_VIEW -> {
                 identifier("workspaceId")
                 bounded("name", 120, allowEmpty = false)
+            }
+            BackupRecordFamily.NOTE -> {
+                identifier("id")
+                identifier("taskId")
+                identifier("projectId")
+                require((value("taskId") == null) != (value("projectId") == null)) {
+                    "Note must have exactly one owner"
+                }
+                boundedBytes("bodyCiphertext", MAX_NOTE_BODY_CIPHERTEXT_BYTES)
+                nonNegativeLong("createdAtEpochMillis")
+                nonNegativeLong("editedAtEpochMillis")
+                revision()
             }
             BackupRecordFamily.TOMBSTONE -> {
                 bounded("objectType", 120, allowEmpty = false)
@@ -672,6 +698,19 @@ internal object BackupMutationCodec {
                 string("workspaceId"),
                 string("name"),
                 bytes("encryptedQuery"),
+            ),
+        ),
+        BackupRecordFamily.NOTE to RecordSchema(
+            listOf(
+                string("id"),
+                string("taskId", nullable = true),
+                string("projectId", nullable = true),
+                bytes("bodyCiphertext"),
+                long("createdAtEpochMillis"),
+                long("editedAtEpochMillis", nullable = true),
+                long("revisionWallMillis"),
+                int("revisionLogical"),
+                string("revisionDeviceId"),
             ),
         ),
         BackupRecordFamily.TOMBSTONE to RecordSchema(

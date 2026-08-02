@@ -123,6 +123,28 @@ function task(id, parentTaskId, statusId, semanticStatus, milestoneId) {
   ]);
 }
 
+function note(
+  id,
+  taskId,
+  projectId,
+  bodyBytes,
+  createdAt,
+  editedAt,
+  logical,
+) {
+  return record("NOTE", [id], [
+    stringField("id", id),
+    nullableStringField("taskId", taskId),
+    nullableStringField("projectId", projectId),
+    bytesField("bodyCiphertext", bodyBytes),
+    longField("createdAtEpochMillis", createdAt),
+    nullableLongField("editedAtEpochMillis", editedAt),
+    longField("revisionWallMillis", 10),
+    intField("revisionLogical", logical),
+    stringField("revisionDeviceId", "device-alpha"),
+  ]);
+}
+
 const semanticStatuses = [
   "BACKLOG",
   "PLANNED",
@@ -167,6 +189,7 @@ const familyOrder = [
   "TIME_ENTRY",
   "TEMPLATE",
   "SAVED_VIEW",
+  "NOTE",
   "TOMBSTONE",
 ];
 
@@ -306,6 +329,8 @@ const snapshotRecords = [
     stringField("name", "View"),
     bytesField("encryptedQuery", [8, 9]),
   ]),
+  note("note-task-1", "task-1", null, [10, 11], 30, null, 0),
+  note("note-project-1", null, "project-1", [12, 13], 31, 32, 0),
   record("TOMBSTONE", ["gone-task", "task"], [
     stringField("objectId", "gone-task"),
     stringField("objectType", "task"),
@@ -358,6 +383,15 @@ const deleteMutation = {
   deletedFamily: "TASK_DEPENDENCY",
   deletedIdentity: ["task-2", "task-1"],
 };
+const noteRecord = note("note-task-1", "task-1", null, [14, 15], 33, 34, 1);
+const noteUpsertMutation = {
+  formatVersion: 1,
+  minimumReaderVersion: 1,
+  mutationKind: "UPSERT",
+  record: noteRecord,
+  deletedFamily: null,
+  deletedIdentity: null,
+};
 
 function payloadBase64(payload) {
   return Buffer.from(JSON.stringify(payload), "utf8")
@@ -394,8 +428,19 @@ const segment = {
       sourceDeviceId: "device-alpha",
       payloadBase64: payloadBase64(deleteMutation),
     },
+    {
+      operationId: "operation-3",
+      generation: 53,
+      sequence: 1,
+      objectId: "note-task-1",
+      objectType: "NOTE",
+      revisionWallMillis: 10,
+      revisionLogical: 1,
+      sourceDeviceId: "device-alpha",
+      payloadBase64: payloadBase64(noteUpsertMutation),
+    },
   ],
-  entryCount: 2,
+  entryCount: 3,
 };
 
 function writeFixture(name, payload) {

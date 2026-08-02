@@ -9,6 +9,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -89,6 +90,9 @@ internal interface RecoveryImportDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertTombstone(value: TombstoneEntity)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNote(value: NoteEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertVault(value: VaultEntity)
 
@@ -142,6 +146,9 @@ internal interface RecoveryImportDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTombstone(value: TombstoneEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertNote(value: NoteEntity)
 
     @Query("DELETE FROM vaults WHERE id = :id")
     suspend fun deleteVault(id: String): Int
@@ -202,6 +209,9 @@ internal interface RecoveryImportDao {
     @Query("DELETE FROM tombstones WHERE objectId = :objectId AND objectType = :objectType")
     suspend fun deleteTombstone(objectId: String, objectType: String): Int
 
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun deleteNote(id: String): Int
+
     /**
      * Reads every activity entry, unlike Stage 2 capture, which attributes a
      * relationless entry through `backup_journal` evidence a recovered vault
@@ -234,7 +244,8 @@ internal interface RecoveryImportDao {
             (SELECT COUNT(*) FROM time_entries) +
             (SELECT COUNT(*) FROM templates) +
             (SELECT COUNT(*) FROM saved_views) +
-            (SELECT COUNT(*) FROM tombstones)
+            (SELECT COUNT(*) FROM tombstones) +
+            (SELECT COUNT(*) FROM notes)
         """,
     )
     suspend fun structuredRecordCount(): Int
@@ -332,7 +343,13 @@ internal interface RecoveryImportDao {
             (SELECT COUNT(*) FROM templates AS p
                 WHERE NOT EXISTS (SELECT 1 FROM workspaces AS w WHERE w.id = p.workspaceId)) +
             (SELECT COUNT(*) FROM saved_views AS v
-                WHERE NOT EXISTS (SELECT 1 FROM workspaces AS w WHERE w.id = v.workspaceId))
+                WHERE NOT EXISTS (SELECT 1 FROM workspaces AS w WHERE w.id = v.workspaceId)) +
+            (SELECT COUNT(*) FROM notes AS n
+                WHERE n.taskId IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM tasks AS t WHERE t.id = n.taskId)) +
+            (SELECT COUNT(*) FROM notes AS n
+                WHERE n.projectId IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM projects AS p WHERE p.id = n.projectId))
         """,
     )
     suspend fun danglingReferenceCount(): Int

@@ -2071,6 +2071,7 @@ class BackupRecordImporterInstrumentedTest {
         BackupRecordFamily.TIME_ENTRY -> "time_entries"
         BackupRecordFamily.TEMPLATE -> "templates"
         BackupRecordFamily.SAVED_VIEW -> "saved_views"
+        BackupRecordFamily.NOTE -> "notes"
         BackupRecordFamily.TOMBSTONE -> "tombstones"
     }
 

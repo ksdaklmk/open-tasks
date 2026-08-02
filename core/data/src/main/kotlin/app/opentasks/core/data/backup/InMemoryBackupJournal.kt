@@ -157,6 +157,8 @@ internal fun WorkspaceSnapshot.toBackupRecords(
                 revisionDeviceId = template.revision.deviceId.value,
             ).toBackupRecordV1()
         }
+        notes.mapTo(this) { it.toEntity().toBackupRecordV1() }
+        attachments.mapTo(this) { it.toEntity().toBackupRecordV1() }
         tombstones.mapTo(this) { it.toBackupRecordV1() }
     }
 }

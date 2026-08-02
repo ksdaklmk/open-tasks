@@ -5,6 +5,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -154,6 +155,123 @@ class BackupMutationCodecTest {
 
         assertThrows(IllegalArgumentException::class.java) {
             BackupMutationCodec.decode(source)
+        }
+    }
+
+    @Test
+    fun noteRecordRoundTripsCanonically() {
+        val payload = BackupMutationPayloadV1(
+            mutationKind = BackupMutationKind.UPSERT,
+            record = NoteEntity(
+                id = "note-1",
+                taskId = "task-1",
+                projectId = null,
+                bodyCiphertext = byteArrayOf(1, 2, 3),
+                createdAtEpochMillis = 10,
+                editedAtEpochMillis = 20,
+                revisionWallMillis = 1,
+                revisionLogical = 0,
+                revisionDeviceId = "device-1",
+            ).toBackupRecordV1(),
+            deletedFamily = null,
+            deletedIdentity = null,
+        )
+        val encoded = BackupMutationCodec.encode(payload)
+
+        val decoded = BackupMutationCodec.decodeOwned(encoded.copyOf())
+
+        assertEquals(payload, decoded)
+        assertArrayEquals(encoded, BackupMutationCodec.encode(decoded))
+    }
+
+    @Test
+    fun noteWithBothOwnersIsRejected() {
+        fun note(taskId: String?, projectId: String?): BackupRecordV1 = NoteEntity(
+            id = "note-1",
+            taskId = taskId,
+            projectId = projectId,
+            bodyCiphertext = byteArrayOf(1),
+            createdAtEpochMillis = 10,
+            editedAtEpochMillis = null,
+            revisionWallMillis = 1,
+            revisionLogical = 0,
+            revisionDeviceId = "device-1",
+        ).toBackupRecordV1()
+
+        listOf(
+            note(taskId = "task-1", projectId = "project-1"),
+            note(taskId = null, projectId = null),
+        ).forEach { record ->
+            assertThrows(IllegalArgumentException::class.java) {
+                BackupMutationCodec.encode(
+                    BackupMutationPayloadV1(
+                        mutationKind = BackupMutationKind.UPSERT,
+                        record = record,
+                        deletedFamily = null,
+                        deletedIdentity = null,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun noteBodyCiphertextOverBoundIsRejected() {
+        val record = NoteEntity(
+            id = "note-1",
+            taskId = "task-1",
+            projectId = null,
+            bodyCiphertext = ByteArray(40_001),
+            createdAtEpochMillis = 10,
+            editedAtEpochMillis = null,
+            revisionWallMillis = 1,
+            revisionLogical = 0,
+            revisionDeviceId = "device-1",
+        ).toBackupRecordV1()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.encode(
+                BackupMutationPayloadV1(
+                    mutationKind = BackupMutationKind.UPSERT,
+                    record = record,
+                    deletedFamily = null,
+                    deletedIdentity = null,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun attachmentRecordCarriesBlobIdentityAndNoKeepOffline() {
+        val payload = BackupMutationPayloadV1(
+            mutationKind = BackupMutationKind.UPSERT,
+            record = AttachmentEntity(
+                id = "attachment-1",
+                taskId = "task-1",
+                displayNameCiphertext = byteArrayOf(1),
+                mimeType = "text/plain",
+                byteCount = 10,
+                contentHash = "hash",
+                blobSetId = "blob-1",
+                chunkCount = 3,
+                deletedAtEpochMillis = 100,
+                revisionWallMillis = 1,
+                revisionLogical = 0,
+                revisionDeviceId = "device-1",
+            ).toBackupRecordV1(),
+            deletedFamily = null,
+            deletedIdentity = null,
+        )
+        val encoded = BackupMutationCodec.encode(payload)
+
+        assertEquals(payload, BackupMutationCodec.decode(encoded))
+
+        val recordWithKeepOffline = payload.record!!.copy(
+            fields = payload.record.fields +
+                BackupFieldV1("keepOffline", BackupFieldType.BOOLEAN, "true"),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.encode(payload.copy(record = recordWithKeepOffline))
         }
     }
 
@@ -362,6 +480,17 @@ class BackupMutationCodecTest {
             ),
             BackupRecordFamily.SAVED_VIEW to
                 listOf("id", "workspaceId", "name", "encryptedQuery"),
+            BackupRecordFamily.NOTE to listOf(
+                "id",
+                "taskId",
+                "projectId",
+                "bodyCiphertext",
+                "createdAtEpochMillis",
+                "editedAtEpochMillis",
+                "revisionWallMillis",
+                "revisionLogical",
+                "revisionDeviceId",
+            ),
             BackupRecordFamily.TOMBSTONE to listOf(
                 "objectId",
                 "objectType",
@@ -390,6 +519,7 @@ class BackupMutationCodecTest {
             BackupRecordFamily.TIME_ENTRY to listOf("time-1"),
             BackupRecordFamily.TEMPLATE to listOf("template-1"),
             BackupRecordFamily.SAVED_VIEW to listOf("view-1"),
+            BackupRecordFamily.NOTE to listOf("note-1"),
             BackupRecordFamily.TOMBSTONE to listOf("task-1", "task"),
         )
 
@@ -718,6 +848,17 @@ class BackupMutationCodecTest {
         ).toBackupRecordV1(),
         SavedViewEntity("view-1", "workspace-1", "View", byteArrayOf(1))
             .toBackupRecordV1(),
+        NoteEntity(
+            "note-1",
+            "task-1",
+            null,
+            byteArrayOf(1),
+            1,
+            null,
+            1,
+            0,
+            "device-1",
+        ).toBackupRecordV1(),
         TombstoneEntity("task-1", "task", 1, 2, 1, 0, "device-1")
             .toBackupRecordV1(),
     )

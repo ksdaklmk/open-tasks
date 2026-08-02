@@ -7,6 +7,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -358,11 +359,24 @@ internal interface BackupMutationDao {
     @Query("SELECT * FROM reminders ORDER BY id")
     suspend fun reminders(): List<ReminderEntity>
 
-    @Query("SELECT id FROM attachments ORDER BY id")
-    suspend fun attachmentIds(): List<String>
+    @Query(
+        """
+        SELECT id, revisionWallMillis, revisionLogical, revisionDeviceId
+        FROM attachments ORDER BY id
+        """,
+    )
+    suspend fun attachmentRevisions(): List<RevisionedIdRow>
 
     @Query("SELECT id FROM activity_entries ORDER BY id")
     suspend fun activityEntryIds(): List<String>
+
+    @Query(
+        """
+        SELECT id, revisionWallMillis, revisionLogical, revisionDeviceId
+        FROM notes ORDER BY id
+        """,
+    )
+    suspend fun noteRevisions(): List<RevisionedIdRow>
 
     @Query("SELECT * FROM time_entries ORDER BY id")
     suspend fun timeEntries(): List<TimeEntryEntity>
@@ -456,6 +470,9 @@ internal interface BackupMutationDao {
     @Query("SELECT * FROM saved_views WHERE id = :id LIMIT 1")
     suspend fun savedView(id: String): SavedViewEntity?
 
+    @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
+    suspend fun note(id: String): NoteEntity?
+
     @Query(
         """
         SELECT * FROM tombstones
@@ -501,13 +518,14 @@ internal suspend fun BackupMutationDao.snapshots(): List<BackupRecordSnapshot> =
     tags().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
     taskTagRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TASK_TAG) }
     reminders().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
-    attachmentIds().mapTo(this) { identitySnapshot(BackupRecordFamily.ATTACHMENT, it) }
+    attachmentRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.ATTACHMENT) }
     activityEntryIds().mapTo(this) {
         identitySnapshot(BackupRecordFamily.ACTIVITY_ENTRY, it)
     }
     timeEntries().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
     templateRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TEMPLATE) }
     savedViewIds().mapTo(this) { identitySnapshot(BackupRecordFamily.SAVED_VIEW, it) }
+    noteRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.NOTE) }
     tombstoneRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TOMBSTONE) }
 }
 
@@ -557,6 +575,8 @@ internal suspend fun BackupMutationDao.requireRecord(
             requireNotNull(template(singleId())).toBackupRecordV1()
         BackupRecordFamily.SAVED_VIEW ->
             requireNotNull(savedView(singleId())).toBackupRecordV1()
+        BackupRecordFamily.NOTE ->
+            requireNotNull(note(singleId())).toBackupRecordV1()
         BackupRecordFamily.TOMBSTONE -> compositeIds().let { (objectId, objectType) ->
             requireNotNull(tombstone(objectId, objectType)).toBackupRecordV1()
         }

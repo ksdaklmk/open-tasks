@@ -11,6 +11,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -459,6 +460,23 @@ interface BackupCaptureDao {
     suspend fun savedViews(vaultId: String): List<SavedViewEntity>
 
     /**
+     * A note is owned by exactly one of a task or a project, so it is
+     * vault-scoped through whichever owner join resolves.
+     */
+    @Query(
+        """
+        SELECT note.* FROM notes AS note
+        LEFT JOIN tasks AS ownerTask ON ownerTask.id = note.taskId
+        LEFT JOIN workspaces AS taskWorkspace ON taskWorkspace.id = ownerTask.workspaceId
+        LEFT JOIN projects AS ownerProject ON ownerProject.id = note.projectId
+        LEFT JOIN workspaces AS projectWorkspace ON projectWorkspace.id = ownerProject.workspaceId
+        WHERE taskWorkspace.vaultId = :vaultId OR projectWorkspace.vaultId = :vaultId
+        ORDER BY note.id
+        """,
+    )
+    suspend fun notes(vaultId: String): List<NoteEntity>
+
+    /**
      * Tombstones and relationless activity entries carry no vault column, so a
      * database holding several vaults attributes them through `backup_journal`
      * evidence. A database holding exactly one vault owns every row in it, and
@@ -588,6 +606,7 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         timeEntries(vaultId).mapTo(this) { it.toBackupRecordV1() }
         templates(vaultId).mapTo(this) { it.toBackupRecordV1() }
         savedViews(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        notes(vaultId).mapTo(this) { it.toBackupRecordV1() }
         tombstones(vaultId).mapTo(this) { it.toBackupRecordV1() }
     }
 

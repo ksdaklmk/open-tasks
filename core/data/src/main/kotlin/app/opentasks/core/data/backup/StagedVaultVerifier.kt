@@ -405,6 +405,9 @@ internal class DefaultStagedVaultVerifier(
                 BackupRecordFamily.ACTIVITY_ENTRY ->
                     BackupRecordFields.of(record).nullableString("taskId")
                         ?.let { it in taskIds } == true
+                BackupRecordFamily.NOTE ->
+                    BackupRecordFields.of(record).nullableString("taskId")
+                        ?.let { it in taskIds } == true
                 BackupRecordFamily.TASK_TAG -> record.identity.first() in taskIds
                 BackupRecordFamily.TASK_DEPENDENCY -> record.identity.any { it in taskIds }
                 else -> false
@@ -452,6 +455,7 @@ internal class DefaultStagedVaultVerifier(
             capture.timeEntries(id).mapTo(this) { it.toBackupRecordV1() }
             capture.templates(id).mapTo(this) { it.toBackupRecordV1() }
             capture.savedViews(id).mapTo(this) { it.toBackupRecordV1() }
+            capture.notes(id).mapTo(this) { it.toBackupRecordV1() }
             importDao.allTombstones().mapTo(this) { it.toBackupRecordV1() }
         }
     }

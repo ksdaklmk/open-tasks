@@ -463,6 +463,14 @@ private fun validateTaskChildren(
             "Attachment task does not exist"
         }
     }
+    recordsByFamily.getValue(BackupRecordFamily.NOTE).forEach { note ->
+        note.value("taskId")?.let { taskId ->
+            require(tasks.containsKey(taskId)) { "Note task does not exist" }
+        }
+        note.value("projectId")?.let { projectId ->
+            require(projects.containsKey(projectId)) { "Note project does not exist" }
+        }
+    }
     recordsByFamily.getValue(BackupRecordFamily.TIME_ENTRY).forEach { entry ->
         require(tasks.containsKey(entry.requiredValue("taskId"))) {
             "Time entry task does not exist"

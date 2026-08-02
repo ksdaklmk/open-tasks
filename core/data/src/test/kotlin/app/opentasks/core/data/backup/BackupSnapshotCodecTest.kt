@@ -5,6 +5,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -79,6 +80,7 @@ class BackupSnapshotCodecTest {
                 BackupRecordFamily.TIME_ENTRY to 1,
                 BackupRecordFamily.TEMPLATE to 1,
                 BackupRecordFamily.SAVED_VIEW to 1,
+                BackupRecordFamily.NOTE to 2,
                 BackupRecordFamily.TOMBSTONE to 1,
             ),
             decoded.records.groupingBy(BackupRecordV1::family).eachCount(),
@@ -87,7 +89,7 @@ class BackupSnapshotCodecTest {
             .flatMap(BackupRecordV1::fields)
             .filter { it.type == BackupFieldType.BYTES }
             .map { requireNotNull(it.value) }
-        assertEquals(7, byteValues.size)
+        assertEquals(9, byteValues.size)
         assertTrue(byteValues.all { !it.endsWith('=') })
     }
 
@@ -229,6 +231,8 @@ class BackupSnapshotCodecTest {
             original.update(BackupRecordFamily.TIME_ENTRY, "time-1", "taskId", "task-other"),
             original.update(BackupRecordFamily.TEMPLATE, "template-1", "workspaceId", "workspace-other"),
             original.update(BackupRecordFamily.SAVED_VIEW, "view-1", "workspaceId", "workspace-other"),
+            original.update(BackupRecordFamily.NOTE, "note-task-1", "taskId", "task-other"),
+            original.update(BackupRecordFamily.NOTE, "note-project-1", "projectId", "project-other"),
         )
 
         invalid.forEachIndexed { index, payload ->
@@ -676,6 +680,32 @@ internal object BackupPayloadTestFixtures {
                         .toBackupRecordV1(),
                 )
                 add(
+                    NoteEntity(
+                        "note-task-1",
+                        "task-1",
+                        null,
+                        byteArrayOf(10, 11),
+                        30,
+                        null,
+                        10,
+                        0,
+                        "device-alpha",
+                    ).toBackupRecordV1(),
+                )
+                add(
+                    NoteEntity(
+                        "note-project-1",
+                        null,
+                        "project-1",
+                        byteArrayOf(12, 13),
+                        31,
+                        32,
+                        10,
+                        0,
+                        "device-alpha",
+                    ).toBackupRecordV1(),
+                )
+                add(
                     TombstoneEntity(
                         "gone-task",
                         "task",
@@ -705,7 +735,10 @@ internal object BackupPayloadTestFixtures {
 
     fun snapshotBytesAtSize(target: Int): ByteArray {
         val base = BackupSnapshotCodec.encode(snapshot())
-        val marker = """,{"family":"TOMBSTONE"""".toByteArray()
+        // Filler records are shaped as SAVED_VIEW, so they must land immediately
+        // after the real SAVED_VIEW records and before the family that follows
+        // them in canonical order (NOTE), not before the terminal TOMBSTONE.
+        val marker = """,{"family":"NOTE"""".toByteArray()
         val insertion = base.indexOfSubsequence(marker)
         require(insertion >= 0)
         val prefix = base.copyOfRange(0, insertion)
@@ -748,18 +781,19 @@ internal object BackupPayloadTestFixtures {
 
     private fun splitCanonicalBase64Lengths(total: Int, count: Int): IntArray {
         val maximum = 2_796_203
+        // Reserves one byte of slack below the hard per-record maximum so the
+        // fixup pass below always has a slot to absorb whatever the modular
+        // rounding below leaves over, regardless of the exact fixture size.
+        val slotCapacity = maximum - 1
         val lengths = IntArray(count)
         var remaining = total
         for (index in lengths.indices) {
-            val slotsAfter = count - index - 1
-            val minimumForRest = 0
-            var length = minOf(maximum, remaining - minimumForRest)
+            var length = minOf(slotCapacity, remaining)
             while (length % 4 == 1) length -= 1
             lengths[index] = length
             remaining -= length
-            if (remaining <= slotsAfter * maximum) continue
-            error("Insufficient Base64 capacity")
         }
+        require(remaining <= 1) { "Insufficient Base64 capacity" }
         if (remaining != 0) {
             for (index in lengths.indices.reversed()) {
                 val replacement = lengths[index] + remaining

@@ -5,6 +5,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -75,6 +76,7 @@ enum class BackupRecordFamily {
     TIME_ENTRY,
     TEMPLATE,
     SAVED_VIEW,
+    NOTE,
     TOMBSTONE,
 }
 
@@ -289,6 +291,20 @@ internal fun SavedViewEntity.toBackupRecordV1(): BackupRecordV1 = record(
     stringField("workspaceId", workspaceId),
     stringField("name", name),
     bytesField("encryptedQuery", encryptedQuery),
+)
+
+internal fun NoteEntity.toBackupRecordV1(): BackupRecordV1 = record(
+    family = BackupRecordFamily.NOTE,
+    identity = listOf(id),
+    stringField("id", id),
+    nullableStringField("taskId", taskId),
+    nullableStringField("projectId", projectId),
+    bytesField("bodyCiphertext", bodyCiphertext),
+    longField("createdAtEpochMillis", createdAtEpochMillis),
+    nullableLongField("editedAtEpochMillis", editedAtEpochMillis),
+    longField("revisionWallMillis", revisionWallMillis),
+    intField("revisionLogical", revisionLogical),
+    stringField("revisionDeviceId", revisionDeviceId),
 )
 
 internal fun TombstoneEntity.toBackupRecordV1(): BackupRecordV1 = record(

@@ -7,6 +7,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -256,6 +257,18 @@ internal class RoomBackupRecordImporter(
             BackupRecordFamily.TOMBSTONE -> fields.toTombstoneEntity().let { entity ->
                 if (replace) importDao.upsertTombstone(entity) else importDao.insertTombstone(entity)
             }
+            BackupRecordFamily.NOTE -> {
+                val entity = fields.toNoteEntity()
+                try {
+                    if (replace) {
+                        importDao.upsertNote(entity)
+                    } else {
+                        importDao.insertNote(entity)
+                    }
+                } finally {
+                    entity.bodyCiphertext.fill(0)
+                }
+            }
         }
     }
 
@@ -279,6 +292,7 @@ internal class RoomBackupRecordImporter(
         BackupRecordFamily.TEMPLATE -> importDao.deleteTemplate(key.single())
         BackupRecordFamily.SAVED_VIEW -> importDao.deleteSavedView(key.single())
         BackupRecordFamily.TOMBSTONE -> importDao.deleteTombstone(key.first(), key.second())
+        BackupRecordFamily.NOTE -> importDao.deleteNote(key.single())
     }
 }
 
@@ -685,6 +699,18 @@ internal fun BackupRecordFields.toSavedViewEntity(): SavedViewEntity = SavedView
     workspaceId = string("workspaceId"),
     name = string("name"),
     encryptedQuery = bytes("encryptedQuery"),
+)
+
+internal fun BackupRecordFields.toNoteEntity(): NoteEntity = NoteEntity(
+    id = string("id"),
+    taskId = nullableString("taskId"),
+    projectId = nullableString("projectId"),
+    bodyCiphertext = bytes("bodyCiphertext"),
+    createdAtEpochMillis = long("createdAtEpochMillis"),
+    editedAtEpochMillis = nullableLong("editedAtEpochMillis"),
+    revisionWallMillis = long("revisionWallMillis"),
+    revisionLogical = int("revisionLogical"),
+    revisionDeviceId = string("revisionDeviceId"),
 )
 
 internal fun BackupRecordFields.toTombstoneEntity(): TombstoneEntity = TombstoneEntity(
