@@ -4,27 +4,28 @@
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
   is in approved subagent-driven execution and deliberately paused after
-  Task 3 of 14 at the user's request. The approved design is
+  Task 4 of 14 at the user's request. The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–3 are complete with independent reviews closed (one
-  fix round each for Tasks 2 and 3; details in the checkpoint below). No
+  (`6538dca`). Tasks 1–4 are complete with independent reviews closed (one
+  fix round each for Tasks 2 and 3; Task 4 closed review-clean after a
+  pre-review parity fix; details in the checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 4 (Room note commands and
-  parity) via superpowers:subagent-driven-development; the execution ledger
-  is
+  untouched and unstaged. Resume with plan Task 5 (activity history
+  generation) via superpowers:subagent-driven-development; the execution
+  ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
   Samsung Remote Test Lab remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `ab5c3d0` (`test: cover NOTE
-  and ATTACHMENT in-memory backup journal wiring`), the tip of the Stage 4
-  Task 1–3 range `6538dca..ab5c3d0`. The prior adaptive-slice closure point
+- Current product source implementation point: `bc4a0ce` (`fix: purge notes
+  with tasks in the in-memory repository`), the tip of the Stage 4
+  Task 1–4 range `6538dca..bc4a0ce`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -678,14 +679,54 @@ notable entries: Task 4 must replace the Room note stub arms' `INVALID_STATE`
 rejection with real persistence, and the plan-mandated `nonNegativeLong`
 NOTE-timestamp strictness was adjudicated defensible. No device suite ran;
 all new instrumented tests are compile-verified only and run at the Task 14
-connected gate. Tasks 4–14 (Room note commands, activity generation, search,
-attachment metadata commands, blob store, intake, open/share/cache, GC and
-destructive deletion, runtime/recovery wiring, product surfaces, and the
-qualification/exit gates) have not started.
+connected gate.
+
+The pause was honoured; Task 4 subsequently closed in the checkpoint below.
+
+## Stage 4 Task 4 closure checkpoint — 2 August 2026
+
+Subagent-driven execution resumed from `ab5c3d0`/`18fb577` on `main`.
+Task 4 (`74563d1`, `bc4a0ce`) persisted notes through Room commands and
+closed its independent review as Approved with zero Critical, Important, or
+spec findings and no fix round.
+
+- `WorkspaceDao` gained `observeNotes()` (parameterless, matching the
+  sibling snapshot observers), `upsertNote`, `deleteNote(id): Int`,
+  `deleteNotesForTask`, `deleteNotesForProject`, and the validation helpers
+  `getNoteById`/`countNotesForOwner`; `purgeTask` deletes the task's notes
+  before the task row.
+- The four Room dispatch arms replace the recorded `INVALID_STATE` stubs
+  and are line-for-line behaviour-equivalent to the Task 1 in-memory
+  handlers — identical branch order, rejection reasons, user messages,
+  revision math, and Undo shapes — wrapped in `database.withTransaction { }`
+  so the surrounding `execute` journal diff emits NOTE rows without
+  hand-written journal code. Write validation reads the DAO directly rather
+  than the plan's literal `currentWorkspace()` wording; the reviewer
+  confirmed the literal wording would have read stale pre-command state and
+  upheld the deviation as the file's universal handler convention.
+- A pre-review parity fix (`bc4a0ce`) made the in-memory
+  `permanentlyDeleteTask` and the independently divergent
+  `purgeExpiredTrash` strip purged tasks' notes with journalled NOTE
+  deletes, with two new mutation-asserting unit tests; the reviewer
+  verified the Room and in-memory purge paths now match.
+- Evidence: RED compile failure first; GREEN
+  `:core:data:compileDebugAndroidTestKotlin` plus
+  `:core:data:testDebugUnitTest` 432/432. The new
+  `RoomNoteCommandInstrumentedTest` (round trip, exactly-one-owner, journal
+  evidence, purge) is compile-verified and executes at the Task 14
+  connected gate. No emulator, ADB, or connected command ran; the protected
+  workspace and user-owned files were untouched.
+
+Deferred minors are in the ignored execution ledger; notable: Room orders
+`WorkspaceSnapshot.notes` by creation time and id while in-memory appends
+unsorted — sort before Task 6's UI reads it. Tasks 5–14 (activity
+generation, search, attachment metadata commands, blob store, intake,
+open/share/cache, GC and destructive deletion, runtime/recovery wiring,
+product surfaces, and the qualification/exit gates) have not started.
 
 Pause here at the user's request. Resume by re-entering
 superpowers:subagent-driven-development with the plan and ledger above,
-starting at Task 4 from base `ab5c3d0`.
+starting at Task 5 (activity history generation) from base `bc4a0ce`.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
