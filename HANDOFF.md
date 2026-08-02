@@ -3,30 +3,30 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution and is paused after Task 5 of 14.
+  is in approved subagent-driven execution and is paused after Task 6 of 14.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–5 are complete with independent reviews closed (one
+  (`6538dca`). Tasks 1–6 are complete with independent reviews closed (one
   fix round each for Tasks 2 and 3; Task 4 closed review-clean after a
-  pre-review parity fix; Task 5 closed review-clean; details in the
+  pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
   checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 6 (search over notes and
-  attachment names) via superpowers:subagent-driven-development; the execution
+  untouched and unstaged. Resume with plan Task 7 (attachment metadata
+  commands) via superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
   Samsung Remote Test Lab remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `45335ae` (`feat: generate
-  immutable activity history`), the tip of the Stage 4 Task 1–5 range
-  `6538dca..45335ae`. The prior adaptive-slice closure point
+- Current product source implementation point: `ee28a16` (`feat: search note
+  bodies and attachment names`), the tip of the Stage 4 Task 1–6 range
+  `6538dca..ee28a16`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -757,6 +757,30 @@ Minor, or spec findings and no fix round.
 
 The Task 4 deferred snapshot-note ordering minor remains assigned to Task 6.
 Tasks 6–14 have not started. Resume Task 6 from `45335ae` with the approved
+plan and execution ledger.
+
+## Stage 4 Task 6 closure checkpoint — 2 August 2026
+
+Task 6 (`ee28a16`) extends search to note bodies and active attachment display
+names and closed its independent review as Approved with zero Critical,
+Important, Minor, or spec findings and no fix round.
+
+- Both repositories group notes by task or project and non-tombstoned
+  attachment names by task, then append those fields to the existing
+  `SearchNormalizer` text bundles. Activity bodies remain excluded; result
+  types, filters, ordering, and the 50-result cap are unchanged.
+- The Task 4 note-ordering minor was load-bearing for queries that span joined
+  note boundaries. Both search implementations now order owner notes by
+  creation time and ID before joining, matching Room without changing snapshot
+  or UI ordering.
+- `SearchExtensionTest` covers task and project notes, live and tombstoned
+  attachment names, activity exclusion, diacritic normalisation, and the
+  cross-note ordering case. The focused test failed RED on the missing search
+  inputs and ordering, then passed GREEN with the full `core:data` unit suite.
+  The final `testDebugUnitTest lintDebug :app:assembleDebug` repository gate
+  also passed.
+
+Tasks 7–14 have not started. Resume Task 7 from `ee28a16` with the approved
 plan and execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
