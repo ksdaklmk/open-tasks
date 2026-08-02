@@ -93,6 +93,8 @@ fun MoreScreen(
     insightsSummary: InsightsSnapshot = insightsState.snapshot,
     openInsights: Boolean = false,
     onInsightsClosed: () -> Unit = {},
+    openBackupRecovery: Boolean = false,
+    onBackupRecoveryClosed: () -> Unit = {},
     onInsightsRangeChange: (InsightsRange) -> Unit = {},
     onInsightsProjectFilter: (ProjectId, Boolean) -> Unit = { _, _ -> },
     onInsightsTagFilter: (TagId, Boolean) -> Unit = { _, _ -> },
@@ -115,6 +117,7 @@ fun MoreScreen(
     canDeleteRemoteHistory: Boolean = false,
     passphraseChangeDisclosureVisible: Boolean = false,
     canReprepareInitialBackup: Boolean = false,
+    attachmentCacheUsageBytes: Long = 0L,
     validateBackupPassphrase: (
         passphrase: String,
         confirmation: String,
@@ -133,6 +136,7 @@ fun MoreScreen(
     onChangeRemotePassphrase: (String, String) -> Unit = { _, _ -> },
     onDisconnectRemoteBackup: () -> Unit = {},
     onDeleteRemoteHistory: (String) -> Unit = {},
+    onDeleteAttachmentContent: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -142,9 +146,18 @@ fun MoreScreen(
             destination = MoreDestination.INSIGHTS
         }
     }
+    LaunchedEffect(openBackupRecovery) {
+        if (openBackupRecovery) {
+            destination = MoreDestination.BACKUP_RECOVERY
+        }
+    }
     val closeInsights = {
         destination = MoreDestination.OVERVIEW
         onInsightsClosed()
+    }
+    val closeBackupRecovery = {
+        destination = MoreDestination.OVERVIEW
+        onBackupRecoveryClosed()
     }
 
     when (destination) {
@@ -201,7 +214,7 @@ fun MoreScreen(
             return
         }
         MoreDestination.BACKUP_RECOVERY -> {
-            BackHandler { destination = MoreDestination.OVERVIEW }
+            BackHandler(onBack = closeBackupRecovery)
             BackupRecoveryScreen(
                 status = backupStatus,
                 remoteStatus = remoteBackupStatus,
@@ -215,6 +228,7 @@ fun MoreScreen(
                 canDeleteHistory = canDeleteRemoteHistory,
                 passphraseChangeDisclosureVisible = passphraseChangeDisclosureVisible,
                 canReprepareInitialPackage = canReprepareInitialBackup,
+                attachmentCacheUsageBytes = attachmentCacheUsageBytes,
                 validatePassphrase = validateBackupPassphrase,
                 onPrepare = onPrepareBackup,
                 onRetry = onRetryBackup,
@@ -228,7 +242,8 @@ fun MoreScreen(
                 onChangePassphrase = onChangeRemotePassphrase,
                 onDisconnect = onDisconnectRemoteBackup,
                 onDeleteHistory = onDeleteRemoteHistory,
-                onBack = { destination = MoreDestination.OVERVIEW },
+                onDeleteAttachmentContent = onDeleteAttachmentContent,
+                onBack = closeBackupRecovery,
                 modifier = modifier,
             )
             return

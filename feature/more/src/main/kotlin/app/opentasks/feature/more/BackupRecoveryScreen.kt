@@ -83,6 +83,7 @@ fun BackupRecoveryScreen(
     canDeleteHistory: Boolean = false,
     passphraseChangeDisclosureVisible: Boolean = false,
     canReprepareInitialPackage: Boolean = false,
+    attachmentCacheUsageBytes: Long = 0L,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -99,6 +100,7 @@ fun BackupRecoveryScreen(
     onChangePassphrase: (String, String) -> Unit = { _, _ -> },
     onDisconnect: () -> Unit = {},
     onDeleteHistory: (String) -> Unit = {},
+    onDeleteAttachmentContent: (String) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -182,6 +184,22 @@ fun BackupRecoveryScreen(
                 )
                 HorizontalDivider(Modifier.padding(vertical = 24.dp))
                 Text(
+                    stringResource(R.string.attachments_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .testTag("cloud-attachments-heading")
+                        .semantics { heading() },
+                )
+                Spacer(Modifier.height(12.dp))
+                CloudAttachmentContent(
+                    status = remoteStatus,
+                    cacheUsageBytes = attachmentCacheUsageBytes,
+                    onDeleteContent = {
+                        remoteSecretAction = RemoteSecretAction.DELETE_ATTACHMENTS
+                    },
+                )
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                Text(
                     stringResource(R.string.backup_android_package_heading),
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier
@@ -236,12 +254,61 @@ fun BackupRecoveryScreen(
             onDismiss = { remoteSecretAction = null },
             onSubmit = { first, second ->
                 remoteSecretAction = null
-                if (action == RemoteSecretAction.CHANGE) {
-                    onChangePassphrase(first, second)
-                } else {
-                    onDeleteHistory(first)
+                when (action) {
+                    RemoteSecretAction.CHANGE -> onChangePassphrase(first, second)
+                    RemoteSecretAction.DELETE -> onDeleteHistory(first)
+                    RemoteSecretAction.DELETE_ATTACHMENTS -> onDeleteAttachmentContent(first)
                 }
             },
+        )
+    }
+}
+
+/**
+ * What this installation can say about the attachment bytes it keeps.
+ *
+ * Attachment content lives in the same Drive lineage as the encrypted backup,
+ * so there is nothing to offer — and nothing to delete — when no lineage is
+ * connected. The cache line is about this device only; it is never a claim
+ * about what the provider holds.
+ */
+@Composable
+private fun CloudAttachmentContent(
+    status: RemoteBackupStatus,
+    cacheUsageBytes: Long,
+    onDeleteContent: () -> Unit,
+) {
+    val connected = status !is RemoteBackupStatus.Disabled &&
+        status !is RemoteBackupStatus.Terminated
+    Text(
+        stringResource(
+            if (connected) R.string.attachments_connected else R.string.attachments_not_connected,
+        ),
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        stringResource(
+            R.string.attachments_cache_usage,
+            NumberFormatHolder.bytes.format(cacheUsageBytes),
+        ),
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Text(
+        stringResource(R.string.attachments_cache_explanation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (connected) {
+        BackupAction(
+            R.string.attachments_delete_content,
+            "attachments-delete-content",
+            onDeleteContent,
+        )
+        Text(
+            stringResource(R.string.attachments_delete_disclosure),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -365,7 +432,13 @@ private fun BackupAction(label: Int, tag: String, onClick: () -> Unit) {
     }
 }
 
-private enum class RemoteSecretAction { CHANGE, DELETE }
+private enum class RemoteSecretAction { CHANGE, DELETE, DELETE_ATTACHMENTS }
+
+private fun RemoteSecretAction.titleRes(): Int = when (this) {
+    RemoteSecretAction.CHANGE -> R.string.backup_remote_change_passphrase
+    RemoteSecretAction.DELETE -> R.string.backup_remote_delete
+    RemoteSecretAction.DELETE_ATTACHMENTS -> R.string.attachments_delete_content
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -385,13 +458,7 @@ private fun RemoteSecretSheet(
                 .padding(24.dp),
         ) {
             Text(
-                stringResource(
-                    if (action == RemoteSecretAction.CHANGE) {
-                        R.string.backup_remote_change_passphrase
-                    } else {
-                        R.string.backup_remote_delete
-                    },
-                ),
+                stringResource(action.titleRes()),
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.semantics { heading() },
             )
@@ -448,17 +515,11 @@ private fun RemoteSecretSheet(
                     second = ""
                     onSubmit(submittedFirst, submittedSecond)
                 },
-                modifier = Modifier.heightIn(min = 48.dp),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("encrypted-secret-submit"),
             ) {
-                Text(
-                    stringResource(
-                        if (action == RemoteSecretAction.CHANGE) {
-                            R.string.backup_remote_change_passphrase
-                        } else {
-                            R.string.backup_remote_delete
-                        },
-                    ),
-                )
+                Text(stringResource(action.titleRes()))
             }
         }
     }

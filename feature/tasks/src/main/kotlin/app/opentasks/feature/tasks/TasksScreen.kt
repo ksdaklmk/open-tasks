@@ -69,6 +69,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -95,9 +96,14 @@ import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.designsystem.TaskRow
 import app.opentasks.core.designsystem.readableName
+import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
@@ -198,6 +204,21 @@ fun TasksScreen(
     onAddTimeEntry: (TaskId, TimeEntryEdit) -> Unit = { _, _ -> },
     onUpdateTimeEntry: (TimeEntryId, TimeEntryEdit) -> Unit = { _, _ -> },
     onDeleteTimeEntry: (TimeEntryId) -> Unit = {},
+    notes: List<Note> = emptyList(),
+    activityEntries: List<ActivityEntry> = emptyList(),
+    onAddNote: (TaskId, String) -> Unit = { _, _ -> },
+    onUpdateNote: (NoteId, String) -> Unit = { _, _ -> },
+    onDeleteNote: (NoteId) -> Unit = {},
+    attachments: List<Attachment> = emptyList(),
+    attachmentStates: Map<AttachmentId, AttachmentRowState> = emptyMap(),
+    attachmentSetupRequired: Boolean = false,
+    onAddAttachmentFromPhotos: (TaskId) -> Unit = {},
+    onAddAttachmentFromFiles: (TaskId) -> Unit = {},
+    onOpenAttachment: (AttachmentId) -> Unit = {},
+    onShareAttachment: (AttachmentId) -> Unit = {},
+    onDeleteAttachment: (AttachmentId) -> Unit = {},
+    onRetryAttachment: (AttachmentId) -> Unit = {},
+    onOpenAttachmentSetup: () -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
@@ -215,6 +236,9 @@ fun TasksScreen(
         conflict.firstEntryId in selectedTimeEntryIds ||
             conflict.secondEntryId in selectedTimeEntryIds
     }
+    val selectedNotes = notes.filter { it.taskId == selectedTaskId }
+    val selectedActivity = activityEntries.filter { it.taskId == selectedTaskId }
+    val selectedAttachments = attachments.filter { it.taskId == selectedTaskId }
 
     if (!showDetailPane && selectedTask != null) {
         Surface(
@@ -258,6 +282,21 @@ fun TasksScreen(
                 onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
                 onUpdateTimeEntry = onUpdateTimeEntry,
                 onDeleteTimeEntry = onDeleteTimeEntry,
+                notes = selectedNotes,
+                activity = selectedActivity,
+                onAddNote = { onAddNote(selectedTask.id, it) },
+                onUpdateNote = onUpdateNote,
+                onDeleteNote = onDeleteNote,
+                attachments = selectedAttachments,
+                attachmentStates = attachmentStates,
+                attachmentSetupRequired = attachmentSetupRequired,
+                onAddAttachmentFromPhotos = { onAddAttachmentFromPhotos(selectedTask.id) },
+                onAddAttachmentFromFiles = { onAddAttachmentFromFiles(selectedTask.id) },
+                onOpenAttachment = onOpenAttachment,
+                onShareAttachment = onShareAttachment,
+                onDeleteAttachment = onDeleteAttachment,
+                onRetryAttachment = onRetryAttachment,
+                onOpenAttachmentSetup = onOpenAttachmentSetup,
                 hingeExclusionBandDp = hingeExclusionBandDp,
             )
         }
@@ -338,6 +377,23 @@ fun TasksScreen(
                         onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
                         onUpdateTimeEntry = onUpdateTimeEntry,
                         onDeleteTimeEntry = onDeleteTimeEntry,
+                        notes = selectedNotes,
+                        activity = selectedActivity,
+                        onAddNote = { onAddNote(selectedTask.id, it) },
+                        onUpdateNote = onUpdateNote,
+                        onDeleteNote = onDeleteNote,
+                        attachments = selectedAttachments,
+                        attachmentStates = attachmentStates,
+                        attachmentSetupRequired = attachmentSetupRequired,
+                        onAddAttachmentFromPhotos = {
+                            onAddAttachmentFromPhotos(selectedTask.id)
+                        },
+                        onAddAttachmentFromFiles = { onAddAttachmentFromFiles(selectedTask.id) },
+                        onOpenAttachment = onOpenAttachment,
+                        onShareAttachment = onShareAttachment,
+                        onDeleteAttachment = onDeleteAttachment,
+                        onRetryAttachment = onRetryAttachment,
+                        onOpenAttachmentSetup = onOpenAttachmentSetup,
                         hingeExclusionBandDp = hingeExclusionBandDp,
                         modifier = Modifier
                             .weight(1f - listPaneFraction)
@@ -473,6 +529,21 @@ private fun TaskDetailPane(
     onAddTimeEntry: (TimeEntryEdit) -> Unit,
     onUpdateTimeEntry: (TimeEntryId, TimeEntryEdit) -> Unit,
     onDeleteTimeEntry: (TimeEntryId) -> Unit,
+    notes: List<Note>,
+    activity: List<ActivityEntry>,
+    onAddNote: (String) -> Unit,
+    onUpdateNote: (NoteId, String) -> Unit,
+    onDeleteNote: (NoteId) -> Unit,
+    attachments: List<Attachment>,
+    attachmentStates: Map<AttachmentId, AttachmentRowState>,
+    attachmentSetupRequired: Boolean,
+    onAddAttachmentFromPhotos: () -> Unit,
+    onAddAttachmentFromFiles: () -> Unit,
+    onOpenAttachment: (AttachmentId) -> Unit,
+    onShareAttachment: (AttachmentId) -> Unit,
+    onDeleteAttachment: (AttachmentId) -> Unit,
+    onRetryAttachment: (AttachmentId) -> Unit,
+    onOpenAttachmentSetup: () -> Unit,
     hingeExclusionBandDp: IntRange?,
     modifier: Modifier = Modifier,
 ) {
@@ -838,6 +909,20 @@ private fun TaskDetailPane(
             isError = descriptionError,
             minLines = 4,
             maxLines = 10,
+        )
+
+        Spacer(Modifier.height(28.dp))
+        TaskAttachmentsSection(
+            attachments = attachments,
+            states = attachmentStates,
+            onAddFromPhotos = onAddAttachmentFromPhotos,
+            onAddFromFiles = onAddAttachmentFromFiles,
+            onOpen = onOpenAttachment,
+            onShare = onShareAttachment,
+            onDelete = onDeleteAttachment,
+            onRetry = onRetryAttachment,
+            setupRequired = attachmentSetupRequired,
+            onOpenBackupSetup = onOpenAttachmentSetup,
         )
 
         Spacer(Modifier.height(28.dp))
@@ -1760,6 +1845,21 @@ private fun TaskDetailPane(
                     onDelete = { onDeleteChecklistItem(item.id) },
                 )
             }
+        }
+
+        Spacer(Modifier.height(28.dp))
+        // The detail pane is one call site for every task, so the in-progress
+        // note is scoped to the selected one: selecting another task must not
+        // leave a draft — or an open edit — pointing at the previous task's
+        // note.
+        key(task.id.value) {
+            NotesActivitySection(
+                notes = notes,
+                activity = activity,
+                onAddNote = onAddNote,
+                onUpdateNote = onUpdateNote,
+                onDeleteNote = onDeleteNote,
+            )
         }
 
         if (task.isBlocked) {

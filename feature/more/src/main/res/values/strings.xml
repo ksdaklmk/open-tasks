@@ -141,6 +141,14 @@
     <string name="backup_restored_title">Restored package detected</string>
     <string name="backup_restored_preserved">An Android backup package was preserved in the recovery inbox. Recovery activation is not available yet.</string>
     <string name="backup_restored_incompatible">An incompatible or corrupt Android backup package was preserved in the recovery inbox. Recovery activation is not available yet.</string>
+    <string name="attachments_heading">Cloud attachments</string>
+    <string name="attachments_connected">Attachment content is kept in this encrypted Google Drive backup.</string>
+    <string name="attachments_not_connected">Connect an encrypted Google Drive backup before adding attachments.</string>
+    <string name="attachments_cache_usage">Temporary cache %1$s bytes</string>
+    <string name="attachments_cache_explanation">Downloaded attachment content is cached on this device only until the space is needed.</string>
+    <string name="attachments_delete_content">Delete attachment content</string>
+    <string name="attachments_delete_disclosure">Attachment content is deleted permanently from Google Drive. The attachment records stay, and the rest of the backup history is kept.</string>
+
     <string name="backup_system_settings_heading">Android backup settings</string>
     <string name="backup_system_settings_explanation">Android controls whether the package is copied or transferred. Open system settings to review platform state.</string>
     <string name="backup_system_settings_action">Open system settings</string>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="timeline_kind_note">Note</string>
+    <string name="timeline_kind_event">Activity</string>
+    <string name="timeline_entry_summary">%1$s • %2$s</string>
+    <string name="timeline_edit_note">Edit note</string>
+    <string name="timeline_delete_note">Delete note</string>
+
+    <string name="notes_heading">Notes and activity</string>
+    <string name="notes_supporting">%1$s • %2$s</string>
+    <plurals name="notes_note_count">
+        <item quantity="one">%1$d note</item>
+        <item quantity="other">%1$d notes</item>
+    </plurals>
+    <plurals name="notes_activity_count">
+        <item quantity="one">%1$d activity entry</item>
+        <item quantity="other">%1$d activity entries</item>
+    </plurals>
+    <string name="notes_empty">No notes or activity yet.</string>
+    <string name="notes_add_label">Add a note</string>
+    <string name="notes_edit_label">Edit note</string>
+    <string name="notes_placeholder">Record a decision, a fact, or what you are waiting for</string>
+    <string name="notes_add_action">Add note</string>
+    <string name="notes_save_action">Save note</string>
+    <string name="notes_cancel_action">Cancel edit</string>
+    <string name="notes_length_error">Keep notes under %1$d characters</string>
+    <string name="notes_length_counter">%1$d/%2$d</string>
+    <string name="notes_edited_label">%1$s, edited</string>
+</resources>

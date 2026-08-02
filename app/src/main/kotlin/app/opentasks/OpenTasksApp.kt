@@ -3,13 +3,16 @@ package app.opentasks
 import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -91,6 +94,8 @@ import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SearchResult
@@ -99,6 +104,7 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
+import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.feature.home.HomeScreen
 import app.opentasks.feature.more.MoreScreen
 import app.opentasks.feature.projects.NewProjectSheet
@@ -178,6 +184,7 @@ fun OpenTasksApp(
     viewModel: WorkspaceViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
     encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
+    attachmentViewModel: AttachmentIntakeViewModel = viewModel(),
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -197,6 +204,11 @@ fun OpenTasksApp(
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
         val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
         val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+        val attachmentStates by attachmentViewModel.rowStates.collectAsStateWithLifecycle()
+        val attachmentSetupRequired by
+            attachmentViewModel.setupRequired.collectAsStateWithLifecycle()
+        val attachmentCacheUsage by
+            attachmentViewModel.cacheUsageBytes.collectAsStateWithLifecycle()
         val snackbarHostState = remember { SnackbarHostState() }
         val accessibilityManager = LocalAccessibilityManager.current
         val showNavigationLabels =
@@ -216,6 +228,25 @@ fun OpenTasksApp(
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
+        var openBackupOnMore by rememberSaveable { mutableStateOf(false) }
+        // The task the picker was opened for; a process death between the
+        // launch and the result simply drops the intake rather than attaching
+        // to whatever is selected when the app comes back.
+        var attachmentTaskValue by rememberSaveable { mutableStateOf<String?>(null) }
+        val acceptPickedAttachment: (Uri?) -> Unit = { uri ->
+            attachmentTaskValue?.let(::TaskId)?.let { taskId ->
+                attachmentViewModel.addFromUri(taskId, uri)
+            }
+            attachmentTaskValue = null
+        }
+        val photoPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.PickVisualMedia(),
+            acceptPickedAttachment,
+        )
+        val documentPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+            acceptPickedAttachment,
+        )
         var rawFolds by remember { mutableStateOf(emptyList<RawFold>()) }
         var permissionStateVersion by remember { mutableIntStateOf(0) }
         var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -247,7 +278,10 @@ fun OpenTasksApp(
 
         fun navigate(route: WorkspaceRoute) {
             if (backStack.lastOrNull() == route) return
-            if (route != MoreRoute) openInsightsOnMore = false
+            if (route != MoreRoute) {
+                openInsightsOnMore = false
+                openBackupOnMore = false
+            }
             backStack.clear()
             backStack.add(route)
             if (route != TasksRoute) viewModel.closeTask()
@@ -255,8 +289,36 @@ fun OpenTasksApp(
         }
 
         fun navigateFromPrimaryNavigation(route: WorkspaceRoute) {
-            if (route == MoreRoute) openInsightsOnMore = false
+            if (route == MoreRoute) {
+                openInsightsOnMore = false
+                openBackupOnMore = false
+            }
             navigate(route)
+        }
+
+        /**
+         * Attachments never fork a second backup setup: the one route is the
+         * existing Backup & recovery screen.
+         */
+        fun openBackupRecovery() {
+            openInsightsOnMore = false
+            openBackupOnMore = true
+            navigate(MoreRoute)
+        }
+
+        fun pickAttachment(taskId: TaskId, fromPhotos: Boolean) {
+            if (attachmentSetupRequired) {
+                openBackupRecovery()
+                return
+            }
+            attachmentTaskValue = taskId.value
+            if (fromPhotos) {
+                photoPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
+                )
+            } else {
+                documentPicker.launch(arrayOf("*/*"))
+            }
         }
 
         fun openNotificationSettings() {
@@ -342,6 +404,24 @@ fun OpenTasksApp(
             if (openTaskSignal > 0 && taskId != null) {
                 viewModel.selectTask(taskId)
                 navigate(TasksRoute)
+            }
+        }
+
+        LaunchedEffect(attachmentViewModel, activity) {
+            for (intent in attachmentViewModel.deliveries) {
+                try {
+                    activity.startActivity(intent)
+                } catch (_: ActivityNotFoundException) {
+                    snackbarHostState.showSnackbar(
+                        activity.getString(R.string.attachment_no_viewer),
+                    )
+                }
+            }
+        }
+
+        LaunchedEffect(attachmentViewModel, activity) {
+            for (message in attachmentViewModel.messages) {
+                snackbarHostState.showSnackbar(activity.getString(message))
             }
         }
 
@@ -644,6 +724,52 @@ fun OpenTasksApp(
                                     preciseRemindersAvailable = preciseRemindersAvailable,
                                     onEnableNotifications = ::enableNotifications,
                                     onEnablePreciseReminders = ::enablePreciseReminders,
+                                    notes = snapshot.notes,
+                                    activityEntries = snapshot.activityEntries,
+                                    onAddNote = { taskId, body ->
+                                        viewModel.execute(
+                                            DomainCommand.AddNote(
+                                                taskId = taskId,
+                                                projectId = null,
+                                                body = body,
+                                            ),
+                                        )
+                                    },
+                                    onUpdateNote = { noteId, body ->
+                                        viewModel.execute(
+                                            DomainCommand.UpdateNote(noteId, body),
+                                        )
+                                    },
+                                    onDeleteNote = { noteId ->
+                                        viewModel.execute(DomainCommand.DeleteNote(noteId))
+                                    },
+                                    attachments = snapshot.attachments,
+                                    attachmentStates = attachmentStates,
+                                    attachmentSetupRequired = attachmentSetupRequired,
+                                    onAddAttachmentFromPhotos = { taskId ->
+                                        pickAttachment(taskId, fromPhotos = true)
+                                    },
+                                    onAddAttachmentFromFiles = { taskId ->
+                                        pickAttachment(taskId, fromPhotos = false)
+                                    },
+                                    onOpenAttachment = { attachmentId ->
+                                        snapshot.attachment(attachmentId)
+                                            ?.let(attachmentViewModel::open)
+                                    },
+                                    onShareAttachment = { attachmentId ->
+                                        snapshot.attachment(attachmentId)
+                                            ?.let(attachmentViewModel::share)
+                                    },
+                                    onDeleteAttachment = { attachmentId ->
+                                        viewModel.execute(
+                                            DomainCommand.DeleteAttachment(attachmentId),
+                                        )
+                                    },
+                                    onRetryAttachment = { attachmentId ->
+                                        snapshot.attachment(attachmentId)
+                                            ?.let(attachmentViewModel::retry)
+                                    },
+                                    onOpenAttachmentSetup = ::openBackupRecovery,
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -737,6 +863,25 @@ fun OpenTasksApp(
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
                                     },
+                                    notes = snapshot.notes,
+                                    activityEntries = snapshot.activityEntries,
+                                    onAddNote = { projectId, body ->
+                                        viewModel.execute(
+                                            DomainCommand.AddNote(
+                                                taskId = null,
+                                                projectId = projectId,
+                                                body = body,
+                                            ),
+                                        )
+                                    },
+                                    onUpdateNote = { noteId, body ->
+                                        viewModel.execute(
+                                            DomainCommand.UpdateNote(noteId, body),
+                                        )
+                                    },
+                                    onDeleteNote = { noteId ->
+                                        viewModel.execute(DomainCommand.DeleteNote(noteId))
+                                    },
                                 )
                             }
                             entry<ScheduleRoute> {
@@ -762,6 +907,10 @@ fun OpenTasksApp(
                                     openInsights = openInsightsOnMore,
                                     onInsightsClosed = {
                                         openInsightsOnMore = false
+                                    },
+                                    openBackupRecovery = openBackupOnMore,
+                                    onBackupRecoveryClosed = {
+                                        openBackupOnMore = false
                                     },
                                     onInsightsRangeChange = viewModel::setInsightsRange,
                                     onInsightsProjectFilter =
@@ -840,6 +989,9 @@ fun OpenTasksApp(
                                         encryptedBackupViewModel::disconnect,
                                     onDeleteRemoteHistory =
                                         encryptedBackupViewModel::deleteHistory,
+                                    attachmentCacheUsageBytes = attachmentCacheUsage,
+                                    onDeleteAttachmentContent =
+                                        attachmentViewModel::deleteRemoteContent,
                                 )
                             }
                         },
@@ -939,6 +1091,9 @@ fun OpenTasksApp(
         }
     }
 }
+
+private fun WorkspaceSnapshot.attachment(attachmentId: AttachmentId): Attachment? =
+    attachments.firstOrNull { it.id == attachmentId }
 
 private fun TaskEdit.toCommand(taskId: TaskId): DomainCommand.UpdateTask =
     DomainCommand.UpdateTask(

@@ -202,12 +202,13 @@ class BackupRecoveryScreenInstrumentedTest {
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
             .assertIsDisplayed()
         composeRule.onNodeWithText("Android backup package")
+            .performScrollTo()
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
             .assertIsDisplayed()
         composeRule.onNodeWithText(
             "Android backup is supplementary. A prepared package does not confirm that " +
                 "Android uploaded it.",
-        ).assertIsDisplayed()
+        ).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
 
         composeRule.onNode(
@@ -710,6 +711,57 @@ class BackupRecoveryScreenInstrumentedTest {
                 composeRule.waitForIdle()
             }
         }
+    }
+
+    @Test
+    fun cloudAttachmentsBlockShowsCacheUsageAndGuardsContentDeletion() {
+        val deleted = AtomicReference<String>()
+        composeRule.setContent {
+            OpenTasksTheme {
+                BackupRecoveryScreen(
+                    status = AndroidBackupStatus.Ready(PACKAGE_INFO),
+                    remoteStatus = RemoteBackupStatus.BackingUp(BackupGeneration(9)),
+                    attachmentCacheUsageBytes = 2_048,
+                    validatePassphrase = { _, _ -> RecoveryPassphraseValidation.Valid },
+                    onPrepare = {},
+                    onRetry = {},
+                    onOpenSystemSettings = {},
+                    onDeleteAttachmentContent = deleted::set,
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("cloud-attachments-heading")
+            .performScrollTo()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        composeRule.onNodeWithText("Temporary cache 2,048 bytes").assertExists()
+        composeRule.onNodeWithTag("attachments-delete-content")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.onNodeWithTag("encrypted-current-passphrase")
+            .performTextInput("correct horse battery")
+        composeRule.onNodeWithTag("encrypted-secret-submit").performClick()
+
+        assertEquals("correct horse battery", deleted.get())
+    }
+
+    @Test
+    fun cloudAttachmentsWithoutRemoteBackupOfferNoContentDeletion() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestScreen(AndroidBackupStatus.NotPrepared)
+            }
+        }
+
+        composeRule.onNodeWithTag("cloud-attachments-heading")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Connect an encrypted Google Drive backup before adding attachments.",
+        ).assertExists()
+        composeRule.onNodeWithTag("attachments-delete-content").assertDoesNotExist()
     }
 
     @androidx.compose.runtime.Composable

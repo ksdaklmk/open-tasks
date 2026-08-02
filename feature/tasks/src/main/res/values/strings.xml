@@ -1,3 +1,24 @@
 <resources>
     <string name="task_editing_state_description">Editing %1$s</string>
+
+    <string name="task_attachments_heading">Attachments</string>
+    <plurals name="task_attachment_count">
+        <item quantity="one">%1$d attachment</item>
+        <item quantity="other">%1$d attachments</item>
+    </plurals>
+    <string name="task_attachments_empty">No attachments yet.</string>
+    <string name="attachment_add_from_photos">Add from photos</string>
+    <string name="attachment_add_from_files">Add from files</string>
+    <string name="attachment_facts">%1$s bytes • %2$s</string>
+    <string name="attachment_state_remote">In cloud backup</string>
+    <string name="attachment_state_downloading">Downloading</string>
+    <string name="attachment_state_unavailable">Temporarily unavailable</string>
+    <string name="attachment_state_tombstoned">Removed</string>
+    <string name="attachment_state_failed">Could not be downloaded</string>
+    <string name="attachment_open_action">Open %1$s</string>
+    <string name="attachment_share_action">Share %1$s</string>
+    <string name="attachment_delete_action">Remove %1$s</string>
+    <string name="attachment_retry_action">Try %1$s again</string>
+    <string name="attachments_setup_required">Attachment content is kept in your encrypted Google Drive backup. Set that up first, then attachments can be added here.</string>
+    <string name="attachments_setup_action">Open Backup &amp; recovery</string>
 </resources>

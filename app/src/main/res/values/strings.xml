@@ -9,4 +9,19 @@
     <string name="reminder_notification_fallback">Task reminder</string>
     <string name="reminder_action_snooze">Snooze 15 min</string>
     <string name="reminder_action_complete">Complete</string>
+
+    <string name="attachment_default_name">Attachment</string>
+    <string name="attachment_adding">Adding attachment…</string>
+    <string name="attachment_added">Attachment added</string>
+    <string name="attachment_source_unavailable">That file could not be read.</string>
+    <string name="attachment_too_large">That file is too large to attach.</string>
+    <string name="attachment_unavailable">Attachments are temporarily unavailable. Try again.</string>
+    <string name="attachment_authorisation_required">Sign in to Google Drive to work with attachments.</string>
+    <string name="attachment_storage_full">There is not enough Google Drive storage for this attachment.</string>
+    <string name="attachment_damaged">That attachment is damaged or incompatible.</string>
+    <string name="attachment_content_missing">That attachment\'s content is no longer available.</string>
+    <string name="attachment_download_failed">The attachment could not be downloaded. Try again.</string>
+    <string name="attachment_no_viewer">No app on this device can open that attachment.</string>
+    <string name="attachment_content_deleted">Attachment content deleted</string>
+    <string name="attachment_content_delete_refused">Attachment content was not deleted.</string>
 </resources>

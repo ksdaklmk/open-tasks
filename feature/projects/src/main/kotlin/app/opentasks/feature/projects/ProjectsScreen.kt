@@ -80,11 +80,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
+import app.opentasks.core.designsystem.NotesTimelineSection
 import app.opentasks.core.designsystem.ProjectProgressRow
 import app.opentasks.core.designsystem.SectionHeader
+import app.opentasks.core.designsystem.TimelineIconKind
+import app.opentasks.core.designsystem.TimelineItem
 import app.opentasks.core.designsystem.readableName
+import app.opentasks.core.designsystem.sortedTimelineItems
+import app.opentasks.core.designsystem.timelineTimestampLabel
+import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
@@ -136,6 +144,11 @@ fun ProjectsScreen(
     onDeleteMilestone: (MilestoneId) -> Unit = {},
     onCaptureTemplate: (ProjectId, String) -> Unit = { _, _ -> },
     onOpenTask: (TaskId) -> Unit,
+    notes: List<Note> = emptyList(),
+    activityEntries: List<ActivityEntry> = emptyList(),
+    onAddNote: (ProjectId, String) -> Unit = { _, _ -> },
+    onUpdateNote: (NoteId, String) -> Unit = { _, _ -> },
+    onDeleteNote: (NoteId) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val activeTasks = tasks.filter { it.deletedAt == null }
@@ -169,6 +182,11 @@ fun ProjectsScreen(
             onDeleteMilestone = onDeleteMilestone,
             onCaptureTemplate = onCaptureTemplate,
             onOpenTask = onOpenTask,
+            notes = notes.filter { it.projectId == selectedProject.id },
+            activity = activityEntries.filter { it.projectId == selectedProject.id },
+            onAddNote = { onAddNote(selectedProject.id, it) },
+            onUpdateNote = onUpdateNote,
+            onDeleteNote = onDeleteNote,
             modifier = modifier.fillMaxSize(),
         )
         return
@@ -225,6 +243,11 @@ fun ProjectsScreen(
                     onDeleteMilestone = onDeleteMilestone,
                     onCaptureTemplate = onCaptureTemplate,
                     onOpenTask = onOpenTask,
+                    notes = notes.filter { it.projectId == selectedProject.id },
+                    activity = activityEntries.filter { it.projectId == selectedProject.id },
+                    onAddNote = { onAddNote(selectedProject.id, it) },
+                    onUpdateNote = onUpdateNote,
+                    onDeleteNote = onDeleteNote,
                     modifier = Modifier
                         .weight(1f - listPaneFraction)
                         .testTag("detailPane"),
@@ -346,6 +369,11 @@ private fun ProjectWorkbench(
     onDeleteMilestone: (MilestoneId) -> Unit,
     onCaptureTemplate: (ProjectId, String) -> Unit,
     onOpenTask: (TaskId) -> Unit,
+    notes: List<Note>,
+    activity: List<ActivityEntry>,
+    onAddNote: (String) -> Unit,
+    onUpdateNote: (NoteId, String) -> Unit,
+    onDeleteNote: (NoteId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by rememberSaveable(project.id.value) { mutableStateOf(project.name) }
@@ -664,6 +692,23 @@ private fun ProjectWorkbench(
 
         items(projectTasks, key = { it.id.value }) { task ->
             ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+        }
+
+        item {
+            Spacer(Modifier.height(28.dp))
+            // The workbench is one call site for every project, so the
+            // in-progress note is scoped to the selected one: selecting
+            // another project must not leave a draft — or an open edit —
+            // pointing at the previous project's note.
+            androidx.compose.runtime.key(project.id.value) {
+                ProjectNotesSection(
+                    notes = notes,
+                    activity = activity,
+                    onAddNote = onAddNote,
+                    onUpdateNote = onUpdateNote,
+                    onDeleteNote = onDeleteNote,
+                )
+            }
         }
 
         item {
@@ -1643,6 +1688,58 @@ private fun MilestoneRow(
         )
     }
 }
+
+/**
+ * A project's notes and its generated activity, newest first.
+ *
+ * The behaviour is the shared section's, exactly as the task surface uses it,
+ * so the two cannot drift; what belongs here is only the mapping between
+ * project-owned records and timeline entries.
+ *
+ * The in-progress note is scoped to one project by the caller; see the `key`
+ * around the call in `ProjectWorkbench`.
+ */
+@Composable
+private fun ProjectNotesSection(
+    notes: List<Note>,
+    activity: List<ActivityEntry>,
+    onAddNote: (String) -> Unit,
+    onUpdateNote: (NoteId, String) -> Unit,
+    onDeleteNote: (NoteId) -> Unit,
+) {
+    NotesTimelineSection(
+        items = projectTimelineItems(notes, activity),
+        noteCount = notes.size,
+        activityCount = activity.size,
+        onAddNote = onAddNote,
+        onUpdateNote = { key, body -> onUpdateNote(NoteId(key), body) },
+        onDeleteNote = { key -> onDeleteNote(NoteId(key)) },
+    )
+}
+
+@Composable
+private fun projectTimelineItems(
+    notes: List<Note>,
+    activity: List<ActivityEntry>,
+): List<TimelineItem> = sortedTimelineItems(
+    notes.map { note ->
+        (note.editedAt ?: note.createdAt) to TimelineItem(
+            key = note.id.value,
+            timestampLabel = timelineTimestampLabel(note.createdAt, note.editedAt),
+            body = note.body,
+            editable = true,
+            iconKind = TimelineIconKind.NOTE,
+        )
+    } + activity.map { entry ->
+        entry.createdAt to TimelineItem(
+            key = entry.id,
+            timestampLabel = timelineTimestampLabel(entry.createdAt),
+            body = entry.body,
+            editable = false,
+            iconKind = TimelineIconKind.EVENT,
+        )
+    },
+)
 
 private const val NEW_MILESTONE_KEY = "__new_milestone__"
 private const val MAX_MILESTONE_NAME_LENGTH = 120
