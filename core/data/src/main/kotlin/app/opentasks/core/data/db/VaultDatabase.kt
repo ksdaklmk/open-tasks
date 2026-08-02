@@ -452,6 +452,33 @@ interface TimeEntryDao {
     suspend fun delete(id: String): Int
 }
 
+@Dao
+interface AttachmentTransferDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(value: AttachmentTransferEntity)
+
+    @Query(
+        """
+        SELECT * FROM attachment_transfer
+        WHERE phase != 'REGISTERED'
+        ORDER BY createdAtEpochMillis, blobSetId
+        """,
+    )
+    suspend fun pending(): List<AttachmentTransferEntity>
+
+    @Query(
+        """
+        SELECT * FROM attachment_transfer
+        WHERE phase != 'REGISTERED' AND updatedAtEpochMillis < :beforeEpochMillis
+        ORDER BY updatedAtEpochMillis, blobSetId
+        """,
+    )
+    suspend fun stale(beforeEpochMillis: Long): List<AttachmentTransferEntity>
+
+    @Query("DELETE FROM attachment_transfer WHERE blobSetId = :blobSetId")
+    suspend fun delete(blobSetId: String): Int
+}
+
 @Database(
     entities = [
         VaultEntity::class,
@@ -489,6 +516,7 @@ abstract class VaultDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun workspaceDao(): WorkspaceDao
     abstract fun timeEntryDao(): TimeEntryDao
+    abstract fun attachmentTransferDao(): AttachmentTransferDao
     abstract fun legacySyncOperationDao(): LegacySyncOperationDao
     abstract fun backupJournalDao(): BackupJournalDao
     internal abstract fun backupMutationDao(): BackupMutationDao
