@@ -53,6 +53,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -193,24 +195,63 @@ class AttachmentOwnershipBoundaryTest {
         }
     }
 
+    /**
+     * Collection releases the bytes and records that it did, so the same
+     * record is never offered — or paid a provider round trip for — again.
+     */
     @Test
-    fun theExpectedTipCollectsARetiredBlobSetChunksFirst() = runBlocking {
+    fun collectingARetiredBlobSetReleasesItsBytesAndRetiresItAsACandidate() = runBlocking {
         withTimeout(5_000) {
-            retire(BLOB_SET, DELETED_AT)
+            val attachmentId = retire(BLOB_SET, DELETED_AT)
             store.publish(BLOB_SET, "manifest", MANIFEST_ROLE)
             store.publish(BLOB_SET, "chunk-0", CHUNK_ROLE)
+            val runtime = runtime(now = COLLECTABLE_AT)
 
-            val result = runtime(now = COLLECTABLE_AT).collectRetiredBytes()
+            val result = runtime.collectRetiredBytes()
 
             assertEquals(2, result.deletedObjects)
             assertEquals(listOf("chunk-0", "manifest"), store.deleted)
             assertEquals(1, sessionsOpened)
             assertEquals(1, sessionsClosed)
+
+            // The record survives collection; only its link to the released
+            // bytes is gone, which is what stops it qualifying again.
+            val collected = repository.currentWorkspace().attachments.single()
+            assertEquals(attachmentId, collected.id)
+            assertNull(collected.blobSetId)
+            assertNotNull(collected.deletedAt)
+            assertEquals("b".repeat(64), collected.contentHash)
+            assertEquals("receipt.pdf", collected.displayName)
+
+            assertEquals(NOTHING_COLLECTED, runtime.collectRetiredBytes())
+            assertEquals(1, sessionsOpened)
+        }
+    }
+
+    /**
+     * A blob set the lineage never listed was not released by this batch — a
+     * separately preserved lineage still holds those bytes under its own
+     * namespace tag.
+     */
+    @Test
+    fun aBlobSetThisLineageNeverHeldIsNeverRecordedAsCollected() = runBlocking {
+        withTimeout(5_000) {
+            retire(BLOB_SET, DELETED_AT)
+            val foreign = retire(FOREIGN_BLOB_SET, DELETED_AT)
+            store.publish(BLOB_SET, "chunk-0", CHUNK_ROLE)
+            store.publish(BLOB_SET, "manifest", MANIFEST_ROLE)
+
+            val result = runtime(now = COLLECTABLE_AT).collectRetiredBytes()
+
+            assertEquals(2, result.deletedObjects)
+            assertEquals(setOf(BLOB_SET), result.collectedBlobSets)
+            val untouched = repository.currentWorkspace().attachments.single { it.id == foreign }
+            assertEquals(FOREIGN_BLOB_SET, untouched.blobSetId)
         }
     }
 
     @Test
-    fun aTombstoneTheFallbackBaseDoesNotYetCoverIsNeverCollected() = runBlocking {
+    fun aTombstoneTheFallbackBaseDoesNotYetCoverOpensNoSession() = runBlocking {
         withTimeout(5_000) {
             retire(BLOB_SET, DELETED_AT)
             store.publish(BLOB_SET, "chunk-0", CHUNK_ROLE)
@@ -220,13 +261,31 @@ class AttachmentOwnershipBoundaryTest {
                 now = COLLECTABLE_AT,
             ).collectRetiredBytes()
 
-            assertEquals(0, result.deletedObjects)
+            assertEquals(NOTHING_COLLECTED, result)
+            assertEquals(0, sessionsOpened)
             assertEquals(emptyList<String>(), store.deleted)
         }
     }
 
+    /** The whole retention window costs no authorization and no listing. */
     @Test
-    fun aBlobSetAnotherLiveRecordStillReferencesIsNeverCollected() = runBlocking {
+    fun aRetiredBlobSetInsideItsRetentionWindowOpensNoSession() = runBlocking {
+        withTimeout(5_000) {
+            retire(BLOB_SET, DELETED_AT)
+            store.publish(BLOB_SET, "chunk-0", CHUNK_ROLE)
+
+            val result = runtime(
+                now = DELETED_AT.plus(Duration.ofDays(29)),
+            ).collectRetiredBytes()
+
+            assertEquals(NOTHING_COLLECTED, result)
+            assertEquals(0, sessionsOpened)
+            assertEquals(emptyList<String>(), store.calls)
+        }
+    }
+
+    @Test
+    fun aBlobSetAnotherLiveRecordStillReferencesOpensNoSession() = runBlocking {
         withTimeout(5_000) {
             retire(BLOB_SET, DELETED_AT)
             assertTrue(
@@ -238,7 +297,8 @@ class AttachmentOwnershipBoundaryTest {
 
             val result = runtime(now = COLLECTABLE_AT).collectRetiredBytes()
 
-            assertEquals(0, result.deletedObjects)
+            assertEquals(NOTHING_COLLECTED, result)
+            assertEquals(0, sessionsOpened)
             assertEquals(emptyList<String>(), store.deleted)
         }
     }
@@ -575,6 +635,7 @@ class AttachmentOwnershipBoundaryTest {
         val LINEAGE_ID = CloudLineageId.parse("22222222-2222-4222-8222-222222222222")
         val ROOT_CLAIM = ProviderObjectId.of("root-claim")
         val BLOB_SET = BlobSetId("66666666-6666-4666-8666-666666666666")
+        val FOREIGN_BLOB_SET = BlobSetId("77777777-7777-4777-8777-777777777777")
         val TASK_ID = OpenTasksFixtures.tasks.first().id
         val DELETED_AT: Instant = Instant.parse("2026-06-01T00:00:00Z")
         val COLLECTABLE_AT: Instant = DELETED_AT.plus(Duration.ofDays(31))

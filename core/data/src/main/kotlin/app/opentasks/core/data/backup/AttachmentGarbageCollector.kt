@@ -14,6 +14,12 @@ data class AttachmentGcResult(
     val deletedObjects: Int,
     val stoppedForOwnershipChange: Boolean,
     val blockers: Int,
+    /**
+     * Blob sets this batch proved the lineage no longer holds a chunk or a
+     * manifest for. Only these may be recorded as released: a blob set the
+     * lineage never listed is not one this batch collected.
+     */
+    val collectedBlobSets: Set<BlobSetId> = emptySet(),
 )
 
 data class GcCandidate(
@@ -24,6 +30,27 @@ data class GcCandidate(
     val coveredByPreviousBase: Boolean,
     val activelyReferenced: Boolean,
 )
+
+/**
+ * Whether a retired blob set's bytes may be released.
+ *
+ * Every retained recoverable base already contains the tombstone, no live
+ * record still names the blob set, and the retention window has passed.
+ *
+ * Callers apply this *before* they authorize anything, so a vault with nothing
+ * collectable pays no provider round trip at all;
+ * [AttachmentGarbageCollector.runBatch] applies it again against the candidates
+ * it was actually handed.
+ */
+fun GcCandidate.isCollectable(now: Instant, minimumRetention: Duration): Boolean =
+    !activelyReferenced &&
+        coveredByCurrentBase &&
+        coveredByPreviousBase &&
+        try {
+            !now.isBefore(deletedAt.plus(minimumRetention))
+        } catch (_: DateTimeException) {
+            false
+        }
 
 class AttachmentGarbageCollector(
     private val chainStore: OwnershipChainStore,
@@ -50,6 +77,7 @@ class AttachmentGarbageCollector(
             .keys
         var deleted = 0
         var blockers = 0
+        var collected = emptySet<BlobSetId>()
         for (role in listOf(CHUNK_ROLE, MANIFEST_ROLE)) {
             val scan = scanRole(
                 store = store,
@@ -58,13 +86,13 @@ class AttachmentGarbageCollector(
                 eligibleBlobSets = eligibleBlobSets,
                 maximumTargets = maximumDeletesPerBatch - deleted,
                 countBlockers = role == CHUNK_ROLE,
-            ) ?: return AttachmentGcResult(deleted, false, blockers + 1)
+            ) ?: return AttachmentGcResult(deleted, false, blockers + 1, collected)
             blockers += scan.blockers
             if (role == MANIFEST_ROLE && scan.eligibleChunkFound) break
             if (scan.targets.isEmpty()) continue
             val current = activeTip(key)
             if (current?.completeSha256 != expected.completeSha256) {
-                return AttachmentGcResult(deleted, true, blockers)
+                return AttachmentGcResult(deleted, true, blockers, collected)
             }
             for (remote in scan.targets) {
                 val removed = try {
@@ -75,13 +103,26 @@ class AttachmentGarbageCollector(
                     false
                 }
                 if (!removed) {
-                    return AttachmentGcResult(deleted, false, blockers + 1)
+                    return AttachmentGcResult(deleted, false, blockers + 1, collected)
                 }
                 deleted += 1
             }
+            // The manifest pass only runs once no eligible chunk is left, so
+            // everything it listed for an eligible blob set is that blob set's
+            // last object. One whose listing was fully targeted, and whose
+            // every target deleted, is a blob set this lineage no longer holds.
+            if (role == MANIFEST_ROLE) {
+                collected = scan.listedEligible
+                    .filter { (blobSetId, listed) ->
+                        scan.targets.count { it.blobSetId == blobSetId } == listed
+                    }
+                    .keys
+                    .map(::BlobSetId)
+                    .toSet()
+            }
             if (deleted == maximumDeletesPerBatch) break
         }
-        return AttachmentGcResult(deleted, false, blockers)
+        return AttachmentGcResult(deleted, false, blockers, collected)
     }
 
     private suspend fun activeTip(key: VaultKey): VerifiedOwnershipClaim? = try {
@@ -101,6 +142,7 @@ class AttachmentGarbageCollector(
         countBlockers: Boolean,
     ): RoleScan? {
         val targets = ArrayList<AttachmentListedObject>(maximumTargets)
+        val listedEligible = mutableMapOf<String, Int>()
         val seenTokens = mutableSetOf<String>()
         var token: String? = null
         var blockers = 0
@@ -122,6 +164,9 @@ class AttachmentGarbageCollector(
                     continue
                 }
                 val eligible = remote.blobSetId in eligibleBlobSets
+                if (eligible) {
+                    remote.blobSetId?.let { listedEligible[it] = (listedEligible[it] ?: 0) + 1 }
+                }
                 if (eligible && remote.role == CHUNK_ROLE) eligibleChunkFound = true
                 if (eligible && remote.role == role && targets.size < maximumTargets) {
                     targets += remote
@@ -130,18 +175,11 @@ class AttachmentGarbageCollector(
             token = page.second
             if (token != null && !seenTokens.add(token)) return null
         } while (token != null)
-        return RoleScan(targets, blockers, eligibleChunkFound)
+        return RoleScan(targets, blockers, eligibleChunkFound, listedEligible)
     }
 
     private fun eligible(candidate: GcCandidate, now: Instant): Boolean =
-        !candidate.activelyReferenced &&
-            candidate.coveredByCurrentBase &&
-            candidate.coveredByPreviousBase &&
-            try {
-                !now.isBefore(candidate.deletedAt.plus(minimumRetention))
-            } catch (_: DateTimeException) {
-                false
-            }
+        candidate.isCollectable(now, minimumRetention)
 
     private companion object {
         const val CHUNK_ROLE = "attachment-chunk"
@@ -154,5 +192,7 @@ class AttachmentGarbageCollector(
         val targets: List<AttachmentListedObject>,
         val blockers: Int,
         val eligibleChunkFound: Boolean,
+        /** Understood, eligible objects this scan listed, per blob set. */
+        val listedEligible: Map<String, Int>,
     )
 }

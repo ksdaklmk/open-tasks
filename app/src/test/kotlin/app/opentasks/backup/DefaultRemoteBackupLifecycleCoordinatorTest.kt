@@ -71,6 +71,7 @@ import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WriterEpoch
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -79,6 +80,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -434,8 +436,31 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         assertEquals(LifecycleResult.AttachmentContentDeleted, result)
         assertEquals(RemoteBackupLifecycle.ACTIVE, fixture.state.configuration.lifecycle)
         assertEquals(listOf("chunk-a", "manifest-a"), attachments.deleted)
+        // Records that still name a blob set must stop being offered for
+        // collection; their bytes no longer exist anywhere in the lineage.
+        assertEquals(1, fixture.contentReleaseSignals.get())
         assertTrue(fixture.objects.deleted.isEmpty())
         assertTrue(passphrase.all { it == '\u0000' })
+        fixture.close()
+    }
+
+    /**
+     * A pass that has not exhausted the namespace has released nothing yet, so
+     * the records must keep naming their blob sets.
+     */
+    @Test
+    fun anUnfinishedAttachmentContentDeletionSignalsNoRelease() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            *(0 until 40)
+                .map { attachmentListed("blob-$it", "chunk-$it", ATTACHMENT_CHUNK_ROLE) }
+                .toTypedArray(),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertNotEquals(LifecycleResult.AttachmentContentDeleted, result)
+        assertEquals(0, fixture.contentReleaseSignals.get())
         fixture.close()
     }
 
@@ -788,6 +813,9 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         publicationGate: Mutex = Mutex(),
         attachmentStore: RecordingAttachmentStore = RecordingAttachmentStore(),
     ) {
+        /** Counts the "this lineage now holds no attachment content" signal. */
+        val contentReleaseSignals = AtomicInteger()
+
         val crypto = TinkVaultCrypto()
         private val key = crypto.createKey()
         private val envelope = crypto.wrapForRecovery(key, PASSPHRASE.copyOf())
@@ -813,6 +841,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
                 attachmentStore.onDelete = { deletionEvents += "attachment:$it" }
                 attachmentStore
             },
+            onAttachmentContentReleased = { contentReleaseSignals.incrementAndGet() },
             ownershipStore = { chain },
             ownershipCodec = codec,
             publicationCodec = publicationCodec,

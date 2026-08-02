@@ -1,5 +1,6 @@
 package app.opentasks.core.data
 
+import app.opentasks.core.data.backup.InMemoryBackupJournal
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
@@ -155,6 +156,59 @@ class InMemoryAttachmentCommandTest {
         }
     }
 
+    /**
+     * Collection releases cloud bytes, not the record: everything that says
+     * what the content was survives, and there is nothing for a person to undo
+     * or be told about.
+     */
+    @Test
+    fun markingContentCollectedClearsOnlyTheBlobSetAndJournalsTheAttachment() = runBlocking {
+        withTimeout(5_000) {
+            val journal = InMemoryBackupJournal()
+            val repository = InMemoryVaultRepository(backupJournal = journal)
+            val original = attachment(
+                repository.currentWorkspace().tasks.first(),
+                blobSetId = BlobSetId("blob-set"),
+            )
+            repository.execute(DomainCommand.RegisterAttachment(original))
+            repository.execute(
+                DomainCommand.DeleteAttachment(
+                    original.id,
+                    Instant.parse("2026-08-02T00:00:00Z"),
+                ),
+            )
+            val retired = repository.currentWorkspace().attachments.single()
+            val activitiesBefore = repository.currentWorkspace().activityEntries.size
+            val entriesBefore = journal.entries.size
+
+            val result = repository.execute(
+                DomainCommand.MarkAttachmentContentCollected(
+                    original.id,
+                    Instant.parse("2026-09-02T00:00:00Z"),
+                ),
+            ) as CommandResult.Success
+
+            val collected = repository.currentWorkspace().attachments.single()
+            assertNull(result.undo)
+            assertNull(collected.blobSetId)
+            assertEquals(retired.copy(blobSetId = null, revision = collected.revision), collected)
+            assertTrue(collected.revision.logicalCounter > retired.revision.logicalCounter)
+            assertEquals(activitiesBefore, repository.currentWorkspace().activityEntries.size)
+            assertTrue(
+                journal.entries.drop(entriesBefore).any {
+                    it.objectType == "ATTACHMENT" && it.objectId == original.id.value
+                },
+            )
+
+            // Recording it again is a no-op, so a repeated pass appends no
+            // journal entry and advances no generation.
+            val entriesAfterFirst = journal.entries.size
+            repository.execute(DomainCommand.MarkAttachmentContentCollected(original.id))
+            assertEquals(collected, repository.currentWorkspace().attachments.single())
+            assertEquals(entriesAfterFirst, journal.entries.size)
+        }
+    }
+
     private suspend fun rejectionOf(attachment: Attachment): CommandResult.Rejected =
         repository.execute(DomainCommand.RegisterAttachment(attachment)) as CommandResult.Rejected
 
@@ -166,6 +220,7 @@ class InMemoryAttachmentCommandTest {
         byteCount: Long = 1,
         contentHash: String = "a".repeat(64),
         chunkCount: Int = 1,
+        blobSetId: BlobSetId? = null,
     ) = Attachment(
         id = AttachmentId(id),
         taskId = taskId,
@@ -173,7 +228,7 @@ class InMemoryAttachmentCommandTest {
         mimeType = "application/pdf",
         byteCount = byteCount,
         contentHash = contentHash,
-        blobSetId = null,
+        blobSetId = blobSetId,
         chunkCount = chunkCount,
         deletedAt = null,
         revision = Revision(task.revision.deviceId, 1, 0),

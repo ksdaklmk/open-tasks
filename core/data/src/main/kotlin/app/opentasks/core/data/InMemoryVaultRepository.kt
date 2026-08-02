@@ -223,6 +223,8 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.RegisterAttachment -> registerAttachment(command)
             is DomainCommand.DeleteAttachment -> deleteAttachment(command)
             is DomainCommand.RestoreAttachment -> restoreAttachment(command)
+            is DomainCommand.MarkAttachmentContentCollected ->
+                markAttachmentContentCollected(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2215,6 +2217,38 @@ class InMemoryVaultRepository internal constructor(
             attachments = current.attachments.map { if (it.id == restored.id) restored else it },
         )
         return CommandResult.Success("Attachment restored")
+    }
+
+    private fun markAttachmentContentCollected(
+        command: DomainCommand.MarkAttachmentContentCollected,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val attachment = current.attachments.firstOrNull { it.id == command.attachmentId }
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Attachment no longer exists.",
+            )
+        // Already recorded: writing again would append a journal entry that
+        // changes nothing and advance the backup generation for it.
+        if (attachment.blobSetId == null) {
+            return CommandResult.Success("Attachment content was already collected")
+        }
+        val collected = attachment.copy(
+            blobSetId = null,
+            revision = attachment.revision.copy(
+                wallTimeMillis = maxOf(
+                    attachment.revision.wallTimeMillis + 1,
+                    command.collectedAt.toEpochMilli(),
+                ),
+                logicalCounter = attachment.revision.logicalCounter + 1,
+            ),
+        )
+        mutableWorkspace.value = current.copy(
+            attachments = current.attachments.map {
+                if (it.id == collected.id) collected else it
+            },
+        )
+        return CommandResult.Success("Attachment content collected")
     }
 
     private fun validateTimeEntry(

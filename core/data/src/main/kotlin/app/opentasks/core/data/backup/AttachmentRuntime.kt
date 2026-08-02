@@ -5,6 +5,7 @@ import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.data.AuthenticatedCloudObjectCodec
 import app.opentasks.core.data.db.AttachmentTransferDao
 import app.opentasks.core.domain.AttachmentBlobStore
+import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.Attachment
@@ -15,6 +16,7 @@ import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.VaultId
 import java.io.OutputStream
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -68,6 +70,7 @@ class AttachmentRuntime(
     private val cache: AttachmentCacheStore,
     private val contentKeyStore: VaultContentKeyStore,
     private val openSession: suspend (RemoteBackupConfiguration) -> AttachmentSessionResult,
+    private val minimumRetention: Duration = Duration.ofDays(30),
     private val now: () -> Instant = Instant::now,
 ) {
     private val stopped = AtomicBoolean()
@@ -176,16 +179,19 @@ class AttachmentRuntime(
      * Collects the bytes of blob sets whose tombstone every retained
      * recoverable base already contains.
      *
-     * Nothing is authorized when there is no retired blob set to consider, and
-     * a chain tip this installation no longer holds stops the pass before the
-     * namespace is listed.
+     * Eligibility is decided entirely from local state first, so a vault with
+     * nothing collectable — the ordinary case, including the whole retention
+     * window — authorizes nothing, resolves no ownership chain, and lists no
+     * namespace. A chain tip this installation no longer holds then stops the
+     * pass before the namespace is listed, and what the batch proves it
+     * released is recorded so the same records are never offered again.
      */
     suspend fun collectRetiredBytes(): AttachmentGcResult {
         val configuration = activeConfiguration() ?: return NOTHING_COLLECTED
-        val candidates = candidates(configuration)
-        if (candidates.isEmpty()) return NOTHING_COLLECTED
+        val retired = collectable(configuration)
+        if (retired.isEmpty()) return NOTHING_COLLECTED
         val key = openContentKey() ?: return NOTHING_COLLECTED
-        return try {
+        val result = try {
             val opened = session(configuration) as? AttachmentSessionResult.Opened
                 ?: return NOTHING_COLLECTED
             opened.session.use { session ->
@@ -196,11 +202,76 @@ class AttachmentRuntime(
                         chainStore = session.ownershipChainStore,
                         rootClaimProviderId = configuration.rootClaimProviderId,
                         contentKey = { key },
-                    ).runBatch(session.blobStore, candidates, now())
+                        minimumRetention = minimumRetention,
+                    ).runBatch(session.blobStore, retired.map { it.candidate }, now())
                 }
             }
         } finally {
             key.close()
+        }
+        recordCollected(retired, result.collectedBlobSets)
+        return result
+    }
+
+    /**
+     * Records that the lineage holds no attachment content at all.
+     *
+     * The destructive attachment action removes the whole namespace, so
+     * afterwards no record's bytes exist — including those of records nothing
+     * has retired. Recording it is what keeps every one of them from being
+     * offered for collection, and paying a provider round trip, for ever.
+     */
+    suspend fun recordAllContentCollected() {
+        if (stopped.get()) return
+        val attachments = try {
+            repository.currentWorkspace().attachments
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return
+        }
+        attachments.forEach { attachment ->
+            if (attachment.blobSetId == null) return@forEach
+            try {
+                repository.execute(
+                    DomainCommand.MarkAttachmentContentCollected(attachment.id, now()),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // A later invocation records what this one could not.
+            }
+        }
+    }
+
+    /**
+     * Records that the lineage no longer holds a blob set's bytes.
+     *
+     * Without this a retired record stays a collection candidate for ever, and
+     * every later verified publication would authorize, resolve the ownership
+     * chain, and page the whole namespace to delete nothing. Clearing
+     * `blobSetId` is also exactly what the open path already reads as "these
+     * bytes are gone", so the marker states a fact the product understands
+     * rather than inventing bookkeeping beside it.
+     *
+     * A write that fails leaves the record a candidate, which is the safe
+     * direction: the pass is repeated, not skipped.
+     */
+    private suspend fun recordCollected(
+        retired: List<RetiredBlobSet>,
+        collectedBlobSets: Set<BlobSetId>,
+    ) {
+        retired.forEach { entry ->
+            if (entry.candidate.blobSetId !in collectedBlobSets) return@forEach
+            try {
+                repository.execute(
+                    DomainCommand.MarkAttachmentContentCollected(entry.attachmentId, now()),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The bytes are gone either way; a later pass records it again.
+            }
         }
     }
 
@@ -290,17 +361,24 @@ class AttachmentRuntime(
     }
 
     /**
-     * Turns retired attachment records into collection candidates.
+     * The retired records whose bytes may be released right now.
      *
      * Coverage is decided by the generation each retained base publishes: a
      * tombstone older than both is present in every recoverable base, so
      * removing its bytes can no longer make a recovery incomplete. A lineage
      * that retains only one base is covered by that one. A blob set another
-     * live record still names is never a candidate for removal at all.
+     * live record still names, or one already recorded as collected — it has
+     * no `blobSetId` left — is not offered at all.
+     *
+     * The final eligibility predicate is applied here rather than left to the
+     * collector, because everything it needs is local: deciding it after
+     * authorizing would make every publication pay a provider round trip
+     * throughout the retention window and for every tombstone a retained base
+     * does not yet cover.
      */
-    private suspend fun candidates(
+    private suspend fun collectable(
         configuration: RemoteBackupConfiguration,
-    ): List<GcCandidate> {
+    ): List<RetiredBlobSet> {
         val currentGeneration = configuration.currentPublication?.generation?.value
             ?: return emptyList()
         val previousGeneration = configuration.previousPublication?.generation?.value
@@ -312,12 +390,13 @@ class AttachmentRuntime(
         } catch (_: Exception) {
             return emptyList()
         }
+        val moment = now()
         val live = attachments.filter { it.deletedAt == null }.mapNotNull { it.blobSetId }.toSet()
         return attachments.mapNotNull { attachment ->
             val blobSetId = attachment.blobSetId ?: return@mapNotNull null
             val deletedAt = attachment.deletedAt ?: return@mapNotNull null
             val tombstoneGeneration = tombstoneGeneration(attachment.id) ?: return@mapNotNull null
-            GcCandidate(
+            val candidate = GcCandidate(
                 blobSetId = blobSetId,
                 deletedAt = deletedAt,
                 tombstoneGeneration = tombstoneGeneration,
@@ -325,6 +404,8 @@ class AttachmentRuntime(
                 coveredByPreviousBase = tombstoneGeneration <= previousGeneration,
                 activelyReferenced = blobSetId in live,
             )
+            if (!candidate.isCollectable(moment, minimumRetention)) return@mapNotNull null
+            RetiredBlobSet(attachmentId = attachment.id, candidate = candidate)
         }
     }
 
@@ -338,6 +419,12 @@ class AttachmentRuntime(
     } catch (_: Exception) {
         null
     }
+
+    /** A retired record and the collection candidate its blob set makes. */
+    private data class RetiredBlobSet(
+        val attachmentId: AttachmentId,
+        val candidate: GcCandidate,
+    )
 
     private companion object {
         val NOTHING_COLLECTED = AttachmentGcResult(

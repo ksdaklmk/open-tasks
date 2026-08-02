@@ -372,6 +372,7 @@ object AppModule {
             publicationCodec = publicationCodec,
             configurator = remoteConfigurator,
             publicationGate = publicationGate,
+            onAttachmentContentReleased = attachmentRuntime::recordAllContentCollected,
         )
         val remoteStatus = observeRemoteBackupStatus(
             runtime.remoteBackupStore.observeActive(runtime.vaultId),

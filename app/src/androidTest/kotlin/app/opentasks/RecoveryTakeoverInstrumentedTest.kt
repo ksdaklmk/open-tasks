@@ -111,6 +111,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -540,8 +541,13 @@ class RecoveryTakeoverInstrumentedTest {
                             DomainCommand.DeleteAttachment(attachmentId, DELETED_AT),
                         ) is CommandResult.Success,
                     )
+                    // A cannot reach the namespace for collection either. It
+                    // is refused locally first — the base it retains does not
+                    // cover the retirement it just recorded — and the refusal
+                    // that follows a tip change is proven directly in
+                    // AttachmentOwnershipBoundaryTest.
                     assertEquals(
-                        AttachmentGcResult(0, true, 0),
+                        AttachmentGcResult(0, false, 0),
                         attachmentsA.collectRetiredBytes(),
                     )
                     assertEquals(namespaceBeforeStaleA, blobs.all().size)
@@ -614,7 +620,19 @@ class RecoveryTakeoverInstrumentedTest {
                     val collected = attachmentsB.collectRetiredBytes()
                     assertEquals(4, collected.deletedObjects)
                     assertEquals(2, blobs.entries(lineage).size)
-                    assertEquals(2, runtimeB.repository.currentWorkspace().attachments.size)
+
+                    // The record survives collection with everything that says
+                    // what its content was; only the link to released bytes is
+                    // gone, which is what stops it being offered again.
+                    val afterCollection = runtimeB.repository.currentWorkspace().attachments
+                    assertEquals(2, afterCollection.size)
+                    val collectedRecord = afterCollection.single { it.id == recovered.id }
+                    assertNull(collectedRecord.blobSetId)
+                    assertEquals(DELETED_AT, collectedRecord.deletedAt)
+                    assertEquals(recovered.contentHash, collectedRecord.contentHash)
+                    assertEquals(recovered.displayName, collectedRecord.displayName)
+                    assertEquals(recovered.byteCount, collectedRecord.byteCount)
+                    assertEquals(AttachmentGcResult(0, false, 0), attachmentsB.collectRetiredBytes())
 
                     // Disconnect keeps every record and every cached frame.
                     val bLifecycle = lifecycle(

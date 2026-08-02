@@ -199,6 +199,13 @@ class DefaultRemoteBackupLifecycleCoordinator(
     private val openAttachmentStore:
         (CreateOnlyDriveTransport, CloudLineageId) -> AttachmentBlobStore =
         { transport, lineageId -> CreateOnlyDriveAttachmentBlobStore(transport, lineageId) },
+    /**
+     * Told once the lineage holds no attachment content at all, so records
+     * that still name a blob set stop being offered for collection. Without it
+     * every later publication would pay a provider round trip to discover that
+     * bytes it already deleted are gone.
+     */
+    private val onAttachmentContentReleased: suspend () -> Unit = {},
     private val now: () -> Instant = Instant::now,
     private val newClaimId: () -> OwnershipClaimId = OwnershipClaimId::new,
     private val publicationGate: Mutex = Mutex(),
@@ -459,6 +466,15 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     next,
                 ) ?: return failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
                 if (next.phase == AttachmentDeletionPhase.COMPLETED.name) {
+                    // Durable first: the records may only claim their bytes
+                    // are gone once the remote pass says so.
+                    try {
+                        onAttachmentContentReleased()
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        // The bytes are gone either way; a later pass records it.
+                    }
                     return LifecycleResult.AttachmentContentDeleted
                 }
                 continue

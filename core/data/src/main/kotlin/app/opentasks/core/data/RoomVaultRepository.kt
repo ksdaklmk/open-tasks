@@ -242,6 +242,8 @@ class RoomVaultRepository(
                 is DomainCommand.RegisterAttachment -> registerAttachment(command)
                 is DomainCommand.DeleteAttachment -> deleteAttachment(command)
                 is DomainCommand.RestoreAttachment -> restoreAttachment(command)
+                is DomainCommand.MarkAttachmentContentCollected ->
+                    markAttachmentContentCollected(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2499,6 +2501,36 @@ class RoomVaultRepository(
         }
         database.workspaceDao().upsertAttachment(command.attachment.copy(deletedAt = null).toEntity())
         return CommandResult.Success("Attachment restored")
+    }
+
+    private suspend fun markAttachmentContentCollected(
+        command: DomainCommand.MarkAttachmentContentCollected,
+    ): CommandResult {
+        val attachment = database.workspaceDao()
+            .getAttachmentById(command.attachmentId.value)
+            ?.toModel()
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Attachment no longer exists.",
+            )
+        // Already recorded: writing again would append a journal entry that
+        // changes nothing and advance the backup generation for it.
+        if (attachment.blobSetId == null) {
+            return CommandResult.Success("Attachment content was already collected")
+        }
+        database.workspaceDao().upsertAttachment(
+            attachment.copy(
+                blobSetId = null,
+                revision = attachment.revision.copy(
+                    wallTimeMillis = maxOf(
+                        attachment.revision.wallTimeMillis + 1,
+                        command.collectedAt.toEpochMilli(),
+                    ),
+                    logicalCounter = attachment.revision.logicalCounter + 1,
+                ),
+            ).toEntity(),
+        )
+        return CommandResult.Success("Attachment content collected")
     }
 
     private fun validateNoteBody(body: String): CommandResult.Rejected? = when {

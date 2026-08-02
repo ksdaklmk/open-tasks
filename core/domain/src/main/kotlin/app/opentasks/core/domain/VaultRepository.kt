@@ -313,6 +313,20 @@ sealed interface DomainCommand {
     ) : DomainCommand
 
     data class RestoreAttachment(val attachment: Attachment) : DomainCommand
+
+    /**
+     * Records that a retired attachment's cloud bytes have been released.
+     *
+     * Only the link to bytes that no longer exist is cleared; the record, its
+     * tombstone, and everything that describes what the content *was* are
+     * kept, so a retired attachment still reads as a retired attachment. There
+     * is nothing to undo — the bytes are already gone — and nothing to tell a
+     * person about, so this raises no activity entry either.
+     */
+    data class MarkAttachmentContentCollected(
+        val attachmentId: AttachmentId,
+        val collectedAt: Instant = Instant.now(),
+    ) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
