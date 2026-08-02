@@ -166,6 +166,19 @@ data class ReminderEntity(
     val precise: Boolean,
 )
 
+@Entity(tableName = "notes", primaryKeys = ["id"], indices = [Index("taskId"), Index("projectId")])
+data class NoteEntity(
+    val id: String,
+    val taskId: String?,
+    val projectId: String?,
+    val bodyCiphertext: ByteArray,
+    val createdAtEpochMillis: Long,
+    val editedAtEpochMillis: Long?,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
+)
+
 @Entity(tableName = "attachments", primaryKeys = ["id"], indices = [Index("taskId")])
 data class AttachmentEntity(
     val id: String,
@@ -174,7 +187,29 @@ data class AttachmentEntity(
     val mimeType: String,
     val byteCount: Long,
     val contentHash: String,
-    val keepOffline: Boolean,
+    val blobSetId: String?,
+    val chunkCount: Int,
+    val deletedAtEpochMillis: Long?,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
+)
+
+@Entity(tableName = "attachment_transfer", primaryKeys = ["blobSetId"])
+data class AttachmentTransferEntity(
+    val blobSetId: String,
+    val attachmentId: String,
+    val taskId: String,
+    val phase: String,
+    val displayNameCiphertext: ByteArray,
+    val mimeType: String,
+    val declaredByteCount: Long,
+    val contentHash: String?,
+    val chunkCount: Int?,
+    val chunkStateEncoded: String,
+    val manifestProviderFileId: String?,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
 )
 
 @Entity(tableName = "activity_entries", primaryKeys = ["id"], indices = [Index("taskId")])

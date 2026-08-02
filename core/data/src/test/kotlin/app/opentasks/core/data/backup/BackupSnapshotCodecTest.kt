@@ -632,7 +632,12 @@ internal object BackupPayloadTestFixtures {
                         "text/plain",
                         2,
                         "sha256:fixture",
-                        false,
+                        null,
+                        0,
+                        null,
+                        10,
+                        0,
+                        "device-alpha",
                     ).toBackupRecordV1(),
                 )
                 add(

@@ -627,7 +627,12 @@ internal object BackupMutationCodec {
                 string("mimeType"),
                 long("byteCount"),
                 string("contentHash"),
-                boolean("keepOffline"),
+                string("blobSetId", nullable = true),
+                int("chunkCount"),
+                long("deletedAtEpochMillis", nullable = true),
+                long("revisionWallMillis"),
+                int("revisionLogical"),
+                string("revisionDeviceId"),
             ),
         ),
         BackupRecordFamily.ACTIVITY_ENTRY to RecordSchema(

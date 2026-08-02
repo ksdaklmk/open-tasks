@@ -191,7 +191,10 @@ data class Attachment(
     val mimeType: String,
     val byteCount: Long,
     val contentHash: String,
-    val keepOffline: Boolean,
+    val blobSetId: BlobSetId?,
+    val chunkCount: Int,
+    val deletedAt: Instant?,
+    val revision: Revision,
 )
 
 data class Note(

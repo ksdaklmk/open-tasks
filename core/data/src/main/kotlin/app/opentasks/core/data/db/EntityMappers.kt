@@ -1,9 +1,14 @@
 package app.opentasks.core.data.db
 
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
@@ -268,3 +273,61 @@ internal fun Task.dependencyEntities(): List<TaskDependencyEntity> = dependencyI
         revisionDeviceId = revision.deviceId.value,
     )
 }
+
+internal fun NoteEntity.toModel(): Note = Note(
+    id = NoteId(id),
+    taskId = taskId?.let(::TaskId),
+    projectId = projectId?.let(::ProjectId),
+    body = bodyCiphertext.toString(Charsets.UTF_8),
+    createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
+    editedAt = editedAtEpochMillis?.let(Instant::ofEpochMilli),
+    revision = Revision(
+        deviceId = DeviceId(revisionDeviceId),
+        wallTimeMillis = revisionWallMillis,
+        logicalCounter = revisionLogical,
+    ),
+)
+
+internal fun Note.toEntity(): NoteEntity = NoteEntity(
+    id = id.value,
+    taskId = taskId?.value,
+    projectId = projectId?.value,
+    bodyCiphertext = body.toByteArray(Charsets.UTF_8),
+    createdAtEpochMillis = createdAt.toEpochMilli(),
+    editedAtEpochMillis = editedAt?.toEpochMilli(),
+    revisionWallMillis = revision.wallTimeMillis,
+    revisionLogical = revision.logicalCounter,
+    revisionDeviceId = revision.deviceId.value,
+)
+
+internal fun AttachmentEntity.toModel(): Attachment = Attachment(
+    id = AttachmentId(id),
+    taskId = TaskId(taskId),
+    displayName = displayNameCiphertext.toString(Charsets.UTF_8),
+    mimeType = mimeType,
+    byteCount = byteCount,
+    contentHash = contentHash,
+    blobSetId = blobSetId?.let(::BlobSetId),
+    chunkCount = chunkCount,
+    deletedAt = deletedAtEpochMillis?.let(Instant::ofEpochMilli),
+    revision = Revision(
+        deviceId = DeviceId(revisionDeviceId),
+        wallTimeMillis = revisionWallMillis,
+        logicalCounter = revisionLogical,
+    ),
+)
+
+internal fun Attachment.toEntity(): AttachmentEntity = AttachmentEntity(
+    id = id.value,
+    taskId = taskId.value,
+    displayNameCiphertext = displayName.toByteArray(Charsets.UTF_8),
+    mimeType = mimeType,
+    byteCount = byteCount,
+    contentHash = contentHash,
+    blobSetId = blobSetId?.value,
+    chunkCount = chunkCount,
+    deletedAtEpochMillis = deletedAt?.toEpochMilli(),
+    revisionWallMillis = revision.wallTimeMillis,
+    revisionLogical = revision.logicalCounter,
+    revisionDeviceId = revision.deviceId.value,
+)

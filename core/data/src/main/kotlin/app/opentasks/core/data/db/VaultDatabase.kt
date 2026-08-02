@@ -409,8 +409,10 @@ interface TimeEntryDao {
         RemoteBackupConfigEntity::class,
         RemoteBackupObjectEntity::class,
         RemoteBackupOperationEntity::class,
+        NoteEntity::class,
+        AttachmentTransferEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -482,6 +484,7 @@ abstract class VaultDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                 .build()
         }
@@ -914,6 +917,84 @@ abstract class VaultDatabase : RoomDatabase() {
                 db.execSQL(
                     "UPDATE vaults SET schemaVersion = 7 WHERE schemaVersion < 7",
                 )
+            }
+        }
+
+        internal val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS notes (
+                        id TEXT NOT NULL,
+                        taskId TEXT,
+                        projectId TEXT,
+                        bodyCiphertext BLOB NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        editedAtEpochMillis INTEGER,
+                        revisionWallMillis INTEGER NOT NULL,
+                        revisionLogical INTEGER NOT NULL,
+                        revisionDeviceId TEXT NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_notes_taskId ON notes(taskId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_notes_projectId ON notes(projectId)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS attachments_v8 (
+                        id TEXT NOT NULL,
+                        taskId TEXT NOT NULL,
+                        displayNameCiphertext BLOB NOT NULL,
+                        mimeType TEXT NOT NULL,
+                        byteCount INTEGER NOT NULL,
+                        contentHash TEXT NOT NULL,
+                        blobSetId TEXT,
+                        chunkCount INTEGER NOT NULL,
+                        deletedAtEpochMillis INTEGER,
+                        revisionWallMillis INTEGER NOT NULL,
+                        revisionLogical INTEGER NOT NULL,
+                        revisionDeviceId TEXT NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO attachments_v8 (id, taskId, displayNameCiphertext, mimeType,
+                        byteCount, contentHash, blobSetId, chunkCount, deletedAtEpochMillis,
+                        revisionWallMillis, revisionLogical, revisionDeviceId)
+                    SELECT id, taskId, displayNameCiphertext, mimeType, byteCount,
+                        contentHash, NULL, 0, NULL, 0, 0, ''
+                    FROM attachments
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE attachments")
+                db.execSQL("ALTER TABLE attachments_v8 RENAME TO attachments")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_taskId ON attachments(taskId)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS attachment_transfer (
+                        blobSetId TEXT NOT NULL,
+                        attachmentId TEXT NOT NULL,
+                        taskId TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        displayNameCiphertext BLOB NOT NULL,
+                        mimeType TEXT NOT NULL,
+                        declaredByteCount INTEGER NOT NULL,
+                        contentHash TEXT,
+                        chunkCount INTEGER,
+                        chunkStateEncoded TEXT NOT NULL,
+                        manifestProviderFileId TEXT,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(blobSetId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("UPDATE vaults SET schemaVersion = 8 WHERE schemaVersion < 8")
             }
         }
 

@@ -68,7 +68,18 @@ value class NoteId(val value: String) {
 value class TagId(val value: String)
 
 @JvmInline
-value class AttachmentId(val value: String)
+value class AttachmentId(val value: String) {
+    companion object {
+        fun new(): AttachmentId = AttachmentId(UUID.randomUUID().toString())
+    }
+}
+
+@JvmInline
+value class BlobSetId(val value: String) {
+    companion object {
+        fun new(): BlobSetId = BlobSetId(UUID.randomUUID().toString())
+    }
+}
 
 @JvmInline
 value class TimeEntryId(val value: String) {

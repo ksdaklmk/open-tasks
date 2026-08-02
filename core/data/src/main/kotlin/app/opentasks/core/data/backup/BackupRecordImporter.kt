@@ -644,7 +644,12 @@ internal fun BackupRecordFields.toAttachmentEntity(): AttachmentEntity = Attachm
     mimeType = string("mimeType"),
     byteCount = long("byteCount"),
     contentHash = string("contentHash"),
-    keepOffline = boolean("keepOffline"),
+    blobSetId = nullableString("blobSetId"),
+    chunkCount = int("chunkCount"),
+    deletedAtEpochMillis = nullableLong("deletedAtEpochMillis"),
+    revisionWallMillis = long("revisionWallMillis"),
+    revisionLogical = int("revisionLogical"),
+    revisionDeviceId = string("revisionDeviceId"),
 )
 
 internal fun BackupRecordFields.toActivityEntryEntity(): ActivityEntryEntity = ActivityEntryEntity(

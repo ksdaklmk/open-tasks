@@ -240,7 +240,12 @@ internal fun AttachmentEntity.toBackupRecordV1(): BackupRecordV1 = record(
     stringField("mimeType", mimeType),
     longField("byteCount", byteCount),
     stringField("contentHash", contentHash),
-    booleanField("keepOffline", keepOffline),
+    nullableStringField("blobSetId", blobSetId),
+    intField("chunkCount", chunkCount),
+    nullableLongField("deletedAtEpochMillis", deletedAtEpochMillis),
+    longField("revisionWallMillis", revisionWallMillis),
+    intField("revisionLogical", revisionLogical),
+    stringField("revisionDeviceId", revisionDeviceId),
 )
 
 internal fun ActivityEntryEntity.toBackupRecordV1(): BackupRecordV1 = record(

@@ -34,6 +34,8 @@ data class WorkspaceSnapshot(
     val timeEntries: List<TimeEntry> = emptyList(),
     val timeEntryConflicts: List<TimeEntryConflict> = emptyList(),
     val notes: List<Note> = emptyList(),
+    val attachments: List<Attachment> = emptyList(),
+    val activityEntries: List<ActivityEntry> = emptyList(),
 )
 
 data class TimeEntryConflict(

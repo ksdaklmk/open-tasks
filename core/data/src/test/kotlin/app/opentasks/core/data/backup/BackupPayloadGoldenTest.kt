@@ -37,7 +37,7 @@ class BackupPayloadGoldenTest {
 
         try {
             assertEquals(
-                "8dc8b8f47914c6eeec6584600d4aa17055909b9c62ae901810ab76ca0c026601",
+                "1ed29f312e1ecb8438b1f73d7257889d2a103248d282365584f94277613ec2a6",
                 fixture.plaintextSha256,
             )
             assertEquals(fixture.plaintextSha256, plaintext.sha256())

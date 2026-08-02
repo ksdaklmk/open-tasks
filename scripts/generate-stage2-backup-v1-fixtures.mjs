@@ -268,7 +268,12 @@ const snapshotRecords = [
     stringField("mimeType", "text/plain"),
     longField("byteCount", 2),
     stringField("contentHash", "sha256:fixture"),
-    booleanField("keepOffline", false),
+    nullableStringField("blobSetId", null),
+    intField("chunkCount", 0),
+    nullableLongField("deletedAtEpochMillis", null),
+    longField("revisionWallMillis", 10),
+    intField("revisionLogical", 0),
+    stringField("revisionDeviceId", "device-alpha"),
   ]),
   record("ACTIVITY_ENTRY", ["activity-1"], [
     stringField("id", "activity-1"),
