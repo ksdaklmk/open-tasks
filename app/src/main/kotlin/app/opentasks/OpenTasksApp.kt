@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -468,18 +469,23 @@ fun OpenTasksApp(
                     }
                 },
             ) { contentPadding ->
+                val layoutDirection = LocalLayoutDirection.current
                 val contentStartDp =
                     (if (layout.showNavigationRail) 80 else 0) +
                         contentPadding
-                            .calculateStartPadding(LocalLayoutDirection.current)
+                            .calculateStartPadding(layoutDirection)
                             .value
                             .toInt()
-                val contentWidthDp = maxWidth.value.toInt() - contentStartDp
+                val contentEndDp = contentPadding
+                    .calculateEndPadding(layoutDirection)
+                    .value
+                    .toInt()
                 val listPaneFraction = layout.paneSplit?.let { split ->
                     WorkspaceLayoutPolicy.contentListFraction(
                         split = split,
+                        windowWidthDp = maxWidth.value.toInt(),
                         contentStartDp = contentStartDp,
-                        contentWidthDp = contentWidthDp,
+                        contentEndDp = contentEndDp,
                     )
                 } ?: 0.42f
                 Row(

@@ -202,22 +202,24 @@ class WorkspaceLayoutPolicyTest {
     }
 
     @Test
-    fun contentFractionConvertsWindowSnapToContentCoordinates() {
+    fun contentFractionSubtractsTrailingInsetBeforeSnapping() {
         val fraction = WorkspaceLayoutPolicy.contentListFraction(
             split = PaneSplit(listFraction = 0.5f, snapToFoldPositionDp = 420),
+            windowWidthDp = 840,
             contentStartDp = 96,
-            contentWidthDp = 744,
+            contentEndDp = 24,
         )
 
-        assertEquals(0.4355f, fraction, 0.001f)
+        assertEquals(0.45f, fraction, 0.001f)
     }
 
     @Test
     fun contentFractionWithoutSnapKeepsRatio() {
         val fraction = WorkspaceLayoutPolicy.contentListFraction(
             split = PaneSplit(listFraction = 0.42f, snapToFoldPositionDp = null),
+            windowWidthDp = 840,
             contentStartDp = 96,
-            contentWidthDp = 744,
+            contentEndDp = 0,
         )
 
         assertEquals(0.42f, fraction, 0.0001f)
@@ -227,8 +229,9 @@ class WorkspaceLayoutPolicyTest {
     fun contentFractionIsClampedToUsableRange() {
         val fraction = WorkspaceLayoutPolicy.contentListFraction(
             split = PaneSplit(listFraction = 0.5f, snapToFoldPositionDp = 60),
+            windowWidthDp = 840,
             contentStartDp = 96,
-            contentWidthDp = 744,
+            contentEndDp = 0,
         )
 
         assertEquals(0.2f, fraction, 0.0001f)
