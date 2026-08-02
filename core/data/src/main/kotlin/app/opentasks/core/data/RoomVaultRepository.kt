@@ -7,6 +7,7 @@ import app.opentasks.core.data.backup.RoomBackupJournalSession
 import app.opentasks.core.data.backup.defaultBackupState
 import app.opentasks.core.data.backup.snapshots
 import app.opentasks.core.data.db.ActivityEntryEntity
+import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
@@ -42,6 +43,7 @@ import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.ActiveTimerSnapshot
+import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
@@ -237,6 +239,9 @@ class RoomVaultRepository(
                 is DomainCommand.UpdateNote -> updateNote(command)
                 is DomainCommand.DeleteNote -> deleteNote(command)
                 is DomainCommand.RestoreNote -> restoreNote(command)
+                is DomainCommand.RegisterAttachment -> registerAttachment(command)
+                is DomainCommand.DeleteAttachment -> deleteAttachment(command)
+                is DomainCommand.RestoreAttachment -> restoreAttachment(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2425,6 +2430,72 @@ class RoomVaultRepository(
         )
     }
 
+    private suspend fun registerAttachment(command: DomainCommand.RegisterAttachment): CommandResult {
+        val attachment = command.attachment
+        val task = database.taskDao().getById(attachment.taskId.value)
+        if (task == null || task.deletedAtEpochMillis != null) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        }
+        val displayName = attachment.displayName.trim()
+        validateAttachment(displayName, attachment)?.let { return it }
+        val existing = database.workspaceDao().getAttachmentById(attachment.id.value)
+        if (
+            (existing == null || existing.deletedAtEpochMillis != null) &&
+            database.workspaceDao().activeAttachmentCountForTask(attachment.taskId.value) >=
+            MAX_ATTACHMENTS_PER_TASK
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.ATTACHMENT_LIMIT_REACHED,
+                "A task can contain up to $MAX_ATTACHMENTS_PER_TASK attachments.",
+            )
+        }
+        val registered = attachment.copy(displayName = displayName)
+        database.workspaceDao().upsertAttachment(registered.toEntity())
+        recordActivity(
+            taskId = registered.taskId,
+            projectId = task.projectId?.let(::ProjectId),
+            kind = ActivityKind.ATTACHMENT_ADDED,
+            body = "Added attachment: ${registered.displayName}",
+            at = now(),
+        )
+        return CommandResult.Success("Attachment added")
+    }
+
+    private suspend fun deleteAttachment(command: DomainCommand.DeleteAttachment): CommandResult {
+        val attachment = database.workspaceDao().getAttachmentById(command.attachmentId.value)?.toModel()
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Attachment no longer exists.")
+        val deleted = attachment.copy(
+            deletedAt = command.deletedAt,
+            revision = attachment.revision.copy(
+                wallTimeMillis = maxOf(
+                    attachment.revision.wallTimeMillis + 1,
+                    command.deletedAt.toEpochMilli(),
+                ),
+                logicalCounter = attachment.revision.logicalCounter + 1,
+            ),
+        )
+        database.workspaceDao().upsertAttachment(deleted.toEntity())
+        recordActivity(
+            taskId = attachment.taskId,
+            projectId = database.taskDao().getById(attachment.taskId.value)?.projectId?.let(::ProjectId),
+            kind = ActivityKind.ATTACHMENT_REMOVED,
+            body = "Removed attachment: ${attachment.displayName}",
+            at = command.deletedAt,
+        )
+        return CommandResult.Success(
+            message = "Attachment removed",
+            undo = DomainCommand.RestoreAttachment(attachment),
+        )
+    }
+
+    private suspend fun restoreAttachment(command: DomainCommand.RestoreAttachment): CommandResult {
+        if (database.workspaceDao().getAttachmentById(command.attachment.id.value) == null) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Attachment no longer exists.")
+        }
+        database.workspaceDao().upsertAttachment(command.attachment.copy(deletedAt = null).toEntity())
+        return CommandResult.Success("Attachment restored")
+    }
+
     private fun validateNoteBody(body: String): CommandResult.Rejected? = when {
         body.isEmpty() -> CommandResult.Rejected(
             RejectionReason.EMPTY_NOTE,
@@ -2433,6 +2504,30 @@ class RoomVaultRepository(
         body.length > MAX_NOTE_BODY_LENGTH -> CommandResult.Rejected(
             RejectionReason.NOTE_TOO_LONG,
             "Keep notes under $MAX_NOTE_BODY_LENGTH characters.",
+        )
+        else -> null
+    }
+
+    private fun validateAttachment(
+        displayName: String,
+        attachment: Attachment,
+    ): CommandResult.Rejected? = when {
+        displayName.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_ATTACHMENT_NAME,
+            "An attachment needs a name.",
+        )
+        displayName.length > MAX_ATTACHMENT_NAME_LENGTH -> CommandResult.Rejected(
+            RejectionReason.ATTACHMENT_NAME_TOO_LONG,
+            "Keep attachment names under $MAX_ATTACHMENT_NAME_LENGTH characters.",
+        )
+        attachment.mimeType.length > MAX_ATTACHMENT_MIME_LENGTH ||
+            attachment.byteCount !in 1..MAX_ATTACHMENT_BYTES ||
+            attachment.chunkCount !in 1..MAX_ATTACHMENT_CHUNK_COUNT ||
+            attachment.chunkCount.toLong() !=
+            (attachment.byteCount + ATTACHMENT_CHUNK_BYTES - 1) / ATTACHMENT_CHUNK_BYTES ||
+            !attachment.contentHash.matches(CONTENT_HASH_REGEX) -> CommandResult.Rejected(
+            RejectionReason.INVALID_ATTACHMENT_METADATA,
+            "Attachment metadata is invalid.",
         )
         else -> null
     }
@@ -2794,13 +2889,18 @@ class RoomVaultRepository(
         }
         val relations = combine(
             combine(
-                workspaceDao.observeTaskTags(),
-                workspaceDao.observeChecklistItems(),
-                workspaceDao.observeReminders(),
-                observeTimeEntriesWithClock(),
-                workspaceDao.observeNotes(),
-            ) { taskTags, checklist, reminders, timeEntries, notes ->
-                RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                combine(
+                    workspaceDao.observeTaskTags(),
+                    workspaceDao.observeChecklistItems(),
+                    workspaceDao.observeReminders(),
+                    observeTimeEntriesWithClock(),
+                    workspaceDao.observeNotes(),
+                ) { taskTags, checklist, reminders, timeEntries, notes ->
+                    RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                },
+                workspaceDao.observeAttachments(),
+            ) { rows, attachments ->
+                rows.copy(attachments = attachments)
             },
             workspaceDao.observeActivityEntries(),
         ) { rows, activityEntries ->
@@ -2911,6 +3011,7 @@ class RoomVaultRepository(
                 )
             },
             notes = relations.notes.map(NoteEntity::toModel),
+            attachments = relations.attachments.map(AttachmentEntity::toModel),
             activityEntries = relations.activityEntries.mapNotNull(ActivityEntryEntity::toModel),
         )
     }
@@ -2961,6 +3062,9 @@ class RoomVaultRepository(
             }
             seedSnapshot.timeEntries.forEach { entry ->
                 workspaceDao.insertTimeEntry(entry.toEntity())
+            }
+            seedSnapshot.attachments.forEach { attachment ->
+                workspaceDao.upsertAttachment(attachment.toEntity())
             }
             seedSnapshot.activityEntries.forEach { entry ->
                 workspaceDao.upsertActivityEntry(entry.toEntity())
@@ -3016,6 +3120,7 @@ class RoomVaultRepository(
         val reminders: List<ReminderEntity>,
         val timeEntries: TimedTimeEntries,
         val notes: List<NoteEntity> = emptyList(),
+        val attachments: List<AttachmentEntity> = emptyList(),
         val activityEntries: List<ActivityEntryEntity> = emptyList(),
     )
 
@@ -3047,8 +3152,15 @@ class RoomVaultRepository(
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000
         const val MAX_NOTES_PER_OWNER = 500
+        const val MAX_ATTACHMENT_NAME_LENGTH = 255
+        const val MAX_ATTACHMENT_MIME_LENGTH = 255
+        const val MAX_ATTACHMENTS_PER_TASK = 100
+        const val MAX_ATTACHMENT_BYTES = 100L * 1024 * 1024
+        const val MAX_ATTACHMENT_CHUNK_COUNT = 25
+        const val ATTACHMENT_CHUNK_BYTES = 4L * 1024 * 1024
         const val MAX_ACTIVITY_ENTRIES_PER_OWNER = 500
         const val MAX_ACTIVITY_BODY_LENGTH = 500
+        val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         val VAULT_ID = VaultId("vault-primary")

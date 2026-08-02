@@ -331,6 +331,18 @@ interface WorkspaceDao {
     @Query("SELECT * FROM notes ORDER BY createdAtEpochMillis, id")
     fun observeNotes(): Flow<List<NoteEntity>>
 
+    @Query("SELECT * FROM attachments ORDER BY id")
+    fun observeAttachments(): Flow<List<AttachmentEntity>>
+
+    @Query("SELECT * FROM attachments WHERE id = :id LIMIT 1")
+    suspend fun getAttachmentById(id: String): AttachmentEntity?
+
+    @Query("SELECT COUNT(*) FROM attachments WHERE taskId = :taskId AND deletedAtEpochMillis IS NULL")
+    suspend fun activeAttachmentCountForTask(taskId: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAttachment(value: AttachmentEntity)
+
     @Query("SELECT * FROM activity_entries ORDER BY createdAtEpochMillis, id")
     fun observeActivityEntries(): Flow<List<ActivityEntryEntity>>
 

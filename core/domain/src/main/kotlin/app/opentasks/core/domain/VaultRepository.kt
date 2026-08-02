@@ -1,6 +1,8 @@
 package app.opentasks.core.domain
 
 import app.opentasks.core.model.HomeSnapshot
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
@@ -302,6 +304,15 @@ sealed interface DomainCommand {
     data class DeleteNote(val noteId: NoteId) : DomainCommand
 
     data class RestoreNote(val note: Note) : DomainCommand
+
+    data class RegisterAttachment(val attachment: Attachment) : DomainCommand
+
+    data class DeleteAttachment(
+        val attachmentId: AttachmentId,
+        val deletedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class RestoreAttachment(val attachment: Attachment) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
@@ -362,6 +373,10 @@ enum class RejectionReason {
     EMPTY_NOTE,
     NOTE_TOO_LONG,
     NOTE_LIMIT_REACHED,
+    EMPTY_ATTACHMENT_NAME,
+    ATTACHMENT_NAME_TOO_LONG,
+    ATTACHMENT_LIMIT_REACHED,
+    INVALID_ATTACHMENT_METADATA,
 }
 
 interface VaultRepository {
