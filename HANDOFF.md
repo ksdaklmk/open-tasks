@@ -3,22 +3,22 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution. Tasks 1–8 of 14 are complete and
-  Task 9 is next.
+  is in approved subagent-driven execution. Tasks 1–9 of 14 are complete and
+  Task 10 is next.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–8 are complete with independent reviews closed (one
-  fix round each for Tasks 2, 3, 7, and 8; Task 4 closed review-clean after a
-  pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
+  (`6538dca`). Tasks 1–9 are complete with independent reviews closed (one
+  fix round each for Tasks 2, 3, 7, 8, and 9; Task 4 closed review-clean after
+  a pre-review parity fix; Tasks 5 and 6 closed review-clean; details in the
   checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Continue with plan Task 9 (intake coordinator with
-  hostile-input matrix) via
+  untouched and unstaged. Continue with plan Task 10 (bounded local
+  open/share cache) via
   superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
@@ -26,9 +26,9 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `131f6b6` (`fix: harden
-  attachment manifest lookup`), the tip of the Stage 4 Task 1–8 range
-  `6538dca..131f6b6`. The prior adaptive-slice closure point
+- Current product source implementation point: `00d7786` (`fix: harden
+  attachment intake recovery`), the tip of the Stage 4 Task 1–9 range
+  `6538dca..00d7786`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -835,6 +835,34 @@ create-only Drive adapter. Its independent review closed after one fix round.
   ran.
 
 Tasks 9–14 remain. Continue Task 9 from `131f6b6` with the approved plan and
+execution ledger.
+
+## Stage 4 Task 9 closure checkpoint — 2 August 2026
+
+Task 9 (`3bf8ce9`, corrected by `00d7786`) adds the bounded durable
+`AttachmentBlobCoordinator`, transfer DAO, intake/resume/expiry state machine,
+and hostile-input matrix. Its independent review closed after one fix round.
+
+- Intake persists exact generated object IDs before any create, streams one
+  4 MiB plaintext chunk and one ciphertext frame, verifies exact-ID readback,
+  creates and verifies the manifest last, then registers metadata only through
+  `VaultRepository.execute`.
+- Resume adopts only exact authenticated occupied chunks and reconstructs a
+  missing aggregate hash one bounded chunk at a time. Registration replay is
+  semantically idempotent in both repositories, preventing duplicate records
+  or `ATTACHMENT_ADDED` activity across the repository-success/DAO-crash gap.
+- Persisted phases and their state are strictly validated. Ownership is
+  checked before initial and manifest creates; stale expiry authenticates and
+  deletes only a session's exact IDs. Hostile source open/read/close failures,
+  lying sizes, readback mismatches, and unsafe names fail inside the sealed
+  result contract.
+- The focused intake and attachment-command tests plus
+  `:core:data:compileDebugAndroidTestKotlin` passed. The final
+  `testDebugUnitTest lintDebug :app:assembleDebug` gate passed with 547
+  actionable tasks and no failures. No emulator, ADB, or connected command
+  ran.
+
+Tasks 10–14 remain. Continue Task 10 from `00d7786` with the approved plan and
 execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026

@@ -27,8 +27,11 @@ existing bounded in-memory scan. Attachment metadata commands now validate,
 register, tombstone, and restore rows in both repositories with activity and
 atomic journal parity. The provider-neutral attachment blob contract, strict
 authenticated manifest codec, and create-only Drive adapter are implemented.
-Attachment intake, transfer coordination, and product flows remain Stage 4
-work under the approved plan.
+The durable attachment coordinator now performs bounded streaming intake,
+authenticated exact-ID readback, crash-safe resume, manifest-last publication,
+command-only metadata registration, and exact-ID provisional expiry.
+Attachment open/share cache and product flows remain Stage 4 work under the
+approved plan.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a
@@ -68,10 +71,10 @@ resumes pending work. `PortableBackupPublisher`, verified recovery-envelope
 setup, exact Android backup eligibility, and restored-package quarantine are
 implemented in `app`. The create-only Drive backup store, explicit
 authorization boundary, runtime scheduler, lifecycle coordinator, and staged
-recovery path are implemented. The attachment coordinator remains approved but
-unimplemented; its `AttachmentBlobStore` boundary and create-only Drive
-implementation are ready. The internal `AuthenticatedCloudObjectCodec` shown
-at their encryption boundary is implemented in `core:data`.
+recovery path are implemented. The attachment coordinator is implemented with
+its `AttachmentBlobStore` boundary and create-only Drive adapter. The internal
+`AuthenticatedCloudObjectCodec` shown at their encryption
+boundary is implemented in `core:data`.
 `RecoveryCoordinator` is the only component allowed to reconstruct Room
 from backup data or a restored portable package. `BackupCoordinator`,
 `PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
