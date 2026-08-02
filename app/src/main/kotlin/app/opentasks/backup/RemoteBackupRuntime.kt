@@ -75,6 +75,10 @@ interface RemoteBackupRuntime {
  * *created*, which can be before the slot it belonged to was replaced, so a
  * stopped runner refuses to run rather than driving a coordinator whose
  * database is being torn down beside a freshly constructed replacement.
+ *
+ * A verified publication is also the only moment attachment collection may
+ * happen, because only then is the newest retained base known to contain every
+ * retirement this vault has recorded.
  */
 class DefaultRemoteBackupRunner(
     private val vaultId: VaultId,
@@ -84,6 +88,7 @@ class DefaultRemoteBackupRunner(
     private val clearToken: suspend (AuthorizedDriveSession) -> Unit,
     private val openObjectStore: (CreateOnlyDriveTransport) -> CreateOnlyBackupObjectStore,
     private val publicationGate: Mutex = Mutex(),
+    private val collectAttachments: suspend () -> Unit = {},
 ) : RemoteBackupRunner {
     private val stopped = AtomicBoolean()
     private val runInFlight = MutableStateFlow(false)
@@ -142,7 +147,9 @@ class DefaultRemoteBackupRunner(
         if (rotationInProgress) return RemoteBackupRunResult.NoChanges
         return when (val authorization = authorizeFor(configuration)) {
             is DriveAuthorizationResult.Authorized ->
-                publish(configuration, authorization.session)
+                publish(configuration, authorization.session).also { outcome ->
+                    if (outcome is RemoteBackupRunResult.Verified) collectRetiredAttachments()
+                }
 
             // The bound account is not the one this device can reach, so the
             // lineage is never read, listed, or written.
@@ -195,6 +202,22 @@ class DefaultRemoteBackupRunner(
             )
         }
         return settle(configuration, outcome)
+    }
+
+    /**
+     * Attachment collection is upkeep, never part of a publication's outcome:
+     * a lineage that verified stays verified even when the retired bytes
+     * behind it could not be collected this pass, and the next verified
+     * publication tries again.
+     */
+    private suspend fun collectRetiredAttachments() {
+        try {
+            collectAttachments()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            // Local editing and structured backup are unaffected.
+        }
     }
 
     private suspend fun closeSession(session: AuthorizedDriveSession, clearsToken: Boolean) {
@@ -303,6 +326,7 @@ class DefaultRemoteBackupRuntime(
     private val scheduler: BackupWorkScheduler,
     private val observeConfiguration: () -> Flow<RemoteBackupConfiguration?>,
     private val observeLocalGeneration: () -> Flow<Long>,
+    private val expireAttachmentSessions: suspend () -> Unit = {},
 ) : RemoteBackupRuntime {
     private val started = AtomicBoolean()
     private val stopped = AtomicBoolean()
@@ -339,6 +363,17 @@ class DefaultRemoteBackupRuntime(
                     if (failure is CancellationException) throw failure
                     // Structured editing is unaffected; a later request retries.
                 }
+            }
+        }
+        // An intake this slot never finished holds provider objects no record
+        // names. Activation is when that residue is abandoned; the attachment
+        // runtime refuses the pass itself unless its lineage is still active.
+        scope.launch {
+            try {
+                expireAttachmentSessions()
+            } catch (failure: Throwable) {
+                if (failure is CancellationException) throw failure
+                // The next activation expires the same sessions again.
             }
         }
     }

@@ -37,6 +37,12 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.VaultRuntimeManager
+import app.opentasks.core.data.backup.AttachmentBlobSetManifestCodec
+import app.opentasks.core.data.backup.AttachmentCacheStore
+import app.opentasks.core.data.backup.AttachmentProviderSession
+import app.opentasks.core.data.backup.AttachmentRuntime
+import app.opentasks.core.data.backup.AttachmentSessionResult
+import app.opentasks.core.data.backup.CreateOnlyDriveAttachmentBlobStore
 import app.opentasks.core.data.backup.CreateOnlyDriveObjectStore
 import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
 import app.opentasks.core.data.backup.DefaultOwnershipChainStore
@@ -51,9 +57,11 @@ import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.BackupWorkScheduler
+import app.opentasks.core.domain.CreateOnlyBackupObjectStore
 import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.RecoveryPassphraseChanger
+import app.opentasks.core.domain.RemoteBackupConfiguration
 import app.opentasks.core.domain.RemoteBackupConnectResult
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
 import app.opentasks.core.domain.VaultRepository
@@ -276,6 +284,32 @@ object AppModule {
             authenticatedCodec = codec,
             remoteStagingRoot = files.remoteTransferRoot,
         )
+        // Attachment bytes live in the lineage that created them, so nothing
+        // here is bound to one: the runtime resolves the active lineage per
+        // operation and builds its store, coordinators, and collector around
+        // it. Only the ciphertext cache is per installation, because a frame
+        // stays valid across every lineage change that keeps its blob set.
+        val attachmentRuntime = AttachmentRuntime(
+            vaultId = runtime.vaultId,
+            repository = runtime.repository,
+            remoteStateStore = runtime.remoteBackupStore,
+            transferDao = runtime.attachmentTransferDao,
+            journalDao = runtime.backupJournalDao,
+            codec = codec,
+            manifestCodec = AttachmentBlobSetManifestCodec(codec),
+            cache = AttachmentCacheStore(files.attachmentCacheRoot) {
+                files.attachmentCacheRoot.usableSpace
+            },
+            contentKeyStore = contentKeyStore,
+            openSession = { configuration ->
+                openAttachmentSession(
+                    configuration = configuration,
+                    authorizationManager = authorizationManager,
+                    openObjectStore = openRemoteObjectStore,
+                    ownershipCodec = ownershipCodec,
+                )
+            },
+        )
         // Exactly one coordinator, and one runner around it, exists per open
         // slot: retention and durable publication both depend on no two runs
         // for a vault ever overlapping.
@@ -309,6 +343,7 @@ object AppModule {
             clearToken = authorizationManager::clearToken,
             openObjectStore = openRemoteObjectStore,
             publicationGate = publicationGate,
+            collectAttachments = { attachmentRuntime.collectRetiredBytes() },
         )
         val recoveryPassphraseChanger = DefaultRecoveryPassphraseChanger(
             vaultId = runtime.vaultId,
@@ -521,8 +556,10 @@ object AppModule {
                     runtime.backupStateStore.observe(runtime.vaultId)
                         .map { it.currentGeneration }
                 },
+                expireAttachmentSessions = { attachmentRuntime.expireStaleSessions() },
             ),
             remoteBackupRunner = remoteRunner,
+            attachmentRuntime = attachmentRuntime,
             recoveryPassphraseChanger = recoveryPassphraseChanger,
             remoteBackupLifecycleCoordinator = lifecycleCoordinator,
             remoteBackupStatus = remoteStatus,
@@ -602,17 +639,72 @@ object AppModule {
         it.lifecycle == RemoteBackupLifecycle.ACTIVE ||
             it.lifecycle == RemoteBackupLifecycle.OWNERSHIP_LOST
     }?.accountBindingDigest
+}
 
-    private fun DriveAuthorizationUnavailableReason.toRemoteFailure():
-        RemoteBackupFailureCategory = when (this) {
-        DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
-        DriveAuthorizationUnavailableReason.REJECTED,
-        -> RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED
-        DriveAuthorizationUnavailableReason.RETRYABLE ->
-            RemoteBackupFailureCategory.RETRYABLE_PROVIDER
-        DriveAuthorizationUnavailableReason.PROVIDER_STORAGE ->
-            RemoteBackupFailureCategory.PROVIDER_STORAGE
-        DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE ->
-            RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE
+/**
+ * Opens one attachment provider session for the lineage a configuration names.
+ *
+ * Authorization is always silent here: neither a person's own open nor a
+ * background collection pass may raise a consent screen from the vault
+ * session, so a grant this process cannot obtain becomes a bounded category
+ * the product surfaces instead. The session owns the provider handle both
+ * stores were built around, and closing it releases that handle.
+ *
+ * This lives outside the module object because a function-typed parameter on a
+ * `@Module` member is not something the annotation processor can resolve.
+ */
+private suspend fun openAttachmentSession(
+    configuration: RemoteBackupConfiguration,
+    authorizationManager: GoogleDriveAuthorizationManager,
+    openObjectStore: (CreateOnlyDriveTransport) -> CreateOnlyBackupObjectStore,
+    ownershipCodec: OwnershipClaimCodec,
+): AttachmentSessionResult {
+    val expectedDigest = configuration.accountBindingDigest
+    val authorization = try {
+        authorizationManager.authorize(
+            mode = DriveAuthorizationMode.NON_INTERACTIVE,
+            expectedAccountDigest = expectedDigest,
+        )
+    } finally {
+        expectedDigest.fill(0)
     }
+    return when (authorization) {
+        is DriveAuthorizationResult.Authorized -> AttachmentSessionResult.Opened(
+            AttachmentProviderSession(
+                blobStore = CreateOnlyDriveAttachmentBlobStore(
+                    transport = authorization.session.transport,
+                    lineageId = configuration.lineageId,
+                ),
+                ownershipChainStore = DefaultOwnershipChainStore(
+                    openObjectStore(authorization.session.transport),
+                    ownershipCodec,
+                ),
+                onClose = authorization.session::close,
+            ),
+        )
+
+        DriveAuthorizationResult.AccountMismatch ->
+            AttachmentSessionResult.Unavailable(RemoteBackupFailureCategory.ACCOUNT_MISMATCH)
+
+        is DriveAuthorizationResult.ResolutionRequired ->
+            AttachmentSessionResult.Unavailable(
+                RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+            )
+
+        is DriveAuthorizationResult.Unavailable ->
+            AttachmentSessionResult.Unavailable(authorization.reason.toRemoteFailure())
+    }
+}
+
+private fun DriveAuthorizationUnavailableReason.toRemoteFailure():
+    RemoteBackupFailureCategory = when (this) {
+    DriveAuthorizationUnavailableReason.AUTHORIZATION_REQUIRED,
+    DriveAuthorizationUnavailableReason.REJECTED,
+    -> RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED
+    DriveAuthorizationUnavailableReason.RETRYABLE ->
+        RemoteBackupFailureCategory.RETRYABLE_PROVIDER
+    DriveAuthorizationUnavailableReason.PROVIDER_STORAGE ->
+        RemoteBackupFailureCategory.PROVIDER_STORAGE
+    DriveAuthorizationUnavailableReason.CORRUPT_OR_INCOMPATIBLE ->
+        RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE
 }

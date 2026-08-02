@@ -8,6 +8,7 @@ import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.di.AppModule
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
+import app.opentasks.core.data.backup.AttachmentRuntime
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.RecoveryPassphraseChanger
 import app.opentasks.core.domain.RemoteBackupConfiguration
@@ -235,6 +236,9 @@ class ActiveVaultServicesTest {
         override val remoteBackupRunner = object : RemoteBackupRunner {
             override suspend fun run(): RemoteBackupRunResult = RemoteBackupRunResult.NoChanges
         }
+
+        override val attachmentRuntime: AttachmentRuntime
+            get() = error("The fake session exposes no attachment runtime")
 
         override val statusSource: AndroidBackupStatusSource
             get() = error("The fake session exposes no status source")

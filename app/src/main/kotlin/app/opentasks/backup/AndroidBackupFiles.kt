@@ -18,6 +18,14 @@ class AndroidBackupFiles(context: Context) {
         File(context.noBackupFilesDir, "backup/remote-transfer/v1")
     val recoveryRoot =
         File(context.noBackupFilesDir, "recovery/staging/v1")
+
+    /**
+     * Verified attachment ciphertext frames, cached so a reopened attachment
+     * costs no download. Cache storage is what the platform may reclaim, and
+     * every frame here is recoverable from the lineage that owns it.
+     */
+    val attachmentCacheRoot =
+        File(context.cacheDir, "attachments/v1")
 }
 
 interface AtomicPackageFile {

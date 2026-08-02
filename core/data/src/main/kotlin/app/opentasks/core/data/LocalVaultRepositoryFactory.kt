@@ -5,6 +5,7 @@ import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
+import app.opentasks.core.data.backup.BackupJournalDao
 import app.opentasks.core.data.backup.DefaultBackupCoordinator
 import app.opentasks.core.data.backup.DefaultRecoveryCoordinator
 import app.opentasks.core.data.backup.DefaultRemoteBackupConfigurator
@@ -25,6 +26,7 @@ import app.opentasks.core.data.backup.RoomBackupStateStore
 import app.opentasks.core.data.backup.RoomRecoveryEnvelopeStore
 import app.opentasks.core.data.backup.RoomRemoteBackupStore
 import app.opentasks.core.data.backup.expectedCapture
+import app.opentasks.core.data.db.AttachmentTransferDao
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.BackupJournalEntry
@@ -56,6 +58,13 @@ class LocalVaultRuntime internal constructor(
     val recoveryEnvelopeStore: RoomRecoveryEnvelopeStore,
     val remoteBackupStore: RoomRemoteBackupStore,
     val contentKeyStore: VaultContentKeyStore,
+    /** Durable attachment intake state; attachment work resumes from these rows. */
+    val attachmentTransferDao: AttachmentTransferDao,
+    /**
+     * The ordered mutation journal. Attachment collection needs the generation
+     * a retirement was recorded in to know which retained bases contain it.
+     */
+    val backupJournalDao: BackupJournalDao,
     private val database: VaultDatabase,
 ) : AutoCloseable {
     /** Joins repository observation before the SQLCipher handle is released. */
@@ -255,6 +264,8 @@ object LocalVaultRepositoryFactory {
                     crypto = crypto,
                     storageNamespace = storageNamespace(slot),
                 ),
+                attachmentTransferDao = database.attachmentTransferDao(),
+                backupJournalDao = database.backupJournalDao(),
                 database = database,
             )
         } catch (failure: Throwable) {

@@ -6,6 +6,7 @@ import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RemoteBackupRuntime
 import app.opentasks.core.data.VaultRuntimeState
+import app.opentasks.core.data.backup.AttachmentRuntime
 import app.opentasks.core.domain.AndroidBackupStatusSource
 import app.opentasks.core.domain.RecoveryPassphraseChanger
 import app.opentasks.core.domain.RemoteBackupLifecycleCoordinator
@@ -37,6 +38,12 @@ interface ActiveVaultSession : AutoCloseable {
      */
     val remoteBackupRunner: RemoteBackupRunner
 
+    /**
+     * Every attachment operation this slot may perform, bound per operation to
+     * whichever lineage the vault is active on.
+     */
+    val attachmentRuntime: AttachmentRuntime
+
     val recoveryPassphraseChanger: RecoveryPassphraseChanger
 
     val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator
@@ -61,6 +68,7 @@ class DefaultActiveVaultSession(
     override val portableBackupPublisher: PortableBackupPublisher,
     override val remoteBackupRuntime: RemoteBackupRuntime,
     override val remoteBackupRunner: RemoteBackupRunner,
+    override val attachmentRuntime: AttachmentRuntime,
     override val recoveryPassphraseChanger: RecoveryPassphraseChanger,
     override val remoteBackupLifecycleCoordinator: RemoteBackupLifecycleCoordinator,
     override val remoteBackupStatus: StateFlow<RemoteBackupStatus>,
@@ -79,9 +87,16 @@ class DefaultActiveVaultSession(
         resolution: Intent?,
     ): EncryptedBackupActionResult = reauthoriseRemote(resolution)
 
-    /** Cancels scheduled remote work before the observing scope goes away. */
+    /**
+     * Cancels scheduled remote work before the observing scope goes away.
+     *
+     * Attachment work stops first, so a collection pass a run is still about
+     * to ask for refuses rather than reaching a lineage this slot no longer
+     * represents.
+     */
     override fun close() {
         try {
+            attachmentRuntime.stop()
             remoteBackupRuntime.stop()
         } finally {
             scope.cancel()

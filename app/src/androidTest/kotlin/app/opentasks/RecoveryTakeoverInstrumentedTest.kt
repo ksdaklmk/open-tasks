@@ -22,6 +22,15 @@ import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRuntimeFactory
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
+import app.opentasks.core.data.backup.AttachmentBlobSetManifestCodec
+import app.opentasks.core.data.backup.AttachmentCacheStore
+import app.opentasks.core.data.backup.AttachmentGcResult
+import app.opentasks.core.data.backup.AttachmentIntakeResult
+import app.opentasks.core.data.backup.AttachmentOpenResult
+import app.opentasks.core.data.backup.AttachmentProviderSession
+import app.opentasks.core.data.backup.AttachmentRuntime
+import app.opentasks.core.data.backup.AttachmentSessionResult
+import app.opentasks.core.data.backup.AttachmentSource
 import app.opentasks.core.data.backup.BackupSnapshotCodec
 import app.opentasks.core.data.backup.CreateOnlyDriveObjectStore
 import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
@@ -44,6 +53,11 @@ import app.opentasks.core.data.backup.drive.DriveListPage
 import app.opentasks.core.data.backup.drive.DriveResumableSession
 import app.opentasks.core.data.backup.drive.DriveTransportException
 import app.opentasks.core.data.backup.drive.DriveTransportFailureCategory
+import app.opentasks.core.domain.AttachmentBlobStore
+import app.opentasks.core.domain.AttachmentListedObject
+import app.opentasks.core.domain.AttachmentManifestLookup
+import app.opentasks.core.domain.AttachmentObjectResult
+import app.opentasks.core.domain.AttachmentReadResult
 import app.opentasks.core.domain.BackupCoordinator
 import app.opentasks.core.domain.BackupWorkScheduler
 import app.opentasks.core.domain.CommandResult
@@ -69,6 +83,7 @@ import app.opentasks.core.domain.RemoteListPage
 import app.opentasks.core.domain.RemoteListRequest
 import app.opentasks.core.domain.RemoteListedObject
 import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.CloudDeviceId
 import app.opentasks.core.model.CloudLineageId
 import app.opentasks.core.model.ProviderObjectId
@@ -79,8 +94,12 @@ import app.opentasks.core.model.RemoteObjectLifecycle
 import app.opentasks.core.model.RemoteObjectRoleV1
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.WriterEpoch
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.async
@@ -104,6 +123,7 @@ class RecoveryTakeoverInstrumentedTest {
             val crypto = TinkVaultCrypto()
             val codec = DefaultAuthenticatedCloudObjectCodec(crypto)
             val provider = TestProviderStore(File(base.cacheDir, "task14-provider-${UUID.randomUUID()}"))
+            val blobs = TestAttachmentNamespace()
             val contexts = mutableListOf<IsolatedContext>()
             val managers = mutableListOf<Pair<IsolatedContext, DefaultVaultRuntimeManager>>()
             val aContext = isolated(base, "a").also(contexts::add)
@@ -260,6 +280,7 @@ class RecoveryTakeoverInstrumentedTest {
                     crypto,
                     codec,
                     provider,
+                    blobs,
                     TestAuthorizationManager(),
                 )
                 val preserved = aLifecycle.preserveDivergentWorkAsNewLineage()
@@ -277,6 +298,7 @@ class RecoveryTakeoverInstrumentedTest {
                     crypto,
                     codec,
                     provider,
+                    blobs,
                     authorization,
                 )
                 val callsBeforeDisconnect = provider.callOrder.size
@@ -327,6 +349,7 @@ class RecoveryTakeoverInstrumentedTest {
                     crypto,
                     codec,
                     provider,
+                    blobs,
                     TestAuthorizationManager(),
                 )
                 provider.failNextDelete = true
@@ -420,6 +443,233 @@ class RecoveryTakeoverInstrumentedTest {
         }
     }
 
+    /**
+     * Task 12's attachment lifecycle over the same production protocols.
+     *
+     * One installation uploads bytes, a second recovers the workspace and
+     * reads them back from manifest discovery alone, the superseded
+     * installation is refused before it touches the namespace, divergent work
+     * keeps its metadata while its bytes stay behind in the lineage that owns
+     * them, retired bytes are collected only once every retained base covers
+     * their tombstone, and terminal deletion leaves nothing but the tombstone.
+     */
+    @Test
+    fun createOnlyAttachmentLifecycleSurvivesRecoveryPreservationAndTerminalDeletion() =
+        runBlocking {
+            withTimeout(180_000) {
+                val base = ApplicationProvider.getApplicationContext<OpenTasksApplication>()
+                val crypto = TinkVaultCrypto()
+                val codec = DefaultAuthenticatedCloudObjectCodec(crypto)
+                val provider = TestProviderStore(
+                    File(base.cacheDir, "task12-provider-${UUID.randomUUID()}"),
+                )
+                val blobs = TestAttachmentNamespace()
+                val contexts = mutableListOf<IsolatedContext>()
+                val managers = mutableListOf<Pair<IsolatedContext, DefaultVaultRuntimeManager>>()
+                val aContext = isolated(base, "attach-a").also(contexts::add)
+                val aSlot = VaultSlot.new()
+                val runtimeA = LocalVaultRepositoryFactory.createRuntime(aContext, aSlot, crypto)
+                var clockB = INTAKE_AT
+                try {
+                    assertTrue(
+                        runtimeA.repository.execute(DomainCommand.CreateTask("baseline"))
+                            is CommandResult.Success,
+                    )
+                    installRecoveryEnvelope(runtimeA, crypto, OLD_PASSPHRASE)
+                    val a = backupStack(aContext, runtimeA, codec)
+                    val lineage = (
+                        a.configurator.connect(provider, ACCOUNT_DIGEST, false)
+                            as RemoteBackupConnectResult.Connected
+                        ).lineageId
+                    val attachmentsA =
+                        attachmentRuntime(aContext, runtimeA, codec, provider, blobs) { INTAKE_AT }
+                    val taskId = runtimeA.repository.currentWorkspace().tasks.single().id
+
+                    // One 9 MiB source becomes three authenticated chunks and a manifest.
+                    val payload = ByteArray(9 * 1024 * 1024) { (it % 251).toByte() }
+                    val attachmentId = (
+                        attachmentsA.intake(
+                            taskId,
+                            "receipt.pdf",
+                            "application/pdf",
+                            BytesAttachmentSource(payload),
+                        ) as AttachmentIntakeResult.Registered
+                        ).attachmentId
+                    assertEquals(4, blobs.entries(lineage).size)
+                    assertTrue(a.remote.run(provider) is RemoteBackupRunResult.Verified)
+
+                    val b = recoveryInstallation(base, "attach-b", crypto, codec).also {
+                        contexts += it.context
+                        managers += it.context to it.manager
+                    }
+                    val preparedB = prepareDrive(b.coordinator, provider, OLD_PASSPHRASE)
+                    assertTrue(
+                        b.coordinator.confirmTakeover(preparedB.operationId, provider)
+                            is RecoveryResult.Activated,
+                    )
+                    val runtimeB = b.manager.requireActive()
+                    val bStack = backupStack(b.context, runtimeB, codec)
+                    val attachmentsB =
+                        attachmentRuntime(b.context, runtimeB, codec, provider, blobs) { clockB }
+
+                    // The recovered installation holds no provider identity of
+                    // its own: the manifest is discovered from the lineage.
+                    val recovered = runtimeB.repository.currentWorkspace().attachments.single()
+                    assertEquals(attachmentId, recovered.id)
+                    val opened = ByteArrayOutputStream()
+                    assertEquals(
+                        AttachmentOpenResult.Opened(payload.size.toLong()),
+                        attachmentsB.open(recovered, opened),
+                    )
+                    assertArrayEquals(payload, opened.toByteArray())
+                    assertTrue(attachmentsB.cacheUsageBytes() > 0)
+
+                    // The superseded installation still believes it is active.
+                    val namespaceBeforeStaleA = blobs.all().size
+                    assertEquals(
+                        AttachmentIntakeResult.OwnershipUnavailable,
+                        attachmentsA.intake(
+                            taskId,
+                            "second.bin",
+                            "application/octet-stream",
+                            BytesAttachmentSource(ByteArray(2_048) { 7 }),
+                        ),
+                    )
+                    assertTrue(
+                        runtimeA.repository.execute(
+                            DomainCommand.DeleteAttachment(attachmentId, DELETED_AT),
+                        ) is CommandResult.Success,
+                    )
+                    assertEquals(
+                        AttachmentGcResult(0, true, 0),
+                        attachmentsA.collectRetiredBytes(),
+                    )
+                    assertEquals(namespaceBeforeStaleA, blobs.all().size)
+
+                    // Divergent work keeps its metadata; its bytes belong to
+                    // the lineage it lost, and the new one copies nothing.
+                    val runner = DefaultRemoteBackupRunner(
+                        vaultId = runtimeA.vaultId,
+                        remoteStateStore = runtimeA.remoteBackupStore,
+                        coordinator = a.remote,
+                        authorize = {
+                            DriveAuthorizationResult.Authorized(
+                                AuthorizedDriveSession(
+                                    transport = UnusedDriveTransport(),
+                                    accountBindingDigest = ACCOUNT_DIGEST,
+                                    accessToken = "opaque",
+                                    account = null,
+                                ),
+                            )
+                        },
+                        clearToken = {},
+                        openObjectStore = { provider },
+                    )
+                    assertEquals(RemoteBackupRunResult.OwnershipLost, runner.run())
+                    val preserved = lifecycle(
+                        runtimeA,
+                        a.configurator,
+                        crypto,
+                        codec,
+                        provider,
+                        blobs,
+                        TestAuthorizationManager(),
+                    ).preserveDivergentWorkAsNewLineage()
+                        as RemoteBackupConnectResult.Connected
+                    assertNotEquals(lineage, preserved.lineageId)
+                    val divergent = runtimeA.repository.currentWorkspace().attachments.single()
+                    assertEquals(recovered.blobSetId, divergent.blobSetId)
+                    assertEquals(
+                        AttachmentOpenResult.Unavailable,
+                        attachmentsA.open(divergent, ByteArrayOutputStream()),
+                    )
+                    assertTrue(blobs.entries(preserved.lineageId).isEmpty())
+                    assertEquals(namespaceBeforeStaleA, blobs.all().size)
+
+                    // A second blob set nothing retires stays untouched by
+                    // collection and is removed only by terminal deletion.
+                    assertTrue(
+                        attachmentsB.intake(
+                            taskId,
+                            "kept.bin",
+                            "application/octet-stream",
+                            BytesAttachmentSource(ByteArray(4_096) { 3 }),
+                        ) is AttachmentIntakeResult.Registered,
+                    )
+                    assertEquals(6, blobs.entries(lineage).size)
+                    assertTrue(
+                        runtimeB.repository.execute(
+                            DomainCommand.DeleteAttachment(recovered.id, DELETED_AT),
+                        ) is CommandResult.Success,
+                    )
+                    repeat(2) { index ->
+                        assertTrue(
+                            runtimeB.repository.execute(DomainCommand.CreateTask("after-$index"))
+                                is CommandResult.Success,
+                        )
+                        assertTrue(bStack.remote.run(provider) is RemoteBackupRunResult.Verified)
+                    }
+
+                    clockB = DELETED_AT.plus(Duration.ofDays(31))
+                    val collected = attachmentsB.collectRetiredBytes()
+                    assertEquals(4, collected.deletedObjects)
+                    assertEquals(2, blobs.entries(lineage).size)
+                    assertEquals(2, runtimeB.repository.currentWorkspace().attachments.size)
+
+                    // Disconnect keeps every record and every cached frame.
+                    val bLifecycle = lifecycle(
+                        runtimeB,
+                        bStack.configurator,
+                        crypto,
+                        codec,
+                        provider,
+                        blobs,
+                        TestAuthorizationManager(),
+                    )
+                    val cachedAfterCollection = attachmentsB.cacheUsageBytes()
+                    assertTrue(cachedAfterCollection > 0)
+                    assertTrue(bLifecycle.disconnect() is LifecycleResult.Disconnected)
+                    val namespaceBeforeDormantOpen = blobs.all().size
+                    assertEquals(
+                        AttachmentOpenResult.Unavailable,
+                        attachmentsB.open(recovered, ByteArrayOutputStream()),
+                    )
+                    assertEquals(namespaceBeforeDormantOpen, blobs.all().size)
+                    assertEquals(2, runtimeB.repository.currentWorkspace().attachments.size)
+                    assertEquals(cachedAfterCollection, attachmentsB.cacheUsageBytes())
+                    attachmentsB.evictCachedBytes(checkNotNull(recovered.blobSetId))
+                    assertEquals(0L, attachmentsB.cacheUsageBytes())
+
+                    assertTrue(
+                        bStack.configurator.connect(provider, ACCOUNT_DIGEST, false)
+                            is RemoteBackupConnectResult.Connected,
+                    )
+                    var deletion: LifecycleResult = bLifecycle.deleteHistory(
+                        OLD_PASSPHRASE.copyOf(),
+                    )
+                    repeat(20) {
+                        if (deletion == LifecycleResult.HistoryDeleted) return@repeat
+                        deletion = bLifecycle.deleteHistory(OLD_PASSPHRASE.copyOf())
+                    }
+                    assertEquals(LifecycleResult.HistoryDeleted, deletion)
+                    assertTrue(blobs.entries(lineage).isEmpty())
+                    val remaining = provider.entries(lineage)
+                    assertEquals(1, remaining.size)
+                    assertEquals(
+                        RemoteObjectRoleV1.OWNERSHIP_TOMBSTONE,
+                        remaining.single().metadata.role,
+                    )
+                    assertEquals(2, runtimeB.repository.currentWorkspace().attachments.size)
+                } finally {
+                    runtimeA.close()
+                    LocalVaultRuntimeFactory(aContext, crypto).discard(aSlot)
+                    managers.forEach { (context, manager) -> cleanup(context, manager, crypto) }
+                    contexts.forEach(IsolatedContext::clearPreferences)
+                    provider.close()
+                }
+            }
+        }
+
     private data class BackupStack(
         val coordinator: BackupCoordinator,
         val local: LocalBackupObjectStore,
@@ -510,12 +760,19 @@ class RecoveryTakeoverInstrumentedTest {
             as RecoveryResult.TakeoverConfirmationRequired
     }
 
+    /**
+     * The lifecycle coordinator reaches the attachment namespace through its
+     * own provider handle, so the fake namespace has to be supplied here too:
+     * terminal deletion exhausts the two attachment roles before claims, and a
+     * transport that refuses every call would fail the run rather than prove it.
+     */
     private fun lifecycle(
         runtime: LocalVaultRuntime,
         configurator: app.opentasks.core.domain.RemoteBackupConfigurator,
         crypto: TinkVaultCrypto,
         codec: DefaultAuthenticatedCloudObjectCodec,
         provider: TestProviderStore,
+        blobs: TestAttachmentNamespace,
         authorization: TestAuthorizationManager,
     ) = DefaultRemoteBackupLifecycleCoordinator(
         vaultId = runtime.vaultId,
@@ -530,6 +787,44 @@ class RecoveryTakeoverInstrumentedTest {
         ownershipCodec = OwnershipClaimCodec(codec),
         publicationCodec = PublicationCodec(codec),
         configurator = configurator,
+        openAttachmentStore = { _, lineageId -> blobs.view(lineageId) },
+    )
+
+    /**
+     * The attachment services one installation owns, built exactly as the app
+     * builds them: collaborators are bound per operation to whichever lineage
+     * the vault is active on, and the cache is the only thing that survives a
+     * lineage change.
+     */
+    private fun attachmentRuntime(
+        context: IsolatedContext,
+        runtime: LocalVaultRuntime,
+        codec: DefaultAuthenticatedCloudObjectCodec,
+        provider: TestProviderStore,
+        blobs: TestAttachmentNamespace,
+        now: () -> Instant,
+    ) = AttachmentRuntime(
+        vaultId = runtime.vaultId,
+        repository = runtime.repository,
+        remoteStateStore = runtime.remoteBackupStore,
+        transferDao = runtime.attachmentTransferDao,
+        journalDao = runtime.backupJournalDao,
+        codec = codec,
+        manifestCodec = AttachmentBlobSetManifestCodec(codec),
+        cache = AttachmentCacheStore(File(context.cacheDir, "attachments/v1")) { 1L shl 30 },
+        contentKeyStore = runtime.contentKeyStore,
+        openSession = { configuration ->
+            AttachmentSessionResult.Opened(
+                AttachmentProviderSession(
+                    blobStore = blobs.view(configuration.lineageId),
+                    ownershipChainStore = DefaultOwnershipChainStore(
+                        provider,
+                        OwnershipClaimCodec(codec),
+                    ),
+                ) {},
+            )
+        },
+        now = now,
     )
 
     private suspend fun installRecoveryEnvelope(
@@ -601,6 +896,8 @@ class RecoveryTakeoverInstrumentedTest {
         val NEW_PASSPHRASE = "correct horse battery rotated".toCharArray()
         val ACCOUNT_DIGEST = ByteArray(32) { (it + 3).toByte() }
         val WRONG_ACCOUNT_DIGEST = ByteArray(32) { (it + 31).toByte() }
+        val INTAKE_AT: Instant = Instant.parse("2026-06-01T00:00:00Z")
+        val DELETED_AT: Instant = Instant.parse("2026-06-02T00:00:00Z")
     }
 }
 
@@ -856,6 +1153,145 @@ private class TestProviderStore(private val root: File) : CreateOnlyBackupObject
         root.deleteRecursively()
     }
 }
+
+private class BytesAttachmentSource(private val bytes: ByteArray) : AttachmentSource {
+    override val declaredByteCount: Long = bytes.size.toLong()
+
+    override fun open(): InputStream = ByteArrayInputStream(bytes)
+}
+
+/**
+ * One create-only attachment namespace shared by every installation.
+ *
+ * Discovery and enumeration are scoped to the lineage that created an object,
+ * exactly as the Drive adapter's `lineageId` app property scopes them, while
+ * reads and deletes address an exact provider identity. That is what makes a
+ * separate lineage report absent bytes instead of another lineage's.
+ */
+private class TestAttachmentNamespace {
+    private class Entry(
+        val bytes: ByteArray,
+        val role: String,
+        val blobSetId: String,
+        val lineageId: CloudLineageId,
+    )
+
+    private val stored = linkedMapOf<String, Entry>()
+    private var generated = 0
+
+    fun all(): List<String> = synchronized(stored) { stored.keys.toList() }
+
+    fun entries(lineageId: CloudLineageId): List<String> = synchronized(stored) {
+        stored.filterValues { it.lineageId == lineageId }.keys.toList()
+    }
+
+    fun view(lineageId: CloudLineageId): AttachmentBlobStore = View(lineageId)
+
+    private inner class View(private val lineageId: CloudLineageId) : AttachmentBlobStore {
+        override suspend fun generateObjectIds(count: Int): List<ProviderObjectId> =
+            synchronized(stored) {
+                (1..count).map { ProviderObjectId.of("attachment-object-${++generated}") }
+            }
+
+        override suspend fun createChunk(
+            providerObjectId: ProviderObjectId,
+            blobSetId: BlobSetId,
+            chunkIndex: Int,
+            chunkCount: Int,
+            frameBytes: ByteArray,
+        ): AttachmentObjectResult =
+            create(providerObjectId, blobSetId, ATTACHMENT_CHUNK_ROLE, frameBytes)
+
+        override suspend fun createManifest(
+            providerObjectId: ProviderObjectId,
+            blobSetId: BlobSetId,
+            frameBytes: ByteArray,
+        ): AttachmentObjectResult =
+            create(providerObjectId, blobSetId, ATTACHMENT_MANIFEST_ROLE, frameBytes)
+
+        override suspend fun readObject(
+            providerObjectId: ProviderObjectId,
+            maximumBytes: Long,
+        ): AttachmentReadResult {
+            val bytes = synchronized(stored) { stored[providerObjectId.value]?.bytes?.copyOf() }
+                ?: return AttachmentReadResult.Missing
+            return if (bytes.size > maximumBytes) {
+                bytes.fill(0)
+                AttachmentReadResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE)
+            } else {
+                AttachmentReadResult.Found(bytes)
+            }
+        }
+
+        override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup {
+            val matches = synchronized(stored) {
+                stored.filterValues {
+                    it.lineageId == lineageId &&
+                        it.role == ATTACHMENT_MANIFEST_ROLE &&
+                        it.blobSetId == blobSetId.value
+                }.keys.toList()
+            }
+            return when (matches.size) {
+                0 -> AttachmentManifestLookup.Missing
+                1 -> AttachmentManifestLookup.Found(ProviderObjectId.of(matches.single()))
+                else -> AttachmentManifestLookup.Ambiguous
+            }
+        }
+
+        override suspend fun listNamespace(
+            pageToken: String?,
+            exactRole: String?,
+        ): Pair<List<AttachmentListedObject>, String?> {
+            val listed = synchronized(stored) {
+                stored.entries
+                    .filter { (_, entry) ->
+                        entry.lineageId == lineageId &&
+                            (exactRole == null || entry.role == exactRole)
+                    }
+                    .map { (providerId, entry) ->
+                        AttachmentListedObject(
+                            providerObjectId = ProviderObjectId.of(providerId),
+                            role = entry.role,
+                            blobSetId = entry.blobSetId,
+                            createdAtEpochMillis = null,
+                        )
+                    }
+            }
+            val offset = pageToken?.toIntOrNull() ?: 0
+            val page = listed.drop(offset).take(ATTACHMENT_PAGE_SIZE)
+            val next = (offset + page.size).takeIf { it < listed.size }?.toString()
+            return page to next
+        }
+
+        override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {
+            synchronized(stored) { stored.remove(providerObjectId.value)?.bytes?.fill(0) }
+            return true
+        }
+
+        private fun create(
+            providerObjectId: ProviderObjectId,
+            blobSetId: BlobSetId,
+            role: String,
+            frameBytes: ByteArray,
+        ): AttachmentObjectResult = synchronized(stored) {
+            if (providerObjectId.value in stored) {
+                AttachmentObjectResult.AlreadyExists
+            } else {
+                stored[providerObjectId.value] = Entry(
+                    bytes = frameBytes.copyOf(),
+                    role = role,
+                    blobSetId = blobSetId.value,
+                    lineageId = lineageId,
+                )
+                AttachmentObjectResult.Created
+            }
+        }
+    }
+}
+
+private const val ATTACHMENT_CHUNK_ROLE = "attachment-chunk"
+private const val ATTACHMENT_MANIFEST_ROLE = "attachment-manifest"
+private const val ATTACHMENT_PAGE_SIZE = 100
 
 private class MemoryTransferStore : RemoteBackupTransferStore {
     private val objects = linkedMapOf<Pair<String, String>, RemoteBackupObject>()

@@ -65,6 +65,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -672,6 +673,81 @@ class RemoteBackupRuntimeTest {
         fixture.close()
     }
 
+    // -- Attachment upkeep ------------------------------------------------------------------
+
+    /**
+     * Only a verified publication proves that the newest retained base
+     * contains every retirement recorded so far, so only a verified
+     * publication may collect the bytes those retirements released.
+     */
+    @Test
+    fun onlyAVerifiedPublicationCollectsRetiredAttachmentBytes() {
+        val collections = AtomicInteger()
+        val verified = runnerFixture(
+            outcome = RemoteBackupRunResult.Verified(BackupGeneration(2)),
+            collectAttachments = { collections.incrementAndGet() },
+        )
+        val retryable = runnerFixture(
+            outcome = RemoteBackupRunResult.Retryable(
+                RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+            ),
+            collectAttachments = { collections.incrementAndGet() },
+        )
+
+        runBlocking {
+            withTimeout(5_000) {
+                assertEquals(
+                    RemoteBackupRunResult.Verified(BackupGeneration(2)),
+                    verified.runner.run(),
+                )
+                assertEquals(1, collections.get())
+                assertEquals(
+                    RemoteBackupRunResult.Retryable(
+                        RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+                    ),
+                    retryable.runner.run(),
+                )
+            }
+        }
+
+        assertEquals(1, collections.get())
+    }
+
+    /** Collection is upkeep behind a publication, never part of its outcome. */
+    @Test
+    fun aFailedCollectionLeavesTheVerifiedPublicationVerified() {
+        val fixture = runnerFixture(
+            outcome = RemoteBackupRunResult.Verified(BackupGeneration(3)),
+            collectAttachments = { throw IllegalStateException("collection failed") },
+        )
+
+        val result = runBlocking { withTimeout(5_000) { fixture.runner.run() } }
+
+        assertEquals(RemoteBackupRunResult.Verified(BackupGeneration(3)), result)
+        assertNull(fixture.stateStore.stored().failureCategory)
+    }
+
+    /**
+     * An intake this slot never finished holds provider objects no record
+     * names, so activation is when that residue is abandoned.
+     */
+    @Test
+    fun activatingTheRuntimeAbandonsAttachmentSessionsItNeverFinished() {
+        val expirations = AtomicInteger()
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 4,
+            expireAttachmentSessions = { expirations.incrementAndGet() },
+        )
+
+        fixture.runtime.start()
+
+        assertTrue(awaitCount(expirations, 1))
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(1, expirations.get())
+        fixture.close()
+    }
+
     // -- Fixtures ---------------------------------------------------------------------------
 
     private fun runnerFixture(
@@ -681,6 +757,7 @@ class RemoteBackupRuntimeTest {
         configured: Boolean = true,
         storedCategory: RemoteBackupFailureCategory? = null,
         publicationGate: Mutex = Mutex(),
+        collectAttachments: suspend () -> Unit = {},
     ): RunnerFixture {
         val events = mutableListOf<String>()
         val transport = RecordingDriveTransport { events += "transport-close" }
@@ -724,6 +801,7 @@ class RemoteBackupRuntimeTest {
                 UnusedObjectStore
             },
             publicationGate = publicationGate,
+            collectAttachments = collectAttachments,
         )
         return fixture
     }
@@ -755,6 +833,7 @@ class RemoteBackupRuntimeTest {
         localGeneration: Long,
         configured: Boolean = true,
         outcome: RemoteBackupRunResult = RemoteBackupRunResult.NoChanges,
+        expireAttachmentSessions: suspend () -> Unit = {},
     ): RuntimeFixture {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val configurationFlow = MutableStateFlow(
@@ -780,8 +859,19 @@ class RemoteBackupRuntimeTest {
                 scheduler = scheduler,
                 observeConfiguration = { configurationFlow },
                 observeLocalGeneration = { generationFlow },
+                expireAttachmentSessions = expireAttachmentSessions,
             ),
         )
+    }
+
+    /** Waits for a counter a background pass increments, or gives up. */
+    private fun awaitCount(counter: AtomicInteger, expected: Int): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            if (counter.get() >= expected) return true
+            Thread.sleep(5)
+        }
+        return counter.get() >= expected
     }
 
     private class RuntimeFixture(
