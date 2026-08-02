@@ -62,8 +62,8 @@ class InMemoryBackupJournalTest {
 
         assertTrue(result is CommandResult.Success)
         assertEquals(1, journal.currentGeneration)
-        assertEquals(List(6) { 1L }, journal.entries.map { it.generation.value })
-        assertEquals(List(6) { it }, journal.entries.map { it.sequence })
+        assertEquals(List(7) { 1L }, journal.entries.map { it.generation.value })
+        assertEquals(List(7) { it }, journal.entries.map { it.sequence })
         assertEquals(
             listOf(
                 BackupRecordFamily.PROJECT,
@@ -72,6 +72,7 @@ class InMemoryBackupJournalTest {
                 BackupRecordFamily.WORKFLOW_STATUS,
                 BackupRecordFamily.WORKFLOW_STATUS,
                 BackupRecordFamily.WORKFLOW_STATUS,
+                BackupRecordFamily.ACTIVITY_ENTRY,
             ),
             journal.entries.map { entry ->
                 BackupMutationCodec.decode(entry.payload).record!!.family

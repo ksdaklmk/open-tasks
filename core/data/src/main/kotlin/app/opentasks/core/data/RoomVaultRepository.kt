@@ -6,6 +6,7 @@ import app.opentasks.core.data.backup.BackupMutationCodec
 import app.opentasks.core.data.backup.RoomBackupJournalSession
 import app.opentasks.core.data.backup.defaultBackupState
 import app.opentasks.core.data.backup.snapshots
+import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
@@ -41,6 +42,7 @@ import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.ActiveTimerSnapshot
+import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
@@ -309,6 +311,13 @@ class RoomVaultRepository(
                 database.workspaceDao().upsertWorkflowStatus(status.toEntity(revision))
             }
         }
+        recordActivity(
+            taskId = null,
+            projectId = project.id,
+            kind = ActivityKind.RECORD_CREATED,
+            body = "Created",
+            at = createdAt,
+        )
         return CommandResult.Success("Project created")
     }
 
@@ -1035,6 +1044,13 @@ class RoomVaultRepository(
             revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
         )
         persistTask(task, "create")
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.RECORD_CREATED,
+            body = "Created",
+            at = createdAt,
+        )
         return CommandResult.Success(
             message = "Task added",
             undo = DomainCommand.DeleteTask(task.id, createdAt),
@@ -1062,6 +1078,8 @@ class RoomVaultRepository(
                 acknowledgeBlocked = command.acknowledgeBlocked,
                 changedAt = command.completedAt,
             ),
+            activityKind = ActivityKind.COMPLETED,
+            activityBody = "Completed",
         )
         return if (result is CommandResult.Success) {
             val generated = (result.undo as? DomainCommand.RestoreTaskStatus)
@@ -1080,6 +1098,8 @@ class RoomVaultRepository(
 
     private suspend fun changeTaskStatus(
         command: DomainCommand.ChangeTaskStatus,
+        activityKind: ActivityKind = ActivityKind.STATUS_CHANGED,
+        activityBody: String? = null,
     ): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
@@ -1163,6 +1183,14 @@ class RoomVaultRepository(
                 }
             }
         }
+        val previousStatus = database.workspaceDao().getWorkflowStatus(task.statusId.value)?.toModel()
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = activityKind,
+            body = activityBody ?: "${previousStatus?.name ?: "Unknown"} → ${status.name}",
+            at = command.changedAt,
+        )
         return CommandResult.Success(
             message = "Moved to ${status.name}",
             undo = DomainCommand.RestoreTaskStatus(
@@ -1229,6 +1257,14 @@ class RoomVaultRepository(
                 database.workspaceDao().upsertTombstone(tombstone)
             }
         }
+        val previousStatus = database.workspaceDao().getWorkflowStatus(task.statusId.value)?.toModel()
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.STATUS_CHANGED,
+            body = "${previousStatus?.name ?: "Unknown"} → ${status.name}",
+            at = command.restoredAt,
+        )
         return CommandResult.Success("Status restored")
     }
 
@@ -1255,6 +1291,13 @@ class RoomVaultRepository(
             ),
             "reopen",
         )
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.REOPENED,
+            body = "Reopened",
+            at = now(),
+        )
         return CommandResult.Success("Task reopened")
     }
 
@@ -1280,6 +1323,13 @@ class RoomVaultRepository(
                     database.timeEntryDao().stop(active.id, stoppedAt)
                 }
         }
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.BINNED,
+            body = "Moved to Bin",
+            at = command.deletedAt,
+        )
         return CommandResult.Success(
             message = "Task moved to the Bin",
             undo = DomainCommand.RestoreTask(task.id),
@@ -1296,6 +1346,13 @@ class RoomVaultRepository(
                 revision = nextRevision(task),
             ),
             "restore",
+        )
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.RESTORED,
+            body = "Restored from Bin",
+            at = now(),
         )
         return CommandResult.Success(
             message = "Task restored",
@@ -1546,6 +1603,25 @@ class RoomVaultRepository(
                     requested = requestedReminder,
                 )
             }
+        }
+        if (task.projectId != updated.projectId) {
+            recordActivity(
+                taskId = task.id,
+                projectId = updated.projectId,
+                kind = ActivityKind.PROJECT_MOVED,
+                body = "${database.workspaceDao().getProjectById(task.projectId?.value.orEmpty())?.name ?: "Inbox"} → " +
+                    "${requestedProject?.name ?: "Inbox"}",
+                at = now(),
+            )
+        }
+        if (task.milestoneId != updated.milestoneId) {
+            recordActivity(
+                taskId = task.id,
+                projectId = updated.projectId,
+                kind = ActivityKind.MILESTONE_CHANGED,
+                body = "Milestone: ${requestedMilestone?.name ?: "None"}",
+                at = now(),
+            )
         }
         return CommandResult.Success(
             message = "Changes saved",
@@ -1916,6 +1992,17 @@ class RoomVaultRepository(
                 )
             }
         }
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = if (command.present) {
+                ActivityKind.DEPENDENCY_ADDED
+            } else {
+                ActivityKind.DEPENDENCY_REMOVED
+            },
+            body = "Depends on: ${dependency.title}",
+            at = now(),
+        )
         return CommandResult.Success(
             message = if (command.present) "Dependency added" else "Dependency removed",
             undo = command.copy(present = !command.present),
@@ -1957,6 +2044,31 @@ class RoomVaultRepository(
 
     private suspend fun persistTask(task: Task, operationKind: String) {
         database.taskDao().upsert(task.toEntity())
+    }
+
+    private suspend fun recordActivity(
+        taskId: TaskId?,
+        projectId: ProjectId?,
+        kind: ActivityKind,
+        body: String,
+        at: Instant,
+    ) {
+        val workspaceDao = database.workspaceDao()
+        workspaceDao.upsertActivityEntry(
+            ActivityEntryEntity(
+                id = UUID.randomUUID().toString(),
+                taskId = taskId?.value,
+                projectId = projectId?.value,
+                kind = kind.name,
+                bodyCiphertext = body.take(MAX_ACTIVITY_BODY_LENGTH).toByteArray(Charsets.UTF_8),
+                createdAtEpochMillis = at.toEpochMilli(),
+            ),
+        )
+        val excess = workspaceDao.activityEntryCountForOwner(taskId?.value, projectId?.value) -
+            MAX_ACTIVITY_ENTRIES_PER_OWNER
+        if (excess > 0) {
+            workspaceDao.deleteOldestActivityEntries(taskId?.value, projectId?.value, excess)
+        }
     }
 
     private suspend fun persistProject(
@@ -2663,13 +2775,18 @@ class RoomVaultRepository(
             rows.copy(workflowStatuses = workflowStatuses)
         }
         val relations = combine(
-            workspaceDao.observeTaskTags(),
-            workspaceDao.observeChecklistItems(),
-            workspaceDao.observeReminders(),
-            observeTimeEntriesWithClock(),
-            workspaceDao.observeNotes(),
-        ) { taskTags, checklist, reminders, timeEntries, notes ->
-            RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+            combine(
+                workspaceDao.observeTaskTags(),
+                workspaceDao.observeChecklistItems(),
+                workspaceDao.observeReminders(),
+                observeTimeEntriesWithClock(),
+                workspaceDao.observeNotes(),
+            ) { taskTags, checklist, reminders, timeEntries, notes ->
+                RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+            },
+            workspaceDao.observeActivityEntries(),
+        ) { rows, activityEntries ->
+            rows.copy(activityEntries = activityEntries)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
@@ -2776,6 +2893,7 @@ class RoomVaultRepository(
                 )
             },
             notes = relations.notes.map(NoteEntity::toModel),
+            activityEntries = relations.activityEntries.mapNotNull(ActivityEntryEntity::toModel),
         )
     }
 
@@ -2825,6 +2943,9 @@ class RoomVaultRepository(
             }
             seedSnapshot.timeEntries.forEach { entry ->
                 workspaceDao.insertTimeEntry(entry.toEntity())
+            }
+            seedSnapshot.activityEntries.forEach { entry ->
+                workspaceDao.upsertActivityEntry(entry.toEntity())
             }
             seedSnapshot.home.activeTimer
                 ?.takeUnless { timer ->
@@ -2877,6 +2998,7 @@ class RoomVaultRepository(
         val reminders: List<ReminderEntity>,
         val timeEntries: TimedTimeEntries,
         val notes: List<NoteEntity> = emptyList(),
+        val activityEntries: List<ActivityEntryEntity> = emptyList(),
     )
 
     private data class TimedTimeEntries(
@@ -2907,6 +3029,8 @@ class RoomVaultRepository(
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000
         const val MAX_NOTES_PER_OWNER = 500
+        const val MAX_ACTIVITY_ENTRIES_PER_OWNER = 500
+        const val MAX_ACTIVITY_BODY_LENGTH = 500
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         val VAULT_ID = VaultId("vault-primary")

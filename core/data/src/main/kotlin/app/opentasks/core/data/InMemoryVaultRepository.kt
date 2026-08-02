@@ -17,6 +17,8 @@ import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.ActiveTimerSnapshot
+import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
@@ -288,6 +290,13 @@ class InMemoryVaultRepository internal constructor(
         publishProjects(
             projects = current.projects + project,
             workflowStatuses = current.workflowStatuses + statuses,
+        )
+        recordActivity(
+            taskId = null,
+            projectId = project.id,
+            kind = ActivityKind.RECORD_CREATED,
+            body = "Created",
+            at = now(),
         )
         return CommandResult.Success("Project created")
     }
@@ -960,6 +969,13 @@ class InMemoryVaultRepository internal constructor(
         )
         val current = mutableWorkspace.value
         publish(current.tasks + task)
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.RECORD_CREATED,
+            body = "Created",
+            at = now(),
+        )
         return CommandResult.Success(
             message = "Task added",
             undo = DomainCommand.DeleteTask(task.id, now()),
@@ -986,6 +1002,8 @@ class InMemoryVaultRepository internal constructor(
                 acknowledgeBlocked = command.acknowledgeBlocked,
                 changedAt = command.completedAt,
             ),
+            activityKind = ActivityKind.COMPLETED,
+            activityBody = "Completed",
         )
         return if (result is CommandResult.Success) {
             val generated = (result.undo as? DomainCommand.RestoreTaskStatus)
@@ -1002,7 +1020,11 @@ class InMemoryVaultRepository internal constructor(
         }
     }
 
-    private fun changeTaskStatus(command: DomainCommand.ChangeTaskStatus): CommandResult {
+    private fun changeTaskStatus(
+        command: DomainCommand.ChangeTaskStatus,
+        activityKind: ActivityKind = ActivityKind.STATUS_CHANGED,
+        activityBody: String? = null,
+    ): CommandResult {
         val current = mutableWorkspace.value
         val task = current.tasks.firstOrNull { it.id == command.taskId }
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
@@ -1077,6 +1099,14 @@ class InMemoryVaultRepository internal constructor(
                 listOfNotNull(generated),
             reminders = current.reminders + listOfNotNull(generatedReminder),
         )
+        val previousStatus = current.workflowStatuses.firstOrNull { it.id == task.statusId }
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = activityKind,
+            body = activityBody ?: "${previousStatus?.name ?: "Unknown"} → ${status.name}",
+            at = command.changedAt,
+        )
         return CommandResult.Success(
             message = "Moved to ${status.name}",
             undo = DomainCommand.RestoreTaskStatus(
@@ -1116,6 +1146,14 @@ class InMemoryVaultRepository internal constructor(
                 it.taskId == command.generatedOccurrenceId
             },
         )
+        val previousStatus = current.workflowStatuses.firstOrNull { it.id == task.statusId }
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.STATUS_CHANGED,
+            body = "${previousStatus?.name ?: "Unknown"} → ${status.name}",
+            at = command.restoredAt,
+        )
         return CommandResult.Success("Status restored")
     }
 
@@ -1145,6 +1183,13 @@ class InMemoryVaultRepository internal constructor(
                 ),
             ),
         )
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.REOPENED,
+            body = "Reopened",
+            at = now(),
+        )
         return CommandResult.Success("Task reopened")
     }
 
@@ -1170,6 +1215,13 @@ class InMemoryVaultRepository internal constructor(
             },
             at = command.deletedAt,
         )
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.BINNED,
+            body = "Moved to Bin",
+            at = command.deletedAt,
+        )
         return CommandResult.Success(
             message = "Task moved to the Bin",
             undo = DomainCommand.RestoreTask(task.id),
@@ -1183,6 +1235,13 @@ class InMemoryVaultRepository internal constructor(
         val deletedAt = task.deletedAt ?: return CommandResult.Success("Task is already restored")
         val updated = task.copy(deletedAt = null, revision = nextRevision(task))
         publish(current.tasks.replace(updated))
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = ActivityKind.RESTORED,
+            body = "Restored from Bin",
+            at = now(),
+        )
         return CommandResult.Success(
             message = "Task restored",
             undo = DomainCommand.DeleteTask(task.id, deletedAt),
@@ -1216,6 +1275,7 @@ class InMemoryVaultRepository internal constructor(
             reminders = current.reminders.filterNot { it.taskId == task.id },
             timeEntries = current.timeEntries.filterNot { it.taskId == task.id },
             notes = current.notes.filterNot { it.taskId == task.id },
+            activityEntries = current.activityEntries.filterNot { it.taskId == task.id },
         )
         return CommandResult.Success("Task permanently deleted")
     }
@@ -1246,6 +1306,7 @@ class InMemoryVaultRepository internal constructor(
                 reminders = current.reminders.filterNot { it.taskId in expiredIds },
                 timeEntries = current.timeEntries.filterNot { it.taskId in expiredIds },
                 notes = current.notes.filterNot { it.taskId in expiredIds },
+                activityEntries = current.activityEntries.filterNot { it.taskId in expiredIds },
                 at = command.now,
             )
         }
@@ -1447,6 +1508,25 @@ class InMemoryVaultRepository internal constructor(
             reminders = current.reminders
                 .filterNot { it.taskId == task.id } + listOfNotNull(requestedReminder),
         )
+        if (task.projectId != updated.projectId) {
+            recordActivity(
+                taskId = task.id,
+                projectId = updated.projectId,
+                kind = ActivityKind.PROJECT_MOVED,
+                body = "${current.projects.firstOrNull { it.id == task.projectId }?.name ?: "Inbox"} → " +
+                    "${current.projects.firstOrNull { it.id == updated.projectId }?.name ?: "Inbox"}",
+                at = now(),
+            )
+        }
+        if (task.milestoneId != updated.milestoneId) {
+            recordActivity(
+                taskId = task.id,
+                projectId = updated.projectId,
+                kind = ActivityKind.MILESTONE_CHANGED,
+                body = "Milestone: ${requestedMilestone?.name ?: "None"}",
+                at = now(),
+            )
+        }
         return CommandResult.Success(
             message = "Changes saved",
             undo = task.toUpdateCommand(existingReminder),
@@ -1737,6 +1817,17 @@ class InMemoryVaultRepository internal constructor(
             revision = nextRevision(task),
         )
         publish(current.tasks.replace(updated))
+        recordActivity(
+            taskId = task.id,
+            projectId = task.projectId,
+            kind = if (command.present) {
+                ActivityKind.DEPENDENCY_ADDED
+            } else {
+                ActivityKind.DEPENDENCY_REMOVED
+            },
+            body = "Depends on: ${dependency.title}",
+            at = now(),
+        )
         return CommandResult.Success(
             message = if (command.present) "Dependency added" else "Dependency removed",
             undo = command.copy(present = !command.present),
@@ -2260,6 +2351,7 @@ class InMemoryVaultRepository internal constructor(
         milestones: List<Milestone> = mutableWorkspace.value.milestones,
         timeEntries: List<TimeEntry> = mutableWorkspace.value.timeEntries,
         notes: List<Note> = mutableWorkspace.value.notes,
+        activityEntries: List<ActivityEntry> = mutableWorkspace.value.activityEntries,
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
@@ -2281,7 +2373,39 @@ class InMemoryVaultRepository internal constructor(
                     .thenBy(Milestone::name),
             ),
             notes = notes,
+            activityEntries = activityEntries,
         ).withReconciledTimeState(at = at, entries = timeEntries)
+    }
+
+    private fun recordActivity(
+        taskId: TaskId?,
+        projectId: ProjectId?,
+        kind: ActivityKind,
+        body: String,
+        at: Instant,
+    ) {
+        val current = mutableWorkspace.value
+        val entry = ActivityEntry(
+            id = UUID.randomUUID().toString(),
+            taskId = taskId,
+            projectId = projectId,
+            kind = kind,
+            body = body.take(MAX_ACTIVITY_BODY_LENGTH),
+            createdAt = at,
+        )
+        val entries = current.activityEntries + entry
+        val ownerEntries = entries.filter {
+            if (taskId != null) it.taskId == taskId else it.taskId == null && it.projectId == projectId
+        }
+        val idsToRemove = ownerEntries
+            .sortedWith(compareBy<ActivityEntry>(ActivityEntry::createdAt).thenBy(ActivityEntry::id))
+            .take((ownerEntries.size - MAX_ACTIVITY_ENTRIES_PER_OWNER).coerceAtLeast(0))
+            .mapTo(hashSetOf(), ActivityEntry::id)
+        mutableWorkspace.value = current.copy(
+            activityEntries = entries
+                .filterNot { it.id in idsToRemove }
+                .sortedWith(compareBy<ActivityEntry>(ActivityEntry::createdAt).thenBy(ActivityEntry::id)),
+        )
     }
 
     private fun Task.toUpdateCommand(
@@ -2351,6 +2475,8 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000
         const val MAX_NOTES_PER_OWNER = 500
+        const val MAX_ACTIVITY_ENTRIES_PER_OWNER = 500
+        const val MAX_ACTIVITY_BODY_LENGTH = 500
     }
 }
 

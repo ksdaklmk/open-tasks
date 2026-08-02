@@ -331,6 +331,38 @@ interface WorkspaceDao {
     @Query("SELECT * FROM notes ORDER BY createdAtEpochMillis, id")
     fun observeNotes(): Flow<List<NoteEntity>>
 
+    @Query("SELECT * FROM activity_entries ORDER BY createdAtEpochMillis, id")
+    fun observeActivityEntries(): Flow<List<ActivityEntryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertActivityEntry(value: ActivityEntryEntity)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM activity_entries
+        WHERE (:taskId IS NOT NULL AND taskId = :taskId)
+            OR (:taskId IS NULL AND taskId IS NULL AND projectId = :projectId)
+        """,
+    )
+    suspend fun activityEntryCountForOwner(taskId: String?, projectId: String?): Int
+
+    @Query(
+        """
+        DELETE FROM activity_entries WHERE id IN (
+            SELECT id FROM activity_entries
+            WHERE (:taskId IS NOT NULL AND taskId = :taskId)
+                OR (:taskId IS NULL AND taskId IS NULL AND projectId = :projectId)
+            ORDER BY createdAtEpochMillis ASC, id ASC
+            LIMIT :excess
+        )
+        """,
+    )
+    suspend fun deleteOldestActivityEntries(
+        taskId: String?,
+        projectId: String?,
+        excess: Int,
+    )
+
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun getNoteById(id: String): NoteEntity?
 

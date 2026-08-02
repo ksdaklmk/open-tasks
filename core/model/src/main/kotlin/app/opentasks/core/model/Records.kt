@@ -207,14 +207,28 @@ data class Note(
     val revision: Revision,
 )
 
+enum class ActivityKind {
+    RECORD_CREATED,
+    STATUS_CHANGED,
+    COMPLETED,
+    REOPENED,
+    PROJECT_MOVED,
+    MILESTONE_CHANGED,
+    DEPENDENCY_ADDED,
+    DEPENDENCY_REMOVED,
+    BINNED,
+    RESTORED,
+    ATTACHMENT_ADDED,
+    ATTACHMENT_REMOVED,
+}
+
 data class ActivityEntry(
     val id: String,
     val taskId: TaskId?,
     val projectId: ProjectId?,
-    val kind: String,
+    val kind: ActivityKind,
     val body: String,
     val createdAt: Instant,
-    val immutable: Boolean = true,
 )
 
 data class TimeEntry(

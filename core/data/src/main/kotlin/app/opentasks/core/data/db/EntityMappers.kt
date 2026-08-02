@@ -2,6 +2,8 @@ package app.opentasks.core.data.db
 
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
@@ -330,4 +332,25 @@ internal fun Attachment.toEntity(): AttachmentEntity = AttachmentEntity(
     revisionWallMillis = revision.wallTimeMillis,
     revisionLogical = revision.logicalCounter,
     revisionDeviceId = revision.deviceId.value,
+)
+
+internal fun ActivityEntryEntity.toModel(): ActivityEntry? {
+    val activityKind = ActivityKind.entries.firstOrNull { it.name == kind } ?: return null
+    return ActivityEntry(
+        id = id,
+        taskId = taskId?.let(::TaskId),
+        projectId = projectId?.let(::ProjectId),
+        kind = activityKind,
+        body = bodyCiphertext.toString(Charsets.UTF_8),
+        createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
+    )
+}
+
+internal fun ActivityEntry.toEntity(): ActivityEntryEntity = ActivityEntryEntity(
+    id = id,
+    taskId = taskId?.value,
+    projectId = projectId?.value,
+    kind = kind.name,
+    bodyCiphertext = body.toByteArray(Charsets.UTF_8),
+    createdAtEpochMillis = createdAt.toEpochMilli(),
 )

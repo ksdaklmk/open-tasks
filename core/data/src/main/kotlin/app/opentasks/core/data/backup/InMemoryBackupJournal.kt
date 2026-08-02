@@ -159,6 +159,7 @@ internal fun WorkspaceSnapshot.toBackupRecords(
         }
         notes.mapTo(this) { it.toEntity().toBackupRecordV1() }
         attachments.mapTo(this) { it.toEntity().toBackupRecordV1() }
+        activityEntries.mapTo(this) { it.toEntity().toBackupRecordV1() }
         tombstones.mapTo(this) { it.toBackupRecordV1() }
     }
 }
