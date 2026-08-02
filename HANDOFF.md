@@ -4,24 +4,29 @@
 - Branch: `main`
 - Session status: **The approved Galaxy Z Fold 8 trifold-ready adaptive slice
   is complete through Task 5. Its API 37 Fold 8 cover/main and Fold 8 Ultra
-  main emulator matrix passed all 38 required rows at 100% and 200% text,
-  including selected-project workbenches, week Schedule, Quick Add and editor
-  coverage. Task 3 instrumentation proves synthetic 50/50 hinge snapping;
-  the AVD exposed no native folding feature, so no native hinge claim is made.
-  Samsung Remote Test Lab is External-blocked while the user's Samsung
-  developer account approval is pending. The protected Pixel AVD and the
-  historical Google Drive plan amendment plus user-owned `.kotlin/` and
-  `artifacts/` remain untouched and unstaged. Both disposable Fold AVDs are
-  shut down and the final ADB/process audit is empty. Pause here. Stage 4 is
-  ready only after a new explicit user request. Stage 3, Stage 2, Train 1 Tasks
-  1.1–1.5, and Stage 1 remain complete and independently reviewed.**
-- Current source implementation point: the Task 5 qualification change
-  containing this handoff, with subject `docs: record fold 8 adaptive
-  acceptance`, on top of `9cc6057` (`fix: stack project status at large
-  text`), `da75a9e` (`fix: keep project progress readable at large text`),
-  `38a84f8` (`fix: show week schedule on medium windows`) and the adaptive
-  implementation range `7276f90..f46ce8c`. The authoritative acceptance record
-  is `docs/qualification/fold8-adaptive-acceptance.md`; ignored PNG and
+  main primary matrix passed 38/38 rows at 100% and 200% text. A focused
+  physical-cover pass also passed 8/8 rows at a verified 332×532 dp at both
+  text scales, covering compact navigation, the single-pane task list, editor
+  scrolling and Quick Add with a visible IME. The shared Quick Add sheet now
+  scrolls so its full actions remain reachable above the keyboard. Task 3
+  instrumentation proves synthetic 50/50 hinge snapping; the AVD exposed no
+  native folding feature, so no native hinge claim is made. Samsung Remote
+  Test Lab is External-blocked while the user's Samsung developer account
+  approval is pending. The protected Pixel AVD and the historical Google Drive
+  plan amendment plus user-owned `.kotlin/` and `artifacts/` remain untouched
+  and unstaged. Both disposable Fold AVDs are shut down and the final
+  ADB/process audit is empty. Pause here. Stage 4 is ready only after a new
+  explicit user request. Stage 3, Stage 2, Train 1 Tasks 1.1–1.5, and Stage 1
+  remain complete and independently reviewed.**
+- Current product source implementation point: `e3afd80` (`chore: remove
+  duplicate projects import`) on top of `0368dcf` (`fix: keep quick add actions
+  reachable`), `9cc6057` (`fix: stack project status at large text`),
+  `da75a9e` (`fix: keep project progress readable at large text`), `38a84f8`
+  (`fix: show week schedule on medium windows`) and the adaptive implementation
+  range `7276f90..f46ce8c`. Accepted visual evidence spans
+  `f46ce8c..0368dcf`, with affected rows recaptured after each fix and final
+  repository gates run at `e3afd80`. The authoritative acceptance record is
+  `docs/qualification/fold8-adaptive-acceptance.md`; ignored PNG and
   UIAutomator evidence is under
   `.superpowers/sdd/2026-07-31-galaxy-fold8-trifold-adaptive-plan/task-5-evidence/`.
   The prior Stage 3 closure point is `216de3e` (`docs: verify create-only Stage
@@ -564,9 +569,8 @@ checkpoint below.
 ## Galaxy Fold 8 trifold-ready adaptive slice closure — 2 August 2026
 
 The approved adaptive slice is complete in the implementation range
-`7276f90..f46ce8c`, the visual-acceptance corrections `38a84f8`, `da75a9e`
-and `9cc6057`, and the Task 5 qualification change with subject
-`docs: record fold 8 adaptive acceptance`. Its authoritative record is
+`7276f90..e3afd80`, including the visual-acceptance corrections `38a84f8`,
+`da75a9e`, `9cc6057` and `0368dcf`. Its authoritative record is
 `docs/qualification/fold8-adaptive-acceptance.md`.
 
 The slice maps AndroidX window layout information to a model-independent
@@ -576,15 +580,20 @@ horizontal tabletop hinge, and preserves bounded drafts and selection across
 fold-driven Activity recreation. Fixture ownership and continuity acceptance
 are isolated from the protected workspace.
 
-Task 5 passed 38/38 visually inspected rows across the API 37
+Task 5 passed a 38/38 primary matrix across the API 37
 `Fold8_Acceptance` cover/main displays and `Fold8_Ultra_Acceptance` main
 display at 100% and 200% text. The selected `Client research` workbench was
 verified rather than an empty Projects state. Acceptance found and closed the
 medium-width Schedule routing, large-text project progress and large-text
-cover status defects in `38a84f8`, `da75a9e` and `9cc6057` respectively.
-Both disposable AVDs ran sequentially with read-only, snapshot-disabled flags,
-were shut down, and left empty ADB and emulator-process audits. The protected
-`Pixel_10_Pro_Fold` was not started or mutated.
+cover status defects in `38a84f8`, `da75a9e` and `9cc6057` respectively. Review
+then found clipped Quick Add actions above the IME; `0368dcf` made the shared
+sheet scrollable and added a focused device regression. A further 8/8 focused
+matrix passed on the physical cover at a verified 332×532 dp at both text
+scales, covering compact navigation, Tasks single-pane behaviour, editor
+scrolling and Quick Add with Gboard visible. Both disposable AVDs ran
+sequentially with read-only, snapshot-disabled flags, were shut down, and left
+empty ADB and emulator-process audits. The protected `Pixel_10_Pro_Fold` was
+not started or mutated.
 
 The AVD exposed physical main and cover displays but no native AndroidX
 `FoldingFeature`, separating fold or hinge. A single bounded fold/unfold probe
@@ -873,12 +882,13 @@ identity above was unchanged after the module suites.
   groups wrap instead of being clipped.
 - Navigation labels stay readable at 100% and 130% text and deliberately
   collapse before wrapping at 150% and 200%.
-- Final Galaxy Fold 8 visual acceptance passed 38/38 required rows on API 37
-  Fold 8 cover/main and Fold 8 Ultra main displays at 100% and 200% text.
-  Physical-display evidence validates the adaptive surfaces; Task 3 synthetic
-  instrumentation validates 50/50 hinge snapping because the AVD reported no
-  native folding feature. Samsung RTL is External-blocked pending account
-  approval, so no real-device or One UI integration claim is made.
+- Final Galaxy Fold 8 visual acceptance passed a 38/38 primary matrix on API
+  37 Fold 8 cover/main and Fold 8 Ultra main displays plus an 8/8 focused
+  332×532 dp cover matrix, all at 100% and 200% text. Physical-display evidence
+  validates the adaptive surfaces; Task 3 synthetic instrumentation validates
+  50/50 hinge snapping because the AVD reported no native folding feature.
+  Samsung RTL is External-blocked pending account approval, so no real-device
+  or One UI integration claim is made.
 
 ### Local workspace
 

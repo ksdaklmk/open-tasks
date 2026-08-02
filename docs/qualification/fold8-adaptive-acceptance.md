@@ -1,10 +1,12 @@
 # Galaxy Fold 8 Adaptive Acceptance
 
 - Date: 2 August 2026
-- Emulator result: **PASS — 38/38 required visual rows**
+- Emulator result: **PASS — 38/38 primary rows and 8/8 focused 332 dp rows**
 - Samsung Remote Test Lab result: **External-blocked**
-- Product source under test: `9cc6057` (`fix: stack project status at large text`)
-- Slice implementation range: `7276f90..9cc6057`
+- Accepted evidence provenance: `f46ce8c..0368dcf`; affected rows were
+  recaptured after each product fix
+- Final product gate source: `e3afd80` (`chore: remove duplicate projects import`)
+- Slice implementation range: `7276f90..e3afd80`
 - Ignored evidence root:
   `.superpowers/sdd/2026-07-31-galaxy-fold8-trifold-adaptive-plan/task-5-evidence/`
 
@@ -20,6 +22,7 @@ credential was requested or handled.
 |---|---:|---|---:|---:|---:|---|---|
 | `Fold8_Acceptance` | 37 | Main | 2160×1856 | 420 dpi | 823×707 | Light | 100%, 200% |
 | `Fold8_Acceptance` | 37 | Cover | 1080×1728 | 420 dpi | 411×658 | Light | 100%, 200% |
+| `Fold8_Acceptance` | 37 | Cover, focused override | 1080×1728 | 520 dpi | 332×532 | Light | 100%, 200% |
 | `Fold8_Ultra_Acceptance` | 37 | Main | 2268×1968 | 420 dpi | 864×750 | Light | 100%, 200% |
 
 The physical SurfaceFlinger display IDs were `4619827259835644672` for the
@@ -29,6 +32,12 @@ sequentially as the sole target with `-read-only -no-snapshot-save
 verified the exact AVD name, API, physical display, density, light theme and
 font scale. UIAutomator confirmed the intended route and selected fixture;
 every accepted PNG was then inspected at original resolution.
+
+The focused cover pass used the reversible per-display command `wm density
+520 -d 2`. `MainActivity` reported `sw332dp w332dp h532dp 520dpi` at both
+text scales before capture. The override was reset after acceptance and the
+same Activity reported the physical `sw411dp w411dp h658dp 420dpi` cover
+configuration before shutdown.
 
 The protected `Pixel_10_Pro_Fold` AVD was not started or mutated. The final
 font scale was restored to `1.0`, each disposable emulator was shut down, and
@@ -58,7 +67,7 @@ the selected `Client research` workbench, not the visually easier empty state.
 | 200% | Projects workbench | PASS | `fold8-cover-200/projects-workbench-green.png` |
 | 200% | Schedule | PASS | `fold8-cover-200/schedule.png` |
 | 200% | More | PASS | `fold8-cover-200/more.png` |
-| 200% | Quick Add | PASS | `fold8-cover-200/quick-add.png` |
+| 200% | Quick Add | PASS | `fold8-cover-200/quick-add-fixed.png` |
 
 ### Fold 8 main — 12/12 PASS
 
@@ -94,9 +103,26 @@ the selected `Client research` workbench, not the visually easier empty state.
 | 200% | Schedule week view | PASS | `fold8-ultra-200/schedule.png` |
 | 200% | More | PASS | `fold8-ultra-200/more.png` |
 
+### Focused 332 dp Fold 8 cover — 8/8 PASS
+
+| Scale | Surface | Result | Evidence file |
+|---:|---|---|---|
+| 100% | Home compact navigation | PASS | `fold8-cover-332-100/home.png` |
+| 100% | Tasks single pane | PASS | `fold8-cover-332-100/tasks.png` |
+| 100% | Task editor scrolling | PASS | `fold8-cover-332-100/task-editor.png` |
+| 100% | Quick Add with IME | PASS | `fold8-cover-332-100/quick-add.png` |
+| 200% | Home compact navigation | PASS | `fold8-cover-332-200/home.png` |
+| 200% | Tasks single pane | PASS | `fold8-cover-332-200/tasks.png` |
+| 200% | Task editor scrolling | PASS | `fold8-cover-332-200/task-editor.png` |
+| 200% | Quick Add with IME | PASS | `fold8-cover-332-200/quick-add.png` |
+
 Matching XML state captures accompany the final selected-project workbench,
 all Ultra rows, both Fold main Schedule corrections and the Fold main 200%
-rows where exact route/state confirmation was material.
+rows where exact route/state confirmation was material. Every focused 332 dp
+row has a matching XML capture. At both scales the editor's lower controls
+remained reachable by scrolling. With Gboard visible, one upward sheet swipe
+exposed the complete enabled Quick Add actions above the IME; the 100% actions
+were exactly 48 dp tall and the 200% actions were approximately 53.2 dp tall.
 
 ## Findings fixed during acceptance
 
@@ -107,14 +133,20 @@ fixed, and the affected row was recaptured before acceptance continued:
   display selecting the compact day agenda rather than the required week view.
   The original red capture is `fold8-main-100/schedule.png`; the accepted
   captures are the corresponding `schedule-green.png` files.
-- `da75a9e` (`fix: keep project progress readable at large text`) made the
-  selected-project progress header stack at large text instead of squeezing
-  progress copy and counts into overlapping columns. The red capture is
+- `da75a9e` (`fix: keep project progress readable at large text`) reserved
+  distinct width for the project count while allowing the title to wrap. The
+  red capture is
   `fold8-main-200/projects.png`.
 - `9cc6057` (`fix: stack project status at large text`) moved the local-save
   status into the title column so the selected workbench remains readable on
   the 200% cover display. The red capture is
   `fold8-cover-200/projects-workbench.png`.
+- `0368dcf` (`fix: keep quick add actions reachable`) made the shared Quick
+  Add sheet vertically scrollable so its actions remain reachable above the
+  IME at large text and narrow widths. The original clipped cover capture is
+  `fold8-cover-200/quick-add.png`; accepted replacements are
+  `fold8-cover-200/quick-add-fixed.png` and the two focused 332 dp Quick Add
+  captures.
 
 ## Fold and hinge evidence boundary
 
@@ -153,13 +185,13 @@ The final documentation commit was prepared only after running the required
 gates from the product source above:
 
 ```text
-./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
-BUILD SUCCESSFUL in 515ms
-547 actionable tasks: 12 executed, 535 up-to-date
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace --console=plain
+BUILD SUCCESSFUL in 26s
+547 actionable tasks: 41 executed, 506 up-to-date
 
-./gradlew :app:assembleRelease --stacktrace
-BUILD SUCCESSFUL in 32s
-441 actionable tasks: 55 executed, 1 from cache, 385 up-to-date
+./gradlew :app:assembleRelease --stacktrace --console=plain
+BUILD SUCCESSFUL in 31s
+441 actionable tasks: 24 executed, 417 up-to-date
 Included minifyReleaseWithR8, resource shrinking/optimisation and packaging.
 
 git diff --check
