@@ -44,43 +44,42 @@ class AttachmentGarbageCollector(
     ): AttachmentGcResult {
         val key = contentKey()
         val expected = activeTip(key) ?: return STOPPED_FOR_OWNERSHIP_CHANGE
-        val listed = listAll(store) ?: return BLOCKED_LISTING
         val candidatesByBlobSet = candidates.groupBy { it.blobSetId.value }
         val eligibleBlobSets = candidatesByBlobSet
             .filterValues { values -> values.size == 1 && eligible(values.single(), now) }
             .keys
-        var blockers = 0
-        val deletable = listed.filter { remote ->
-            val understoodRole = remote.role == CHUNK_ROLE || remote.role == MANIFEST_ROLE
-            val associated = remote.blobSetId in candidatesByBlobSet
-            if (!understoodRole || !associated) {
-                blockers += 1
-                false
-            } else {
-                remote.blobSetId in eligibleBlobSets
-            }
-        }.sortedBy { if (it.role == CHUNK_ROLE) 0 else 1 }
-
-        if (deletable.isEmpty()) return AttachmentGcResult(0, false, blockers)
-        val current = activeTip(key)
-        if (current?.completeSha256 != expected.completeSha256) {
-            return STOPPED_FOR_OWNERSHIP_CHANGE
-        }
-
         var deleted = 0
-        for (remote in deletable) {
+        var blockers = 0
+        for (role in listOf(CHUNK_ROLE, MANIFEST_ROLE)) {
+            val scan = scanRole(
+                store = store,
+                role = role,
+                candidatesByBlobSet = candidatesByBlobSet,
+                eligibleBlobSets = eligibleBlobSets,
+                maximumTargets = maximumDeletesPerBatch - deleted,
+                countBlockers = role == CHUNK_ROLE,
+            ) ?: return AttachmentGcResult(deleted, false, blockers + 1)
+            blockers += scan.blockers
+            if (role == MANIFEST_ROLE && scan.eligibleChunkFound) break
+            if (scan.targets.isEmpty()) continue
+            val current = activeTip(key)
+            if (current?.completeSha256 != expected.completeSha256) {
+                return AttachmentGcResult(deleted, true, blockers)
+            }
+            for (remote in scan.targets) {
+                val removed = try {
+                    store.delete(remote.providerObjectId)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    false
+                }
+                if (!removed) {
+                    return AttachmentGcResult(deleted, false, blockers + 1)
+                }
+                deleted += 1
+            }
             if (deleted == maximumDeletesPerBatch) break
-            val removed = try {
-                store.delete(remote.providerObjectId)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                false
-            }
-            if (!removed) {
-                return AttachmentGcResult(deleted, false, blockers + 1)
-            }
-            deleted += 1
         }
         return AttachmentGcResult(deleted, false, blockers)
     }
@@ -93,10 +92,19 @@ class AttachmentGarbageCollector(
         null
     }
 
-    private suspend fun listAll(store: AttachmentBlobStore): List<AttachmentListedObject>? {
-        val listed = mutableListOf<AttachmentListedObject>()
+    private suspend fun scanRole(
+        store: AttachmentBlobStore,
+        role: String,
+        candidatesByBlobSet: Map<String, List<GcCandidate>>,
+        eligibleBlobSets: Set<String>,
+        maximumTargets: Int,
+        countBlockers: Boolean,
+    ): RoleScan? {
+        val targets = ArrayList<AttachmentListedObject>(maximumTargets)
         val seenTokens = mutableSetOf<String>()
         var token: String? = null
+        var blockers = 0
+        var eligibleChunkFound = false
         do {
             val page = try {
                 store.listNamespace(token)
@@ -105,12 +113,24 @@ class AttachmentGarbageCollector(
             } catch (_: Exception) {
                 return null
             }
-            if (listed.size + page.first.size > MAX_LISTED_OBJECTS) return null
-            listed += page.first
+            if (page.first.size > MAX_PAGE_SIZE) return null
+            for (remote in page.first) {
+                val understoodRole = remote.role == CHUNK_ROLE || remote.role == MANIFEST_ROLE
+                val associated = remote.blobSetId in candidatesByBlobSet
+                if (!understoodRole || !associated) {
+                    if (countBlockers) blockers += 1
+                    continue
+                }
+                val eligible = remote.blobSetId in eligibleBlobSets
+                if (eligible && remote.role == CHUNK_ROLE) eligibleChunkFound = true
+                if (eligible && remote.role == role && targets.size < maximumTargets) {
+                    targets += remote
+                }
+            }
             token = page.second
             if (token != null && !seenTokens.add(token)) return null
         } while (token != null)
-        return listed
+        return RoleScan(targets, blockers, eligibleChunkFound)
     }
 
     private fun eligible(candidate: GcCandidate, now: Instant): Boolean =
@@ -126,8 +146,13 @@ class AttachmentGarbageCollector(
     private companion object {
         const val CHUNK_ROLE = "attachment-chunk"
         const val MANIFEST_ROLE = "attachment-manifest"
-        const val MAX_LISTED_OBJECTS = 4_096
+        const val MAX_PAGE_SIZE = 100
         val STOPPED_FOR_OWNERSHIP_CHANGE = AttachmentGcResult(0, true, 0)
-        val BLOCKED_LISTING = AttachmentGcResult(0, false, 1)
     }
+
+    private data class RoleScan(
+        val targets: List<AttachmentListedObject>,
+        val blockers: Int,
+        val eligibleChunkFound: Boolean,
+    )
 }

@@ -503,6 +503,68 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun attachmentContentDeletionFailsClosedOnCyclicPageTokens() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+            pageSize = 1,
+            nextPageToken = { _, _ -> "0" },
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            result,
+        )
+        assertTrue(attachments.deleted.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun attachmentContentDeletionResumesPastFourThousandNinetySixListedRows() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            *(0 until 4_097).map {
+                attachmentListed("blob-$it", "manifest-$it", ATTACHMENT_MANIFEST_ROLE)
+            }.toTypedArray(),
+            attachmentListed("tail-blob", "tail-chunk", ATTACHMENT_CHUNK_ROLE),
+            pageSize = 100,
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        var attempts = 0
+        while ("tail-chunk" !in attachments.deleted && attempts < 20) {
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+            attempts += 1
+        }
+
+        assertTrue("tail chunk was never reached", "tail-chunk" in attachments.deleted)
+        assertTrue(attachments.deleted.none { it.startsWith("manifest-") })
+        fixture.close()
+    }
+
+    @Test
+    fun attachmentContentDeletionRejectsProgressFromAnotherLineage() = runBlocking {
+        val attachments = RecordingAttachmentStore()
+        val fixture = DeletionFixture(attachmentStore = attachments)
+        assertEquals(
+            LifecycleResult.AttachmentContentDeleted,
+            fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf()),
+        )
+        val listCallsBefore = attachments.listCalls
+        fixture.state.configuration = fixture.state.configuration.copy(lineageId = NEW_LINEAGE_ID)
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE),
+            result,
+        )
+        assertEquals(listCallsBefore, attachments.listCalls)
+        fixture.close()
+    }
+
+    @Test
     fun terminalDeletionRemovesAttachmentChunksAndManifestsBeforeClaims() = runBlocking {
         val attachments = RecordingAttachmentStore(
             attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
@@ -518,6 +580,29 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             fixture.deletionEvents.indexOf("attachment:manifest-a") <
                 fixture.deletionEvents.indexOf("backup:$OLD_CLAIM_PROVIDER"),
         )
+        fixture.close()
+    }
+
+    @Test
+    fun terminalDeletionResumesPagedChunkPassBeforeAnyManifestDelete() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            *(0 until 5).map {
+                attachmentListed("blob-$it", "manifest-$it", ATTACHMENT_MANIFEST_ROLE)
+            }.toTypedArray(),
+            attachmentListed("tail-blob", "tail-chunk", ATTACHMENT_CHUNK_ROLE),
+            pageSize = 1,
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+
+        var attempts = 0
+        while ("tail-chunk" !in attachments.deleted && attempts < 3) {
+            fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+            attempts += 1
+        }
+
+        assertTrue("tail-chunk" in attachments.deleted)
+        assertTrue(attachments.deleted.none { it.startsWith("manifest-") })
+        assertTrue(OLD_CLAIM_PROVIDER !in fixture.objects.deleted)
         fixture.close()
     }
 
@@ -884,10 +969,15 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         }
     }
 
-    private class RecordingAttachmentStore(vararg initial: AttachmentListedObject) :
+    private class RecordingAttachmentStore(
+        vararg initial: AttachmentListedObject,
+        private val pageSize: Int = Int.MAX_VALUE,
+        private val nextPageToken: (String?, String?) -> String? = { _, calculated -> calculated },
+    ) :
         AttachmentBlobStore {
         private val objects = initial.toMutableList()
         val deleted = mutableListOf<String>()
+        var listCalls = 0
         var onDelete: (String) -> Unit = {}
         fun add(vararg added: AttachmentListedObject) {
             objects += added
@@ -911,7 +1001,14 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         ): AttachmentObjectResult = error("not used")
         override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup =
             error("not used")
-        override suspend fun listNamespace(pageToken: String?) = objects.toList() to null
+        override suspend fun listNamespace(pageToken: String?): Pair<List<AttachmentListedObject>, String?> {
+            listCalls += 1
+            val start = pageToken?.toInt() ?: 0
+            val page = objects.drop(start).take(pageSize)
+            val calculatedNext = (start + page.size).takeIf { it < objects.size }?.toString()
+            val next = nextPageToken(pageToken, calculatedNext)
+            return page to next
+        }
         override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {
             deleted += providerObjectId.value
             onDelete(providerObjectId.value)

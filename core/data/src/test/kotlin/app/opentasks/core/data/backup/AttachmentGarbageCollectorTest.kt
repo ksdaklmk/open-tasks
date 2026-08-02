@@ -139,6 +139,28 @@ class AttachmentGarbageCollectorTest {
         }
     }
 
+    @Test
+    fun validNamespaceLargerThanFourThousandNinetySixStreamsWithoutBlocking() = runBlocking {
+        withTimeout(5_000) {
+            val store = FakeAttachmentStore(
+                *(0 until 4_100).map {
+                    listed("eligible", "chunk-$it", CHUNK_ROLE)
+                }.toTypedArray(),
+                pageSize = 100,
+            )
+
+            val result = collector(maximumDeletes = 1).runBatch(
+                store,
+                listOf(candidate("eligible")),
+                NOW,
+            )
+
+            assertEquals(1, result.deletedObjects)
+            assertEquals(0, result.blockers)
+            assertEquals(listOf("chunk-0"), store.deleted)
+        }
+    }
+
     private fun collector(
         chain: OwnershipChainStore = FakeChainStore(),
         maximumDeletes: Int = 32,
@@ -183,7 +205,10 @@ class AttachmentGarbageCollectorTest {
         ) = error("not used")
     }
 
-    private class FakeAttachmentStore(vararg initial: AttachmentListedObject) :
+    private class FakeAttachmentStore(
+        vararg initial: AttachmentListedObject,
+        private val pageSize: Int = Int.MAX_VALUE,
+    ) :
         AttachmentBlobStore {
         private val objects = initial.toMutableList()
         val deleted = mutableListOf<String>()
@@ -206,7 +231,12 @@ class AttachmentGarbageCollectorTest {
         ): AttachmentObjectResult = error("not used")
         override suspend fun findManifest(blobSetId: BlobSetId): AttachmentManifestLookup =
             error("not used")
-        override suspend fun listNamespace(pageToken: String?) = objects.toList() to null
+        override suspend fun listNamespace(pageToken: String?): Pair<List<AttachmentListedObject>, String?> {
+            val start = pageToken?.toInt() ?: 0
+            val page = objects.drop(start).take(pageSize)
+            val next = (start + page.size).takeIf { it < objects.size }?.toString()
+            return page to next
+        }
         override suspend fun delete(providerObjectId: ProviderObjectId): Boolean {
             deleted += providerObjectId.value
             objects.removeAll { it.providerObjectId == providerObjectId }
