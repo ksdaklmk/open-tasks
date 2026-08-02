@@ -405,9 +405,6 @@ fun OpenTasksApp(
                 ),
             )
             val compact = layout.windowClass == WorkspaceWindowClass.COMPACT
-            val expanded =
-                layout.windowClass == WorkspaceWindowClass.EXPANDED ||
-                    layout.windowClass == WorkspaceWindowClass.EXTRA_WIDE
             val showDetailPane = layout.showDetailPane
 
             Scaffold(
@@ -740,7 +737,7 @@ fun OpenTasksApp(
                                 ScheduleScreen(
                                     tasks = snapshot.tasks,
                                     projectNames = projectNames,
-                                    expanded = expanded,
+                                    expanded = layout.showNavigationRail,
                                     reminders = snapshot.reminders,
                                     today = snapshot.home.today,
                                     onOpenTask = { taskId ->
