@@ -8,6 +8,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,6 +20,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Project
+import app.opentasks.core.model.ProjectId
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -66,11 +69,38 @@ class ProjectPaneFractionInstrumentedTest {
         )
     }
 
+    @Test
+    fun fold8CoverLargeTextStacksSaveStatusBelowProjectHeading() {
+        setContent(
+            listPaneFraction = 0.42f,
+            hostWidth = 411.dp,
+            fontScale = 2f,
+            projects = listOf(OpenTasksFixtures.researchProject),
+            selectedProjectId = OpenTasksFixtures.researchProject.id,
+            showDetailPane = false,
+        )
+
+        val heading = composeRule.onNode(
+            hasText("Client research") and isHeading(),
+            useUnmergedTree = true,
+        )
+            .getUnclippedBoundsInRoot()
+        val status = composeRule.onNodeWithText("Saved on this device", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+
+        assertTrue(
+            "At Fold 8 cover width and 200% text, save status must follow the project heading",
+            status.top >= heading.bottom,
+        )
+    }
+
     private fun setContent(
         listPaneFraction: Float,
         hostWidth: Dp = 1_000.dp,
         fontScale: Float = 1f,
         projects: List<Project> = OpenTasksFixtures.snapshot.projects,
+        selectedProjectId: ProjectId = OpenTasksFixtures.studioProject.id,
+        showDetailPane: Boolean = true,
     ) {
         composeRule.setContent {
             val density = LocalDensity.current
@@ -88,8 +118,8 @@ class ProjectPaneFractionInstrumentedTest {
                             tasks = OpenTasksFixtures.tasks,
                             milestones = OpenTasksFixtures.milestones,
                             workflowStatuses = OpenTasksFixtures.workflowStatuses,
-                            selectedProjectId = OpenTasksFixtures.studioProject.id,
-                            showDetailPane = true,
+                            selectedProjectId = selectedProjectId,
+                            showDetailPane = showDetailPane,
                             listPaneFraction = listPaneFraction,
                             onSelectProject = {},
                             onCloseDetail = {},

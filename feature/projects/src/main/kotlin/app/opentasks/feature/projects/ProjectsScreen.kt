@@ -457,21 +457,22 @@ private fun ProjectWorkbench(
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.semantics { heading() },
                     )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when {
+                            hasErrors -> "Fix fields to save"
+                            editorValue != persistedValue -> "Saving…"
+                            else -> "Saved on this device"
+                        },
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (hasErrors) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                 }
-                Text(
-                    when {
-                        hasErrors -> "Fix fields to save"
-                        editorValue != persistedValue -> "Saving…"
-                        else -> "Saved on this device"
-                    },
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (hasErrors) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
             }
             Spacer(Modifier.height(24.dp))
 
