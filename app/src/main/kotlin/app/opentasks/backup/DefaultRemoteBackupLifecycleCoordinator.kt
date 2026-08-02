@@ -364,6 +364,23 @@ class DefaultRemoteBackupLifecycleCoordinator(
             return LifecycleResult.OwnershipRequired
         }
         val attachmentStore = openAttachmentStore(session.transport, configuration.lineageId)
+        suspend fun reauthenticateExpectedTip(): LifecycleResult? = when (
+            val resolution = chainStore.resolve(
+                configuration.rootClaimProviderId,
+                contentKey,
+            )
+        ) {
+            is OwnershipResolution.Active -> if (
+                resolution.tip.completeSha256 != expectedTip.completeSha256
+            ) {
+                markOwnershipLost(configuration)
+                LifecycleResult.OwnershipRequired
+            } else {
+                null
+            }
+            is OwnershipResolution.Terminated -> LifecycleResult.OwnershipRequired
+            is OwnershipResolution.Blocked -> failed(resolution.reason)
+        }
         var state = initialState
         val budget = DeletionBudget(MAX_DELETES_PER_BATCH)
         var pages = 0
@@ -449,20 +466,8 @@ class DefaultRemoteBackupLifecycleCoordinator(
             if (budget.remaining == 0) {
                 return failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER)
             }
-            when (
-                val resolution = chainStore.resolve(
-                    configuration.rootClaimProviderId,
-                    contentKey,
-                )
-            ) {
-                is OwnershipResolution.Active -> if (
-                    resolution.tip.completeSha256 != expectedTip.completeSha256
-                ) {
-                    markOwnershipLost(configuration)
-                    return LifecycleResult.OwnershipRequired
-                }
-                is OwnershipResolution.Terminated -> return LifecycleResult.OwnershipRequired
-                is OwnershipResolution.Blocked -> return failed(resolution.reason)
+            if (phase == AttachmentDeletionPhase.CHUNKS) {
+                reauthenticateExpectedTip()?.let { return it }
             }
             state = transitionAttachmentDeletion(
                 operationId,
@@ -485,6 +490,7 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     AttachmentChunkProbe.Present -> continue
                     is AttachmentChunkProbe.Failed -> return failed(probe.reason)
                 }
+                reauthenticateExpectedTip()?.let { return it }
             }
             val batch = targets.take(budget.remaining)
             for (target in batch) {
@@ -1303,8 +1309,10 @@ class DefaultRemoteBackupLifecycleCoordinator(
                     failed(RemoteBackupFailureCategory.RETRYABLE_PROVIDER),
                 )
             }
-            authenticateTerminal()?.let {
-                return TerminalAttachmentCleanupResult(state, it)
+            if (phase == AttachmentDeletionPhase.CHUNKS) {
+                authenticateTerminal()?.let {
+                    return TerminalAttachmentCleanupResult(state, it)
+                }
             }
             state = checkpointDeletion(
                 operationId,
@@ -1331,6 +1339,9 @@ class DefaultRemoteBackupLifecycleCoordinator(
                         state,
                         failed(probe.reason),
                     )
+                }
+                authenticateTerminal()?.let {
+                    return TerminalAttachmentCleanupResult(state, it)
                 }
             }
             val batch = targets.take(deletionBudget.remaining)

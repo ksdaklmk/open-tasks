@@ -626,6 +626,21 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
     }
 
     @Test
+    fun attachmentManifestDeletionReauthenticatesAfterChunkRoleProbe() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+        attachments.onChunkRoleProbe = { fixture.chain.forceDifferentActiveTip = true }
+
+        val result = fixture.coordinator.deleteAttachmentContent(PASSPHRASE.copyOf())
+
+        assertEquals(LifecycleResult.OwnershipRequired, result)
+        assertTrue(attachments.deleted.isEmpty())
+        fixture.close()
+    }
+
+    @Test
     fun attachmentContentDeletionResumesPastFourThousandNinetySixListedRows() = runBlocking {
         val attachments = RecordingAttachmentStore(
             *(0 until 4_097).map {
@@ -706,6 +721,27 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
 
         assertTrue("tail-chunk" in attachments.deleted)
         assertTrue(attachments.deleted.none { it.startsWith("manifest-") })
+        assertTrue(OLD_CLAIM_PROVIDER !in fixture.objects.deleted)
+        fixture.close()
+    }
+
+    @Test
+    fun terminalManifestDeletionReauthenticatesAfterChunkRoleProbe() = runBlocking {
+        val attachments = RecordingAttachmentStore(
+            attachmentListed("blob-a", "manifest-a", ATTACHMENT_MANIFEST_ROLE),
+        )
+        val fixture = DeletionFixture(attachmentStore = attachments)
+        attachments.onChunkRoleProbe = {
+            fixture.objects.smallFiles.remove(TOMBSTONE_PROVIDER)?.fill(0)
+        }
+
+        val result = fixture.coordinator.deleteHistory(PASSPHRASE.copyOf())
+
+        assertEquals(
+            LifecycleResult.Failed(RemoteBackupFailureCategory.AMBIGUOUS_REMOTE_STATE),
+            result,
+        )
+        assertTrue(attachments.deleted.isEmpty())
         assertTrue(OLD_CLAIM_PROVIDER !in fixture.objects.deleted)
         fixture.close()
     }
@@ -963,6 +999,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         var createCalls = 0
         var resolveCalls = 0
         var requireRootForResolution = false
+        var forceDifferentActiveTip = false
         override suspend fun discoverPublicRoots() = error("not used")
         override suspend fun resolve(
             rootProviderId: ProviderObjectId,
@@ -977,7 +1014,14 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             return if (::terminal.isInitialized) {
                 OwnershipResolution.Terminated(terminal)
             } else {
-                OwnershipResolution.Active(root, root)
+                OwnershipResolution.Active(
+                    root,
+                    if (forceDifferentActiveTip) {
+                        root.copy(completeSha256 = Sha256Digest.of(ZERO_SHA256))
+                    } else {
+                        root
+                    },
+                )
             }
         }
         override suspend fun createClaim(
@@ -1085,6 +1129,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
         val deleted = mutableListOf<String>()
         var listCalls = 0
         var onDelete: (String) -> Unit = {}
+        var onChunkRoleProbe: () -> Unit = {}
         fun add(vararg added: AttachmentListedObject) {
             objects += added
         }
@@ -1115,6 +1160,7 @@ class DefaultRemoteBackupLifecycleCoordinatorTest {
             exactRole: String?,
         ): Pair<List<AttachmentListedObject>, String?> {
             listCalls += 1
+            if (exactRole == ATTACHMENT_CHUNK_ROLE) onChunkRoleProbe()
             val listed = objects.filter { exactRole == null || it.role == exactRole }
             val start = pageStart(pageToken)
             val page = listed.drop(start).take(pageSize)
