@@ -3,22 +3,22 @@
 - Last updated: 2 August 2026
 - Branch: `main`
 - Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is in approved subagent-driven execution. Tasks 1–10 of 14 are complete and
-  Task 11 is next.
+  is paused after Tasks 1–11 of 14; Task 12 is next.
   The approved design is
   `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
   (`7b5af15`); the execution authority is
   `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–10 are complete with independent reviews closed (one
+  (`6538dca`). Tasks 1–11 are complete with independent reviews closed (one
   fix round each for Tasks 2, 3, 7, 8, and 9; two fix rounds for Task 10; Task
   4 closed review-clean after a pre-review parity fix; Tasks 5 and 6 closed
-  review-clean; details in the checkpoints below). No
+  review-clean; Task 11 closed after four scoped fix rounds; details in the
+  checkpoints below). No
   emulator, ADB, or connected command ran in this session; the new v7→v8
   migration and other instrumented tests are compile-verified and execute at
   the Task 14 device gate. The protected Pixel AVD, the historical Google
   Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Continue with plan Task 11 (attachment garbage
-  collection and destructive deletion) via
+  untouched and unstaged. Resume with plan Task 12 (attachment runtime,
+  recovery, and ownership boundaries) via
   superpowers:subagent-driven-development; the execution
   ledger is
   `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
@@ -26,9 +26,9 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `5d9fc19` (`fix: fail closed
-  on invalid attachment cache entries`), the tip of the Stage 4 Task 1–10
-  range `6538dca..5d9fc19`. The prior adaptive-slice closure point
+- Current product source implementation point: `73b8922` (`fix: reauthenticate
+  before manifest deletion`), the tip of the Stage 4 Task 1–11 range
+  `6538dca..73b8922`. The prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -889,6 +889,32 @@ fix rounds.
 
 Tasks 11–14 remain. Continue Task 11 from `5d9fc19` with the approved plan and
 execution ledger.
+
+## Stage 4 Task 11 closure checkpoint — 2 August 2026
+
+Task 11 (`4639f02`, corrected by `c9f3ff5`, `80c6529`, `c2b3fe2`, and
+`73b8922`) adds attachment garbage collection, attachment-only destructive
+deletion, and attachment cleanup during terminal vault deletion. Its
+independent review closed after four scoped fix rounds.
+
+- Garbage collection uses exact current/previous-generation and 30-day
+  eligibility, streams arbitrary finite pages, retains at most 32 candidates,
+  deletes chunks before manifests, and reauthenticates ownership. Unknown or
+  hostile state blocks deletion.
+- Attachment-only deletion requires the passphrase and active remote tip,
+  persists lineage-scoped role/cursor progress, preserves metadata and backup
+  history, and uses an exact-role chunk probe before manifest deletion.
+- Terminal deletion shares the 32-object budget, removes attachment roles
+  before claims, preserves opaque pagination tokens, and reauthenticates
+  authority after the final chunk probe and immediately before a manifest
+  delete.
+- Focused attachment and lifecycle tests, both Android-test compile gates, and
+  the final `testDebugUnitTest lintDebug :app:assembleDebug` gate passed with
+  547 actionable tasks and no failures. No emulator, ADB, or connected command
+  ran.
+
+Stage 4 is paused at the user's request after Task 11. Tasks 12–14 remain.
+Resume Task 12 from `73b8922` with the approved plan and execution ledger.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 

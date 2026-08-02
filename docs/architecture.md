@@ -32,8 +32,11 @@ authenticated exact-ID readback, crash-safe resume, manifest-last publication,
 command-only metadata registration, and exact-ID provisional expiry. The
 attachment open path authenticates manifest and chunk identity while streaming
 one plaintext chunk at a time; its bounded ciphertext-only LRU cache rejects
-noncanonical paths and never follows symlinks. Share and product flows remain
-Stage 4 work under the approved plan.
+noncanonical paths and never follows symlinks. Attachment garbage collection,
+attachment-only destructive deletion, and terminal attachment cleanup are
+bounded, ownership-authenticated, crash-resumable, and chunk-before-manifest.
+Runtime construction, share, and product flows remain Stage 4 work under the
+approved plan.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a
@@ -74,8 +77,9 @@ setup, exact Android backup eligibility, and restored-package quarantine are
 implemented in `app`. The create-only Drive backup store, explicit
 authorization boundary, runtime scheduler, lifecycle coordinator, and staged
 recovery path are implemented. The attachment coordinator, authenticated open
-path, and bounded encrypted-frame cache are implemented with the
-`AttachmentBlobStore` boundary and create-only Drive adapter. The internal
+path, bounded encrypted-frame cache, garbage collector, and destructive
+deletion paths are implemented with the `AttachmentBlobStore` boundary and
+create-only Drive adapter. The internal
 `AuthenticatedCloudObjectCodec` shown at their encryption
 boundary is implemented in `core:data`.
 `RecoveryCoordinator` is the only component allowed to reconstruct Room
