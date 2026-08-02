@@ -6,6 +6,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -35,6 +36,29 @@ class InMemoryAttachmentCommandTest {
                 ActivityKind.ATTACHMENT_ADDED,
                 repository.currentWorkspace().activityEntries.last().kind,
             )
+        }
+    }
+
+    @Test
+    fun registerAttachmentReplayPreservesRecordAndDoesNotDuplicateActivity() = runBlocking {
+        withTimeout(5_000) {
+            val original = attachment(repository.currentWorkspace().tasks.first()).copy(
+                blobSetId = BlobSetId("blob-set"),
+            )
+            repository.execute(DomainCommand.RegisterAttachment(original))
+            val registered = repository.currentWorkspace().attachments.single()
+            val activities = repository.currentWorkspace().activityEntries.size
+            val replay = original.copy(
+                revision = original.revision.copy(
+                    wallTimeMillis = original.revision.wallTimeMillis + 1,
+                    logicalCounter = original.revision.logicalCounter + 1,
+                ),
+            )
+
+            assertTrue(repository.execute(DomainCommand.RegisterAttachment(replay)) is CommandResult.Success)
+
+            assertEquals(registered, repository.currentWorkspace().attachments.single())
+            assertEquals(activities, repository.currentWorkspace().activityEntries.size)
         }
     }
 

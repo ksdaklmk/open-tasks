@@ -26,6 +26,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.fail
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -204,6 +205,93 @@ class AttachmentIntakeTest {
     }
 
     @Test
+    fun resumeReconstructsMissingContentHashAfterFinalChunkCreateCrash() = runBlocking {
+        withTimeout(5_000) {
+            val content = bytes(MIB)
+            store.crashAfterChunkCreate = 1
+            try {
+                coordinator.intake(
+                    store,
+                    OpenTasksFixtures.tasks.first().id,
+                    "hash-crash.bin",
+                    "application/octet-stream",
+                    ByteArrayAttachmentSource(content),
+                )
+                fail("Expected simulated process death")
+            } catch (_: SimulatedCrash) {
+                // Expected: remote create committed before local hash persistence.
+            }
+            assertEquals(null, dao.rows.values.single().contentHash)
+            assertEquals(1, store.objects.size)
+            store.crashAfterChunkCreate = null
+
+            assertEquals(1, coordinator.resume(store))
+
+            assertEquals(sha256(content), repository.currentWorkspace().attachments.single().contentHash)
+            assertEquals(1, store.chunkCreateCalls.size)
+        }
+    }
+
+    @Test
+    fun lyingSourceIsRejectedBeforeFinalChunkCreateCanCommit() = runBlocking {
+        withTimeout(5_000) {
+            store.crashAfterChunkCreate = 1
+
+            val result = try {
+                coordinator.intake(
+                    store,
+                    OpenTasksFixtures.tasks.first().id,
+                    "lying-crash.bin",
+                    "application/octet-stream",
+                    ByteArrayAttachmentSource(byteArrayOf(1, 2), declaredByteCount = 1),
+                )
+            } catch (_: SimulatedCrash) {
+                fail("Final chunk committed before the declared-length proof")
+                return@withTimeout
+            }
+
+            assertEquals(
+                AttachmentIntakeResult.Failed(
+                    RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+                ),
+                result,
+            )
+            assertTrue(store.chunkCreateCalls.isEmpty())
+            assertEquals(0, coordinator.resume(store))
+        }
+    }
+
+    @Test
+    fun registrationReplayAfterDaoCrashDoesNotDuplicateAttachmentActivity() = runBlocking {
+        withTimeout(5_000) {
+            val activitiesBefore = repository.currentWorkspace().activityEntries.size
+            dao.crashOnPhase = "REGISTERED"
+            try {
+                coordinator.intake(
+                    store,
+                    OpenTasksFixtures.tasks.first().id,
+                    "register-crash.bin",
+                    "application/octet-stream",
+                    ByteArrayAttachmentSource(bytes(MIB)),
+                )
+                fail("Expected simulated durable-state failure")
+            } catch (_: SimulatedCrash) {
+                // Expected: repository commit succeeded before phase persistence.
+            }
+            assertEquals("MANIFEST_CREATED", dao.rows.values.single().phase)
+            assertEquals(activitiesBefore + 1, repository.currentWorkspace().activityEntries.size)
+            val registered = repository.currentWorkspace().attachments.single()
+            dao.crashOnPhase = null
+
+            assertEquals(1, coordinator.resume(store))
+
+            assertEquals(activitiesBefore + 1, repository.currentWorkspace().activityEntries.size)
+            assertEquals(registered, repository.currentWorkspace().attachments.single())
+            assertEquals("REGISTERED", dao.rows.values.single().phase)
+        }
+    }
+
+    @Test
     fun ownershipLossBeforeManifestAbandonsSessionWithoutPublishingMetadata() = runBlocking {
         withTimeout(5_000) {
             ownership += true
@@ -308,8 +396,57 @@ class AttachmentIntakeTest {
     }
 
     @Test
+    fun expiryRejectsUnknownPersistedPhaseWithoutRemoteWork() = runBlocking {
+        withTimeout(5_000) {
+            ownership += true
+            ownership += false
+            coordinator.intake(
+                store,
+                OpenTasksFixtures.tasks.first().id,
+                "future.bin",
+                "application/octet-stream",
+                ByteArrayAttachmentSource(bytes(MIB)),
+            )
+            dao.upsert(dao.rows.values.single().copy(phase = "FUTURE_PHASE"))
+            store.readCalls.clear()
+            clock = clock.plus(Duration.ofHours(25))
+
+            assertEquals(0, coordinator.expireStaleSessions(store))
+
+            assertTrue(store.readCalls.isEmpty())
+            assertTrue(store.deleteCalls.isEmpty())
+            assertEquals(1, dao.rows.size)
+        }
+    }
+
+    @Test
+    fun expiryRejectsPhaseStateThatSkipsDurableSequence() = runBlocking {
+        withTimeout(5_000) {
+            ownership += true
+            ownership += false
+            coordinator.intake(
+                store,
+                OpenTasksFixtures.tasks.first().id,
+                "impossible.bin",
+                "application/octet-stream",
+                ByteArrayAttachmentSource(bytes(MIB)),
+            )
+            dao.upsert(dao.rows.values.single().copy(phase = "PLANNED"))
+            store.readCalls.clear()
+            clock = clock.plus(Duration.ofHours(25))
+
+            assertEquals(0, coordinator.expireStaleSessions(store))
+
+            assertTrue(store.readCalls.isEmpty())
+            assertTrue(store.deleteCalls.isEmpty())
+            assertEquals(1, dao.rows.size)
+        }
+    }
+
+    @Test
     fun traversalControlsWhitespaceAndLengthAreSanitizedExactly() {
         assertEquals("etc_passwd", sanitizeAttachmentDisplayName("../../etc/passwd"))
+        assertEquals("hidden.txt", sanitizeAttachmentDisplayName("   ...hidden.txt"))
         assertEquals("my file_name", sanitizeAttachmentDisplayName("...my\u0000   file\\name"))
         assertEquals("attachment", sanitizeAttachmentDisplayName(".../\\\u0000\t"))
         assertEquals("x".repeat(255), sanitizeAttachmentDisplayName("x".repeat(300)))
@@ -341,6 +478,47 @@ class AttachmentIntakeTest {
                     ByteArrayAttachmentSource(byteArrayOf(1), declaredByteCount = 2),
                 ),
             )
+            assertTrue(repository.currentWorkspace().attachments.isEmpty())
+        }
+    }
+
+    @Test
+    fun closeFailureReturnsSourceUnavailableInsteadOfEscaping() = runBlocking {
+        withTimeout(5_000) {
+            val result = try {
+                coordinator.intake(
+                    store,
+                    OpenTasksFixtures.tasks.first().id,
+                    "close.bin",
+                    "application/octet-stream",
+                    CloseFailingAttachmentSource(bytes(MIB)),
+                )
+            } catch (_: IOException) {
+                fail("Source close failure escaped the sealed result API")
+                return@withTimeout
+            }
+
+            assertEquals(AttachmentIntakeResult.SourceUnavailable, result)
+        }
+    }
+
+    @Test
+    fun lateLengthProbeFailureReturnsSourceUnavailableInsteadOfEscaping() = runBlocking {
+        withTimeout(5_000) {
+            val result = try {
+                coordinator.intake(
+                    store,
+                    OpenTasksFixtures.tasks.first().id,
+                    "probe.bin",
+                    "application/octet-stream",
+                    ProbeFailingAttachmentSource(),
+                )
+            } catch (_: IOException) {
+                fail("Late source probe failure escaped the sealed result API")
+                return@withTimeout
+            }
+
+            assertEquals(AttachmentIntakeResult.SourceUnavailable, result)
             assertTrue(repository.currentWorkspace().attachments.isEmpty())
         }
     }
@@ -388,11 +566,41 @@ private class ByteArrayAttachmentSource(
     }
 }
 
+private class CloseFailingAttachmentSource(
+    private val bytes: ByteArray,
+) : AttachmentSource {
+    override val declaredByteCount = bytes.size.toLong()
+
+    override fun open() = object : ByteArrayInputStream(bytes) {
+        override fun close() = throw IOException("close failed")
+    }
+}
+
+private class ProbeFailingAttachmentSource : AttachmentSource {
+    override val declaredByteCount = 1L
+
+    override fun open() = object : ByteArrayInputStream(byteArrayOf(1, 2)) {
+        private var bulkReads = 0
+
+        override fun read(destination: ByteArray, offset: Int, length: Int): Int {
+            bulkReads += 1
+            if (bulkReads == 2) throw IOException("late probe failed")
+            return super.read(destination, offset, length)
+        }
+
+        override fun skip(byteCount: Long): Long = throw IOException("late probe failed")
+    }
+}
+
+private class SimulatedCrash : RuntimeException()
+
 private class FakeAttachmentTransferDao : AttachmentTransferDao {
     val rows = linkedMapOf<String, AttachmentTransferEntity>()
     val distinctPhases = mutableListOf<String>()
+    var crashOnPhase: String? = null
 
     override suspend fun upsert(value: AttachmentTransferEntity) {
+        if (value.phase == crashOnPhase) throw SimulatedCrash()
         rows[value.blobSetId] = value.copy(displayNameCiphertext = value.displayNameCiphertext.copyOf())
         if (distinctPhases.lastOrNull() != value.phase) distinctPhases += value.phase
     }
@@ -424,6 +632,7 @@ private class FakeAttachmentBlobStore : AttachmentBlobStore {
     val corruptReadIds = mutableSetOf<ProviderObjectId>()
     var readFailure: RemoteBackupFailureCategory? = null
     var failManifestReadback = false
+    var crashAfterChunkCreate: Int? = null
     var totalCalls = 0
     private var nextId = 0
     private val manifestIds = mutableSetOf<ProviderObjectId>()
@@ -444,6 +653,7 @@ private class FakeAttachmentBlobStore : AttachmentBlobStore {
         chunkCreateCalls += ChunkCreateCall(providerObjectId, blobSetId, chunkIndex, chunkCount)
         if (objects.containsKey(providerObjectId)) return AttachmentObjectResult.AlreadyExists
         objects[providerObjectId] = frameBytes.copyOf()
+        if (chunkCreateCalls.size == crashAfterChunkCreate) throw SimulatedCrash()
         return AttachmentObjectResult.Created
     }
 

@@ -2145,9 +2145,14 @@ class InMemoryVaultRepository internal constructor(
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
         val displayName = attachment.displayName.trim()
         validateAttachment(displayName, attachment)?.let { return it }
-        val replacingActive = current.attachments.any {
-            it.id == attachment.id && it.taskId == attachment.taskId && it.deletedAt == null
+        val registered = attachment.copy(displayName = displayName)
+        val existing = current.attachments.firstOrNull { it.id == attachment.id }
+        if (existing?.hasSameRegistrationAs(registered) == true) {
+            return CommandResult.Success("Attachment added")
         }
+        val replacingActive = existing?.let {
+            it.taskId == attachment.taskId && it.deletedAt == null
+        } == true
         if (!replacingActive && current.attachments.count {
                 it.taskId == attachment.taskId && it.deletedAt == null
             } >= MAX_ATTACHMENTS_PER_TASK
@@ -2157,7 +2162,6 @@ class InMemoryVaultRepository internal constructor(
                 "A task can contain up to $MAX_ATTACHMENTS_PER_TASK attachments.",
             )
         }
-        val registered = attachment.copy(displayName = displayName)
         mutableWorkspace.value = current.copy(
             attachments = current.attachments.filterNot { it.id == registered.id } + registered,
         )

@@ -78,8 +78,12 @@ class AttachmentBlobCoordinator(
         } catch (_: SecurityException) {
             return AttachmentIntakeResult.SourceUnavailable
         }
-        return input.use {
-            intakeOpened(store, taskId, displayName, mimeType, source.declaredByteCount, it)
+        return try {
+            input.use {
+                intakeOpened(store, taskId, displayName, mimeType, source.declaredByteCount, it)
+            }
+        } catch (_: IOException) {
+            AttachmentIntakeResult.SourceUnavailable
         }
     }
 
@@ -91,12 +95,20 @@ class AttachmentBlobCoordinator(
             if (state.invalid) return@forEach
             val verification = verifyChunks(store, session, state)
             if (verification !is ChunkVerification.Success) return@forEach
+            val resumable = if (session.contentHash == null) {
+                session.copy(
+                    contentHash = verification.manifest.contentSha256.value,
+                    updatedAtEpochMillis = now().toEpochMilli(),
+                ).also { transferDao.upsert(it) }
+            } else {
+                session
+            }
             val result = publish(
                 store = store,
-                session = session,
+                session = resumable,
                 state = state,
                 manifest = verification.manifest,
-                createManifest = session.phase != PHASE_MANIFEST_CREATED,
+                createManifest = resumable.phase != PHASE_MANIFEST_CREATED,
             )
             if (result is AttachmentIntakeResult.Registered) registered += 1
         }
@@ -197,6 +209,32 @@ class AttachmentBlobCoordinator(
             )
             session = session.withState(state)
             transferDao.upsert(session)
+            if (index == chunkCount - 1) {
+                val extra = try {
+                    source.read()
+                } catch (_: IOException) {
+                    state = state.copy(invalid = true)
+                    transferDao.upsert(session.withState(state))
+                    frame.fill(0)
+                    return AttachmentIntakeResult.SourceUnavailable
+                }
+                if (extra >= 0) {
+                    state = state.copy(invalid = true)
+                    transferDao.upsert(session.withState(state))
+                    val exceedsCap = try {
+                        source.exceedsCap(declaredByteCount + 1)
+                    } catch (_: IOException) {
+                        frame.fill(0)
+                        return AttachmentIntakeResult.SourceUnavailable
+                    }
+                    frame.fill(0)
+                    return if (exceedsCap) {
+                        AttachmentIntakeResult.TooLarge
+                    } else {
+                        corruptFailure()
+                    }
+                }
+            }
             val createResult = try {
                 store.createChunk(
                     providerObjectId = objectIds[index],
@@ -212,22 +250,6 @@ class AttachmentBlobCoordinator(
                 return AttachmentIntakeResult.Failed(createResult.reason)
             }
             consumed += size
-        }
-        val extra = try {
-            source.read()
-        } catch (_: IOException) {
-            state = state.copy(invalid = true)
-            transferDao.upsert(session.withState(state))
-            return AttachmentIntakeResult.SourceUnavailable
-        }
-        if (extra >= 0) {
-            state = state.copy(invalid = true)
-            transferDao.upsert(session.withState(state))
-            return if (source.exceedsCap(consumed + 1)) {
-                AttachmentIntakeResult.TooLarge
-            } else {
-                corruptFailure()
-            }
         }
         session = session.copy(
             contentHash = plaintextDigest.digest().toHex(),
@@ -340,7 +362,7 @@ class AttachmentBlobCoordinator(
         session: AttachmentTransferEntity,
         state: AttachmentTransferStateV1,
     ): ChunkVerification {
-        val expectedHash = session.contentHash ?: return corruptVerification()
+        val expectedHash = session.contentHash
         val chunkCount = session.chunkCount ?: return corruptVerification()
         if (state.invalid || state.chunks.size != chunkCount) return corruptVerification()
         val digest = MessageDigest.getInstance(SHA_256)
@@ -386,13 +408,16 @@ class AttachmentBlobCoordinator(
             )
         }
         val verifiedHash = digest.digest().toHex()
-        if (total != session.declaredByteCount || verifiedHash != expectedHash) {
+        if (
+            total != session.declaredByteCount ||
+            (expectedHash != null && verifiedHash != expectedHash)
+        ) {
             return corruptVerification()
         }
         return ChunkVerification.Success(
             AttachmentBlobSetManifest(
                 blobSetId = BlobSetId(session.blobSetId),
-                contentSha256 = Sha256Digest.of(expectedHash),
+                contentSha256 = Sha256Digest.of(verifiedHash),
                 totalByteCount = total,
                 chunks = refs,
             ),
@@ -497,6 +522,7 @@ class AttachmentBlobCoordinator(
         val chunkCount = session.chunkCount ?: return null
         if (
             state.version != 1 ||
+            session.phase !in ALL_PHASES ||
             session.blobSetId.isBlank() ||
             session.declaredByteCount !in 1..MAX_TOTAL_BYTES ||
             chunkCount !in 1..MAX_CHUNKS ||
@@ -533,6 +559,22 @@ class AttachmentBlobCoordinator(
                 if (chunk.plaintextByteCount != maximum) return null
             }
         }
+        val completed = state.chunks.map { it.ciphertextSha256 != null }
+        if (completed.zipWithNext().any { (current, next) -> !current && next }) return null
+        val noneComplete = completed.none { it }
+        val allComplete = completed.all { it }
+        val phaseMatchesState = when (session.phase) {
+            PHASE_PLANNED -> noneComplete && session.contentHash == null && !state.invalid
+            PHASE_UPLOADING ->
+                (session.contentHash == null || allComplete) &&
+                    (!state.invalid || session.contentHash == null)
+            PHASE_CHUNKS_VERIFIED,
+            PHASE_MANIFEST_CREATED,
+            PHASE_REGISTERED,
+            -> allComplete && session.contentHash != null && !state.invalid
+            else -> false
+        }
+        if (!phaseMatchesState) return null
         return state
     }
     private fun encodeState(state: AttachmentTransferStateV1): String =
@@ -596,12 +638,13 @@ class AttachmentBlobCoordinator(
             PHASE_CHUNKS_VERIFIED,
             PHASE_MANIFEST_CREATED,
         )
+        val ALL_PHASES = RESUMABLE_PHASES + PHASE_REGISTERED
     }
 }
 
 fun sanitizeAttachmentDisplayName(raw: String): String {
     val clean = raw.filterNot(Char::isISOControl)
-        .trimStart { it == '.' || it == '/' || it == '\\' }
+        .trimStart { it.isWhitespace() || it == '.' || it == '/' || it == '\\' }
     val result = buildString(minOf(clean.length, 255)) {
         var pendingSpace = false
         clean.forEach { character ->
@@ -669,18 +712,16 @@ private fun InputStream.readFully(destination: ByteArray): Boolean {
 
 private fun InputStream.exceedsCap(alreadyRead: Long): Boolean {
     var total = alreadyRead
-    val buffer = ByteArray(8 * 1024)
-    try {
-        while (total <= AttachmentBlobSetManifestCodec.MAX_TOTAL_BYTES) {
-            val count = read(buffer)
-            if (count < 0) return false
-            total += if (count == 0) 1 else count
-            if (count == 0 && read() < 0) return false
+    while (total <= AttachmentBlobSetManifestCodec.MAX_TOTAL_BYTES) {
+        val skipped = skip(AttachmentBlobSetManifestCodec.MAX_TOTAL_BYTES - total + 1)
+        if (skipped > 0) {
+            total += skipped
+        } else {
+            if (read() < 0) return false
+            total += 1
         }
-        return true
-    } finally {
-        buffer.fill(0)
     }
+    return true
 }
 
 private fun ByteArray.toHex(): String = try {

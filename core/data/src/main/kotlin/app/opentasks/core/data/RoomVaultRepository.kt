@@ -2438,7 +2438,11 @@ class RoomVaultRepository(
         }
         val displayName = attachment.displayName.trim()
         validateAttachment(displayName, attachment)?.let { return it }
+        val registered = attachment.copy(displayName = displayName)
         val existing = database.workspaceDao().getAttachmentById(attachment.id.value)
+        if (existing?.toModel()?.hasSameRegistrationAs(registered) == true) {
+            return CommandResult.Success("Attachment added")
+        }
         if (
             (existing == null ||
                 existing.taskId != attachment.taskId.value ||
@@ -2451,7 +2455,6 @@ class RoomVaultRepository(
                 "A task can contain up to $MAX_ATTACHMENTS_PER_TASK attachments.",
             )
         }
-        val registered = attachment.copy(displayName = displayName)
         database.workspaceDao().upsertAttachment(registered.toEntity())
         recordActivity(
             taskId = registered.taskId,
@@ -3169,3 +3172,14 @@ class RoomVaultRepository(
         const val TASK_OBJECT_TYPE = "task"
     }
 }
+
+internal fun Attachment.hasSameRegistrationAs(other: Attachment): Boolean =
+    id == other.id &&
+        taskId == other.taskId &&
+        displayName == other.displayName &&
+        mimeType == other.mimeType &&
+        byteCount == other.byteCount &&
+        contentHash == other.contentHash &&
+        blobSetId == other.blobSetId &&
+        chunkCount == other.chunkCount &&
+        deletedAt == other.deletedAt
