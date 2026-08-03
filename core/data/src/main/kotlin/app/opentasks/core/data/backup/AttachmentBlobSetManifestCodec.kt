@@ -29,8 +29,7 @@ class AttachmentBlobSetManifestCodec(
         lineageId: CloudLineageId,
         contentKey: VaultKey,
     ): ByteArray {
-        validate(manifest)
-        val plaintext = canonicalBytes(manifest.toPayload())
+        val plaintext = encodeAttachmentManifestPlaintext(manifest)
         return try {
             authenticatedCodec.encrypt(identity(lineageId, manifest.blobSetId), plaintext, contentKey)
         } finally {
@@ -61,9 +60,7 @@ class AttachmentBlobSetManifestCodec(
             }
             val plaintext = decrypted.takePlaintext()
             try {
-                val payload = decodeCanonical(plaintext)
-                val manifest = payload.toDomain()
-                validate(manifest)
+                val manifest = decodeAttachmentManifestPlaintext(plaintext)
                 require(manifest.blobSetId == blobSetId) {
                     "Attachment manifest names another blob set"
                 }
@@ -71,62 +68,6 @@ class AttachmentBlobSetManifestCodec(
             } finally {
                 plaintext.fill(0)
             }
-        }
-    }
-
-    private fun decodeCanonical(bytes: ByteArray): AttachmentBlobSetManifestPayload {
-        require(bytes.isNotEmpty() && bytes.size <= MAX_PLAINTEXT_BYTES) {
-            "Attachment manifest payload is outside its bound"
-        }
-        val payload = try {
-            STRICT_JSON.decodeFromString(
-                AttachmentBlobSetManifestPayload.serializer(),
-                strictUtf8(bytes),
-            )
-        } catch (failure: SerializationException) {
-            throw IllegalArgumentException("Invalid attachment manifest", failure)
-        }
-        val canonical = canonicalBytes(payload)
-        try {
-            require(bytes.contentEquals(canonical)) {
-                "Attachment manifest is not canonical"
-            }
-        } finally {
-            canonical.fill(0)
-        }
-        return payload
-    }
-
-    private fun canonicalBytes(payload: AttachmentBlobSetManifestPayload): ByteArray =
-        STRICT_JSON.encodeToString(AttachmentBlobSetManifestPayload.serializer(), payload)
-            .toByteArray(Charsets.UTF_8)
-            .also {
-                require(it.size <= MAX_PLAINTEXT_BYTES) {
-                    "Attachment manifest payload exceeds its bound"
-                }
-            }
-
-    private fun validate(manifest: AttachmentBlobSetManifest) {
-        require(manifest.blobSetId.value.isNotBlank()) { "Blob set identifier is blank" }
-        require(manifest.chunks.size in 1..MAX_BLOB_SET_CHUNKS) {
-            "Attachment chunk count is outside its bound"
-        }
-        var total = 0L
-        manifest.chunks.forEachIndexed { index, chunk ->
-            require(chunk.index == index) { "Attachment chunk indexes are not canonical" }
-            require(
-                chunk.plaintextByteCount in
-                    1..CloudBounds.MAX_ATTACHMENT_CHUNK_PLAINTEXT_BYTES.toInt(),
-            ) {
-                "Attachment chunk plaintext size is outside its bound"
-            }
-            total += chunk.plaintextByteCount
-        }
-        require(total == manifest.totalByteCount) {
-            "Attachment chunk sizes do not sum to the declared total"
-        }
-        require(manifest.totalByteCount in 1..MAX_TOTAL_BYTES) {
-            "Attachment total size is outside its bound"
         }
     }
 
@@ -150,6 +91,83 @@ class AttachmentBlobSetManifestCodec(
                 CloudBounds.AES_GCM_V1_CIPHERTEXT_OVERHEAD_BYTES).toInt()
         val MAX_FRAME_BYTES =
             4 + CloudBounds.MAX_HEADER_BYTES + CloudBounds.MAX_MANIFEST_CIPHERTEXT_BYTES.toInt()
+    }
+}
+
+/**
+ * The canonical manifest plaintext, without the frame that usually carries it.
+ *
+ * The `.otvault` archive writes the same manifest bytes under an
+ * archive-scoped identity, so both namespaces share this one encoding rather
+ * than drifting apart with a second copy of it.
+ */
+internal fun encodeAttachmentManifestPlaintext(
+    manifest: AttachmentBlobSetManifest,
+): ByteArray {
+    validateAttachmentManifest(manifest)
+    return canonicalAttachmentManifestBytes(manifest.toPayload())
+}
+
+/** The inverse of [encodeAttachmentManifestPlaintext]; rejects non-canonical bytes. */
+internal fun decodeAttachmentManifestPlaintext(
+    bytes: ByteArray,
+): AttachmentBlobSetManifest {
+    require(
+        bytes.isNotEmpty() && bytes.size <= AttachmentBlobSetManifestCodec.MAX_PLAINTEXT_BYTES,
+    ) {
+        "Attachment manifest payload is outside its bound"
+    }
+    val payload = try {
+        STRICT_JSON.decodeFromString(
+            AttachmentBlobSetManifestPayload.serializer(),
+            strictUtf8(bytes),
+        )
+    } catch (failure: SerializationException) {
+        throw IllegalArgumentException("Invalid attachment manifest", failure)
+    }
+    val canonical = canonicalAttachmentManifestBytes(payload)
+    try {
+        require(bytes.contentEquals(canonical)) {
+            "Attachment manifest is not canonical"
+        }
+    } finally {
+        canonical.fill(0)
+    }
+    return payload.toDomain().also(::validateAttachmentManifest)
+}
+
+private fun canonicalAttachmentManifestBytes(
+    payload: AttachmentBlobSetManifestPayload,
+): ByteArray =
+    STRICT_JSON.encodeToString(AttachmentBlobSetManifestPayload.serializer(), payload)
+        .toByteArray(Charsets.UTF_8)
+        .also {
+            require(it.size <= AttachmentBlobSetManifestCodec.MAX_PLAINTEXT_BYTES) {
+                "Attachment manifest payload exceeds its bound"
+            }
+        }
+
+private fun validateAttachmentManifest(manifest: AttachmentBlobSetManifest) {
+    require(manifest.blobSetId.value.isNotBlank()) { "Blob set identifier is blank" }
+    require(manifest.chunks.size in 1..AttachmentBlobSetManifestCodec.MAX_BLOB_SET_CHUNKS) {
+        "Attachment chunk count is outside its bound"
+    }
+    var total = 0L
+    manifest.chunks.forEachIndexed { index, chunk ->
+        require(chunk.index == index) { "Attachment chunk indexes are not canonical" }
+        require(
+            chunk.plaintextByteCount in
+                1..CloudBounds.MAX_ATTACHMENT_CHUNK_PLAINTEXT_BYTES.toInt(),
+        ) {
+            "Attachment chunk plaintext size is outside its bound"
+        }
+        total += chunk.plaintextByteCount
+    }
+    require(total == manifest.totalByteCount) {
+        "Attachment chunk sizes do not sum to the declared total"
+    }
+    require(manifest.totalByteCount in 1..AttachmentBlobSetManifestCodec.MAX_TOTAL_BYTES) {
+        "Attachment total size is outside its bound"
     }
 }
 

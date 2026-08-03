@@ -1,0 +1,147 @@
+{
+  "vaultId": "vault-alpha",
+  "createdAtEpochMillis": 1754000000000,
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "recordCount": 10,
+  "attachmentCount": 1,
+  "recoveryEnvelope": {
+    "formatVersion": 1,
+    "kdfAlgorithm": "ARGON2ID",
+    "memoryKiB": 65536,
+    "iterations": 3,
+    "parallelism": 1,
+    "saltBase64": "AAECAwQFBgcICQoLDA0ODw",
+    "nonceBase64": "EBESExQVFhcYGRob",
+    "wrappedKeysetBase64": "HB0eHyAhIiM"
+  },
+  "headerJson": "{\"formatVersion\":1,\"vaultId\":\"vault-alpha\",\"createdAtEpochMillis\":1754000000000,\"recoveryEnvelope\":{\"formatVersion\":1,\"kdfAlgorithm\":\"ARGON2ID\",\"memoryKiB\":65536,\"iterations\":3,\"parallelism\":1,\"saltBase64\":\"AAECAwQFBgcICQoLDA0ODw\",\"nonceBase64\":\"EBESExQVFhcYGRob\",\"wrappedKeysetBase64\":\"HB0eHyAhIiM\"},\"recordCount\":10,\"attachmentCount\":1}",
+  "headerSha256": "a8c9915882c4fa9553aa8e1b407470590f6f84a233613c78dd632d3791c81fc6",
+  "snapshotJson": "{\"formatVersion\":1,\"minimumReaderVersion\":1,\"vaultId\":\"vault-alpha\",\"coveredGeneration\":53,\"records\":[{\"family\":\"VAULT\",\"identity\":[\"vault-alpha\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"vault-alpha\"},{\"name\":\"createdAtEpochMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"schemaVersion\",\"type\":\"INT\",\"value\":\"9\"},{\"name\":\"cryptoVersion\",\"type\":\"INT\",\"value\":\"1\"},{\"name\":\"minimumReaderVersion\",\"type\":\"INT\",\"value\":\"1\"}]},{\"family\":\"WORKSPACE\",\"identity\":[\"workspace-1\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"workspace-1\"},{\"name\":\"vaultId\",\"type\":\"STRING\",\"value\":\"vault-alpha\"},{\"name\":\"ownerId\",\"type\":\"STRING\",\"value\":\"member-1\"},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Résumé workspace\"}]},{\"family\":\"MEMBER\",\"identity\":[\"member-1\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"member-1\"},{\"name\":\"displayName\",\"type\":\"STRING\",\"value\":\"Member One\"}]},{\"family\":\"WORKFLOW_STATUS\",\"identity\":[\"status-inbox-backlog\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"status-inbox-backlog\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Inbox backlog\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"BACKLOG\"},{\"name\":\"rank\",\"type\":\"STRING\",\"value\":\"inbox-0\"},{\"name\":\"archivedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"0\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"WORKFLOW_STATUS\",\"identity\":[\"status-inbox-blocked\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"status-inbox-blocked\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Inbox blocked\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"BLOCKED\"},{\"name\":\"rank\",\"type\":\"STRING\",\"value\":\"inbox-3\"},{\"name\":\"archivedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"3\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"WORKFLOW_STATUS\",\"identity\":[\"status-inbox-completed\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"status-inbox-completed\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Inbox completed\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"COMPLETED\"},{\"name\":\"rank\",\"type\":\"STRING\",\"value\":\"inbox-4\"},{\"name\":\"archivedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"4\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"WORKFLOW_STATUS\",\"identity\":[\"status-inbox-planned\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"status-inbox-planned\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Inbox planned\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"PLANNED\"},{\"name\":\"rank\",\"type\":\"STRING\",\"value\":\"inbox-1\"},{\"name\":\"archivedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"1\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"WORKFLOW_STATUS\",\"identity\":[\"status-inbox-started\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"status-inbox-started\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"name\",\"type\":\"STRING\",\"value\":\"Inbox started\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"STARTED\"},{\"name\":\"rank\",\"type\":\"STRING\",\"value\":\"inbox-2\"},{\"name\":\"archivedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"2\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"TASK\",\"identity\":[\"task-1\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"task-1\"},{\"name\":\"workspaceId\",\"type\":\"STRING\",\"value\":\"workspace-1\"},{\"name\":\"projectId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"parentTaskId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"statusId\",\"type\":\"STRING\",\"value\":\"status-inbox-started\"},{\"name\":\"semanticStatus\",\"type\":\"STRING\",\"value\":\"STARTED\"},{\"name\":\"title\",\"type\":\"STRING\",\"value\":\"Résumé task 🚀\"},{\"name\":\"descriptionCiphertext\",\"type\":\"BYTES\",\"value\":\"AP8\"},{\"name\":\"priority\",\"type\":\"STRING\",\"value\":\"HIGH\"},{\"name\":\"startEpochMillis\",\"type\":\"LONG\",\"value\":\"1\"},{\"name\":\"startZoneId\",\"type\":\"STRING\",\"value\":\"UTC\"},{\"name\":\"dueEpochMillis\",\"type\":\"LONG\",\"value\":\"2\"},{\"name\":\"dueZoneId\",\"type\":\"STRING\",\"value\":\"UTC\"},{\"name\":\"recurrenceFrequency\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceInterval\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceWeekdays\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceCount\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceEndDate\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceSeriesId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceAnchorEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceAnchorZoneId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"recurrenceOccurrenceIndex\",\"type\":\"NULL\",\"value\":null},{\"name\":\"estimateSeconds\",\"type\":\"LONG\",\"value\":\"60\"},{\"name\":\"milestoneId\",\"type\":\"NULL\",\"value\":null},{\"name\":\"completedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"deletedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"10\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"0\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]},{\"family\":\"ATTACHMENT\",\"identity\":[\"attachment-1\"],\"fields\":[{\"name\":\"id\",\"type\":\"STRING\",\"value\":\"attachment-1\"},{\"name\":\"taskId\",\"type\":\"STRING\",\"value\":\"task-1\"},{\"name\":\"displayNameCiphertext\",\"type\":\"BYTES\",\"value\":\"AAE\"},{\"name\":\"mimeType\",\"type\":\"STRING\",\"value\":\"text/plain\"},{\"name\":\"byteCount\",\"type\":\"LONG\",\"value\":\"35\"},{\"name\":\"contentHash\",\"type\":\"STRING\",\"value\":\"sha256:fixture\"},{\"name\":\"blobSetId\",\"type\":\"STRING\",\"value\":\"blob-set-1\"},{\"name\":\"chunkCount\",\"type\":\"INT\",\"value\":\"2\"},{\"name\":\"deletedAtEpochMillis\",\"type\":\"NULL\",\"value\":null},{\"name\":\"revisionWallMillis\",\"type\":\"LONG\",\"value\":\"10\"},{\"name\":\"revisionLogical\",\"type\":\"INT\",\"value\":\"0\"},{\"name\":\"revisionDeviceId\",\"type\":\"STRING\",\"value\":\"device-alpha\"}]}]}",
+  "segmentJson": "{\"formatVersion\":1,\"minimumReaderVersion\":1,\"vaultId\":\"vault-alpha\",\"firstGeneration\":54,\"lastGeneration\":54,\"entries\":[{\"operationId\":\"operation-1\",\"generation\":54,\"sequence\":0,\"objectId\":\"task-1\",\"objectType\":\"TASK\",\"revisionWallMillis\":10,\"revisionLogical\":0,\"sourceDeviceId\":\"device-alpha\",\"payloadBase64\":\"eyJmb3JtYXRWZXJzaW9uIjoxLCJtaW5pbXVtUmVhZGVyVmVyc2lvbiI6MSwibXV0YXRpb25LaW5kIjoiVVBTRVJUIiwicmVjb3JkIjp7ImZhbWlseSI6IlRBU0siLCJpZGVudGl0eSI6WyJ0YXNrLTEiXSwiZmllbGRzIjpbeyJuYW1lIjoiaWQiLCJ0eXBlIjoiU1RSSU5HIiwidmFsdWUiOiJ0YXNrLTEifSx7Im5hbWUiOiJ3b3Jrc3BhY2VJZCIsInR5cGUiOiJTVFJJTkciLCJ2YWx1ZSI6IndvcmtzcGFjZS0xIn0seyJuYW1lIjoicHJvamVjdElkIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicGFyZW50VGFza0lkIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoic3RhdHVzSWQiLCJ0eXBlIjoiU1RSSU5HIiwidmFsdWUiOiJzdGF0dXMtaW5ib3gtc3RhcnRlZCJ9LHsibmFtZSI6InNlbWFudGljU3RhdHVzIiwidHlwZSI6IlNUUklORyIsInZhbHVlIjoiU1RBUlRFRCJ9LHsibmFtZSI6InRpdGxlIiwidHlwZSI6IlNUUklORyIsInZhbHVlIjoiUsOpc3Vtw6kgdGFzayDwn5qAIn0seyJuYW1lIjoiZGVzY3JpcHRpb25DaXBoZXJ0ZXh0IiwidHlwZSI6IkJZVEVTIiwidmFsdWUiOiJBUDgifSx7Im5hbWUiOiJwcmlvcml0eSIsInR5cGUiOiJTVFJJTkciLCJ2YWx1ZSI6IkhJR0gifSx7Im5hbWUiOiJzdGFydEVwb2NoTWlsbGlzIiwidHlwZSI6IkxPTkciLCJ2YWx1ZSI6IjEifSx7Im5hbWUiOiJzdGFydFpvbmVJZCIsInR5cGUiOiJTVFJJTkciLCJ2YWx1ZSI6IlVUQyJ9LHsibmFtZSI6ImR1ZUVwb2NoTWlsbGlzIiwidHlwZSI6IkxPTkciLCJ2YWx1ZSI6IjIifSx7Im5hbWUiOiJkdWVab25lSWQiLCJ0eXBlIjoiU1RSSU5HIiwidmFsdWUiOiJVVEMifSx7Im5hbWUiOiJyZWN1cnJlbmNlRnJlcXVlbmN5IiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmVjdXJyZW5jZUludGVydmFsIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmVjdXJyZW5jZVdlZWtkYXlzIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmVjdXJyZW5jZUNvdW50IiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmVjdXJyZW5jZUVuZERhdGUiLCJ0eXBlIjoiTlVMTCIsInZhbHVlIjpudWxsfSx7Im5hbWUiOiJyZWN1cnJlbmNlU2VyaWVzSWQiLCJ0eXBlIjoiTlVMTCIsInZhbHVlIjpudWxsfSx7Im5hbWUiOiJyZWN1cnJlbmNlQW5jaG9yRXBvY2hNaWxsaXMiLCJ0eXBlIjoiTlVMTCIsInZhbHVlIjpudWxsfSx7Im5hbWUiOiJyZWN1cnJlbmNlQW5jaG9yWm9uZUlkIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmVjdXJyZW5jZU9jY3VycmVuY2VJbmRleCIsInR5cGUiOiJOVUxMIiwidmFsdWUiOm51bGx9LHsibmFtZSI6ImVzdGltYXRlU2Vjb25kcyIsInR5cGUiOiJMT05HIiwidmFsdWUiOiI2MCJ9LHsibmFtZSI6Im1pbGVzdG9uZUlkIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoiY29tcGxldGVkQXRFcG9jaE1pbGxpcyIsInR5cGUiOiJOVUxMIiwidmFsdWUiOm51bGx9LHsibmFtZSI6ImRlbGV0ZWRBdEVwb2NoTWlsbGlzIiwidHlwZSI6Ik5VTEwiLCJ2YWx1ZSI6bnVsbH0seyJuYW1lIjoicmV2aXNpb25XYWxsTWlsbGlzIiwidHlwZSI6IkxPTkciLCJ2YWx1ZSI6IjEwIn0seyJuYW1lIjoicmV2aXNpb25Mb2dpY2FsIiwidHlwZSI6IklOVCIsInZhbHVlIjoiMCJ9LHsibmFtZSI6InJldmlzaW9uRGV2aWNlSWQiLCJ0eXBlIjoiU1RSSU5HIiwidmFsdWUiOiJkZXZpY2UtYWxwaGEifV19LCJkZWxldGVkRmFtaWx5IjpudWxsLCJkZWxldGVkSWRlbnRpdHkiOm51bGx9\"}],\"entryCount\":1}",
+  "inventoryJson": "{\"formatVersion\":1,\"vaultId\":\"vault-alpha\",\"headerSha256\":\"a8c9915882c4fa9553aa8e1b407470590f6f84a233613c78dd632d3791c81fc6\",\"entryCount\":5,\"entries\":[{\"objectId\":\"otvault:snapshot:53\",\"family\":\"SNAPSHOT\",\"sha256\":\"8f0579ed46c67752a8f52387cd2fdf5cabbc03072ad1897ccfeb4ed4d92cf33e\",\"byteCount\":6595},{\"objectId\":\"otvault:segment:54:54\",\"family\":\"OPERATION_SEGMENT\",\"sha256\":\"614cc1f83ddc05e2adb6a12570947ed24681fb0d3f40e3f0e480fbf6bbe84f3a\",\"byteCount\":3112},{\"objectId\":\"otvault:attachment-manifest:blob-set-1\",\"family\":\"MANIFEST\",\"sha256\":\"a63c99c738840be4dc823fd3d233bbe7c0c62421ed915bf501a09cbc4ca1ad59\",\"byteCount\":821},{\"objectId\":\"otvault:attachment-chunk:blob-set-1:0\",\"family\":\"ATTACHMENT_CHUNK\",\"sha256\":\"f9b54b7b23d2933870576584288cc72889fe7ca76737b8fabbd36226d699198e\",\"byteCount\":380},{\"objectId\":\"otvault:attachment-chunk:blob-set-1:1\",\"family\":\"ATTACHMENT_CHUNK\",\"sha256\":\"20083cca7c1093e9416ac12eb92223201e679b6334cc1636125c23c473289c0f\",\"byteCount\":379}]}",
+  "manifest": {
+    "blobSetId": "blob-set-1",
+    "contentSha256": "4d753020fd5e6a92188747340936bb6b3760fcedcf766fee7742e08a589ca77b",
+    "totalByteCount": 35,
+    "chunks": [
+      {
+        "index": 0,
+        "providerObjectId": "provider-chunk-0",
+        "ciphertextSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "plaintextByteCount": 18
+      },
+      {
+        "index": 1,
+        "providerObjectId": "provider-chunk-1",
+        "ciphertextSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "plaintextByteCount": 17
+      }
+    ]
+  },
+  "chunkPlaintextHex": [
+    "6f747661756c742d6368756e6b2d7a65726f",
+    "6f747661756c742d6368756e6b2d6f6e65"
+  ],
+  "objects": [
+    {
+      "objectId": "otvault:snapshot:53",
+      "family": "SNAPSHOT",
+      "chunkIndex": null,
+      "chunkCount": null,
+      "nonceHex": "202122232425262728292a2b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a763100000008534e415053484f540000000131000000013100000001310000000b7661756c742d616c706861000000136f747661756c743a736e617073686f743a35330000000000000000",
+      "plaintextSha256": "5d5d5abe506a4a8372ac61c299ba348bc43dc3d12f2e4958f74a02bddfb581f7",
+      "frameSha256": "8f0579ed46c67752a8f52387cd2fdf5cabbc03072ad1897ccfeb4ed4d92cf33e",
+      "byteCount": 6595
+    },
+    {
+      "objectId": "otvault:segment:54:54",
+      "family": "OPERATION_SEGMENT",
+      "chunkIndex": null,
+      "chunkCount": null,
+      "nonceHex": "303132333435363738393a3b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a7631000000114f5045524154494f4e5f5345474d454e540000000131000000013100000001310000000b7661756c742d616c706861000000156f747661756c743a7365676d656e743a35343a35340000000000000000",
+      "plaintextSha256": "cf0d61715ab82cb064963176394d1233e6ed8904b86069c3447765e09a01d27a",
+      "frameSha256": "614cc1f83ddc05e2adb6a12570947ed24681fb0d3f40e3f0e480fbf6bbe84f3a",
+      "byteCount": 3112
+    },
+    {
+      "objectId": "otvault:attachment-manifest:blob-set-1",
+      "family": "MANIFEST",
+      "chunkIndex": null,
+      "chunkCount": null,
+      "nonceHex": "404142434445464748494a4b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a7631000000084d414e49464553540000000131000000013100000001310000000b7661756c742d616c706861000000266f747661756c743a6174746163686d656e742d6d616e69666573743a626c6f622d7365742d310000000000000000",
+      "plaintextSha256": "78da54f681215b84fb6cd3db8d358e59f35ce23c7c3e21670904759abc3017e9",
+      "frameSha256": "a63c99c738840be4dc823fd3d233bbe7c0c62421ed915bf501a09cbc4ca1ad59",
+      "byteCount": 821
+    },
+    {
+      "objectId": "otvault:attachment-chunk:blob-set-1:0",
+      "family": "ATTACHMENT_CHUNK",
+      "chunkIndex": 0,
+      "chunkCount": 25,
+      "nonceHex": "505152535455565758595a5b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a7631000000104154544143484d454e545f4348554e4b0000000131000000013100000001310000000b7661756c742d616c706861000000256f747661756c743a6174746163686d656e742d6368756e6b3a626c6f622d7365742d313a300000000130000000023235",
+      "plaintextSha256": "f7e6891ce2529a0797040d8b86631e7de88b381839b879f225b8b232c0157c6f",
+      "frameSha256": "f9b54b7b23d2933870576584288cc72889fe7ca76737b8fabbd36226d699198e",
+      "byteCount": 380
+    },
+    {
+      "objectId": "otvault:attachment-chunk:blob-set-1:1",
+      "family": "ATTACHMENT_CHUNK",
+      "chunkIndex": 1,
+      "chunkCount": 25,
+      "nonceHex": "606162636465666768696a6b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a7631000000104154544143484d454e545f4348554e4b0000000131000000013100000001310000000b7661756c742d616c706861000000256f747661756c743a6174746163686d656e742d6368756e6b3a626c6f622d7365742d313a310000000131000000023235",
+      "plaintextSha256": "acbd79c4349881899e10aa3cfdf53586ea6b782642e3645dcb7f0c7fca6615f9",
+      "frameSha256": "20083cca7c1093e9416ac12eb92223201e679b6334cc1636125c23c473289c0f",
+      "byteCount": 379
+    },
+    {
+      "objectId": "otvault:inventory",
+      "family": "MANIFEST",
+      "chunkIndex": null,
+      "chunkCount": null,
+      "nonceHex": "707172737475767778797a7b",
+      "associatedDataHex": "000000236f70656e2d7461736b733a636c6f75642d6865616465722d6964656e746974793a7631000000084d414e49464553540000000131000000013100000001310000000b7661756c742d616c706861000000116f747661756c743a696e76656e746f72790000000000000000",
+      "plaintextSha256": "960b4149d10c300e99b590ceb6a0fd3da6ac0829f159d8d7d41a8485b4973832",
+      "frameSha256": "c2b0ab0f0911cee8cc6f88ba3c5889862562057cf7a3aa58e1a6005528bc67ae",
+      "byteCount": 1312
+    }
+  ],
+  "inventoryEntries": [
+    {
+      "objectId": "otvault:snapshot:53",
+      "family": "SNAPSHOT",
+      "sha256": "8f0579ed46c67752a8f52387cd2fdf5cabbc03072ad1897ccfeb4ed4d92cf33e",
+      "byteCount": 6595
+    },
+    {
+      "objectId": "otvault:segment:54:54",
+      "family": "OPERATION_SEGMENT",
+      "sha256": "614cc1f83ddc05e2adb6a12570947ed24681fb0d3f40e3f0e480fbf6bbe84f3a",
+      "byteCount": 3112
+    },
+    {
+      "objectId": "otvault:attachment-manifest:blob-set-1",
+      "family": "MANIFEST",
+      "sha256": "a63c99c738840be4dc823fd3d233bbe7c0c62421ed915bf501a09cbc4ca1ad59",
+      "byteCount": 821
+    },
+    {
+      "objectId": "otvault:attachment-chunk:blob-set-1:0",
+      "family": "ATTACHMENT_CHUNK",
+      "sha256": "f9b54b7b23d2933870576584288cc72889fe7ca76737b8fabbd36226d699198e",
+      "byteCount": 380
+    },
+    {
+      "objectId": "otvault:attachment-chunk:blob-set-1:1",
+      "family": "ATTACHMENT_CHUNK",
+      "sha256": "20083cca7c1093e9416ac12eb92223201e679b6334cc1636125c23c473289c0f",
+      "byteCount": 379
+    }
+  ],
+  "archiveByteCount": 12985,
+  "archiveSha256": "71d2ad6ff026410da8be0b300527fa9c2695bc0b74a9880bc236d0bb746c7500"
+}
