@@ -115,6 +115,18 @@ disabled; final ADB and host qemu/emulator audits were empty.
 - Production Kotlin logging scans were empty: no `Log.`, `Timber.`, `println`,
   or `printStackTrace` calls carrying private fields were introduced.
 
+## Post-review targeted verification
+
+Formal review fix `18eef9c` strengthened permanent-purge coverage to compare
+every pre-purge target-task activity ID with the exact `ACTIVITY_ENTRY`
+deletion identities and reconciled the live handoff/threat-model wording. The
+controller then ran `:core:data:connectedDebugAndroidTest --rerun-tasks` on the
+sole audited disposable: **BUILD SUCCESSFUL in 2m 34s**, 125/125 actionable
+tasks executed, and `Pixel_10_Pro_Fold` on Android 17 finished **150 tests,
+0 failed, 0 skipped**. Exact AVD/API/flags/font-scale preflight passed, a stale
+app was uninstalled first, and post-run app/instrumentation package scans were
+empty. This did not change production code or run the credentialed harness.
+
 ## Recorded Stage 5 limitations
 
 1. Purged attachments' blob sets never become GC candidates: their records are
