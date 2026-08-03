@@ -1299,6 +1299,7 @@ class InMemoryVaultRepository internal constructor(
             reminders = current.reminders.filterNot { it.taskId == task.id },
             timeEntries = current.timeEntries.filterNot { it.taskId == task.id },
             notes = current.notes.filterNot { it.taskId == task.id },
+            attachments = current.attachments.filterNot { it.taskId == task.id },
             activityEntries = current.activityEntries.filterNot { it.taskId == task.id },
         )
         return CommandResult.Success("Task permanently deleted")
@@ -1330,6 +1331,7 @@ class InMemoryVaultRepository internal constructor(
                 reminders = current.reminders.filterNot { it.taskId in expiredIds },
                 timeEntries = current.timeEntries.filterNot { it.taskId in expiredIds },
                 notes = current.notes.filterNot { it.taskId in expiredIds },
+                attachments = current.attachments.filterNot { it.taskId in expiredIds },
                 activityEntries = current.activityEntries.filterNot { it.taskId in expiredIds },
                 at = command.now,
             )
@@ -2120,23 +2122,46 @@ class InMemoryVaultRepository internal constructor(
         )
     }
 
+    /**
+     * Puts one note's content back, whether or not the identity still exists.
+     *
+     * Undoing an edit restores over a note that is still present, so an
+     * existing identity cannot mean the work is done — that would claim a
+     * restore and change nothing. Owners are only re-checked when the record
+     * has to be re-created: writing the prior body of a note that is already
+     * held introduces no reference the record does not already hold. Replay is
+     * safe because writing identical content produces no journal diff.
+     */
     private fun restoreNote(command: DomainCommand.RestoreNote): CommandResult {
         val current = mutableWorkspace.value
-        if (current.notes.any { it.id == command.note.id }) {
-            return CommandResult.Success("Note restored")
+        val existing = current.notes.firstOrNull { it.id == command.note.id }
+        if (existing == null) {
+            command.note.taskId?.let { taskId ->
+                current.tasks.firstOrNull { it.id == taskId && it.deletedAt == null }
+                    ?: return CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Task no longer exists.",
+                    )
+            }
+            command.note.projectId?.let { projectId ->
+                current.projects.firstOrNull { it.id == projectId }
+                    ?: return CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Project no longer exists.",
+                    )
+            }
         }
-        command.note.taskId?.let { taskId ->
-            current.tasks.firstOrNull { it.id == taskId && it.deletedAt == null }
-                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
-        }
-        command.note.projectId?.let { projectId ->
-            current.projects.firstOrNull { it.id == projectId }
-                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Project no longer exists.")
-        }
-        mutableWorkspace.value = current.copy(notes = current.notes + command.note)
+        mutableWorkspace.value = current.copy(
+            notes = if (existing == null) {
+                current.notes + command.note
+            } else {
+                current.notes.map { if (it.id == command.note.id) command.note else it }
+            },
+        )
         return CommandResult.Success(
             message = "Note restored",
-            undo = DomainCommand.DeleteNote(command.note.id),
+            undo = existing?.let(DomainCommand::RestoreNote)
+                ?: DomainCommand.DeleteNote(command.note.id),
         )
     }
 
@@ -2510,6 +2535,7 @@ class InMemoryVaultRepository internal constructor(
         milestones: List<Milestone> = mutableWorkspace.value.milestones,
         timeEntries: List<TimeEntry> = mutableWorkspace.value.timeEntries,
         notes: List<Note> = mutableWorkspace.value.notes,
+        attachments: List<Attachment> = mutableWorkspace.value.attachments,
         activityEntries: List<ActivityEntry> = mutableWorkspace.value.activityEntries,
         at: Instant = now(),
     ) {
@@ -2532,6 +2558,7 @@ class InMemoryVaultRepository internal constructor(
                     .thenBy(Milestone::name),
             ),
             notes = notes,
+            attachments = attachments,
             activityEntries = activityEntries,
         ).withReconciledTimeState(at = at, entries = timeEntries)
     }

@@ -12,6 +12,7 @@ import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Revision
+import app.opentasks.core.model.TaskId
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -308,6 +309,63 @@ class InMemoryBackupJournalTest {
         )
     }
 
+    /**
+     * A permanent purge deletes the record and everything hanging off it in
+     * one transaction. An attachment row that outlived its task would keep
+     * describing content for a task that no longer exists.
+     */
+    @Test
+    fun permanentlyDeletingTaskRemovesItsAttachmentsAndJournalsTheAttachmentDelete() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+        repository.execute(DomainCommand.RegisterAttachment(attachment(task.id.value)))
+        val attachment = repository.currentWorkspace().attachments.single()
+
+        repository.execute(DomainCommand.DeleteTask(task.id, now.minusSeconds(60)))
+        repository.execute(DomainCommand.PermanentlyDeleteTask(task.id, now))
+
+        assertTrue(repository.currentWorkspace().attachments.none { it.id == attachment.id })
+        val purgeGeneration = journal.currentGeneration
+        val purgePayloads = journal.entries
+            .filter { it.generation.value == purgeGeneration }
+            .map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(
+            purgePayloads.any {
+                it.mutationKind == BackupMutationKind.DELETE &&
+                    it.deletedFamily == BackupRecordFamily.ATTACHMENT &&
+                    it.deletedIdentity == listOf(attachment.id.value)
+            },
+        )
+    }
+
+    @Test
+    fun expiredTrashPurgeRemovesTaskAttachmentsAndJournalsTheAttachmentDelete() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        val journal = InMemoryBackupJournal()
+        val repository = repository(journal)
+        val task = OpenTasksFixtures.tasks.first()
+        repository.execute(DomainCommand.RegisterAttachment(attachment(task.id.value)))
+        val attachment = repository.currentWorkspace().attachments.single()
+
+        repository.execute(DomainCommand.DeleteTask(task.id, now.minus(31, ChronoUnit.DAYS)))
+        repository.execute(DomainCommand.PurgeExpiredTrash(now))
+
+        assertTrue(repository.currentWorkspace().attachments.none { it.id == attachment.id })
+        val purgeGeneration = journal.currentGeneration
+        val purgePayloads = journal.entries
+            .filter { it.generation.value == purgeGeneration }
+            .map { BackupMutationCodec.decode(it.payload) }
+        assertTrue(
+            purgePayloads.any {
+                it.mutationKind == BackupMutationKind.DELETE &&
+                    it.deletedFamily == BackupRecordFamily.ATTACHMENT &&
+                    it.deletedIdentity == listOf(attachment.id.value)
+            },
+        )
+    }
+
     @Test
     fun attachmentParticipatesInBackupRecordsWithFinalisedFields() {
         val task = OpenTasksFixtures.tasks.first()
@@ -345,6 +403,19 @@ class InMemoryBackupJournalTest {
         assertEquals("1", field("revisionLogical"))
         assertEquals("device-1", field("revisionDeviceId"))
     }
+
+    private fun attachment(taskId: String): Attachment = Attachment(
+        id = AttachmentId("attachment-purge"),
+        taskId = TaskId(taskId),
+        displayName = "Contract.pdf",
+        mimeType = "application/pdf",
+        byteCount = 1_024,
+        contentHash = "a".repeat(64),
+        blobSetId = BlobSetId("blob-set-purge"),
+        chunkCount = 1,
+        deletedAt = null,
+        revision = Revision(DeviceId("device-1"), 1, 0),
+    )
 
     private fun repository(journal: InMemoryBackupJournal): InMemoryVaultRepository =
         InMemoryVaultRepository(

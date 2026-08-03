@@ -100,7 +100,17 @@ class AttachmentIntakeViewModel internal constructor(
     val messages = Channel<Int>(Channel.BUFFERED)
 
     init {
-        refreshCacheUsage()
+        viewModelScope.launch(Dispatchers.IO) {
+            // A handoff that was interrupted by process death leaves a
+            // decrypted copy on disk, and nothing else would ever remove it:
+            // the teardown that normally clears it never ran. Construction is
+            // the one moment at which no share can be in flight, so sweeping
+            // the whole staging root here races nothing — and doing it before
+            // the first usage read means the figure reported describes what
+            // actually survived.
+            sweepStagedPlaintext(cacheRoot)
+            refreshCacheUsage()
+        }
     }
 
     fun addFromUri(taskId: TaskId, uri: Uri?) {
@@ -186,13 +196,7 @@ class AttachmentIntakeViewModel internal constructor(
         discardStagedPlaintext()
     }
 
-    private fun discardStagedPlaintext() {
-        try {
-            cacheRoot.deleteRecursively()
-        } catch (_: Exception) {
-            // A later open or teardown clears what this attempt could not.
-        }
-    }
+    private fun discardStagedPlaintext() = sweepStagedPlaintext(cacheRoot)
 
     private fun deliver(attachment: Attachment, share: Boolean) {
         if (attachment.deletedAt != null) return
@@ -280,19 +284,13 @@ class AttachmentIntakeViewModel internal constructor(
     private fun refreshCacheUsage() {
         viewModelScope.launch(Dispatchers.IO) {
             mutableCacheUsage.value = try {
-                runtime.cacheUsageBytes() + stagedPlaintextBytes()
+                runtime.cacheUsageBytes() + stagedPlaintextBytes(cacheRoot)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
                 0L
             }
         }
-    }
-
-    private fun stagedPlaintextBytes(): Long = try {
-        cacheRoot.walkTopDown().filter(File::isFile).sumOf(File::length)
-    } catch (_: Exception) {
-        0L
     }
 
     /**
@@ -404,6 +402,28 @@ private fun RemoteBackupFailureCategory.messageRes(): Int = when (this) {
     RemoteBackupFailureCategory.PROVIDER_STORAGE -> R.string.attachment_storage_full
     RemoteBackupFailureCategory.CORRUPT_OR_INCOMPATIBLE -> R.string.attachment_damaged
     else -> R.string.attachment_unavailable
+}
+
+/**
+ * Drops every decrypted copy staged under [root], root included.
+ *
+ * Plaintext is meant to exist only for the length of one handoff, so nothing
+ * under this root is ever worth keeping: whatever survived was abandoned by an
+ * operation that ended, and a later open restages the one file it needs.
+ */
+internal fun sweepStagedPlaintext(root: File) {
+    try {
+        root.deleteRecursively()
+    } catch (_: Exception) {
+        // A later open, sweep, or teardown clears what this attempt could not.
+    }
+}
+
+/** The plaintext this installation is currently staging under [root]. */
+internal fun stagedPlaintextBytes(root: File): Long = try {
+    root.walkTopDown().filter(File::isFile).sumOf(File::length)
+} catch (_: Exception) {
+    0L
 }
 
 /** A provider-supplied name reduced to something safe to put on this disk. */

@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.data.backup.BackupMutationCodec
 import app.opentasks.core.data.backup.BackupRecordFamily
 import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.data.db.toModel
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
@@ -137,6 +138,59 @@ class RoomNoteCommandInstrumentedTest {
             assertEquals(before.currentGeneration + 1, after.currentGeneration)
             assertTrue(rows.isNotEmpty())
             assertEquals("NOTE", rows.maxBy { it.sequence }.objectType)
+        }
+    }
+
+    /**
+     * The Room mirror of the in-memory round trip: executing the undo an edit
+     * hands back must put the previous body on disk, not merely report that a
+     * note with that identity is present.
+     */
+    @Test
+    fun executingTheUpdateUndoRevertsTheStoredNoteAndJournalsTheRestoredBody() = runBlocking {
+        withTimeout(5_000) {
+            val task = repository!!.currentWorkspace().tasks.first()
+            repository!!.execute(
+                DomainCommand.AddNote(taskId = task.id, projectId = null, body = "v1"),
+            )
+            val original = awaitNote { it.taskId == task.id }
+            val updated = repository!!.execute(
+                DomainCommand.UpdateNote(original.id, "v2"),
+            ) as CommandResult.Success
+            val edited = awaitNote { it.id == original.id && it.body == "v2" }
+            val before = database!!.backupStateDao().require(VAULT_ID)
+
+            val undone = repository!!.execute(updated.undo as DomainCommand)
+
+            assertTrue(undone is CommandResult.Success)
+            val restored = awaitNote { it.id == original.id && it.body == "v1" }
+            assertEquals(original, restored)
+            assertNull(restored.editedAt)
+            assertEquals("v1", database!!.workspaceDao().getNoteById(original.id.value)!!.toModel().body)
+            assertTrue(edited.revision.logicalCounter > restored.revision.logicalCounter)
+            val after = database!!.backupStateDao().require(VAULT_ID)
+            assertEquals(before.currentGeneration + 1, after.currentGeneration)
+            val rows = database!!.backupJournalDao().between(
+                VAULT_ID,
+                after.currentGeneration,
+                after.currentGeneration,
+            )
+            val payloads = rows.map { BackupMutationCodec.decode(it.payload) }
+            assertTrue(
+                payloads.any {
+                    it.record?.family == BackupRecordFamily.NOTE &&
+                        it.record.identity == listOf(original.id.value)
+                },
+            )
+
+            // Replaying the same restore writes the same content, so it leaves
+            // one record behind and allocates no further generation.
+            assertTrue(repository!!.execute(DomainCommand.RestoreNote(original)) is CommandResult.Success)
+            assertEquals(original, awaitNote { it.id == original.id })
+            assertEquals(
+                after.currentGeneration,
+                database!!.backupStateDao().require(VAULT_ID).currentGeneration,
+            )
         }
     }
 

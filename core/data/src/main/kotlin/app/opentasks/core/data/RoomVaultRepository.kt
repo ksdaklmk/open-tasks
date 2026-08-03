@@ -2406,29 +2406,43 @@ class RoomVaultRepository(
         )
     }
 
+    /**
+     * Puts one note's content back, whether or not the identity still exists.
+     *
+     * Undoing an edit restores over a note that is still present, so an
+     * existing identity cannot mean the work is done — that would claim a
+     * restore and change nothing. Owners are only re-checked when the record
+     * has to be re-created: writing the prior body of a note that is already
+     * stored introduces no reference the row does not already hold. Replay is
+     * safe because writing identical content produces no journal diff.
+     */
     private suspend fun restoreNote(command: DomainCommand.RestoreNote): CommandResult {
-        if (database.workspaceDao().getNoteById(command.note.id.value) != null) {
-            return CommandResult.Success("Note restored")
-        }
-        command.note.taskId?.let { taskId ->
-            val task = database.taskDao().getById(taskId.value)
-            if (task == null || task.deletedAtEpochMillis != null) {
-                return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val existing = database.workspaceDao().getNoteById(command.note.id.value)?.toModel()
+        if (existing == null) {
+            command.note.taskId?.let { taskId ->
+                val task = database.taskDao().getById(taskId.value)
+                if (task == null || task.deletedAtEpochMillis != null) {
+                    return CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Task no longer exists.",
+                    )
+                }
             }
-        }
-        command.note.projectId?.let { projectId ->
-            database.workspaceDao().getProjectById(projectId.value)
-                ?: return CommandResult.Rejected(
-                    RejectionReason.NOT_FOUND,
-                    "Project no longer exists.",
-                )
+            command.note.projectId?.let { projectId ->
+                database.workspaceDao().getProjectById(projectId.value)
+                    ?: return CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Project no longer exists.",
+                    )
+            }
         }
         database.withTransaction {
             database.workspaceDao().upsertNote(command.note.toEntity())
         }
         return CommandResult.Success(
             message = "Note restored",
-            undo = DomainCommand.DeleteNote(command.note.id),
+            undo = existing?.let(DomainCommand::RestoreNote)
+                ?: DomainCommand.DeleteNote(command.note.id),
         )
     }
 
