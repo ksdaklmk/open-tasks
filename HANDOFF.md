@@ -19,9 +19,10 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `73b8922` (`fix: reauthenticate
-  before manifest deletion`), the tip of the Stage 4 Task 1–11 range
-  `6538dca..73b8922`. The prior adaptive-slice closure point
+- Current product source implementation point: `b3da5d2` (`test: skip Pixel
+  fold harness transition`), the tip of the qualified Stage 4 Task 1–13,
+  whole-branch-review, and Task 14 gate-fix range `6538dca..b3da5d2`. The
+  prior adaptive-slice closure point
   is `ddbe52a` (`test: guard all continuity database sidecars`) on top of
   `1194536` (`fix: close fold 8 review gaps`), `74d3064` (`fix: align hinge
   split with safe insets`) and the accepted
@@ -140,9 +141,9 @@ publication with namespace-safe cleanup, unique background scheduling,
 verified staging reconstruction, recovery with writer takeover and activation,
 passphrase rotation, disconnect, permanent remote-history deletion, and
 separate-lineage preservation, product UI, complete recovery/takeover
-qualification, and final release/privacy/protected-workspace gates. Cloud
-attachment metadata commands are implemented; blob transport, attachment
-product surfaces, and Play Console work remain pending.
+qualification, and final release/privacy/protected-workspace gates. Stage 4
+now qualifies attachment metadata, blob transport, and attachment product
+surfaces; Play Console work remains externally pending.
 
 Train 1 Tasks 1.1–1.5 and Stage 1 are complete. Vault-content keys are
 independent of SQLCipher database keys and have separate recovery and per-vault
@@ -156,9 +157,9 @@ local recovery objects, recovery-envelope preparation, the portable package,
 runtime activation, exact Android eligibility, inert restored input, and
 status UI. The final review's correctness defects are closed in `f9e091b`.
 The recovery, takeover, passphrase-rotation, remote-lifecycle, and product
-surface work is committed through Task 14; attachment transport remains
-unimplemented, and the committed Stage 3 Drive transport work is recorded
-above. The historical
+surface work is committed through Task 14. Stage 4's attachment transport and
+product flows are qualified; the committed Stage 3 Drive transport work is
+recorded above. The historical
 Train 1 Task 1.6 is superseded.
 
 ## Stage 3 provider and replacement-design checkpoint — 30 July 2026
