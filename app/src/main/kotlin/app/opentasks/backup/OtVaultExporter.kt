@@ -17,7 +17,6 @@ import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.VaultId
 import java.io.OutputStream
-import java.security.MessageDigest
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 
@@ -49,6 +48,17 @@ sealed interface OtVaultExportResult {
  * beyond one chunk at a time is ever held in memory, and no plaintext archive
  * is staged on disk; the caller owns [destination] and must discard it on
  * anything other than [OtVaultExportResult.Completed].
+ *
+ * The write phase re-reads every attachment a second time (see [preflight]),
+ * so a cache large enough to hold the whole pre-flighted corpus serves that
+ * second read for free. A corpus above the cache ceiling
+ * (`min(128 MiB, 5% available storage)`) has no such guarantee: an entry
+ * fetched early in pre-flight can be evicted before the write phase asks for
+ * it again, and that attachment is then re-downloaded from the live session —
+ * a real, honest 2x transfer cost, not a defect. A second-read failure still
+ * fails safe: `readChunksForExport` returns `false`, the export becomes a
+ * generic [OtVaultExportResult.Failed], and the caller deletes the partial
+ * document exactly as it would for any other failure.
  */
 class OtVaultExporter(
     private val vaultId: VaultId,
@@ -66,7 +76,7 @@ class OtVaultExporter(
     suspend fun export(destination: OutputStream, passphrase: CharArray): OtVaultExportResult = try {
         runExport(destination, passphrase)
     } finally {
-        passphrase.fill(' ')
+        passphrase.fill('\u0000')
     }
 
     private suspend fun runExport(
@@ -117,9 +127,9 @@ class OtVaultExporter(
 
     /**
      * Verifies every active attachment is fetchable and learns each chunk's
-     * real plaintext length and digest — before a single archive byte is
-     * written. A chunk is read exactly once here; the write phase reads it
-     * again, by then served from the cache this pass already populated.
+     * real plaintext length — before a single archive byte is written. A
+     * chunk is read once here; the write phase reads it again (see the class
+     * doc for what that costs when the cache can't hold the whole corpus).
      */
     private suspend fun preflight(attachments: List<Attachment>): Preflight {
         val manifests = mutableMapOf<AttachmentId, PendingManifest>()
@@ -127,12 +137,10 @@ class OtVaultExporter(
         attachments.forEach { attachment ->
             val chunkCount = attachment.chunkCount
             val plaintextByteCounts = arrayOfNulls<Int>(chunkCount)
-            val chunkDigests = arrayOfNulls<String>(chunkCount)
             val fetched = try {
                 readChunksForExport(attachment) { chunkIndex, plaintext ->
                     if (chunkIndex in 0 until chunkCount) {
                         plaintextByteCounts[chunkIndex] = plaintext.size
-                        chunkDigests[chunkIndex] = sha256(plaintext)
                     }
                 }
             } catch (cancellation: CancellationException) {
@@ -140,12 +148,11 @@ class OtVaultExporter(
             } catch (_: Exception) {
                 false
             }
-            if (!fetched || chunkDigests.any { it == null } || plaintextByteCounts.any { it == null }) {
+            if (!fetched || plaintextByteCounts.any { it == null }) {
                 missing += attachment.displayName
             } else {
                 manifests[attachment.id] = PendingManifest(
                     plaintextByteCounts = plaintextByteCounts.map { requireNotNull(it) },
-                    chunkDigests = chunkDigests.map { requireNotNull(it) },
                 )
             }
         }
@@ -229,17 +236,28 @@ class OtVaultExporter(
 
     private fun genericFailure() = OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
 
-    /** One attachment's real per-chunk lengths and digests, learned in [preflight]. */
+    /** One attachment's real per-chunk plaintext lengths, learned in [preflight]. */
     private class PendingManifest(
         private val plaintextByteCounts: List<Int>,
-        private val chunkDigests: List<String>,
     ) {
         /**
-         * A manifest scoped to this archive alone: [AttachmentChunkRef.providerObjectId]
-         * and [AttachmentChunkRef.ciphertextSha256] never claim to describe the live
-         * remote object — only this archive's own chunk frames, which
-         * [OtVaultCodec] authenticates independently through its own frame
-         * encryption and inventory digest.
+         * A manifest scoped to this archive alone.
+         *
+         * The codec's mandated write order puts the manifest before its
+         * chunks, so the real archive frame for a chunk — and therefore its
+         * ciphertext — does not exist yet when this manifest is built.
+         * [AttachmentChunkRef.providerObjectId] and
+         * [AttachmentChunkRef.ciphertextSha256] carry the same fixed sentinel
+         * every other place in this codebase uses for "not meaningful here"
+         * (see `ZERO_SHA256` in `PortableBackupCodec`/`PublicationCodec`):
+         * writing the plaintext's own digest into a field whose one meaning
+         * everywhere else is "sha256 of the encrypted frame"
+         * ([app.opentasks.core.data.backup.AttachmentOpenCoordinator] checks
+         * exactly that) would look plausible and be wrong — every chunk would
+         * fail as corrupt the moment anything fed this manifest to the live
+         * open path. Per-chunk integrity for the archive itself lives in the
+         * codec's own frame encryption plus the inventory's per-object digest,
+         * not in this manifest.
          */
         fun toManifest(attachment: Attachment, blobSetId: BlobSetId): AttachmentBlobSetManifest =
             AttachmentBlobSetManifest(
@@ -249,10 +267,8 @@ class OtVaultExporter(
                 chunks = plaintextByteCounts.mapIndexed { index, byteCount ->
                     AttachmentChunkRef(
                         index = index,
-                        providerObjectId = ProviderObjectId.of(
-                            "otvault-export-chunk:${blobSetId.value}:$index",
-                        ),
-                        ciphertextSha256 = Sha256Digest.of(chunkDigests[index]),
+                        providerObjectId = ProviderObjectId.of(SENTINEL_PROVIDER_OBJECT_ID),
+                        ciphertextSha256 = Sha256Digest.of(SENTINEL_SHA256),
                         plaintextByteCount = byteCount,
                     )
                 },
@@ -298,15 +314,18 @@ private class CountingOutputStream(private val delegate: OutputStream) : OutputS
     override fun close() = delegate.close()
 }
 
-private fun sha256(bytes: ByteArray): String {
-    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-    return buildString(digest.size * 2) {
-        digest.forEach { byte ->
-            val value = byte.toInt() and 0xff
-            append(HEX[value ushr 4])
-            append(HEX[value and 0x0f])
-        }
-    }
-}
+/**
+ * The fixed placeholder [AttachmentChunkRef.ciphertextSha256] carries in an
+ * archive manifest, matching the `ZERO_SHA256` convention already used
+ * elsewhere in this module for "this field has no meaning in this context".
+ */
+private const val SENTINEL_SHA256 =
+    "0000000000000000000000000000000000000000000000000000000000000000"
 
-private const val HEX = "0123456789abcdef"
+/**
+ * The fixed placeholder [AttachmentChunkRef.providerObjectId] carries in an
+ * archive manifest. It never names a real provider object — the archive's
+ * actual chunk frame identity lives entirely in [OtVaultCodec]'s own object
+ * IDs, authenticated by its frame encryption and inventory digest.
+ */
+private const val SENTINEL_PROVIDER_OBJECT_ID = "otvault:archive-manifest-sentinel"

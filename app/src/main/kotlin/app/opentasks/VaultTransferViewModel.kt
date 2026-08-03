@@ -14,12 +14,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the whole-vault export flow.
@@ -64,39 +66,47 @@ class VaultTransferViewModel @Inject constructor(
         val passphrase = pendingPassphrase
         pendingPassphrase = null
         if (uri == null || passphrase == null) {
-            passphrase?.fill(' ')
+            passphrase?.fill('\u0000')
             if (operation.isLocked) operation.unlock()
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
             mutableExportInProgress.value = true
-            val result = try {
-                context.contentResolver.openOutputStream(uri)?.use { stream ->
-                    exporter.export(stream, passphrase)
-                } ?: OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
+            var result: OtVaultExportResult? = null
+            try {
+                result = try {
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        exporter.export(stream, passphrase)
+                    } ?: OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
+                }
             } finally {
-                operation.unlock()
+                // Cancellation (this ViewModel cleared mid-export) must not
+                // orphan the document the person just chose: unlocking,
+                // clearing the progress flag, and deleting anything short of
+                // a verified success all run to completion even though the
+                // job that started them is itself cancelled.
+                withContext(NonCancellable) {
+                    operation.unlock()
+                    mutableExportInProgress.value = false
+                    if (result !is OtVaultExportResult.Completed) {
+                        deletePartialDocument(uri)
+                    }
+                }
             }
-            mutableExportInProgress.value = false
-            mutableExportOutcome.value = when (result) {
+            mutableExportOutcome.value = when (val outcome = checkNotNull(result)) {
                 is OtVaultExportResult.Completed -> VaultExportOutcome.Completed(
-                    byteCount = result.byteCount,
-                    attachmentCount = result.attachmentCount,
+                    byteCount = outcome.byteCount,
+                    attachmentCount = outcome.attachmentCount,
                 )
 
-                is OtVaultExportResult.MissingAttachmentBytes -> {
-                    deletePartialDocument(uri)
-                    VaultExportOutcome.MissingAttachmentBytes(result.displayNames)
-                }
+                is OtVaultExportResult.MissingAttachmentBytes ->
+                    VaultExportOutcome.MissingAttachmentBytes(outcome.displayNames)
 
-                is OtVaultExportResult.Failed -> {
-                    deletePartialDocument(uri)
-                    VaultExportOutcome.Failed(result.reason)
-                }
+                is OtVaultExportResult.Failed -> VaultExportOutcome.Failed(outcome.reason)
             }
         }
     }
@@ -111,7 +121,7 @@ class VaultTransferViewModel @Inject constructor(
     }
 
     private fun releasePendingPassphrase() {
-        pendingPassphrase?.fill(' ')
+        pendingPassphrase?.fill('\u0000')
         pendingPassphrase = null
     }
 

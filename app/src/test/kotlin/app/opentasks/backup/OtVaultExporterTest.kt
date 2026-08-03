@@ -65,7 +65,7 @@ class OtVaultExporterTest {
 
             val result = exporter.export(destination, passphrase)
 
-            assertTrue(passphrase.all { it == ' ' })
+            assertTrue(passphrase.all { it == '\u0000' })
             assertTrue(result is OtVaultExportResult.Completed)
             val completed = result as OtVaultExportResult.Completed
             assertEquals(2, completed.attachmentCount)
@@ -142,7 +142,7 @@ class OtVaultExporterTest {
             val result = exporter.export(destination, passphrase)
 
             assertTrue(result is OtVaultExportResult.Failed)
-            assertTrue(passphrase.all { it == ' ' })
+            assertTrue(passphrase.all { it == '\u0000' })
             assertEquals(0, destination.size())
         }
     }
