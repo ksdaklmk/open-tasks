@@ -484,7 +484,8 @@ class RecoveryTakeoverInstrumentedTest {
                         ).lineageId
                     val attachmentsA =
                         attachmentRuntime(aContext, runtimeA, codec, provider, blobs) { INTAKE_AT }
-                    val taskId = runtimeA.repository.currentWorkspace().tasks.single().id
+                    val taskId = runtimeA.repository.currentWorkspace()
+                        .tasks.single { it.title == "baseline" }.id
 
                     // One 9 MiB source becomes three authenticated chunks and a manifest.
                     val payload = ByteArray(9 * 1024 * 1024) { (it % 251).toByte() }
