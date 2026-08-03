@@ -181,12 +181,16 @@ class AttachmentRuntime(
      * The coordinator re-verifies every occupied chunk and the manifest
      * before it registers anything, so nothing here trusts a session's
      * persisted phase; what this adds is refusing to authorize at all when
-     * there is no live provider session to resume through. Callers are
-     * expected to run [expireStaleSessions] first in the same pass, so a
-     * session old enough to abandon is never also a candidate to resume.
+     * there is no unfinished session to resume — the overwhelmingly common
+     * case, and one this runtime is asked about on every activation and
+     * every completed publication run, so it must cost no authorization or
+     * session open at all. Callers are expected to run [expireStaleSessions]
+     * first in the same pass, so a session old enough to abandon is never
+     * also a candidate to resume.
      */
     suspend fun resumeInterruptedSessions(): Int {
         val configuration = activeConfiguration() ?: return 0
+        if (!hasUnfinishedSessions()) return 0
         val key = openContentKey() ?: return 0
         return try {
             val opened = session(configuration) as? AttachmentSessionResult.Opened ?: return 0

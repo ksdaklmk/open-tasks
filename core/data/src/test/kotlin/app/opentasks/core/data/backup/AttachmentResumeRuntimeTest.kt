@@ -97,8 +97,22 @@ class AttachmentResumeRuntimeTest {
     }
 
     @Test
-    fun nonActiveLineageMakesZeroStoreCalls() = runBlocking {
+    fun unavailableProviderSessionMakesZeroStoreCalls() = runBlocking {
         withTimeout(5_000) {
+            // Seeded first, exactly as test one does: an unfinished session
+            // must exist, or the local pending-session guard refuses before
+            // ever consulting openSession, and this test would stop
+            // exercising the Unavailable path it claims to.
+            store.readFailure = RemoteBackupFailureCategory.RETRYABLE_PROVIDER
+            runtime().intake(
+                OpenTasksFixtures.tasks.first().id,
+                "receipt.pdf",
+                "application/pdf",
+                source(),
+            )
+            assertEquals("UPLOADING", transferDao.rows.values.single().phase)
+            store.readFailure = null
+            val callsBeforeResume = store.totalCalls
             val runtime = runtime(
                 openSession = {
                     AttachmentSessionResult.Unavailable(
@@ -109,7 +123,7 @@ class AttachmentResumeRuntimeTest {
 
             assertEquals(0, runtime.resumeInterruptedSessions())
 
-            assertEquals(0, store.totalCalls)
+            assertEquals(callsBeforeResume, store.totalCalls)
         }
     }
 
