@@ -1,13 +1,21 @@
 # Open Tasks Handoff
 
-- Last updated: 3 August 2026
+- Last updated: 4 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–2 of the 13-task plan
+- Session status: **Stage 5 is in progress: Tasks 1–6 of the 13-task plan
   (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
-  collection command) are complete and independently reviewed at
-  `eb343cb`. Execution is paused before Task 3 at the user's request;
-  resume via the checkpoint below. Stage 4 is complete and qualified.
-  Task 14's one-shot
+  collection command; retired-set GC closure; silent attachment intake
+  auto-resume; frozen `.otvault` v1 archive format with independent Node
+  fixtures; encrypted vault export with SAF product surface) are complete
+  and independently reviewed at `b4b1ec4`. Execution is paused before
+  Task 7 at the user's request; resume via the Tasks 3–6 checkpoint
+  below. One controller ruling awaits user confirmation before Task 7:
+  `.otvault` exports are snapshot-only (no operation-segment frames) —
+  see the checkpoint. Both recorded Stage 4 limits are now discharged:
+  the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
+  `AttachmentBlobCoordinator.resume()` product caller by Task 4's silent
+  auto-resume. Stage 4 itself is complete and qualified. Task 14's
+  one-shot
   credentialed live attachment gate passed in 606.947 s; its preserved harness
   is `a813c41` and must not be rerun. The final disposable six-module gate was
   282 tests, 0 failures/errors, and exactly two expected skips: the
@@ -16,18 +24,16 @@
   post-Stage-4. Forced-fresh debug/unit/lint/APK, release, schema-drift,
   deterministic-fixture, diff, release-scope, and production-logging gates
   passed. The authoritative qualification is
-  `docs/qualification/stage4-notes-activity-attachments-search.md`. Of the
-  two recorded Stage 4 limits, the retired-set index is now discharged by
-  Stage 5 Tasks 1–2 (Room v9); the second — no product caller for
-  `AttachmentBlobCoordinator.resume()` (24-hour expiry, no in-row
-  progress) — remains until Stage 5 Task 4 lands its silent auto-resume.
+  `docs/qualification/stage4-notes-activity-attachments-search.md`.
   Samsung Remote Test Lab RTL remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `eb343cb` (`fix: accept a
-  purge's own retired blob set as verified drift`), the tip of the Stage 5
-  Task 1–2 range `33ea364..eb343cb`. The prior Stage 4 implementation
+- Current product source implementation point: `b4b1ec4` (`fix: sentinel
+  manifest digests, NUL passphrase wipe, cancellation-safe export
+  cleanup`), the tip of the Stage 5 Task 3–6 range `1cb768e..b4b1ec4` on
+  top of the Task 1–2 range `33ea364..eb343cb` and its checkpoint commit
+  `f2835b7`. The prior Stage 4 implementation
   point is `b3da5d2` (`test: skip Pixel
   fold harness transition`), the tip of the qualified Stage 4 Task 1–13,
   whole-branch-review, and Task 14 gate-fix range `6538dca..b3da5d2`. The
@@ -106,11 +112,87 @@ base `1cd8cf4` with an independent review per task. The execution ledger is
   the pre-existing in-memory `restoreTaskStatus` gap that still leaves a
   generated occurrence's activity and time entries uncleaned.
 
-Resume by re-entering superpowers:subagent-driven-development with the plan
-and ledger above, dispatching Task 3 (GC closure over retired sets) from
-base `eb343cb`. Tasks 3–13 (GC closure, auto-resume, `.otvault` format/
-export/import, CSV, widget, app lock, input, calendar, qualification) have
-not started.
+This checkpoint's resume instruction is superseded: Tasks 3–6 were
+executed on 3–4 August and are recorded in the checkpoint below.
+
+## Stage 5 Tasks 3–6 checkpoint — 4 August 2026
+
+Execution resumed from `f2835b7` with the same plan, ledger, and
+independent-review-per-task discipline. All four task boundaries closed
+with zero open Critical or Important findings. No device suite ran; all
+new instrumented tests remain compile-verified and execute at the Task 13
+connected gate.
+
+- Task 3 (`1cb768e`, fix `7abe74e`) joined `retired_blob_sets` rows into
+  the attachment GC candidate stream: `deletedAt = retiredAt`, tombstone
+  generation from the RETIRED_BLOB_SET journal family, base coverage via
+  the existing helpers, live-`blobSetId` replacement rows excluded, and
+  post-batch release through `MarkRetiredBlobSetCollected`. The review's
+  one Important finding — `recordAllContentCollected()` left retired rows
+  permanently unsatisfiable after the destructive attachment wipe,
+  costing a full authorize/resolve/list round trip forever — was fixed by
+  releasing `workspace.retiredBlobSets` there too, with a covering test.
+- Task 4 (`4a216bc`, fix `a6617d8`) gave
+  `AttachmentBlobCoordinator.resume()` its product caller: silent
+  auto-resume ordered strictly after session expiry on runtime start
+  (same coroutine) and re-armed after each completed publication run, wired
+  through a new `resumeAttachmentSessions` lambda in AppModule. The
+  review's Important finding — resume authorized against Drive even with
+  nothing pending — was fixed with the sibling
+  `hasUnfinishedSessions()` guard. There is still no in-row transfer
+  progress; that boundary is unchanged.
+- Task 5 (`cf68f2e`) froze the `.otvault` v1 archive format:
+  `OtVaultCodec` with a bounded authenticated header whose envelope is a
+  real recovery envelope (export passphrase = recovery passphrase,
+  Argon2id 64 MiB/3/1/16-byte salt), archive-scoped object IDs with
+  bidirectional replay resistance, streamed Stage 1 frames, an
+  inventory-last integrity check, and an independent Node fixture
+  generator whose byte-identical regeneration the controller verified.
+  Review approved with zero Critical or Important findings; the
+  manifest-codec `internal` extraction was ruled a sound pure move. The
+  practical archive bound is the inventory frame's byte limit (~6,000
+  objects ≈ 240 attachments at 25 chunks), not the entry-count constant.
+- Task 6 (`4eb112f`, fix `b4b1ec4`) built encrypted vault export:
+  capture → recovery-envelope wrap → complete attachment pre-flight
+  (returns `MissingAttachmentBytes` naming every unfetchable attachment
+  before a single byte is written) → streamed archive → `Completed`,
+  with a `VaultTransferViewModel` owning the SAF `CreateDocument` flow,
+  passphrase sheet with confirmation, partial-document deletion on
+  failure and — after the fix round — on cancellation via a
+  `NonCancellable` finally. Archive manifests carry `ZERO_SHA256`-style
+  sentinels instead of plausible-but-wrong digests; passphrase wipes now
+  use the repo-wide NUL convention.
+
+**Controller ruling requiring user confirmation before Task 7:** the
+Task 6 review flagged that no operation-segment frames are written even
+though the brief's export-order sentence lists them. The controller ruled
+snapshot-only export correct: `RoomBackupCaptureSource.capture()` is a
+complete point-in-time baseline captured in one transaction, the
+authority spec never mentions segments, Task 7 imports into fresh-only
+operational state (empty remote tables — segments would have no
+consumer), and the brief's own Consumes list names no segment source.
+Task 7 would pass an empty segments list to `RecoveryImportRequest`. The
+ruling is reversible until Task 7 is dispatched; uphold or overturn it
+first.
+
+Carry-forwards for Task 7, recorded in the ledger: archive manifests
+carry sentinel `ciphertextSha256`/`providerObjectId` values — the
+importer must never hand them to the live open path expecting frame
+digests (per-frame integrity is the inventory plus AEAD);
+`readChunksForExport` and its AppModule wiring are compile-verified only,
+with Task 7's `OtVaultImportInstrumentedTest` as the end-to-end proof at
+the Task 13 connected gate. Notable deferred minors in the ledger: the
+unwiped passphrase array on the rare null-`openOutputStream` branch
+(memory-hygiene only; final review must triage), the unbounded read-side
+inventory accumulator in `OtVaultCodec.readAll` (hostile archive could
+OOM instead of failing closed), and the export row remaining enabled
+during an in-flight export.
+
+Resume by re-entering superpowers:subagent-driven-development with the
+plan and ledger above: first confirm the segments ruling with the user,
+then dispatch Task 7 (encrypted vault import and activation) from base
+`b4b1ec4`. Tasks 7–13 (import, CSV, widget, app lock, input, calendar,
+qualification) have not started.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 

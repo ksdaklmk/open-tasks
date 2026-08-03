@@ -89,9 +89,18 @@ race KSP while release Hilt sources are generated.
   `retired_blob_sets` index and its `RETIRED_BLOB_SET` backup family
   (Stage 5); any further durable schema change requires a later migration
   and exported schema.
-- `AttachmentBlobCoordinator.resume()` intentionally has no product caller;
-  retain it and its tests. Do not add in-row transfer progress without a
-  durable product contract.
+- `AttachmentBlobCoordinator.resume()` has exactly one product caller: the
+  silent auto-resume in `AttachmentRuntime.resumeInterruptedSessions()`,
+  which runs strictly after session expiry on runtime start and re-arms
+  after each completed publication run, and never authorizes when nothing
+  is pending. Retain the coordinator's tests. Do not add in-row transfer
+  progress without a durable product contract.
+- `.otvault` v1 (Stage 5) is a frozen archive format: `OtVaultCodec` wraps
+  the vault content key in a real recovery envelope (export passphrase =
+  recovery passphrase) and streams frozen Stage 1 frames at archive-scoped
+  object IDs. Exports are snapshot-only baselines. Its Node fixture
+  generator must regenerate byte-identically; change the format only with
+  a new version, never in place.
 - Room v9 is the remote-backup persistence authority. An active runtime is
   bound to one active vault slot and must stop when that slot is replaced,
   ownership is lost, or the lineage terminates.
