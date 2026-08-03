@@ -105,6 +105,8 @@ import java.util.UUID
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
@@ -624,8 +626,18 @@ class RecoveryTakeoverInstrumentedTest {
 
                     // The record survives collection with everything that says
                     // what its content was; only the link to released bytes is
-                    // gone, which is what stops it being offered again.
-                    val afterCollection = runtimeB.repository.currentWorkspace().attachments
+                    // gone, which is what stops it being offered again. Room
+                    // publishes that clearing through its observed snapshot, so
+                    // the bounded wait is for the projection, not the write.
+                    val afterCollection = withTimeout(5_000) {
+                        runtimeB.repository.observeWorkspace()
+                            .map { it.attachments }
+                            .first { attachments ->
+                                attachments.singleOrNull {
+                                    it.id == recovered.id
+                                }?.blobSetId == null
+                            }
+                    }
                     assertEquals(2, afterCollection.size)
                     val collectedRecord = afterCollection.single { it.id == recovered.id }
                     assertNull(collectedRecord.blobSetId)
