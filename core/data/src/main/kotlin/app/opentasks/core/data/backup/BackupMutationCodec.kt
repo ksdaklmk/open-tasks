@@ -397,6 +397,15 @@ internal object BackupMutationCodec {
                 nonNegativeLong("editedAtEpochMillis")
                 revision()
             }
+            BackupRecordFamily.RETIRED_BLOB_SET -> {
+                identifier("blobSetId")
+                val maxChunks = AttachmentBlobSetManifestCodec.MAX_BLOB_SET_CHUNKS
+                require(requireNotNull(value("chunkCount")).toInt() in 0..maxChunks) {
+                    "chunkCount must be between 0 and $maxChunks"
+                }
+                nonNegativeLong("retiredAtEpochMillis")
+                revision()
+            }
             BackupRecordFamily.TOMBSTONE -> {
                 bounded("objectType", 120, allowEmpty = false)
                 require(
@@ -708,6 +717,16 @@ internal object BackupMutationCodec {
                 bytes("bodyCiphertext"),
                 long("createdAtEpochMillis"),
                 long("editedAtEpochMillis", nullable = true),
+                long("revisionWallMillis"),
+                int("revisionLogical"),
+                string("revisionDeviceId"),
+            ),
+        ),
+        BackupRecordFamily.RETIRED_BLOB_SET to RecordSchema(
+            listOf(
+                string("blobSetId"),
+                int("chunkCount"),
+                long("retiredAtEpochMillis"),
                 long("revisionWallMillis"),
                 int("revisionLogical"),
                 string("revisionDeviceId"),

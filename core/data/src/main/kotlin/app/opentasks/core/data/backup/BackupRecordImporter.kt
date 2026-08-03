@@ -10,6 +10,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -254,6 +255,13 @@ internal class RoomBackupRecordImporter(
                     entity.encryptedQuery.fill(0)
                 }
             }
+            BackupRecordFamily.RETIRED_BLOB_SET -> fields.toRetiredBlobSetEntity().let { entity ->
+                if (replace) {
+                    importDao.upsertRetiredBlobSet(entity)
+                } else {
+                    importDao.insertRetiredBlobSet(entity)
+                }
+            }
             BackupRecordFamily.TOMBSTONE -> fields.toTombstoneEntity().let { entity ->
                 if (replace) importDao.upsertTombstone(entity) else importDao.insertTombstone(entity)
             }
@@ -293,6 +301,7 @@ internal class RoomBackupRecordImporter(
         BackupRecordFamily.SAVED_VIEW -> importDao.deleteSavedView(key.single())
         BackupRecordFamily.TOMBSTONE -> importDao.deleteTombstone(key.first(), key.second())
         BackupRecordFamily.NOTE -> importDao.deleteNote(key.single())
+        BackupRecordFamily.RETIRED_BLOB_SET -> importDao.deleteRetiredBlobSet(key.single())
     }
 }
 
@@ -708,6 +717,15 @@ internal fun BackupRecordFields.toNoteEntity(): NoteEntity = NoteEntity(
     bodyCiphertext = bytes("bodyCiphertext"),
     createdAtEpochMillis = long("createdAtEpochMillis"),
     editedAtEpochMillis = nullableLong("editedAtEpochMillis"),
+    revisionWallMillis = long("revisionWallMillis"),
+    revisionLogical = int("revisionLogical"),
+    revisionDeviceId = string("revisionDeviceId"),
+)
+
+internal fun BackupRecordFields.toRetiredBlobSetEntity(): RetiredBlobSetEntity = RetiredBlobSetEntity(
+    blobSetId = string("blobSetId"),
+    chunkCount = int("chunkCount"),
+    retiredAtEpochMillis = long("retiredAtEpochMillis"),
     revisionWallMillis = long("revisionWallMillis"),
     revisionLogical = int("revisionLogical"),
     revisionDeviceId = string("revisionDeviceId"),

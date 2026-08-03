@@ -8,6 +8,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -77,6 +78,7 @@ enum class BackupRecordFamily {
     TEMPLATE,
     SAVED_VIEW,
     NOTE,
+    RETIRED_BLOB_SET,
     TOMBSTONE,
 }
 
@@ -302,6 +304,17 @@ internal fun NoteEntity.toBackupRecordV1(): BackupRecordV1 = record(
     bytesField("bodyCiphertext", bodyCiphertext),
     longField("createdAtEpochMillis", createdAtEpochMillis),
     nullableLongField("editedAtEpochMillis", editedAtEpochMillis),
+    longField("revisionWallMillis", revisionWallMillis),
+    intField("revisionLogical", revisionLogical),
+    stringField("revisionDeviceId", revisionDeviceId),
+)
+
+internal fun RetiredBlobSetEntity.toBackupRecordV1(): BackupRecordV1 = record(
+    family = BackupRecordFamily.RETIRED_BLOB_SET,
+    identity = listOf(blobSetId),
+    stringField("blobSetId", blobSetId),
+    intField("chunkCount", chunkCount),
+    longField("retiredAtEpochMillis", retiredAtEpochMillis),
     longField("revisionWallMillis", revisionWallMillis),
     intField("revisionLogical", revisionLogical),
     stringField("revisionDeviceId", revisionDeviceId),

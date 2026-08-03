@@ -456,6 +456,7 @@ internal class DefaultStagedVaultVerifier(
             capture.templates(id).mapTo(this) { it.toBackupRecordV1() }
             capture.savedViews(id).mapTo(this) { it.toBackupRecordV1() }
             capture.notes(id).mapTo(this) { it.toBackupRecordV1() }
+            importDao.allRetiredBlobSets().mapTo(this) { it.toBackupRecordV1() }
             importDao.allTombstones().mapTo(this) { it.toBackupRecordV1() }
         }
     }

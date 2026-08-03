@@ -145,6 +145,17 @@ function note(
   ]);
 }
 
+function retiredBlobSet(blobSetId, chunkCount, retiredAt) {
+  return record("RETIRED_BLOB_SET", [blobSetId], [
+    stringField("blobSetId", blobSetId),
+    intField("chunkCount", chunkCount),
+    longField("retiredAtEpochMillis", retiredAt),
+    longField("revisionWallMillis", 10),
+    intField("revisionLogical", 0),
+    stringField("revisionDeviceId", "device-alpha"),
+  ]);
+}
+
 const semanticStatuses = [
   "BACKLOG",
   "PLANNED",
@@ -190,6 +201,7 @@ const familyOrder = [
   "TEMPLATE",
   "SAVED_VIEW",
   "NOTE",
+  "RETIRED_BLOB_SET",
   "TOMBSTONE",
 ];
 
@@ -331,6 +343,7 @@ const snapshotRecords = [
   ]),
   note("note-task-1", "task-1", null, [10, 11], 30, null, 0),
   note("note-project-1", null, "project-1", [12, 13], 31, 32, 0),
+  retiredBlobSet("blob-set-1", 3, 40),
   record("TOMBSTONE", ["gone-task", "task"], [
     stringField("objectId", "gone-task"),
     stringField("objectType", "task"),

@@ -33,12 +33,13 @@ class BackupPayloadGoldenTest {
             BackupRecordFamily.TEMPLATE to 1,
             BackupRecordFamily.SAVED_VIEW to 1,
             BackupRecordFamily.NOTE to 2,
+            BackupRecordFamily.RETIRED_BLOB_SET to 1,
             BackupRecordFamily.TOMBSTONE to 1,
         )
 
         try {
             assertEquals(
-                "ce45327286bc1d55a4fa3937fe1c05640a4016b497ff0b7c62d50e772c1a374b",
+                "86384e9a1370ce4e840a906178c21f95d0163ffab548cd13803840a1478c20e8",
                 fixture.plaintextSha256,
             )
             assertEquals(fixture.plaintextSha256, plaintext.sha256())

@@ -8,6 +8,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -491,6 +492,14 @@ class BackupMutationCodecTest {
                 "revisionLogical",
                 "revisionDeviceId",
             ),
+            BackupRecordFamily.RETIRED_BLOB_SET to listOf(
+                "blobSetId",
+                "chunkCount",
+                "retiredAtEpochMillis",
+                "revisionWallMillis",
+                "revisionLogical",
+                "revisionDeviceId",
+            ),
             BackupRecordFamily.TOMBSTONE to listOf(
                 "objectId",
                 "objectType",
@@ -520,6 +529,7 @@ class BackupMutationCodecTest {
             BackupRecordFamily.TEMPLATE to listOf("template-1"),
             BackupRecordFamily.SAVED_VIEW to listOf("view-1"),
             BackupRecordFamily.NOTE to listOf("note-1"),
+            BackupRecordFamily.RETIRED_BLOB_SET to listOf("blob-set-1"),
             BackupRecordFamily.TOMBSTONE to listOf("task-1", "task"),
         )
 
@@ -859,6 +869,8 @@ class BackupMutationCodecTest {
             0,
             "device-1",
         ).toBackupRecordV1(),
+        RetiredBlobSetEntity("blob-set-1", 3, 1, 1, 0, "device-1")
+            .toBackupRecordV1(),
         TombstoneEntity("task-1", "task", 1, 2, 1, 0, "device-1")
             .toBackupRecordV1(),
     )

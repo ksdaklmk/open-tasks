@@ -10,6 +10,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -378,6 +379,14 @@ internal interface BackupMutationDao {
     )
     suspend fun noteRevisions(): List<RevisionedIdRow>
 
+    @Query(
+        """
+        SELECT blobSetId AS id, revisionWallMillis, revisionLogical, revisionDeviceId
+        FROM retired_blob_sets ORDER BY blobSetId
+        """,
+    )
+    suspend fun retiredBlobSetRevisions(): List<RevisionedIdRow>
+
     @Query("SELECT * FROM time_entries ORDER BY id")
     suspend fun timeEntries(): List<TimeEntryEntity>
 
@@ -473,6 +482,9 @@ internal interface BackupMutationDao {
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun note(id: String): NoteEntity?
 
+    @Query("SELECT * FROM retired_blob_sets WHERE blobSetId = :blobSetId LIMIT 1")
+    suspend fun retiredBlobSet(blobSetId: String): RetiredBlobSetEntity?
+
     @Query(
         """
         SELECT * FROM tombstones
@@ -526,6 +538,9 @@ internal suspend fun BackupMutationDao.snapshots(): List<BackupRecordSnapshot> =
     templateRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TEMPLATE) }
     savedViewIds().mapTo(this) { identitySnapshot(BackupRecordFamily.SAVED_VIEW, it) }
     noteRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.NOTE) }
+    retiredBlobSetRevisions().mapTo(this) {
+        it.snapshot(BackupRecordFamily.RETIRED_BLOB_SET)
+    }
     tombstoneRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TOMBSTONE) }
 }
 
@@ -577,6 +592,8 @@ internal suspend fun BackupMutationDao.requireRecord(
             requireNotNull(savedView(singleId())).toBackupRecordV1()
         BackupRecordFamily.NOTE ->
             requireNotNull(note(singleId())).toBackupRecordV1()
+        BackupRecordFamily.RETIRED_BLOB_SET ->
+            requireNotNull(retiredBlobSet(singleId())).toBackupRecordV1()
         BackupRecordFamily.TOMBSTONE -> compositeIds().let { (objectId, objectType) ->
             requireNotNull(tombstone(objectId, objectType)).toBackupRecordV1()
         }

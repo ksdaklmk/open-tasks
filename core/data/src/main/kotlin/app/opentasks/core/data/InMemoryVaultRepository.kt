@@ -226,6 +226,8 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.RestoreAttachment -> restoreAttachment(command)
             is DomainCommand.MarkAttachmentContentCollected ->
                 markAttachmentContentCollected(command)
+            is DomainCommand.MarkRetiredBlobSetCollected ->
+                markRetiredBlobSetCollected(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2300,6 +2302,22 @@ class InMemoryVaultRepository internal constructor(
             },
         )
         return CommandResult.Success("Attachment content collected")
+    }
+
+    private fun markRetiredBlobSetCollected(
+        command: DomainCommand.MarkRetiredBlobSetCollected,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        if (current.retiredBlobSets.none { it.blobSetId == command.blobSetId }) {
+            return CommandResult.Success("Retired blob set was already collected")
+        }
+        publish(
+            tasks = current.tasks,
+            retiredBlobSets = current.retiredBlobSets.filterNot {
+                it.blobSetId == command.blobSetId
+            },
+        )
+        return CommandResult.Success("Retired blob set collected")
     }
 
     private fun validateTimeEntry(

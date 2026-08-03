@@ -245,6 +245,8 @@ class RoomVaultRepository(
                 is DomainCommand.RestoreAttachment -> restoreAttachment(command)
                 is DomainCommand.MarkAttachmentContentCollected ->
                     markAttachmentContentCollected(command)
+                is DomainCommand.MarkRetiredBlobSetCollected ->
+                    markRetiredBlobSetCollected(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2559,6 +2561,17 @@ class RoomVaultRepository(
             ).toEntity(),
         )
         return CommandResult.Success("Attachment content collected")
+    }
+
+    private suspend fun markRetiredBlobSetCollected(
+        command: DomainCommand.MarkRetiredBlobSetCollected,
+    ): CommandResult {
+        val deleted = database.workspaceDao().deleteRetiredBlobSet(command.blobSetId.value)
+        return if (deleted == 0) {
+            CommandResult.Success("Retired blob set was already collected")
+        } else {
+            CommandResult.Success("Retired blob set collected")
+        }
     }
 
     private fun validateNoteBody(body: String): CommandResult.Rejected? = when {

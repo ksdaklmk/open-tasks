@@ -2,6 +2,7 @@ package app.opentasks.core.data.backup
 
 import app.opentasks.core.data.TemplatePayloadCodec
 import app.opentasks.core.data.db.ChecklistItemEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
@@ -160,6 +161,16 @@ internal fun WorkspaceSnapshot.toBackupRecords(
         notes.mapTo(this) { it.toEntity().toBackupRecordV1() }
         attachments.mapTo(this) { it.toEntity().toBackupRecordV1() }
         activityEntries.mapTo(this) { it.toEntity().toBackupRecordV1() }
+        retiredBlobSets.mapTo(this) { retired ->
+            RetiredBlobSetEntity(
+                blobSetId = retired.blobSetId.value,
+                chunkCount = retired.chunkCount,
+                retiredAtEpochMillis = retired.retiredAt.toEpochMilli(),
+                revisionWallMillis = retired.revision.wallTimeMillis,
+                revisionLogical = retired.revision.logicalCounter,
+                revisionDeviceId = retired.revision.deviceId.value,
+            ).toBackupRecordV1()
+        }
         tombstones.mapTo(this) { it.toBackupRecordV1() }
     }
 }

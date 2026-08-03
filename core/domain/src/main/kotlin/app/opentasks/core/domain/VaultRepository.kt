@@ -3,6 +3,7 @@ package app.opentasks.core.domain
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
@@ -325,6 +326,19 @@ sealed interface DomainCommand {
      */
     data class MarkAttachmentContentCollected(
         val attachmentId: AttachmentId,
+        val collectedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    /**
+     * Records that a retired blob set's cloud bytes have been collected.
+     *
+     * The retired-blob-set row exists solely to drive that collection, so once
+     * it is done there is nothing left to keep: deleting an absent row is an
+     * idempotent no-op, and deleting a present one removes it outright. There
+     * is nothing to undo and nothing to tell a person about.
+     */
+    data class MarkRetiredBlobSetCollected(
+        val blobSetId: BlobSetId,
         val collectedAt: Instant = Instant.now(),
     ) : DomainCommand
 }

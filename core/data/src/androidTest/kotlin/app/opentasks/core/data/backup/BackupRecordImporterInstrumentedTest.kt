@@ -19,6 +19,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -1386,6 +1387,14 @@ class BackupRecordImporterInstrumentedTest {
                 revisionLogical = 2,
                 revisionDeviceId = SOURCE_DEVICE_ID,
             ).toBackupRecordV1(),
+            RetiredBlobSetEntity(
+                blobSetId = RETIRED_BLOB_SET_ID,
+                chunkCount = 3,
+                retiredAtEpochMillis = 1_700_000_008_600,
+                revisionWallMillis = 1_700_000_008_650,
+                revisionLogical = 0,
+                revisionDeviceId = SOURCE_DEVICE_ID,
+            ).toBackupRecordV1(),
             TimeEntryEntity(
                 id = TIME_ENTRY_ID,
                 taskId = TASK_ID,
@@ -2084,6 +2093,7 @@ class BackupRecordImporterInstrumentedTest {
         BackupRecordFamily.TEMPLATE -> "templates"
         BackupRecordFamily.SAVED_VIEW -> "saved_views"
         BackupRecordFamily.NOTE -> "notes"
+        BackupRecordFamily.RETIRED_BLOB_SET -> "retired_blob_sets"
         BackupRecordFamily.TOMBSTONE -> "tombstones"
     }
 
@@ -2107,6 +2117,7 @@ class BackupRecordImporterInstrumentedTest {
         const val ATTACHMENT_ID = "attachment-recovered"
         const val ACTIVITY_ID = "activity-recovered"
         const val NOTE_ID = "note-recovered"
+        const val RETIRED_BLOB_SET_ID = "blob-set-recovered"
         const val TIME_ENTRY_ID = "time-recovered"
         const val TEMPLATE_ID = "template-recovered"
         const val SAVED_VIEW_ID = "view-recovered"

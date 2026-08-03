@@ -12,6 +12,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
@@ -93,6 +94,9 @@ internal interface RecoveryImportDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertNote(value: NoteEntity)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRetiredBlobSet(value: RetiredBlobSetEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertVault(value: VaultEntity)
 
@@ -149,6 +153,9 @@ internal interface RecoveryImportDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNote(value: NoteEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRetiredBlobSet(value: RetiredBlobSetEntity)
 
     @Query("DELETE FROM vaults WHERE id = :id")
     suspend fun deleteVault(id: String): Int
@@ -212,6 +219,9 @@ internal interface RecoveryImportDao {
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun deleteNote(id: String): Int
 
+    @Query("DELETE FROM retired_blob_sets WHERE blobSetId = :blobSetId")
+    suspend fun deleteRetiredBlobSet(blobSetId: String): Int
+
     /**
      * Reads every activity entry, unlike Stage 2 capture, which attributes a
      * relationless entry through `backup_journal` evidence a recovered vault
@@ -223,6 +233,14 @@ internal interface RecoveryImportDao {
     /** Reads every tombstone, for the same reason as [allActivityEntries]. */
     @Query("SELECT * FROM tombstones ORDER BY objectId, objectType")
     suspend fun allTombstones(): List<TombstoneEntity>
+
+    /**
+     * Reads every retired blob set, for the same reason as [allActivityEntries]:
+     * a blob set is retired only after its attachment and owning task are both
+     * gone, so it carries no reference a vault-scoped join could resolve.
+     */
+    @Query("SELECT * FROM retired_blob_sets ORDER BY blobSetId")
+    suspend fun allRetiredBlobSets(): List<RetiredBlobSetEntity>
 
     @Query(
         """
@@ -245,7 +263,8 @@ internal interface RecoveryImportDao {
             (SELECT COUNT(*) FROM templates) +
             (SELECT COUNT(*) FROM saved_views) +
             (SELECT COUNT(*) FROM tombstones) +
-            (SELECT COUNT(*) FROM notes)
+            (SELECT COUNT(*) FROM notes) +
+            (SELECT COUNT(*) FROM retired_blob_sets)
         """,
     )
     suspend fun structuredRecordCount(): Int

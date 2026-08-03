@@ -14,6 +14,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.SyncOperationEntity
 import app.opentasks.core.data.db.TagEntity
@@ -485,6 +486,37 @@ interface BackupCaptureDao {
     suspend fun notes(vaultId: String): List<NoteEntity>
 
     /**
+     * A blob set is retired only once its attachment and owning task are both
+     * gone, so it carries no reference a join could resolve; it is attributed
+     * through its own `backup_journal` upsert evidence instead, exactly as a
+     * relationless activity entry is.
+     */
+    @Query(
+        """
+        SELECT retired.* FROM retired_blob_sets AS retired
+        WHERE (
+            (SELECT COUNT(*) FROM vaults) = 1
+            AND EXISTS (SELECT 1 FROM vaults AS sole WHERE sole.id = :vaultId)
+        ) OR (
+            (
+                SELECT COUNT(DISTINCT owner.vaultId)
+                FROM backup_journal AS owner
+                WHERE owner.objectId = retired.blobSetId
+                    AND owner.objectType = 'RETIRED_BLOB_SET'
+            ) = 1
+            AND EXISTS (
+                SELECT 1 FROM backup_journal AS journal
+                WHERE journal.vaultId = :vaultId
+                    AND journal.objectId = retired.blobSetId
+                    AND journal.objectType = 'RETIRED_BLOB_SET'
+            )
+        )
+        ORDER BY retired.blobSetId
+        """,
+    )
+    suspend fun retiredBlobSets(vaultId: String): List<RetiredBlobSetEntity>
+
+    /**
      * Tombstones and relationless activity entries carry no vault column, so a
      * database holding several vaults attributes them through `backup_journal`
      * evidence. A database holding exactly one vault owns every row in it, and
@@ -578,6 +610,20 @@ interface BackupCaptureDao {
         """,
     )
     suspend fun unassignableTombstoneCount(): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM retired_blob_sets AS retired
+        WHERE (SELECT COUNT(*) FROM vaults) != 1
+        AND (
+            SELECT COUNT(DISTINCT journal.vaultId)
+            FROM backup_journal AS journal
+            WHERE journal.objectId = retired.blobSetId
+                AND journal.objectType = 'RETIRED_BLOB_SET'
+        ) != 1
+        """,
+    )
+    suspend fun unassignableRetiredBlobSetCount(): Int
 }
 
 internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRecordV1> =
@@ -593,6 +639,9 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         }
         require(unassignableTombstoneCount() == 0) {
             "Tombstone cannot be assigned to a vault"
+        }
+        require(unassignableRetiredBlobSetCount() == 0) {
+            "Retired blob set cannot be assigned to a vault"
         }
         require(ambiguousInboxWorkflowStatusCount(vaultId) == 0) {
             "Inbox workflow cannot be assigned to one workspace"
@@ -615,6 +664,7 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         templates(vaultId).mapTo(this) { it.toBackupRecordV1() }
         savedViews(vaultId).mapTo(this) { it.toBackupRecordV1() }
         notes(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        retiredBlobSets(vaultId).mapTo(this) { it.toBackupRecordV1() }
         tombstones(vaultId).mapTo(this) { it.toBackupRecordV1() }
     }
 
