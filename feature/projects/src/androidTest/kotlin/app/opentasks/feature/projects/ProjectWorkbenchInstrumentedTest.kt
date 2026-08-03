@@ -383,9 +383,13 @@ class ProjectWorkbenchInstrumentedTest {
 
         restorationTester.emulateSavedInstanceStateRestore()
 
+        composeRule.onNodeWithTag("archive-project").assertIsDisplayed()
+        // Restoration keeps the list scrolled past the name field, which the
+        // notes and activity section now pushes further out of composition.
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("project-name-field"))
         composeRule.onNodeWithTag("project-name-field")
             .assertTextContains(draft, substring = true)
-        composeRule.onNodeWithTag("archive-project").assertIsDisplayed()
     }
 
     private data class MilestoneUpdate(
