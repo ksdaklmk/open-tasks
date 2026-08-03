@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -87,12 +88,19 @@ class RoomActivityGenerationInstrumentedTest {
 
     @Test
     fun pruningJournalsOldestActivityDeletion() = runBlocking {
-        withTimeout(5_000) {
-            val task = repository!!.currentWorkspace().tasks.first()
+        withTimeout(60_000) {
+            // Snapshot task order is the repository's, not the fixture's, so the
+            // task is chosen by the status it must alternate away from. The bound
+            // is wider than the usual five seconds because 501 real Room
+            // transactions run here, not one.
+            val task = repository!!.currentWorkspace().tasks.first {
+                it.semanticStatus == SemanticStatus.STARTED
+            }
             val started = task.statusId
             val planned = repository!!.currentWorkspace().workflowStatuses.first {
                 it.projectId == task.projectId && it.semanticStatus == SemanticStatus.PLANNED
             }.id
+            assertNotEquals(started, planned)
             val firstChange = Instant.parse("2026-08-02T10:00:00Z")
 
             repeat(501) { index ->

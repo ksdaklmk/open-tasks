@@ -474,7 +474,7 @@ class RoomBackupCaptureSourceInstrumentedTest {
             "deletedAtEpochMillis" to null,
             "revisionWallMillis" to 0L,
             "revisionLogical" to 0,
-            "revisionDeviceId" to "",
+            "revisionDeviceId" to "device-$scope",
         )
         insertActivity("activity-task-$scope", taskId, projectId, scope)
         insertActivity("activity-project-$scope", null, projectId, scope)

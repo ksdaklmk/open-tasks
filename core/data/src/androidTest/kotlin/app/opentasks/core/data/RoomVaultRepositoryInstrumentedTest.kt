@@ -1734,18 +1734,13 @@ class RoomVaultRepositoryInstrumentedTest {
         val rows = journalRows(after.currentGeneration)
         assertTrue(result is CommandResult.Success)
         assertEquals(before.currentGeneration + 1, after.currentGeneration)
-        assertEquals(List(6) { it }, rows.map { it.sequence })
-        assertEquals(
-            listOf(
-                BackupRecordFamily.PROJECT,
-                BackupRecordFamily.WORKFLOW_STATUS,
-                BackupRecordFamily.WORKFLOW_STATUS,
-                BackupRecordFamily.WORKFLOW_STATUS,
-                BackupRecordFamily.WORKFLOW_STATUS,
-                BackupRecordFamily.WORKFLOW_STATUS,
-            ),
-            rows.map { BackupMutationCodec.decode(it.payload).record!!.family },
-        )
+        // Project creation also generates its own activity entry, so the one
+        // generation carries seven records rather than the original six.
+        assertEquals(List(7) { it }, rows.map { it.sequence })
+        val families = rows.map { BackupMutationCodec.decode(it.payload).record!!.family }
+        assertEquals(1, families.count { it == BackupRecordFamily.PROJECT })
+        assertEquals(5, families.count { it == BackupRecordFamily.WORKFLOW_STATUS })
+        assertEquals(1, families.count { it == BackupRecordFamily.ACTIVITY_ENTRY })
     }
 
     @Test
@@ -1945,11 +1940,17 @@ class RoomVaultRepositoryInstrumentedTest {
                 it.deletedFamily == BackupRecordFamily.ATTACHMENT
             }.map { it.deletedIdentity },
         )
-        assertEquals(
-            listOf(listOf(activityId)),
+        // The commands this test runs generate their own activity, so the purge
+        // journals those deletions too; what matters is that the seeded entry is
+        // among them and the task keeps none.
+        assertTrue(
             payloads.filter {
                 it.deletedFamily == BackupRecordFamily.ACTIVITY_ENTRY
-            }.map { it.deletedIdentity },
+            }.map { it.deletedIdentity }.contains(listOf(activityId)),
+        )
+        assertTrue(
+            database!!.recoveryImportDao().allActivityEntries()
+                .none { it.taskId == task.id.value },
         )
         assertEquals(
             listOf(listOf(stoppedTimer.id)),

@@ -16,6 +16,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.SavedViewEntity
@@ -1374,6 +1375,17 @@ class BackupRecordImporterInstrumentedTest {
                 bodyCiphertext = BODY_CIPHERTEXT.copyOf(),
                 createdAtEpochMillis = 1_700_000_008_000,
             ).toBackupRecordV1(),
+            NoteEntity(
+                id = NOTE_ID,
+                taskId = TASK_ID,
+                projectId = null,
+                bodyCiphertext = NOTE_BODY_CIPHERTEXT.copyOf(),
+                createdAtEpochMillis = 1_700_000_008_500,
+                editedAtEpochMillis = 1_700_000_008_900,
+                revisionWallMillis = 1_700_000_008_950,
+                revisionLogical = 2,
+                revisionDeviceId = SOURCE_DEVICE_ID,
+            ).toBackupRecordV1(),
             TimeEntryEntity(
                 id = TIME_ENTRY_ID,
                 taskId = TASK_ID,
@@ -2094,6 +2106,7 @@ class BackupRecordImporterInstrumentedTest {
         const val REMINDER_ID = "reminder:task-recovered"
         const val ATTACHMENT_ID = "attachment-recovered"
         const val ACTIVITY_ID = "activity-recovered"
+        const val NOTE_ID = "note-recovered"
         const val TIME_ENTRY_ID = "time-recovered"
         const val TEMPLATE_ID = "template-recovered"
         const val SAVED_VIEW_ID = "view-recovered"
@@ -2119,6 +2132,7 @@ class BackupRecordImporterInstrumentedTest {
         val DISPLAY_NAME_CIPHERTEXT = byteArrayOf(11, 12, 13)
         val BODY_CIPHERTEXT = byteArrayOf(21, 22)
         val NOTE_CIPHERTEXT = byteArrayOf(31)
+        val NOTE_BODY_CIPHERTEXT = byteArrayOf(41, 42, 43)
         val TEMPLATE_CIPHERTEXT = byteArrayOf(51, 52, 53, 54)
         val SAVED_VIEW_CIPHERTEXT = byteArrayOf(61, 62)
         val RECOVERY_SALT = ByteArray(16) { (it + 1).toByte() }
