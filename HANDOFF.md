@@ -6,17 +6,25 @@
   stop. Tasks 12 and 13 are complete and review-closed; the whole-branch
   final review and its fix wave are closed at `f98d1c3`. Task 14's
   credentialed live attachment gate PASSED once (606.9 s; harness preserved
-  in `a813c41` — never re-run it); the first full connected gate failed
-  10 of 282 tests, and the resumed agent was committing per-class fixes
-  when the session paused. Read the Stage 4 Task 12–14 checkpoint below,
-  then the execution ledger
-  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`
-  and `…/task-14-report.md`, and `git log a813c41..main`, for the exact
-  per-class resume state before doing anything. Resume by re-entering
-  superpowers:subagent-driven-development at Task 14: finish the remaining
-  connected-failure fixes, run the full six-module connected gate to green,
-  then plan Steps 3–5 (forced-fresh gates, release inspection, contract
-  docs, scoped commit — never `git add -A` at root). Samsung Remote Test
+  in `a813c41` — never re-run it). The first full connected gate failed 10
+  of 282; after fix commits `1ba5d0e`..`bf2f95a` the second full gate is
+  282 tests, ONE failure, one expected credential-only skip. The sole
+  failure, `FoldContinuityInstrumentedTest.draftAndSelectionSurviveFold`
+  `Transition`, is diagnosed pre-existing and outside Stage 4: it has
+  never run green anywhere (Fold 8 acceptance skipped it on the
+  DEFAULT-only AVD), Stage 4 never touched it, and it dies in
+  cross-display activity churn before any Stage 4 surface renders. USER
+  DECISION on resume: accept a second recorded expected skip for it (and
+  record that in the gate criteria) or fix it as separate post-Stage 4
+  work. Then Task 14 Steps 3–5 remain (forced-fresh gates, release
+  inspection, contract docs, scoped commit — never `git add -A` at root).
+  Operational note: the first `:app` connected run on a fresh read-only
+  overlay always fails 4 tests against the protected workspace's legacy
+  files; AGP's uninstall leaves the next run clean — do one throwaway
+  `:app` run first and record it. Details: the checkpoint below, the
+  execution ledger
+  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`,
+  and `…/task-14-report.md`. Samsung Remote Test
   Lab remains External-blocked pending the user's developer-account
   approval. The Fold 8 adaptive slice, Stage 3, Stage 2, Train 1 Tasks
   1.1–1.5, and Stage 1 remain complete and independently reviewed.**
@@ -961,19 +969,22 @@ Subagent-driven execution resumed from `2d3ca4f` on `main`.
   one expected credential-only skip. Fix commits so far: `1ba5d0e` (E2E
   task selection), `b5e6a1f` (stale post-Task-5 activity expectations),
   `3648595` (notes-section scroll), `a328695` (collected-attachment
-  projection wait), `bf2f95a` (fold-wait retry) — see
-  `git log a813c41..main` for any later ones and the ledger plus
-  `task-14-report.md` for per-class status and classifications. The
-  emulator procedure was followed exactly (read-only, no snapshots,
-  audits empty; protected workspace and account untouched).
-- Next session, in order: read the ledger and `task-14-report.md`; close
-  the remaining connected-failure classes (the Room activity-pruning
-  parity candidate and the two recreation failures were the undiagnosed
-  ones at the block — classify test-vs-production with evidence); rerun
-  the FULL six-module connected gate to zero failures; then Task 14
+  projection wait), `bf2f95a` (fold-wait retry). The second full
+  six-module gate then ran 282 tests with ONE failure and the expected
+  credential-only skip (core:data 7→0, feature:projects 1→0, app 2→1).
+  The suspected Room activity-pruning parity divergence was disproven:
+  Room's `ORDER BY id` snapshot made the test alternate a task into its
+  existing status, short-circuiting all 501 commands; Room's 500-cap
+  eviction is now genuinely proven. The sole remaining failure is the
+  pre-existing, out-of-scope fold-continuity test described in the status
+  block. The emulator procedure was followed exactly (read-only, no
+  snapshots, audits empty; protected workspace and account untouched).
+- Next session, in order: get the user's ruling on the fold-continuity
+  failure (second recorded expected skip vs separate fix); then Task 14
   Steps 3–5 with the recorded controller rulings (scoped add only; the
   qualification doc and this file must record the first gate's 10
-  failures, every fix commit, and the second gate's counts). Then the
+  failures, every fix commit, the second gate's counts, and the
+  throwaway-first-`:app`-run behaviour on a fresh overlay). Then the
   Task 14 task review, ledger closure, and workspace deletion.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
