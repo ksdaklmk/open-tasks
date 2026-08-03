@@ -195,8 +195,16 @@ class FoldContinuityInstrumentedTest {
             awaitDeviceState(checkNotNull(closed))
             shell("wm dismiss-keyguard")
             awaitActivityState(Lifecycle.State.RESUMED)
+            // The fold state change recreates the activity, so RESUMED can be
+            // reached before the new composition attaches. Querying then throws
+            // rather than reporting an empty tree, which would abort the wait
+            // instead of retrying it.
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()
+                runCatching {
+                    composeRule.onAllNodesWithTag("recovery-shell")
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }.getOrDefault(false)
             }
             composeRule.onNodeWithText("Start without restoring").performClick()
             ownedVault = awaitCreatedVault()
