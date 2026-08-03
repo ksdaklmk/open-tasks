@@ -2052,16 +2052,16 @@ configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 Stage 2 and Stage 3 are implemented and verified through their task
 boundaries. Stage 3 create-only Tasks 1–14 close with the Task 14 qualification
 change, and the approved Galaxy Fold 8 trifold-ready adaptive slice closes with
-the Task 5 qualification change containing this handoff. Remote merge and
-attachment transport remain absent by design.
+the Task 5 qualification change containing this handoff. Stage 4 is complete
+and qualified: notes, activity, search, attachment transport, and attachment
+product flows are implemented. Remote merge remains absent by design.
 
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
-maintenance commit. The approved Stage 3 and adaptive-slice execution
-authorities are closed. Stage 4 execution is now underway under its approved
-design and plan, paused after Task 3 of 14 at the user's request. Samsung RTL
-remains an External-blocked qualification gap independent of Stage 4
-progress.
+maintenance commit. The approved Stage 3, adaptive-slice, and Stage 4
+execution authorities are closed. Stage 5 is next. Samsung RTL, native fold
+continuity, and broader two-installation live recovery evidence remain
+post-Stage-4/external work and are not implied by Stage 4 qualification.
 
 ## Resume instructions
 
@@ -2077,11 +2077,9 @@ progress.
 2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
    1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
    reviewed commits without a new verified finding.
-3. Stage 4 is in progress and paused after plan Task 3. Resume it with
-   superpowers:subagent-driven-development against the Stage 4 plan and its
-   execution ledger (paths in the Stage 4 checkpoint above), starting at
-   Task 4 from base `ab5c3d0`. Retain the External-blocked Samsung RTL gap
-   until the user's developer-account approval is available.
+3. Start Stage 5 from the current live backlog. Retain the External-blocked
+   Samsung RTL gap and route native fold continuity plus broader
+   two-installation live recovery evidence as post-Stage-4 work.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
@@ -2108,8 +2106,8 @@ recorded above.
 | 1 | Direction reset and authenticated object foundation | Done | Active contracts match local authority; the authenticated provider-independent object codec is frozen |
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Done | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
-| 4 | Notes, activity, cloud attachments, and search | Paused (Tasks 1–3 of 14 complete) | Cloud-authoritative blob lifecycle and final structured metadata are complete |
-| 5 | Remaining platform features | Blocked by Stage 4 | Import/export, widget, app lock, input, and calendar features use the final local schema |
+| 4 | Notes, activity, cloud attachments, and search | Done (qualified) | Notes/activity/search and attachment lifecycle/product flows are implemented; native fold and broader two-installation evidence remain post-Stage-4 |
+| 5 | Remaining platform features | Next | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
 The dependency chain is strict:
@@ -2120,11 +2118,9 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Resume the paused Stage 4 subagent-driven execution at plan Task 4 (Room
-   note commands and parity) from base `ab5c3d0`, using the approved Stage 4
-   plan and its execution ledger. Preserve the adaptive design and plan as
-   closed authorities, and keep Samsung RTL recorded as External-blocked
-   until the approved account is available.
+1. Start Stage 5 using the current live backlog. Preserve Stage 4 as a closed
+   authority, keep Samsung RTL External-blocked, and retain native fold and
+   broader two-installation live recovery evidence as post-Stage-4 work.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -2229,13 +2225,11 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-Resume the paused Stage 4 execution at plan Task 4 from base `ab5c3d0` via
-superpowers:subagent-driven-development, honouring the recorded deferred
-minors (Task 4 replaces the Room note stub arms with real persistence).
-Preserve Room as the sole live structured-data authority, treat the
-Stage 2 Android package as supplementary recovery input rather than upload
-evidence, and retain the External-blocked Samsung RTL rows until real-device
-access is available.
+Start Stage 5 from the current live backlog. Preserve Room as the sole live
+structured-data authority, treat the Stage 2 Android package as supplementary
+recovery input rather than upload evidence, and retain the External-blocked
+Samsung RTL rows plus native fold and broader two-installation recovery
+evidence as post-Stage-4 work.
 
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly

@@ -1916,6 +1916,10 @@ class RoomVaultRepositoryInstrumentedTest {
         )
         repository!!.execute(DomainCommand.DeleteTask(task.id, now.minusSeconds(60)))
         val before = database!!.backupStateDao().require("vault-primary")
+        val activityIdsBeforePurge = database!!.recoveryImportDao()
+            .allActivityEntries()
+            .filter { it.taskId == task.id.value }
+            .map { it.id }
 
         val result = repository!!.execute(DomainCommand.PermanentlyDeleteTask(task.id, now))
 
@@ -1940,13 +1944,11 @@ class RoomVaultRepositoryInstrumentedTest {
                 it.deletedFamily == BackupRecordFamily.ATTACHMENT
             }.map { it.deletedIdentity },
         )
-        // The commands this test runs generate their own activity, so the purge
-        // journals those deletions too; what matters is that the seeded entry is
-        // among them and the task keeps none.
-        assertTrue(
+        assertEquals(
+            activityIdsBeforePurge.sorted(),
             payloads.filter {
                 it.deletedFamily == BackupRecordFamily.ACTIVITY_ENTRY
-            }.map { it.deletedIdentity }.contains(listOf(activityId)),
+            }.map { checkNotNull(it.deletedIdentity).single() }.sorted(),
         )
         assertTrue(
             database!!.recoveryImportDao().allActivityEntries()

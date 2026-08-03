@@ -32,8 +32,9 @@ local staging, and attachment bytes remain excluded.
 Package readiness proves only local production and eligibility. It does not
 prove Android upload. Explicit Google authorization, create-only
 `drive.appdata` transport, one-writer publication, lifecycle management, and
-staged recovery/takeover are implemented in source; credentialed
-two-installation upload/restore remains an external Task 14 qualification.
+staged recovery/takeover are implemented in source. Credentialed
+two-installation upload/restore was not claimed by completed Task 14; it
+remains post-Stage-4 external qualification.
 Task 13 is complete and review-clean: transient transport failure has truthful
 bounded retry guidance without a Sign in claim, and genuine `MainActivity`
 production recovery-route recreation proves private passphrase input is not
