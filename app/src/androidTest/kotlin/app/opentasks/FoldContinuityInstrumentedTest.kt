@@ -174,17 +174,12 @@ class FoldContinuityInstrumentedTest {
     }
 
     @Test
-    fun multiplePhysicalDisplaysMarkTheFoldHarnessUnsupported() {
+    fun aFoldTransitionCrossesDisplaysOnlyWhenTheActivityDisplayChanges() {
         assertTrue(
-            hasMultiplePhysicalDisplays(
-                """
-                Display 4619827259835644672 (HWC display 0): port=0
-                Display 4619827551948147201 (HWC display 1): port=1
-                """.trimIndent(),
-            ),
+            foldTransitionCrossesDisplays("EMU_display_0", "EMU_display_1"),
         )
         assertTrue(
-            !hasMultiplePhysicalDisplays("Display 4619827259835644672 (HWC display 0): port=0"),
+            !foldTransitionCrossesDisplays("EMU_display_0", "EMU_display_0"),
         )
     }
 
@@ -204,18 +199,19 @@ class FoldContinuityInstrumentedTest {
             "Target exposes no closed/opened fold states: $statesOutput",
             closed != null && opened != null,
         )
-        val physicalDisplaysOutput = shell("dumpsys SurfaceFlinger --displays")
-        assumeTrue(
-            "Instrumentation cannot follow the app across this target's physical displays: " +
-                physicalDisplaysOutput,
-            !hasMultiplePhysicalDisplays(physicalDisplaysOutput),
-        )
+        val displayBeforeClosing = displayName(currentActivity())
 
         try {
             shell("cmd device_state state ${checkNotNull(closed)}")
             awaitDeviceState(checkNotNull(closed))
             shell("wm dismiss-keyguard")
             awaitActivityState(Lifecycle.State.RESUMED)
+            val displayAfterClosing = displayName(currentActivity())
+            assumeTrue(
+                "Instrumentation cannot follow the app across this fold transition: " +
+                    "$displayBeforeClosing -> $displayAfterClosing",
+                !foldTransitionCrossesDisplays(displayBeforeClosing, displayAfterClosing),
+            )
             // The fold state change recreates the activity, so RESUMED can be
             // reached before the new composition attaches. Querying then throws
             // rather than reporting an empty tree, which would abort the wait
@@ -314,6 +310,9 @@ class FoldContinuityInstrumentedTest {
         return checkNotNull(current)
     }
 
+    private fun displayName(activity: Activity): String =
+        checkNotNull(activity.display) { "MainActivity has no display" }.name
+
     private fun windowSnapshot(activity: Activity): WindowSnapshot =
         activity.resources.configuration.let { configuration ->
             WindowSnapshot(
@@ -370,8 +369,7 @@ class FoldContinuityInstrumentedTest {
                 .executeShellCommand(command),
         ).bufferedReader().use { it.readText() }
 
-    private fun hasMultiplePhysicalDisplays(output: String): Boolean =
-        Regex("(?m)^\\s*Display \\d+ \\(").findAll(output).count() > 1
+    private fun foldTransitionCrossesDisplays(before: String, after: String): Boolean = before != after
 
     private fun awaitSystemIdle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
