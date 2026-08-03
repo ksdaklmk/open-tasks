@@ -174,12 +174,12 @@ class FoldContinuityInstrumentedTest {
     }
 
     @Test
-    fun aFoldTransitionCrossesDisplaysOnlyWhenTheActivityDisplayChanges() {
+    fun aClosedToOpenedTransitionCrossesDisplaysOnlyWhenTheActivityDisplayIdChanges() {
         assertTrue(
-            foldTransitionCrossesDisplays("EMU_display_0", "EMU_display_1"),
+            closedToOpenedTransitionCrossesDisplays(0, 1),
         )
         assertTrue(
-            !foldTransitionCrossesDisplays("EMU_display_0", "EMU_display_0"),
+            !closedToOpenedTransitionCrossesDisplays(0, 0),
         )
     }
 
@@ -199,19 +199,27 @@ class FoldContinuityInstrumentedTest {
             "Target exposes no closed/opened fold states: $statesOutput",
             closed != null && opened != null,
         )
-        val displayBeforeClosing = displayName(currentActivity())
 
         try {
             shell("cmd device_state state ${checkNotNull(closed)}")
             awaitDeviceState(checkNotNull(closed))
             shell("wm dismiss-keyguard")
             awaitActivityState(Lifecycle.State.RESUMED)
-            val displayAfterClosing = displayName(currentActivity())
+            val closedDisplayId = displayId(currentActivity())
+            shell("cmd device_state state ${checkNotNull(opened)}")
+            awaitDeviceState(checkNotNull(opened))
+            shell("wm dismiss-keyguard")
+            awaitActivityState(Lifecycle.State.RESUMED)
+            val openedDisplayId = displayId(currentActivity())
             assumeTrue(
-                "Instrumentation cannot follow the app across this fold transition: " +
-                    "$displayBeforeClosing -> $displayAfterClosing",
-                !foldTransitionCrossesDisplays(displayBeforeClosing, displayAfterClosing),
+                "Instrumentation cannot follow the app across CLOSED -> OPENED: " +
+                    "$closedDisplayId -> $openedDisplayId",
+                !closedToOpenedTransitionCrossesDisplays(closedDisplayId, openedDisplayId),
             )
+            shell("cmd device_state state ${checkNotNull(closed)}")
+            awaitDeviceState(checkNotNull(closed))
+            shell("wm dismiss-keyguard")
+            awaitActivityState(Lifecycle.State.RESUMED)
             // The fold state change recreates the activity, so RESUMED can be
             // reached before the new composition attaches. Querying then throws
             // rather than reporting an empty tree, which would abort the wait
@@ -310,8 +318,8 @@ class FoldContinuityInstrumentedTest {
         return checkNotNull(current)
     }
 
-    private fun displayName(activity: Activity): String =
-        checkNotNull(activity.display) { "MainActivity has no display" }.name
+    private fun displayId(activity: Activity): Int =
+        checkNotNull(activity.display) { "MainActivity has no display" }.displayId
 
     private fun windowSnapshot(activity: Activity): WindowSnapshot =
         activity.resources.configuration.let { configuration ->
@@ -369,7 +377,8 @@ class FoldContinuityInstrumentedTest {
                 .executeShellCommand(command),
         ).bufferedReader().use { it.readText() }
 
-    private fun foldTransitionCrossesDisplays(before: String, after: String): Boolean = before != after
+    private fun closedToOpenedTransitionCrossesDisplays(closed: Int, opened: Int): Boolean =
+        closed != opened
 
     private fun awaitSystemIdle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
