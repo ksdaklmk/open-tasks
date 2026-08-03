@@ -174,6 +174,21 @@ class FoldContinuityInstrumentedTest {
     }
 
     @Test
+    fun multiplePhysicalDisplaysMarkTheFoldHarnessUnsupported() {
+        assertTrue(
+            hasMultiplePhysicalDisplays(
+                """
+                Display 4619827259835644672 (HWC display 0): port=0
+                Display 4619827551948147201 (HWC display 1): port=1
+                """.trimIndent(),
+            ),
+        )
+        assertTrue(
+            !hasMultiplePhysicalDisplays("Display 4619827259835644672 (HWC display 0): port=0"),
+        )
+    }
+
+    @Test
     fun draftAndSelectionSurviveFoldTransition() {
         val statesOutput = shell("cmd device_state print-states")
         assertTrue(
@@ -188,6 +203,12 @@ class FoldContinuityInstrumentedTest {
         assumeTrue(
             "Target exposes no closed/opened fold states: $statesOutput",
             closed != null && opened != null,
+        )
+        val physicalDisplaysOutput = shell("dumpsys SurfaceFlinger --displays")
+        assumeTrue(
+            "Instrumentation cannot follow the app across this target's physical displays: " +
+                physicalDisplaysOutput,
+            !hasMultiplePhysicalDisplays(physicalDisplaysOutput),
         )
 
         try {
@@ -348,6 +369,9 @@ class FoldContinuityInstrumentedTest {
             InstrumentationRegistry.getInstrumentation().uiAutomation
                 .executeShellCommand(command),
         ).bufferedReader().use { it.readText() }
+
+    private fun hasMultiplePhysicalDisplays(output: String): Boolean =
+        Regex("(?m)^\\s*Display \\d+ \\(").findAll(output).count() > 1
 
     private fun awaitSystemIdle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
