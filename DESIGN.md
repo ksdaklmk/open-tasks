@@ -128,6 +128,14 @@ for floating controls and temporary surfaces.
   version; use generic copy on the lock screen. Content opens the task, Snooze
   is always available, and Complete appears only when the task is not blocked.
 - Workbench: list and persistent detail panes with visible selection.
+- Notes and activity: one merged timeline in task and project detail. Notes
+  are editable drafts with explicit save/cancel state; activity is immutable,
+  dated metadata and never becomes an editable note substitute.
+- Attachment rows: show a sanitised name, type/size metadata, text-and-icon
+  state, and 48 dp actions. Remote, downloading, unavailable, tombstoned, and
+  failed remain distinct; unavailable is neutral rather than an error claim.
+  Intake and sharing use temporary files only, and task editing remains
+  available while attachment work is offline or failing.
 - Workflow editor: a project-scoped modal sheet with editable status names,
   explicit up/down actions as an accessible alternative to drag gestures,
   immutable reporting-category labels, assigned-task counts and explained
@@ -198,8 +206,10 @@ The programme retains four independent concerns:
 - **Android backup package** — ready or unavailable state, local production
   time, generation, and size. It never claims that Android uploaded the
   package or invents a platform backup time.
-- **Cloud attachments** — account connection and temporary-cache usage, with
-  clear remote, downloading, unavailable, tombstoned, and failed states.
+- **Cloud attachments** — account connection and combined encrypted-frame
+  cache plus plaintext staging usage, with clear remote, downloading,
+  unavailable, tombstoned, and failed states. Content deletion requires the
+  passphrase and preserves metadata/history.
 - **Active device** — the current writer and explicit takeover explanation.
 
 Backup, attachment, and active-device states use text and iconography and

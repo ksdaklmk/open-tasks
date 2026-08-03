@@ -1,6 +1,6 @@
 # Threat Model
 
-Last reviewed: 1 August 2026
+Last reviewed: 3 August 2026
 
 This document covers the implemented local-authority foundation and the
 approved backup, recovery-takeover, and cloud-attachment programme. It is a
@@ -21,7 +21,7 @@ attachment data. The security objectives, in order, are:
    vault.
 
 The current application has one structured-data authority: encrypted Room.
-Room v7, local generation journalling, strict snapshot/segment payloads, and a
+Room v8, local generation journalling, strict snapshot/segment payloads, and a
 verified encrypted no-backup recovery-object pipeline are implemented. The
 application now triggers that coordinator, verifies a recovery envelope, and
 atomically publishes one portable encrypted package at most 24 MiB. Android
@@ -38,17 +38,20 @@ Task 13 is complete and review-clean: transient transport failure has truthful
 bounded retry guidance without a Sign in claim, and genuine `MainActivity`
 production recovery-route recreation proves private passphrase input is not
 restored. Android-restored packages remain inert until the explicit recovery
-path verifies and activates them. Attachment transfer and remote merge are not
-connected.
+path verifies and activates them. Attachment transfer is implemented as a
+separate create-only blob namespace; remote merge is not connected.
 
 ## Assets
 
 | Asset | Sensitivity | Current or approved location |
 |---|---|---|
 | Structured workspace records and tombstones | Private content | SQLCipher Room; sole live authority |
+| Note text | Private content | SQLCipher Room and encrypted structured backup records |
+| Immutable activity entries | Private content and metadata | SQLCipher Room and encrypted structured backup records |
 | Unsaved editor, quick-add and search text plus UI identifiers | Private transient content and sensitive metadata | Android saved-instance-state bundle |
-| Attachment metadata and opaque blob references | Private content and metadata | Planned Room records and structured backups |
-| Attachment bytes | Private content | Planned encrypted attachment blob service; temporary bounded cache only |
+| Attachment metadata and opaque blob references | Private content and metadata | SQLCipher Room and encrypted structured backups |
+| Attachment-transfer session state | Sensitive routing metadata | SQLCipher Room; exact generated IDs only |
+| Attachment bytes | Private content | Encrypted attachment blob service; bounded ciphertext cache and plaintext staging only |
 | Backup snapshots and journal segments | Private content | Implemented encrypted local objects under `noBackupFilesDir/backup/v1`; provider namespace remains Stage 3 |
 | Portable backup package | Private encrypted recovery input | Implemented single Auto Backup-eligible app file |
 | Local database key | Critical key material | AES-GCM envelope in private preferences |
@@ -75,8 +78,8 @@ VaultRepository
 
 BackupCoordinator ── AuthenticatedCloudObjectCodec ── LocalBackupObjectStore
 PortableBackupPublisher ───────────────────────────── portable package
-Planned AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
-Planned RecoveryCoordinator ─ staged verification/takeover ─ replacement Room vault
+AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
+RecoveryCoordinator ─ staged verification/takeover ─ replacement Room vault
 
 Recovery passphrase ── Argon2id ── AES-GCM unwrap ── vault-content key
 Per-vault Keystore key ─────────── AES-GCM unwrap ── same content key
@@ -131,14 +134,14 @@ fails safely where practical and must not weaken platform protections.
 | T09 | Portable package includes excluded data or grows beyond safe platform bounds | The publisher builds from a consistent snapshot, verifies the authenticated container, caps it at 24 MiB, withdraws ineligible generations, and publishes atomically | Future format changes require the same exact-file and bounded-package audit |
 | T10 | Logs or telemetry leak private fields | Architecture prohibits private content and sensitive routing data; current review found no application logging calls | Any telemetry requires a separate field allow-list review |
 | T11 | Exported component mutates or leaks data | Only launcher activity is exported; reminder receivers and pending intents are private/immutable; `FileProvider` is private and constrained | Sharesheet/import and attachment paths require explicit validation, grants, and cleanup tests |
-| T12 | Provider reads backup or attachment content | Backup objects are encrypted locally through the provider-independent authenticated codec; explicit authorization requests only `drive.appdata`; create-only Drive transport has no update/PATCH path | Live credentialed two-installation qualification remains Task 14; attachment transport remains Stage 4 |
-| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, atomic activation, truthful transient-provider guidance, and genuine Activity recovery-route recreation evidence fail closed | Live credentialed two-installation recovery remains Task 14 qualification |
-| T14 | Stale writer overwrites a recovered lineage or mutates blob state | Writer epochs, conditional create-only control succession, ownership-loss handling, and explicit account-bound takeover are implemented | Task 14 must prove live two-installation and offline prior-device reconnect behaviour |
-| T15 | Missing/replaced control record recreates a known lineage | A client that observed control state treats absence/replacement as ownership loss and never recreates automatically; divergent work requires an explicit separate lineage | Live provider qualification remains Task 14 |
-| T16 | Backup retention deletes the only recoverable base | Local and provider publication retain authenticated current/previous recoverable bases and bridging segments; promotion uses strict readback; lifecycle deletion is bounded and crash-resumable | Task 14 must prove the live provider tombstone/retention scenarios |
-| T17 | Attachment blob is deleted while live or retained recovery metadata references it | No attachment transport is operational | Stage 4 requires verified tombstone backup, at least 30-day retention, and zero active/retained inventory references before collection |
-| T18 | Hostile attachment input exhausts disk or memory | Attachments are not operational | Stage 4 caps intake at 100 MiB, chunks at 4 MiB, bounds working storage, verifies every published chunk, and cleans abandoned provisional/share files |
-| T19 | Missing or damaged attachment bytes corrupt structured work | Room remains authoritative and attachments are not operational | Future UI keeps metadata, marks the file unavailable, and never disables task editing or invents content |
+| T12 | Provider reads backup or attachment content | Backup and attachment objects are encrypted locally through the provider-independent authenticated codec; explicit authorization requests only `drive.appdata`; create-only transport has no update/PATCH path. A one-shot credentialed attachment gate proved exact-ID chunk create/occupied rejection, byte-identical readback, manifest create/readback/single lookup, and cleanup. | This is not broader live-provider or two-installation coverage. |
+| T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, atomic activation, truthful transient-provider guidance, and genuine Activity recovery-route recreation evidence fail closed | A destructive live two-installation recovery was not claimed by this Stage 4 gate. |
+| T14 | Stale writer overwrites a recovered lineage or mutates blob state | Writer epochs, conditional create-only control succession, ownership-loss handling, and explicit account-bound takeover are implemented | Additional live two-installation and prior-device reconnect coverage remains outside this qualification. |
+| T15 | Missing/replaced control record recreates a known lineage | A client that observed control state treats absence/replacement as ownership loss and never recreates automatically; divergent work requires an explicit separate lineage | Broader live-provider coverage is not claimed. |
+| T16 | Backup retention deletes the only recoverable base | Local and provider publication retain authenticated current/previous recoverable bases and bridging segments; promotion uses strict readback; lifecycle deletion is bounded and crash-resumable | Broader live provider tombstone/retention coverage is not claimed. |
+| T17 | Attachment blob is deleted while live or retained recovery metadata references it | GC requires verified tombstone backup, current/previous-generation and 30-day eligibility, zero active/retained references, ownership reauthentication, and chunk-before-manifest deletion; destructive and terminal deletion clear bytes under the same bounded cleanup rules. | A purged record's blob set is not a GC candidate because v8 has no retired-set index; this conservatively leaks encrypted bytes until Stage 5. |
+| T18 | Hostile attachment input exhausts disk or memory | Intake caps content at 100 MiB in 4 MiB chunks (at most 25), persists bounded sessions, verifies exact-ID readback, limits the ciphertext cache to `min(128 MiB, 5% available storage)`, and clears abandoned provisional/share files. | Interrupted intake expires after 24 hours; `resume()` has no product caller. |
+| T19 | Missing or damaged attachment bytes corrupt structured work | Open authenticates the manifest, chunks, byte count, and aggregate hash; unavailable/corrupt bytes leave metadata visible with neutral unavailable state and never block task editing or invent content. | Attachment recovery remains bounded to the implemented lifecycle. |
 | T20 | Dependency or CI compromise | Minimal repositories, read-only CI token, secret scanning/push protection, and reviewed Action commit pins | GitHub dependency maintenance remains paused; review every future Action revision before secrets exist |
 | T21 | Plaintext export or notification discloses content | Contextual notification permission, private lock-screen content with generic public version, and opaque alarm IDs | Physical-device notification acceptance and separate export/widget/app-lock reviews remain required |
 | T22 | Screenshots reveal unlocked content | No app-wide screenshot block, by design | Planned app-lock title privacy supplies user-controlled concealment |

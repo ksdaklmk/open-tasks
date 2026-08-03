@@ -76,7 +76,21 @@ race KSP while release Hilt sources are generated.
   authority, add no bidirectional sync path, encrypt objects locally through
   the provider-neutral authenticated codec, and use separate
   `BackupObjectStore` and `AttachmentBlobStore` boundaries.
-- Room v7 is the remote-backup persistence authority. An active runtime is
+- Stage 4 attachment objects are immutable exact-ID chunks plus one manifest
+  in the separate attachment namespace. Use only authenticated lineage/blob-set
+  IDs and attachment role properties; unknown, malformed, or cross-namespace
+  objects are retained and fail closed. Never broaden `drive.appdata`, add an
+  update/PATCH path, or scan the namespace as a substitute for exact lookup.
+- Keep Stage 4 bounds: note body 10,000 characters and 500 notes per owner;
+  activity body 500 characters and 500 entries per task or project; 50 search
+  results; 100 active attachments per task; 100 MiB per attachment, 4 MiB
+  chunks, at most 25 chunks; sessions expire after 24 hours; and cache
+  `min(128 MiB, 5% available storage)`. Room v8 is frozen: any durable
+  retired-set index requires a later migration and schema.
+- `AttachmentBlobCoordinator.resume()` intentionally has no product caller;
+  retain it and its tests. Do not add in-row transfer progress without a
+  durable product contract.
+- Room v8 is the remote-backup persistence authority. An active runtime is
   bound to one active vault slot and must stop when that slot is replaced,
   ownership is lost, or the lineage terminates.
 - Ownership claims, publications, recovery bases, and the terminal tombstone

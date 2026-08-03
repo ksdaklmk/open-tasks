@@ -38,7 +38,7 @@ Android Keystore wrapping, plus strict bounded canonical frames for manifests,
 snapshots, operation segments and attachment chunks. The implemented internal
 authenticated object codec binds each frame's complete identity as AEAD
 associated data, verifies its checksum before decryption, and returns typed
-untrusted-object failures. Room v7 also records accepted local generations
+untrusted-object failures. Room v8 also records accepted local generations
 and ordered backup-journal rows atomically. Strict snapshot/segment payloads,
 consistent capture, and verified encrypted current/previous local recovery
 objects are implemented under the no-backup directory.
@@ -52,16 +52,15 @@ package readiness, pending, unavailable, and inert restored-package states.
 It never claims that Android uploaded the package or invents a platform backup
 time.
 
-Source now includes explicit Google authorization, create-only
-`drive.appdata` transport, app-managed backup publication, verified recovery
-staging/activation, writer takeover, lifecycle management, and the Task 13
-backup/recovery product surfaces. Normal operation still never downloads or
-merges live structured records, and cloud attachments remain unavailable.
-These cloud surfaces are not release-qualified. Task 13 is complete and
-review-clean with truthful transient-provider retry copy and genuine
-`MainActivity` production-route recreation coverage. Task 14 still owns live
-credentialed two-installation qualification, so product copy must not claim
-release-proven upload or reinstall recovery until those gates pass.
+Source includes explicit Google authorization, create-only `drive.appdata`
+transport, app-managed backup publication, verified recovery staging/activation,
+writer takeover, lifecycle management, and the backup/recovery product
+surfaces. Stage 4 adds local notes, immutable activity history, note/active
+attachment-name search, and cloud attachment intake, open/share, unavailable,
+GC, and destructive-deletion flows. Normal operation still never downloads or
+merges live structured records. The one-shot credentialed attachment check
+proves its exact create/readback/manifest/cleanup properties only; it is not a
+broader live-provider or protected-workspace claim.
 
 ## Approved future contract
 
@@ -70,7 +69,7 @@ release-proven upload or reinstall recovery until those gates pass.
 - Android Auto Backup supplements that future guarantee with the implemented
   strictly whitelisted portable encrypted package.
 - Attachment metadata remains local structured data, while attachment bytes
-  are durable only in the cloud attachment service.
+  are durable only in the separate encrypted cloud attachment service.
 - Each backed-up vault has one active writer. Recovery on another device is an
   explicit takeover that advances writer ownership; it never merges two live
   workspaces.

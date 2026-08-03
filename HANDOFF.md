@@ -2,32 +2,23 @@
 
 - Last updated: 3 August 2026
 - Branch: `main`
-- Session status: **Stage 4 is paused mid-Task 14 (of 14) at a usage-limit
-  stop. Tasks 12 and 13 are complete and review-closed; the whole-branch
-  final review and its fix wave are closed at `f98d1c3`. Task 14's
-  credentialed live attachment gate PASSED once (606.9 s; harness preserved
-  in `a813c41` — never re-run it). The first full connected gate failed 10
-  of 282; after fix commits `1ba5d0e`..`bf2f95a` the second full gate is
-  282 tests, ONE failure, one expected credential-only skip. The sole
-  failure, `FoldContinuityInstrumentedTest.draftAndSelectionSurviveFold`
-  `Transition`, is diagnosed pre-existing and outside Stage 4: it has
-  never run green anywhere (Fold 8 acceptance skipped it on the
-  DEFAULT-only AVD), Stage 4 never touched it, and it dies in
-  cross-display activity churn before any Stage 4 surface renders. USER
-  DECISION on resume: accept a second recorded expected skip for it (and
-  record that in the gate criteria) or fix it as separate post-Stage 4
-  work. Then Task 14 Steps 3–5 remain (forced-fresh gates, release
-  inspection, contract docs, scoped commit — never `git add -A` at root).
-  Operational note: the first `:app` connected run on a fresh read-only
-  overlay always fails 4 tests against the protected workspace's legacy
-  files; AGP's uninstall leaves the next run clean — do one throwaway
-  `:app` run first and record it. Details: the checkpoint below, the
-  execution ledger
-  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`,
-  and `…/task-14-report.md`. Samsung Remote Test
-  Lab remains External-blocked pending the user's developer-account
-  approval. The Fold 8 adaptive slice, Stage 3, Stage 2, Train 1 Tasks
-  1.1–1.5, and Stage 1 remain complete and independently reviewed.**
+- Session status: **Stage 4 is complete and qualified. Task 14's one-shot
+  credentialed live attachment gate passed in 606.947 s; its preserved harness
+  is `a813c41` and must not be rerun. The final disposable six-module gate was
+  282 tests, 0 failures/errors, and exactly two expected skips: the
+  credential-only row and the exact `Pixel_10_Pro_Fold` cross-display harness
+  exception. It makes no native fold-continuity claim; route that work
+  post-Stage-4. Forced-fresh debug/unit/lint/APK, release, schema-drift,
+  deterministic-fixture, diff, release-scope, and production-logging gates
+  passed. The authoritative qualification is
+  `docs/qualification/stage4-notes-activity-attachments-search.md`. Stage 5
+  starts with two recorded limits: no retired-set index for purged attachment
+  blobs in frozen Room v8, and no product caller for
+  `AttachmentBlobCoordinator.resume()` (24-hour expiry, no in-row progress).
+  Samsung Remote Test Lab RTL remains External-blocked pending the user's
+  developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
+  Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
+  reviewed.**
 - Current product source implementation point: `73b8922` (`fix: reauthenticate
   before manifest deletion`), the tip of the Stage 4 Task 1–11 range
   `6538dca..73b8922`. The prior adaptive-slice closure point
@@ -66,6 +57,33 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 4 closure checkpoint — 3 August 2026
+
+Stage 4 closes at the commit containing the contract documents and
+`docs/qualification/stage4-notes-activity-attachments-search.md`.
+
+- The credentialed attachment qualification passed once in 606.947 s with the
+  preserved `a813c41` harness. It proves only its exact chunk-create,
+  readback, manifest-lookup, and cleanup properties; do not rerun it or infer
+  wider provider coverage.
+- Connected-gate history is retained in the qualification record: 282/10/0/1,
+  then 282/1/0/1 after `1ba5d0e`, `b5e6a1f`, `3648595`, `a328695`, and
+  `bf2f95a`; successive fold-guard rounds; the invalidated cascade run; and
+  the final `b3da5d2` exact-AVD exception. Final result: 282/0/0/2.
+- The final API 37 / Android 17 `Pixel_10_Pro_Fold` target was read-only,
+  snapshot-disabled, headless, and the sole ADB device; only overlay-local
+  `font_scale=1.0` changed. The preflight app was cleanly uninstalled and
+  final package/ADB/host audits were empty.
+- Forced-fresh debug/unit/lint/APK was 547 executed tasks and 935 JVM tests in
+  80 suites with zero failures; release was 441 executed tasks. Schema drift,
+  both generators, and diff-check were clean. Release exposed only
+  `drive.appdata`, no debug activity or client secret, and logging scans were
+  empty.
+- Stage 5 must address the conservative retained encrypted bytes for purged
+  attachment blob sets with a schema-backed retired-set index, and decide a
+  product path for `AttachmentBlobCoordinator.resume()`; retain its tests.
+  Samsung RTL is still externally blocked.
 
 ## Executive status
 
@@ -918,7 +936,7 @@ independent review closed after four scoped fix rounds.
 Stage 4 was paused after Task 11 and resumed in the 2–3 August session
 recorded in the checkpoint below.
 
-## Stage 4 Tasks 12–14 checkpoint — 3 August 2026
+## Historical Stage 4 Tasks 12–14 pre-qualification checkpoint — 3 August 2026
 
 Subagent-driven execution resumed from `2d3ca4f` on `main`.
 

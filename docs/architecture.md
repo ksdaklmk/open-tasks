@@ -22,11 +22,14 @@ finalised attachment metadata shape (dropping the obsolete keep-offline
 column while preserving rows), and durable attachment-transfer session
 state. Note commands, Room persistence, backup records, and
 repository-generated activity history are implemented with in-memory parity.
-Search includes note bodies and active attachment display names through the
-existing bounded in-memory scan. Attachment metadata commands now validate,
-register, tombstone, and restore rows in both repositories with activity and
-atomic journal parity. The provider-neutral attachment blob contract, strict
-authenticated manifest codec, and create-only Drive adapter are implemented.
+Activity is immutable, excludes note edits, and retains the newest 500 entries
+per task or project by deterministic creation-time-and-ID eviction. Search
+includes note bodies and active attachment display names through the existing
+bounded in-memory scan; activity bodies remain excluded and the 50-result cap
+is unchanged. Attachment metadata commands validate, register, tombstone, and
+restore rows in both repositories with activity and atomic journal parity.
+The provider-neutral attachment blob contract, strict authenticated manifest
+codec, and create-only Drive adapter are implemented.
 The durable attachment coordinator now performs bounded streaming intake,
 authenticated exact-ID readback, crash-safe resume, manifest-last publication,
 command-only metadata registration, and exact-ID provisional expiry. The
@@ -35,8 +38,10 @@ one plaintext chunk at a time; its bounded ciphertext-only LRU cache rejects
 noncanonical paths and never follows symlinks. Attachment garbage collection,
 attachment-only destructive deletion, and terminal attachment cleanup are
 bounded, ownership-authenticated, crash-resumable, and chunk-before-manifest.
-Runtime construction, share, and product flows remain Stage 4 work under the
-approved plan.
+Runtime construction, share staging, and product flows are implemented;
+attachment-byte failure leaves structured Room work available. Room v8 is the
+Stage 4 schema freeze: a retired-set index or other durable change requires a
+later migration with an exported schema.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a
@@ -76,10 +81,11 @@ resumes pending work. `PortableBackupPublisher`, verified recovery-envelope
 setup, exact Android backup eligibility, and restored-package quarantine are
 implemented in `app`. The create-only Drive backup store, explicit
 authorization boundary, runtime scheduler, lifecycle coordinator, and staged
-recovery path are implemented. The attachment coordinator, authenticated open
-path, bounded encrypted-frame cache, garbage collector, and destructive
-deletion paths are implemented with the `AttachmentBlobStore` boundary and
-create-only Drive adapter. The internal
+recovery path are implemented. `AttachmentBlobCoordinator` persists an exact
+ID session before creates, publishes verified chunks before a manifest, and
+registers metadata only through `VaultRepository`; its open, cache, GC,
+destructive-deletion, and share-staging paths stay behind the separate
+`AttachmentBlobStore` boundary. The internal
 `AuthenticatedCloudObjectCodec` shown at their encryption
 boundary is implemented in `core:data`.
 `RecoveryCoordinator` is the only component allowed to reconstruct Room
@@ -387,9 +393,10 @@ product-visible app-managed backup/recovery surfaces are implemented in source.
 Task 13 is complete and review-clean: transient authorization transport
 failure has a distinct bounded retry presentation with no false sign-in
 guidance, and a genuine `MainActivity` production recovery-route recreation
-test proves private passphrase input is not restored. Task 14 still owns live
-credentialed two-installation and final Stage 3 qualification. Attachment flows
-are not implemented.
+test proves private passphrase input is not restored. Stage 4's final gates
+are qualified, including the one-shot credentialed attachment properties; that
+does not broaden live-provider or two-installation recovery claims. Attachment
+flows are implemented behind their separate store boundary.
 
 Hybrid logical clocks and merge primitives remain implemented internal
 utilities but do not define product behaviour. Future journal segments carry
