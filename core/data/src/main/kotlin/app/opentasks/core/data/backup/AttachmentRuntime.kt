@@ -189,7 +189,7 @@ class AttachmentRuntime(
     suspend fun collectRetiredBytes(): AttachmentGcResult {
         val configuration = activeConfiguration() ?: return NOTHING_COLLECTED
         val retired = collectable(configuration)
-        if (retired.isEmpty()) return NOTHING_COLLECTED
+        if (retired.isEmpty) return NOTHING_COLLECTED
         val key = openContentKey() ?: return NOTHING_COLLECTED
         val result = try {
             val opened = session(configuration) as? AttachmentSessionResult.Opened
@@ -203,13 +203,14 @@ class AttachmentRuntime(
                         rootClaimProviderId = configuration.rootClaimProviderId,
                         contentKey = { key },
                         minimumRetention = minimumRetention,
-                    ).runBatch(session.blobStore, retired.map { it.candidate }, now())
+                    ).runBatch(session.blobStore, retired.candidates, now())
                 }
             }
         } finally {
             key.close()
         }
-        recordCollected(retired, result.collectedBlobSets)
+        recordCollected(retired.attachmentCandidates, result.collectedBlobSets)
+        recordRetiredRowsCollected(retired.retiredRowCandidates, result.collectedBlobSets)
         return result
     }
 
@@ -266,6 +267,32 @@ class AttachmentRuntime(
             try {
                 repository.execute(
                     DomainCommand.MarkAttachmentContentCollected(entry.attachmentId, now()),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The bytes are gone either way; a later pass records it again.
+            }
+        }
+    }
+
+    /**
+     * Records that the durable retired-blob-set index no longer needs to
+     * track a blob set a purge retired: this batch proved the lineage holds
+     * none of its bytes.
+     *
+     * The command is idempotent on an absent row (Task 2), so a write this
+     * pass could not confirm, or one a later pass repeats, changes nothing.
+     */
+    private suspend fun recordRetiredRowsCollected(
+        retired: List<RetiredBlobSetRow>,
+        collectedBlobSets: Set<BlobSetId>,
+    ) {
+        retired.forEach { entry ->
+            if (entry.blobSetId !in collectedBlobSets) return@forEach
+            try {
+                repository.execute(
+                    DomainCommand.MarkRetiredBlobSetCollected(entry.blobSetId, now()),
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -361,14 +388,17 @@ class AttachmentRuntime(
     }
 
     /**
-     * The retired records whose bytes may be released right now.
+     * The retired records whose bytes may be released right now, from both
+     * retirement sources: an attachment row a soft delete tombstoned, and a
+     * `retired_blob_sets` row a purge left behind once it removed the
+     * attachment row outright.
      *
      * Coverage is decided by the generation each retained base publishes: a
      * tombstone older than both is present in every recoverable base, so
      * removing its bytes can no longer make a recovery incomplete. A lineage
      * that retains only one base is covered by that one. A blob set another
-     * live record still names, or one already recorded as collected — it has
-     * no `blobSetId` left — is not offered at all.
+     * live record still names — a replacement edge — or one already recorded
+     * as collected, is not offered at all.
      *
      * The final eligibility predicate is applied here rather than left to the
      * collector, because everything it needs is local: deciding it after
@@ -378,24 +408,30 @@ class AttachmentRuntime(
      */
     private suspend fun collectable(
         configuration: RemoteBackupConfiguration,
-    ): List<RetiredBlobSet> {
+    ): CollectableRetirements {
         val currentGeneration = configuration.currentPublication?.generation?.value
-            ?: return emptyList()
+            ?: return CollectableRetirements.EMPTY
         val previousGeneration = configuration.previousPublication?.generation?.value
             ?: currentGeneration
-        val attachments = try {
-            repository.currentWorkspace().attachments
+        val workspace = try {
+            repository.currentWorkspace()
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (_: Exception) {
-            return emptyList()
+            return CollectableRetirements.EMPTY
         }
         val moment = now()
-        val live = attachments.filter { it.deletedAt == null }.mapNotNull { it.blobSetId }.toSet()
-        return attachments.mapNotNull { attachment ->
+        val live = workspace.attachments.filter { it.deletedAt == null }
+            .mapNotNull { it.blobSetId }
+            .toSet()
+
+        val attachmentCandidates = workspace.attachments.mapNotNull { attachment ->
             val blobSetId = attachment.blobSetId ?: return@mapNotNull null
             val deletedAt = attachment.deletedAt ?: return@mapNotNull null
-            val tombstoneGeneration = tombstoneGeneration(attachment.id) ?: return@mapNotNull null
+            val tombstoneGeneration = tombstoneGeneration(
+                objectType = BackupRecordFamily.ATTACHMENT.name,
+                objectId = attachment.id.value,
+            ) ?: return@mapNotNull null
             val candidate = GcCandidate(
                 blobSetId = blobSetId,
                 deletedAt = deletedAt,
@@ -407,24 +443,63 @@ class AttachmentRuntime(
             if (!candidate.isCollectable(moment, minimumRetention)) return@mapNotNull null
             RetiredBlobSet(attachmentId = attachment.id, candidate = candidate)
         }
+
+        val retiredRowCandidates = workspace.retiredBlobSets.mapNotNull { retired ->
+            val tombstoneGeneration = tombstoneGeneration(
+                objectType = BackupRecordFamily.RETIRED_BLOB_SET.name,
+                objectId = retired.blobSetId.value,
+            ) ?: return@mapNotNull null
+            val candidate = GcCandidate(
+                blobSetId = retired.blobSetId,
+                deletedAt = retired.retiredAt,
+                tombstoneGeneration = tombstoneGeneration,
+                coveredByCurrentBase = tombstoneGeneration <= currentGeneration,
+                coveredByPreviousBase = tombstoneGeneration <= previousGeneration,
+                activelyReferenced = retired.blobSetId in live,
+            )
+            if (!candidate.isCollectable(moment, minimumRetention)) return@mapNotNull null
+            RetiredBlobSetRow(blobSetId = retired.blobSetId, candidate = candidate)
+        }
+
+        return CollectableRetirements(attachmentCandidates, retiredRowCandidates)
     }
 
-    private suspend fun tombstoneGeneration(attachmentId: AttachmentId): Long? = try {
-        journalDao.latestGenerationFor(
-            objectType = BackupRecordFamily.ATTACHMENT.name,
-            objectId = attachmentId.value,
-        )
+    private suspend fun tombstoneGeneration(objectType: String, objectId: String): Long? = try {
+        journalDao.latestGenerationFor(objectType = objectType, objectId = objectId)
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (_: Exception) {
         null
     }
 
-    /** A retired record and the collection candidate its blob set makes. */
+    /** A retired attachment row and the collection candidate its blob set makes. */
     private data class RetiredBlobSet(
         val attachmentId: AttachmentId,
         val candidate: GcCandidate,
     )
+
+    /** A durable `retired_blob_sets` row and the collection candidate it makes. */
+    private data class RetiredBlobSetRow(
+        val blobSetId: BlobSetId,
+        val candidate: GcCandidate,
+    )
+
+    /** Every retirement source's candidates, ready for one GC batch. */
+    private data class CollectableRetirements(
+        val attachmentCandidates: List<RetiredBlobSet>,
+        val retiredRowCandidates: List<RetiredBlobSetRow>,
+    ) {
+        val candidates: List<GcCandidate>
+            get() = attachmentCandidates.map { it.candidate } +
+                retiredRowCandidates.map { it.candidate }
+
+        val isEmpty: Boolean
+            get() = attachmentCandidates.isEmpty() && retiredRowCandidates.isEmpty()
+
+        companion object {
+            val EMPTY = CollectableRetirements(emptyList(), emptyList())
+        }
+    }
 
     private companion object {
         val NOTHING_COLLECTED = AttachmentGcResult(
