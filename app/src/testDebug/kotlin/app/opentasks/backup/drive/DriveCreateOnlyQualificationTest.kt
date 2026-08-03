@@ -79,6 +79,64 @@ class DriveCreateOnlyQualificationTest {
     }
 
     @Test
+    fun attachmentChunksAndManifestCreateReadBackAndResolveAtExactIds() = runBlocking {
+        val transport = FakeCreateOnlyDriveTransport()
+        val qualification = DriveCreateOnlyQualification(
+            transport = transport,
+            directory = temporaryDirectory(),
+            keySupplier = { ByteArray(32) { 3 } },
+        )
+
+        val results = qualification.run()
+
+        assertTrue(results.all(QualificationResult::passed))
+        assertTrue(results.any { it.property == "ATTACHMENT_EXACT_ID_CHUNK_CREATE" })
+        assertTrue(results.any { it.property == "ATTACHMENT_CHUNK_READBACK_IDENTITY" })
+        assertTrue(results.any { it.property == "ATTACHMENT_MANIFEST_CREATE_READBACK_LOOKUP" })
+        assertEquals(2, transport.attachmentChunkCreates)
+        assertEquals(1, transport.attachmentChunkConflicts)
+        assertEquals(1, transport.attachmentManifestCreates)
+        assertEquals(3, transport.attachmentReadbacks)
+        assertTrue(transport.remainingIds().isEmpty())
+    }
+
+    @Test
+    fun attachmentReadbackThatIsNotByteIdenticalFailsAndStillDeletesEveryObject() = runBlocking {
+        val transport = FakeCreateOnlyDriveTransport(corruptAttachmentDownloads = true)
+
+        val results = DriveCreateOnlyQualification(
+            transport = transport,
+            directory = temporaryDirectory(),
+            keySupplier = { ByteArray(32) { 4 } },
+        ).run()
+
+        assertTrue(
+            results.any {
+                !it.passed && it.property == "EXCEPTION_ATTACHMENT_CHUNK_READBACK_IllegalStateException"
+            },
+        )
+        assertEquals(transport.generatedIds.toSet(), transport.deleteAttempts.toSet())
+        assertTrue(transport.remainingIds().isEmpty())
+    }
+
+    @Test
+    fun interruptedAttachmentObjectsInTheReservedLineageAreRemovedBeforeAnotherRun() = runBlocking {
+        val transport = FakeCreateOnlyDriveTransport().also {
+            it.seedStaleAttachmentChunk("stale-attachment-chunk")
+        }
+
+        val results = DriveCreateOnlyQualification(
+            transport = transport,
+            directory = temporaryDirectory(),
+            keySupplier = { ByteArray(32) { 6 } },
+        ).run()
+
+        assertTrue(results.all(QualificationResult::passed))
+        assertTrue("stale-attachment-chunk" in transport.deleteAttempts)
+        assertTrue(transport.remainingIds().isEmpty())
+    }
+
+    @Test
     fun interruptedQualificationObjectsAreRemovedBeforeAnotherRun() = runBlocking {
         val transport = FakeCreateOnlyDriveTransport().also {
             it.seedStaleQualification("stale-qualification")
@@ -122,6 +180,7 @@ class DriveCreateOnlyQualificationTest {
 
     private class FakeCreateOnlyDriveTransport(
         private val corruptFirstDownload: Boolean = false,
+        private val corruptAttachmentDownloads: Boolean = false,
     ) : CreateOnlyDriveTransport {
         private val nextId = AtomicInteger()
         private val content = ConcurrentHashMap<String, ByteArray>()
@@ -139,6 +198,14 @@ class DriveCreateOnlyQualificationTest {
             private set
         var winnerReadbacks = 0
             private set
+        var attachmentChunkCreates = 0
+            private set
+        var attachmentChunkConflicts = 0
+            private set
+        var attachmentManifestCreates = 0
+            private set
+        var attachmentReadbacks = 0
+            private set
 
         override suspend fun readCurrentUserPermissionId(): String = "permission-for-test"
 
@@ -152,11 +219,21 @@ class DriveCreateOnlyQualificationTest {
             pageToken: String?,
             pageSize: Int,
         ): DriveListPage = DriveListPage(
-            metadata.values.map {
+            metadata.values.filter { it.matches(query) }.map {
                 DriveListedFile(it.providerFileId, it.name, it.role, it.appProperties)
             },
             null,
         )
+
+        private fun DriveFileMetadata.matches(query: String): Boolean {
+            val nameClause = NAME_CLAUSE.find(query)?.groupValues?.get(1)?.let(::unescape)
+            if (nameClause != null && name != nameClause) return false
+            return PROPERTY_CLAUSE.findAll(query).all { match ->
+                appProperties[unescape(match.groupValues[1])] == unescape(match.groupValues[2])
+            }
+        }
+
+        private fun unescape(value: String): String = value.replace(Regex("""\\(.)"""), "$1")
 
         override suspend fun createFileIfAbsent(request: DriveCreateRequest): DriveCreateResult {
             val copy = request.content.copyOf()
@@ -166,12 +243,17 @@ class DriveCreateOnlyQualificationTest {
                     request.metadata.appProperties["claimId"] != "discarded-success"
             if (previous == null) {
                 metadata[request.metadata.providerFileId] = request.metadata
-                if (isRaceSuccessor) {
-                    synchronized(this) { raceSuccessorCreates++ }
+                synchronized(this) {
+                    if (isRaceSuccessor) raceSuccessorCreates++
+                    if (request.metadata.role == "attachment-chunk") attachmentChunkCreates++
+                    if (request.metadata.role == "attachment-manifest") attachmentManifestCreates++
                 }
                 return DriveCreateResult.Created
             }
             copy.fill(0)
+            if (request.metadata.role == "attachment-chunk") {
+                synchronized(this) { attachmentChunkConflicts++ }
+            }
             if (isRaceSuccessor) {
                 val count = successorCreateCounts
                     .computeIfAbsent(request.metadata.providerFileId) { AtomicInteger() }
@@ -191,6 +273,11 @@ class DriveCreateOnlyQualificationTest {
             val stored = checkNotNull(content[providerFileId]).copyOf()
             if (corruptFirstDownload && downloadCount.getAndIncrement() == 0) {
                 stored[0] = (stored[0].toInt() xor 1).toByte()
+            }
+            val isAttachment = metadata[providerFileId]?.role?.startsWith("attachment-") == true
+            if (isAttachment) {
+                synchronized(this) { attachmentReadbacks++ }
+                if (corruptAttachmentDownloads) stored[0] = (stored[0].toInt() xor 1).toByte()
             }
             destination.writeBytes(stored)
             stored.fill(0)
@@ -239,6 +326,29 @@ class DriveCreateOnlyQualificationTest {
                     "role" to "successor",
                 ),
             )
+        }
+
+        fun seedStaleAttachmentChunk(id: String) {
+            content[id] = byteArrayOf(1)
+            metadata[id] = DriveFileMetadata(
+                providerFileId = id,
+                name = "attachment-chunk",
+                role = "attachment-chunk",
+                appProperties = mapOf(
+                    "format" to "v1",
+                    "role" to "attachment-chunk",
+                    "lineageId" to QUALIFICATION_LINEAGE_ID,
+                    "blobSetId" to "1c0ffee0-0000-4000-8000-000000000009",
+                    "chunkIndex" to "0",
+                ),
+            )
+        }
+
+        private companion object {
+            const val QUALIFICATION_LINEAGE_ID = "0e57a11f-0000-4000-8000-000000000004"
+            val NAME_CLAUSE = Regex("""name = '((?:[^'\\]|\\.)*)'""")
+            val PROPERTY_CLAUSE =
+                Regex("""key='((?:[^'\\]|\\.)*)' and value='((?:[^'\\]|\\.)*)'""")
         }
     }
 }

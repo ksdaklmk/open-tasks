@@ -1,10 +1,18 @@
 package app.opentasks.backup.drive
 
+import app.opentasks.core.data.backup.CreateOnlyDriveAttachmentBlobStore
 import app.opentasks.core.data.backup.drive.CreateOnlyDriveTransport
 import app.opentasks.core.data.backup.drive.DriveCreateRequest
 import app.opentasks.core.data.backup.drive.DriveCreateResult
 import app.opentasks.core.data.backup.drive.DriveFileMetadata
 import app.opentasks.core.data.backup.drive.DriveTransportException
+import app.opentasks.core.domain.AttachmentBlobStore
+import app.opentasks.core.domain.AttachmentManifestLookup
+import app.opentasks.core.domain.AttachmentObjectResult
+import app.opentasks.core.domain.AttachmentReadResult
+import app.opentasks.core.model.BlobSetId
+import app.opentasks.core.model.CloudLineageId
+import app.opentasks.core.model.ProviderObjectId
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -13,6 +21,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -128,6 +137,20 @@ internal class DriveCreateOnlyQualification(
                 frame.fill(0)
             }
             results += QualificationResult("DISCARDED_SUCCESS_EXACT_ID", true)
+
+            val attachmentStore = CreateOnlyDriveAttachmentBlobStore(
+                transport = transport,
+                lineageId = CloudLineageId.parse(QUALIFICATION_LINEAGE_ID),
+            )
+            stage = "ATTACHMENT_INTERRUPTED_RUN_CLEANUP"
+            cleanupInterruptedAttachmentRuns(attachmentStore)
+            results += runAttachmentProperties(
+                store = attachmentStore,
+                key = key,
+                generatedIds = generatedIds,
+                createdIds = createdIds,
+                recordStage = { stage = it },
+            )
         } catch (throwable: Exception) {
             results += QualificationResult(failureDiagnostic(stage, throwable), false)
         } finally {
@@ -164,6 +187,159 @@ internal class DriveCreateOnlyQualification(
         }
         error("interrupted cleanup page bound exceeded")
     }
+
+    /** Removes only exact objects left by an interrupted run in the reserved qualification lineage. */
+    private suspend fun cleanupInterruptedAttachmentRuns(store: AttachmentBlobStore) {
+        var pageToken: String? = null
+        repeat(MAX_CLEANUP_PAGES) {
+            val (objects, nextPageToken) = store.listNamespace(pageToken)
+            objects.forEach { store.delete(it.providerObjectId) }
+            pageToken = nextPageToken ?: return
+        }
+        error("interrupted attachment cleanup page bound exceeded")
+    }
+
+    /**
+     * Proves the production attachment blob boundary against the live provider: creates at
+     * pre-generated exact IDs, rejects an occupied ID, reads chunks and the manifest back
+     * byte-for-byte, and resolves exactly one manifest for the blob set.
+     */
+    private suspend fun runAttachmentProperties(
+        store: AttachmentBlobStore,
+        key: ByteArray,
+        generatedIds: MutableList<String>,
+        createdIds: MutableSet<String>,
+        recordStage: (String) -> Unit,
+    ): List<QualificationResult> {
+        val results = mutableListOf<QualificationResult>()
+        recordStage("ATTACHMENT_ID_GENERATION")
+        val blobSetId = BlobSetId.new()
+        val objectIds = store.generateObjectIds(ATTACHMENT_OBJECT_COUNT)
+        if (objectIds.size != ATTACHMENT_OBJECT_COUNT ||
+            objectIds.map(ProviderObjectId::value).toSet().size != ATTACHMENT_OBJECT_COUNT
+        ) {
+            error("invalid generated attachment ids")
+        }
+        generatedIds += objectIds.map(ProviderObjectId::value)
+        val chunkIds = objectIds.take(ATTACHMENT_CHUNK_COUNT)
+        val manifestId = objectIds.last()
+
+        val chunkFrames = chunkIds.indices.map { index ->
+            encodeFrame(attachmentClaim("attachment-chunk-$index", index.toLong()), key)
+        }
+        try {
+            recordStage("ATTACHMENT_CHUNK_EXACT_ID_CREATE")
+            chunkIds.forEachIndexed { index, chunkId ->
+                val created = store.createChunk(
+                    providerObjectId = chunkId,
+                    blobSetId = blobSetId,
+                    chunkIndex = index,
+                    chunkCount = ATTACHMENT_CHUNK_COUNT,
+                    frameBytes = chunkFrames[index],
+                )
+                if (created != AttachmentObjectResult.Created) {
+                    error("attachment chunk was not created at its exact id")
+                }
+                createdIds += chunkId.value
+            }
+
+            recordStage("ATTACHMENT_CHUNK_OCCUPIED_REJECTION")
+            val occupiedFrame = encodeFrame(attachmentClaim("attachment-chunk-occupied", 0), key)
+            try {
+                val occupied = store.createChunk(
+                    providerObjectId = chunkIds.first(),
+                    blobSetId = blobSetId,
+                    chunkIndex = 0,
+                    chunkCount = ATTACHMENT_CHUNK_COUNT,
+                    frameBytes = occupiedFrame,
+                )
+                if (occupied != AttachmentObjectResult.AlreadyExists) {
+                    error("occupied attachment chunk id was not rejected")
+                }
+            } finally {
+                occupiedFrame.fill(0)
+            }
+            results += QualificationResult("ATTACHMENT_EXACT_ID_CHUNK_CREATE", true)
+
+            recordStage("ATTACHMENT_CHUNK_READBACK")
+            chunkIds.forEachIndexed { index, chunkId ->
+                if (!readsBackIdentically(store, chunkId, chunkFrames[index])) {
+                    error("attachment chunk readback was not byte identical")
+                }
+            }
+            results += QualificationResult("ATTACHMENT_CHUNK_READBACK_IDENTITY", true)
+        } finally {
+            chunkFrames.forEach { it.fill(0) }
+        }
+
+        val manifestFrame = encodeFrame(attachmentClaim("attachment-manifest", 0), key)
+        try {
+            recordStage("ATTACHMENT_MANIFEST_CREATE")
+            if (
+                store.createManifest(manifestId, blobSetId, manifestFrame) !=
+                AttachmentObjectResult.Created
+            ) {
+                error("attachment manifest was not created at its exact id")
+            }
+            createdIds += manifestId.value
+
+            recordStage("ATTACHMENT_MANIFEST_READBACK")
+            if (!readsBackIdentically(store, manifestId, manifestFrame)) {
+                error("attachment manifest readback was not byte identical")
+            }
+
+            recordStage("ATTACHMENT_MANIFEST_LOOKUP")
+            if (settledManifestLookup(store, blobSetId) != AttachmentManifestLookup.Found(manifestId)) {
+                error("attachment manifest did not resolve to exactly one object")
+            }
+            if (store.findManifest(BlobSetId.new()) != AttachmentManifestLookup.Missing) {
+                error("attachment manifest lookup matched an unrelated blob set")
+            }
+            results += QualificationResult("ATTACHMENT_MANIFEST_CREATE_READBACK_LOOKUP", true)
+        } finally {
+            manifestFrame.fill(0)
+        }
+        return results
+    }
+
+    /** Tolerates a bounded provider index delay before the created manifest becomes listable. */
+    private suspend fun settledManifestLookup(
+        store: AttachmentBlobStore,
+        blobSetId: BlobSetId,
+    ): AttachmentManifestLookup {
+        var lookup: AttachmentManifestLookup = store.findManifest(blobSetId)
+        repeat(MANIFEST_LOOKUP_RETRIES) {
+            if (lookup !is AttachmentManifestLookup.Missing) return lookup
+            delay(MANIFEST_LOOKUP_DELAY_MILLIS)
+            lookup = store.findManifest(blobSetId)
+        }
+        return lookup
+    }
+
+    private suspend fun readsBackIdentically(
+        store: AttachmentBlobStore,
+        providerObjectId: ProviderObjectId,
+        expectedFrame: ByteArray,
+    ): Boolean {
+        val read = store.readObject(providerObjectId, MAX_FRAME_BYTES)
+        if (read !is AttachmentReadResult.Found) return false
+        return try {
+            MessageDigest.isEqual(read.bytes, expectedFrame)
+        } finally {
+            read.bytes.fill(0)
+        }
+    }
+
+    private fun attachmentClaim(claimId: String, epoch: Long): QualificationClaim =
+        QualificationClaim(
+            predecessorId = claimId,
+            successorId = claimId,
+            claimId = claimId,
+            candidateId = claimId,
+            baselineId = claimId,
+            nextSuccessorId = claimId,
+            epoch = epoch,
+        )
 
     private suspend fun runRace(
         ids: List<String>,
@@ -405,6 +581,13 @@ internal class DriveCreateOnlyQualification(
         private const val MAX_PROPERTY_NAME_LENGTH = 80
         private const val MAX_CLEANUP_PAGES = 10
         private const val CLEANUP_PAGE_SIZE = 100
+        private const val ATTACHMENT_CHUNK_COUNT = 2
+        private const val ATTACHMENT_OBJECT_COUNT = ATTACHMENT_CHUNK_COUNT + 1
+        private const val MANIFEST_LOOKUP_RETRIES = 10
+        private const val MANIFEST_LOOKUP_DELAY_MILLIS = 1_000L
+
+        /** Reserved disposable lineage; qualification attachment objects live only here. */
+        private const val QUALIFICATION_LINEAGE_ID = "0e57a11f-0000-4000-8000-000000000004"
         private const val QUALIFICATION_FORMAT = "open-tasks-create-only-qualification-v1"
         private const val QUALIFICATION_FILE_NAME = "stage3-drive-create-only-qualification"
         private const val DOWNLOAD_FILE_NAME = "stage3-drive-create-only-download.bin"
