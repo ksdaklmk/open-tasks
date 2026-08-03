@@ -2083,7 +2083,7 @@ post-Stage-4/external work and are not implied by Stage 4 qualification.
 4. Run any device suite on a sole disposable emulator. Verify the disposable
    font scale as well as AVD/API/posture before instrumentation. Do not let
    Keystore or App instrumentation mutate the protected workspace.
-5. Preserve the read-only legacy outbox, Room v7 local authority, exact Android
+5. Preserve the read-only legacy outbox, Room v8 local authority, exact Android
    package allow-list, inert restored-package inbox, and local no-upload copy.
    Treat encrypted Google transport backup/restore as external evidence until
    it is actually qualified.
