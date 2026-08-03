@@ -212,6 +212,16 @@ data class AttachmentTransferEntity(
     val updatedAtEpochMillis: Long,
 )
 
+@Entity(tableName = "retired_blob_sets", primaryKeys = ["blobSetId"])
+data class RetiredBlobSetEntity(
+    val blobSetId: String,
+    val chunkCount: Int,
+    val retiredAtEpochMillis: Long,
+    val revisionWallMillis: Long,
+    val revisionLogical: Int,
+    val revisionDeviceId: String,
+)
+
 @Entity(tableName = "activity_entries", primaryKeys = ["id"], indices = [Index("taskId")])
 data class ActivityEntryEntity(
     val id: String,

@@ -13,6 +13,7 @@ import app.opentasks.core.data.db.MilestoneEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
+import app.opentasks.core.data.db.RetiredBlobSetEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskEntity
@@ -2941,21 +2942,26 @@ class RoomVaultRepository(
         val relations = combine(
             combine(
                 combine(
-                    workspaceDao.observeTaskTags(),
-                    workspaceDao.observeChecklistItems(),
-                    workspaceDao.observeReminders(),
-                    observeTimeEntriesWithClock(),
-                    workspaceDao.observeNotes(),
-                ) { taskTags, checklist, reminders, timeEntries, notes ->
-                    RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                    combine(
+                        workspaceDao.observeTaskTags(),
+                        workspaceDao.observeChecklistItems(),
+                        workspaceDao.observeReminders(),
+                        observeTimeEntriesWithClock(),
+                        workspaceDao.observeNotes(),
+                    ) { taskTags, checklist, reminders, timeEntries, notes ->
+                        RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                    },
+                    workspaceDao.observeAttachments(),
+                ) { rows, attachments ->
+                    rows.copy(attachments = attachments)
                 },
-                workspaceDao.observeAttachments(),
-            ) { rows, attachments ->
-                rows.copy(attachments = attachments)
+                workspaceDao.observeActivityEntries(),
+            ) { rows, activityEntries ->
+                rows.copy(activityEntries = activityEntries)
             },
-            workspaceDao.observeActivityEntries(),
-        ) { rows, activityEntries ->
-            rows.copy(activityEntries = activityEntries)
+            workspaceDao.observeRetiredBlobSets(),
+        ) { rows, retiredBlobSets ->
+            rows.copy(retiredBlobSets = retiredBlobSets)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
@@ -3064,6 +3070,7 @@ class RoomVaultRepository(
             notes = relations.notes.map(NoteEntity::toModel),
             attachments = relations.attachments.map(AttachmentEntity::toModel),
             activityEntries = relations.activityEntries.mapNotNull(ActivityEntryEntity::toModel),
+            retiredBlobSets = relations.retiredBlobSets.map(RetiredBlobSetEntity::toModel),
         )
     }
 
@@ -3173,6 +3180,7 @@ class RoomVaultRepository(
         val notes: List<NoteEntity> = emptyList(),
         val attachments: List<AttachmentEntity> = emptyList(),
         val activityEntries: List<ActivityEntryEntity> = emptyList(),
+        val retiredBlobSets: List<RetiredBlobSetEntity> = emptyList(),
     )
 
     private data class TimedTimeEntries(

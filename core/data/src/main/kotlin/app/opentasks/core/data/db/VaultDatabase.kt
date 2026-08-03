@@ -340,8 +340,23 @@ interface WorkspaceDao {
     @Query("SELECT COUNT(*) FROM attachments WHERE taskId = :taskId AND deletedAtEpochMillis IS NULL")
     suspend fun activeAttachmentCountForTask(taskId: String): Int
 
+    @Query("SELECT * FROM attachments WHERE taskId = :taskId AND blobSetId IS NOT NULL")
+    suspend fun getAttachmentsWithBlobSetForTask(taskId: String): List<AttachmentEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAttachment(value: AttachmentEntity)
+
+    @Query("SELECT * FROM retired_blob_sets ORDER BY retiredAtEpochMillis, blobSetId")
+    fun observeRetiredBlobSets(): Flow<List<RetiredBlobSetEntity>>
+
+    @Query("SELECT * FROM retired_blob_sets WHERE blobSetId = :blobSetId LIMIT 1")
+    suspend fun getRetiredBlobSet(blobSetId: String): RetiredBlobSetEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRetiredBlobSet(value: RetiredBlobSetEntity)
+
+    @Query("DELETE FROM retired_blob_sets WHERE blobSetId = :blobSetId")
+    suspend fun deleteRetiredBlobSet(blobSetId: String): Int
 
     @Query("SELECT * FROM activity_entries ORDER BY createdAtEpochMillis, id")
     fun observeActivityEntries(): Flow<List<ActivityEntryEntity>>
@@ -508,8 +523,9 @@ interface AttachmentTransferDao {
         RemoteBackupOperationEntity::class,
         NoteEntity::class,
         AttachmentTransferEntity::class,
+        RetiredBlobSetEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -553,6 +569,18 @@ abstract class VaultDatabase : RoomDatabase() {
         workspaceDao().deleteTagsForTask(taskId)
         workspaceDao().deleteDependenciesForTask(taskId)
         workspaceDao().deleteRemindersForTask(taskId)
+        workspaceDao().getAttachmentsWithBlobSetForTask(taskId).forEach { attachment ->
+            workspaceDao().upsertRetiredBlobSet(
+                RetiredBlobSetEntity(
+                    blobSetId = requireNotNull(attachment.blobSetId),
+                    chunkCount = attachment.chunkCount,
+                    retiredAtEpochMillis = revisionWallMillis,
+                    revisionWallMillis = revisionWallMillis,
+                    revisionLogical = 0,
+                    revisionDeviceId = revisionDeviceId,
+                ),
+            )
+        }
         workspaceDao().deleteAttachmentsForTask(taskId)
         workspaceDao().deleteActivityForTask(taskId)
         workspaceDao().deleteTimeForTask(taskId)
@@ -584,6 +612,7 @@ abstract class VaultDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 )
                 .build()
         }
@@ -1094,6 +1123,20 @@ abstract class VaultDatabase : RoomDatabase() {
                     """.trimIndent(),
                 )
                 db.execSQL("UPDATE vaults SET schemaVersion = 8 WHERE schemaVersion < 8")
+            }
+        }
+
+        internal val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `retired_blob_sets` (" +
+                        "`blobSetId` TEXT NOT NULL, `chunkCount` INTEGER NOT NULL, " +
+                        "`retiredAtEpochMillis` INTEGER NOT NULL, " +
+                        "`revisionWallMillis` INTEGER NOT NULL, " +
+                        "`revisionLogical` INTEGER NOT NULL, " +
+                        "`revisionDeviceId` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`blobSetId`))",
+                )
             }
         }
 

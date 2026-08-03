@@ -197,6 +197,13 @@ data class Attachment(
     val revision: Revision,
 )
 
+data class RetiredBlobSet(
+    val blobSetId: BlobSetId,
+    val chunkCount: Int,
+    val retiredAt: Instant,
+    val revision: Revision,
+)
+
 data class Note(
     val id: NoteId,
     val taskId: TaskId?,

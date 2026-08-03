@@ -318,6 +318,133 @@ class VaultDatabaseMigrationInstrumentedTest {
         migrated.close()
     }
 
+    @Test
+    fun migrate8To9PreservesRowsAndAddsEmptyRetiredBlobSets() {
+        val databaseName = databaseNameV8("preserved")
+        lateinit var before: Map<String, List<List<Any?>>>
+        createV8(databaseName).use { database ->
+            seedVersion8Fixture(database)
+            before = database.captureVersion8Bytes()
+        }
+
+        val migrated = migrateTo9(databaseName)
+
+        assertEquals(before, migrated.captureVersion8Bytes())
+        assertEquals(0L, migrated.longValue("SELECT COUNT(*) FROM retired_blob_sets"))
+        migrated.close()
+    }
+
+    private fun databaseNameV8(suffix: String): String =
+        "vault-v8-v9-$suffix.db".also(databaseNames::add)
+
+    private fun createV8(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.createDatabase(databaseName, 8)
+
+    private fun migrateTo9(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.runMigrationsAndValidate(
+            databaseName,
+            9,
+            true,
+            VaultDatabase.MIGRATION_8_9,
+        )
+
+    private fun insertVaultV8(database: SupportSQLiteDatabase, id: String) {
+        database.execSQL(
+            """
+            INSERT INTO vaults (
+                id, storageMode, createdAtEpochMillis, schemaVersion,
+                cryptoVersion, minimumReaderVersion
+            ) VALUES (?, 'LOCAL', 1000, 8, 1, 1)
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    /**
+     * Populates a task, two attachments (one with a `blobSetId`, one
+     * without), and one `attachment_transfer` row so
+     * [migrate8To9PreservesRowsAndAddsEmptyRetiredBlobSets] can prove the
+     * additive 8→9 migration changes no existing byte while starting the new
+     * `retired_blob_sets` table empty.
+     */
+    private fun seedVersion8Fixture(database: SupportSQLiteDatabase) {
+        insertVaultV8(database, id = "vault-a")
+        database.execSQL(
+            """
+            INSERT INTO workspaces (id, vaultId, ownerId, name)
+            VALUES ('workspace-a', 'vault-a', 'member-a', 'Workspace A')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            "INSERT INTO members (id, displayName) VALUES ('member-a', 'Member A')",
+        )
+        database.execSQL(
+            """
+            INSERT INTO tasks (
+                id, workspaceId, projectId, parentTaskId, statusId, semanticStatus,
+                title, descriptionCiphertext, priority, startEpochMillis, startZoneId,
+                dueEpochMillis, dueZoneId, recurrenceFrequency, recurrenceInterval,
+                recurrenceWeekdays, recurrenceCount, recurrenceEndDate,
+                recurrenceSeriesId, recurrenceAnchorEpochMillis, recurrenceAnchorZoneId,
+                recurrenceOccurrenceIndex, estimateSeconds, milestoneId,
+                completedAtEpochMillis, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'task-a', 'workspace-a', NULL, NULL, 'workflow-a', 'TODO',
+                'Task A', ?, 'MEDIUM', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x01, 0x02, 0x03)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount, contentHash,
+                blobSetId, chunkCount, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'attachment-blob', 'task-a', ?, 'application/pdf', 9000000, 'hash-a',
+                'blob-set-a', 3, NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x04, 0x05)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount, contentHash,
+                blobSetId, chunkCount, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'attachment-blobless', 'task-a', ?, 'application/octet-stream', 10,
+                'hash-b', NULL, 0, NULL, 11, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x06)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachment_transfer (
+                blobSetId, attachmentId, taskId, phase, displayNameCiphertext, mimeType,
+                declaredByteCount, contentHash, chunkCount, chunkStateEncoded,
+                manifestProviderFileId, createdAtEpochMillis, updatedAtEpochMillis
+            ) VALUES (
+                'blob-set-pending', 'attachment-pending', 'task-a', 'UPLOADING', ?,
+                'application/zip', 4000000, NULL, NULL, '000', NULL, 10, 20
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x07)),
+        )
+    }
+
+    private fun SupportSQLiteDatabase.captureVersion8Bytes(): Map<String, List<List<Any?>>> =
+        buildMap {
+            listOf("tasks", "attachments", "attachment_transfer").forEach { table ->
+                put(table, captureRows("SELECT * FROM $table ORDER BY rowid"))
+            }
+        }
+
     private fun databaseNameV6(suffix: String): String =
         "vault-v6-v7-$suffix.db".also(databaseNames::add)
 

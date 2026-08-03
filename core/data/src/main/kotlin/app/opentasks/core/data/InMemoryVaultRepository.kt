@@ -32,6 +32,7 @@ import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Reminder
+import app.opentasks.core.model.RetiredBlobSet
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
@@ -1301,6 +1302,8 @@ class InMemoryVaultRepository internal constructor(
             notes = current.notes.filterNot { it.taskId == task.id },
             attachments = current.attachments.filterNot { it.taskId == task.id },
             activityEntries = current.activityEntries.filterNot { it.taskId == task.id },
+            retiredBlobSets = current.retiredBlobSets +
+                current.attachments.retiredBlobSets(setOf(task.id), command.purgedAt),
         )
         return CommandResult.Success("Task permanently deleted")
     }
@@ -1333,6 +1336,8 @@ class InMemoryVaultRepository internal constructor(
                 notes = current.notes.filterNot { it.taskId in expiredIds },
                 attachments = current.attachments.filterNot { it.taskId in expiredIds },
                 activityEntries = current.activityEntries.filterNot { it.taskId in expiredIds },
+                retiredBlobSets = current.retiredBlobSets +
+                    current.attachments.retiredBlobSets(expiredIds, command.now),
                 at = command.now,
             )
         }
@@ -1363,6 +1368,23 @@ class InMemoryVaultRepository internal constructor(
         filterNot {
             it.objectId == value.objectId && it.objectType == value.objectType
         } + value
+
+    private fun List<Attachment>.retiredBlobSets(
+        taskIds: Set<TaskId>,
+        purgedAt: Instant,
+    ): List<RetiredBlobSet> = filter { it.taskId in taskIds && it.blobSetId != null }
+        .map { attachment ->
+            RetiredBlobSet(
+                blobSetId = requireNotNull(attachment.blobSetId),
+                chunkCount = attachment.chunkCount,
+                retiredAt = purgedAt,
+                revision = Revision(
+                    deviceId = sourceDeviceId,
+                    wallTimeMillis = purgedAt.toEpochMilli(),
+                    logicalCounter = 0,
+                ),
+            )
+        }
 
     private fun renameTask(command: DomainCommand.RenameTask): CommandResult {
         val title = command.title.trim()
@@ -2537,6 +2559,7 @@ class InMemoryVaultRepository internal constructor(
         notes: List<Note> = mutableWorkspace.value.notes,
         attachments: List<Attachment> = mutableWorkspace.value.attachments,
         activityEntries: List<ActivityEntry> = mutableWorkspace.value.activityEntries,
+        retiredBlobSets: List<RetiredBlobSet> = mutableWorkspace.value.retiredBlobSets,
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
@@ -2560,6 +2583,9 @@ class InMemoryVaultRepository internal constructor(
             notes = notes,
             attachments = attachments,
             activityEntries = activityEntries,
+            retiredBlobSets = retiredBlobSets.sortedWith(
+                compareBy<RetiredBlobSet> { it.retiredAt }.thenBy { it.blobSetId.value },
+            ),
         ).withReconciledTimeState(at = at, entries = timeEntries)
     }
 

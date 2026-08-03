@@ -18,6 +18,7 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
+import app.opentasks.core.model.RetiredBlobSet
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Tag
@@ -332,6 +333,17 @@ internal fun Attachment.toEntity(): AttachmentEntity = AttachmentEntity(
     revisionWallMillis = revision.wallTimeMillis,
     revisionLogical = revision.logicalCounter,
     revisionDeviceId = revision.deviceId.value,
+)
+
+internal fun RetiredBlobSetEntity.toModel(): RetiredBlobSet = RetiredBlobSet(
+    blobSetId = BlobSetId(blobSetId),
+    chunkCount = chunkCount,
+    retiredAt = Instant.ofEpochMilli(retiredAtEpochMillis),
+    revision = Revision(
+        deviceId = DeviceId(revisionDeviceId),
+        wallTimeMillis = revisionWallMillis,
+        logicalCounter = revisionLogical,
+    ),
 )
 
 internal fun ActivityEntryEntity.toModel(): ActivityEntry? {
