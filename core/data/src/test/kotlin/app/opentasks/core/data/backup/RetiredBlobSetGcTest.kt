@@ -50,6 +50,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -168,6 +169,37 @@ class RetiredBlobSetGcTest {
             assertEquals(0, sessionsOpened)
             assertTrue(store.deleted.isEmpty())
             assertEquals(1, repository.currentWorkspace().retiredBlobSets.size)
+        }
+    }
+
+    /**
+     * The destructive "remove all attachment content" action wipes the whole
+     * namespace outside `collectRetiredBytes`, so it must release every
+     * retired-blob-set row itself: a row it leaves behind can never satisfy
+     * `collectedBlobSets` on a later GC pass, because that pass would list an
+     * already-empty namespace and find nothing to confirm a release against.
+     */
+    @Test
+    fun destructiveContentReleaseRetiresRetiredRowsAlongsideLiveAttachments() = runBlocking {
+        withTimeout(5_000) {
+            retireViaPurge(
+                taskId = TASK_PROPOSAL,
+                retiredAt = NOW.minus(Duration.ofDays(1)),
+                tombstoneGeneration = PREVIOUS_GENERATION,
+            )
+            val liveTask = repository.currentWorkspace().tasks.single { it.id == TASK_INVOICES }
+            assertTrue(
+                repository.execute(
+                    DomainCommand.RegisterAttachment(attachment(liveTask, BlobSetId.new())),
+                ) is CommandResult.Success,
+            )
+
+            runtime(FakeAttachmentStore(), now = NOW).recordAllContentCollected()
+
+            assertTrue(repository.currentWorkspace().retiredBlobSets.isEmpty())
+            val recorded = repository.currentWorkspace().attachments
+                .single { it.taskId == liveTask.id }
+            assertNull(recorded.blobSetId)
         }
     }
 

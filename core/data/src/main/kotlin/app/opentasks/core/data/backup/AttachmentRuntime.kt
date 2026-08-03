@@ -219,23 +219,39 @@ class AttachmentRuntime(
      *
      * The destructive attachment action removes the whole namespace, so
      * afterwards no record's bytes exist — including those of records nothing
-     * has retired. Recording it is what keeps every one of them from being
-     * offered for collection, and paying a provider round trip, for ever.
+     * has retired, and every durable `retired_blob_sets` row a purge left
+     * behind. Recording both is what keeps every one of them from being
+     * offered for collection, and paying a provider round trip, for ever: a
+     * retired row the action does not release here can never be released by
+     * a later `collectRetiredBytes()` pass either, because that pass lists
+     * the namespace to confirm a release, and the destructive action already
+     * emptied it.
      */
     suspend fun recordAllContentCollected() {
         if (stopped.get()) return
-        val attachments = try {
-            repository.currentWorkspace().attachments
+        val workspace = try {
+            repository.currentWorkspace()
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (_: Exception) {
             return
         }
-        attachments.forEach { attachment ->
+        workspace.attachments.forEach { attachment ->
             if (attachment.blobSetId == null) return@forEach
             try {
                 repository.execute(
                     DomainCommand.MarkAttachmentContentCollected(attachment.id, now()),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // A later invocation records what this one could not.
+            }
+        }
+        workspace.retiredBlobSets.forEach { retired ->
+            try {
+                repository.execute(
+                    DomainCommand.MarkRetiredBlobSetCollected(retired.blobSetId, now()),
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -281,8 +297,12 @@ class AttachmentRuntime(
      * track a blob set a purge retired: this batch proved the lineage holds
      * none of its bytes.
      *
-     * The command is idempotent on an absent row (Task 2), so a write this
-     * pass could not confirm, or one a later pass repeats, changes nothing.
+     * The command is idempotent on an absent row (Task 2), so a repeated
+     * write is safe. A write that fails here is not: the batch already
+     * deleted every object this blob set had, so a later pass lists nothing
+     * for it and never rebuilds `collectedBlobSets` to include it again —
+     * a failed release strands the row as a candidate for ever, not just
+     * until the next pass.
      */
     private suspend fun recordRetiredRowsCollected(
         retired: List<RetiredBlobSetRow>,
@@ -297,7 +317,8 @@ class AttachmentRuntime(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
-                // The bytes are gone either way; a later pass records it again.
+                // The bytes are already gone; see the doc comment above for
+                // why a failed write here is not self-healing.
             }
         }
     }
