@@ -252,6 +252,7 @@ internal class DefaultStagedVaultVerifier(
             verified = expectedCapture.records,
             actual = actual,
             journalEntryCount = journalEntryCount,
+            now = now,
         )
         val state = database.backupStateDao().get(expectedVaultId.value)
         checkNotNull(state) { "The staged vault holds no backup state" }
@@ -269,152 +270,6 @@ internal class DefaultStagedVaultVerifier(
             retentionPurge = retentionPurge,
         )
     }
-
-    /**
-     * Attributes every difference to expired trash, or fails closed.
-     *
-     * A record may only disappear as part of purging a task that was in the Bin
-     * past retention, a record may only appear as the tombstone that purge
-     * writes, and journal entries are only allowed to exist when they match.
-     */
-    private fun accountForRetentionPurge(
-        verified: List<BackupRecordV1>,
-        actual: List<BackupRecordV1>,
-        journalEntryCount: Int,
-    ): RetentionPurgeAccounting {
-        val verifiedByKey = verified.associateBy { BackupRecordKey(it) }
-        val actualByKey = actual.associateBy { BackupRecordKey(it) }
-        check(actualByKey.size == actual.size) {
-            "The staged vault holds a duplicate record identity"
-        }
-
-        val removed = verifiedByKey.keys - actualByKey.keys
-        val written = actualByKey.keys.filterTo(mutableSetOf()) { key ->
-            actualByKey.getValue(key) != verifiedByKey[key]
-        }
-        if (removed.isEmpty() && written.isEmpty()) {
-            check(journalEntryCount == 0) {
-                "The staged vault journalled a change it did not make"
-            }
-            return RetentionPurgeAccounting.NONE
-        }
-
-        val purgedTasks = removed
-            .filter { it.family == BackupRecordFamily.TASK }
-            .associate { key -> key.identity.single() to verifiedByKey.getValue(key) }
-        purgedTasks.values.forEach { task ->
-            val deletedAt = BackupRecordFields.of(task).nullableLong("deletedAtEpochMillis")
-            check(
-                deletedAt != null &&
-                    TrashPolicy.isEligibleForPurge(Instant.ofEpochMilli(deletedAt), now()),
-            ) {
-                "The staged vault lost a task no retention purge could remove"
-            }
-        }
-        check(removed == retentionPurgeRemovals(verified, purgedTasks.keys)) {
-            "The staged vault lost records beyond its retention purge"
-        }
-
-        val detachedChildren = verified.asSequence()
-            .filter { it.family == BackupRecordFamily.TASK }
-            .filter { it.identity.single() !in purgedTasks.keys }
-            .filter {
-                BackupRecordFields.of(it).nullableString("parentTaskId") in purgedTasks.keys
-            }
-            .associateBy { BackupRecordKey(it) }
-
-        val tombstones = purgedTasks.keys.mapTo(mutableSetOf()) { taskId ->
-            BackupRecordKey(BackupRecordFamily.TOMBSTONE, listOf(taskId, TASK_OBJECT_TYPE))
-        }
-        check(written.all { it in tombstones || it in detachedChildren }) {
-            "The staged vault gained a record its retention purge did not write"
-        }
-        tombstones.forEach { key ->
-            val tombstone = actualByKey[key]
-            checkNotNull(tombstone) { "The retention purge left a purged task untombstoned" }
-            check(
-                BackupRecordFields.of(tombstone).long("deletedAtEpochMillis") ==
-                    BackupRecordFields.of(purgedTasks.getValue(key.identity.first()))
-                        .nullableLong("deletedAtEpochMillis"),
-            ) {
-                "A retention tombstone does not describe the task it replaced"
-            }
-        }
-        detachedChildren.forEach { (key, before) ->
-            val after = checkNotNull(actualByKey[key]) {
-                "The retention purge removed a surviving direct child"
-            }
-            checkDetachedChild(before, after)
-        }
-        check(journalEntryCount == removed.size + written.size) {
-            "The staged vault journalled changes beyond its retention purge"
-        }
-        return RetentionPurgeAccounting(
-            purgedTaskCount = purgedTasks.size,
-            removedRecordCount = removed.size,
-            journalEntryCount = journalEntryCount,
-        )
-    }
-
-    private fun checkDetachedChild(before: BackupRecordV1, after: BackupRecordV1) {
-        check(before.family == BackupRecordFamily.TASK && after.family == before.family)
-        check(after.identity == before.identity) {
-            "The retention purge changed a surviving child identity"
-        }
-        val mutable = setOf(
-            "parentTaskId",
-            "revisionWallMillis",
-            "revisionLogical",
-            "revisionDeviceId",
-        )
-        check(
-            before.fields.filterNot { it.name in mutable } ==
-                after.fields.filterNot { it.name in mutable },
-        ) {
-            "The retention purge changed a surviving child beyond detaching it"
-        }
-        val previous = BackupRecordFields.of(before)
-        val current = BackupRecordFields.of(after)
-        check(current.nullableString("parentTaskId") == null) {
-            "The retention purge left a surviving child attached"
-        }
-        check(current.long("revisionWallMillis") > previous.long("revisionWallMillis")) {
-            "The retention purge did not advance a surviving child wall revision"
-        }
-        check(current.int("revisionLogical") == previous.int("revisionLogical") + 1) {
-            "The retention purge did not advance a surviving child logical revision"
-        }
-        check(current.string("revisionDeviceId").isNotBlank()) {
-            "The retention purge wrote an invalid surviving child device revision"
-        }
-    }
-
-    /** The rows `VaultDatabase.purgeTask` removes for each expired task. */
-    private fun retentionPurgeRemovals(
-        verified: List<BackupRecordV1>,
-        taskIds: Set<String>,
-    ): Set<BackupRecordKey> = verified.asSequence()
-        .filter { record ->
-            when (record.family) {
-                BackupRecordFamily.TASK -> record.identity.single() in taskIds
-                BackupRecordFamily.CHECKLIST_ITEM,
-                BackupRecordFamily.REMINDER,
-                BackupRecordFamily.ATTACHMENT,
-                BackupRecordFamily.TIME_ENTRY,
-                -> BackupRecordFields.of(record).string("taskId") in taskIds
-                BackupRecordFamily.ACTIVITY_ENTRY ->
-                    BackupRecordFields.of(record).nullableString("taskId")
-                        ?.let { it in taskIds } == true
-                BackupRecordFamily.NOTE ->
-                    BackupRecordFields.of(record).nullableString("taskId")
-                        ?.let { it in taskIds } == true
-                BackupRecordFamily.TASK_TAG -> record.identity.first() in taskIds
-                BackupRecordFamily.TASK_DEPENDENCY -> record.identity.any { it in taskIds }
-                else -> false
-            }
-        }
-        .map { BackupRecordKey(it) }
-        .toSet()
 
     /**
      * Reads the staged vault with Stage 2 capture semantics.
@@ -507,6 +362,258 @@ internal class DefaultStagedVaultVerifier(
     private companion object {
         const val INTEGRITY_OK = "ok"
         const val REOPEN_TIMEOUT_MILLIS = 5_000L
-        const val TASK_OBJECT_TYPE = "task"
+    }
+}
+
+private const val TASK_OBJECT_TYPE = "task"
+
+/**
+ * Attributes every difference to expired trash, or fails closed.
+ *
+ * A record may only disappear as part of purging a task that was in the Bin
+ * past retention, a record may only appear as the tombstone that purge
+ * writes, as a surviving child that purge detached, or as the retired blob
+ * set of a blob-bearing attachment that purge just removed, and journal
+ * entries are only allowed to exist when they match.
+ *
+ * Pulled out of [DefaultStagedVaultVerifier] as a pure function of its
+ * inputs (no Room, no SQLCipher, no Android API) so this accounting rule is
+ * unit-testable on its own.
+ */
+internal fun accountForRetentionPurge(
+    verified: List<BackupRecordV1>,
+    actual: List<BackupRecordV1>,
+    journalEntryCount: Int,
+    now: () -> Instant,
+): RetentionPurgeAccounting {
+    val verifiedByKey = verified.associateBy { BackupRecordKey(it) }
+    val actualByKey = actual.associateBy { BackupRecordKey(it) }
+    check(actualByKey.size == actual.size) {
+        "The staged vault holds a duplicate record identity"
+    }
+
+    val removed = verifiedByKey.keys - actualByKey.keys
+    val written = actualByKey.keys.filterTo(mutableSetOf()) { key ->
+        actualByKey.getValue(key) != verifiedByKey[key]
+    }
+    if (removed.isEmpty() && written.isEmpty()) {
+        check(journalEntryCount == 0) {
+            "The staged vault journalled a change it did not make"
+        }
+        return RetentionPurgeAccounting.NONE
+    }
+
+    val purgedTasks = removed
+        .filter { it.family == BackupRecordFamily.TASK }
+        .associate { key -> key.identity.single() to verifiedByKey.getValue(key) }
+    purgedTasks.values.forEach { task ->
+        val deletedAt = BackupRecordFields.of(task).nullableLong("deletedAtEpochMillis")
+        check(
+            deletedAt != null &&
+                TrashPolicy.isEligibleForPurge(Instant.ofEpochMilli(deletedAt), now()),
+        ) {
+            "The staged vault lost a task no retention purge could remove"
+        }
+    }
+    check(removed == retentionPurgeRemovals(verified, purgedTasks.keys)) {
+        "The staged vault lost records beyond its retention purge"
+    }
+
+    val detachedChildren = verified.asSequence()
+        .filter { it.family == BackupRecordFamily.TASK }
+        .filter { it.identity.single() !in purgedTasks.keys }
+        .filter {
+            BackupRecordFields.of(it).nullableString("parentTaskId") in purgedTasks.keys
+        }
+        .associateBy { BackupRecordKey(it) }
+
+    val tombstones = purgedTasks.keys.mapTo(mutableSetOf()) { taskId ->
+        BackupRecordKey(BackupRecordFamily.TOMBSTONE, listOf(taskId, TASK_OBJECT_TYPE))
+    }
+    val purgedBlobSets = purgedAttachmentBlobSets(verified, purgedTasks.keys)
+    val retiredBlobSets = purgedBlobSets.mapTo(mutableSetOf()) { it.key }
+    check(
+        written.all { it in tombstones || it in detachedChildren || it in retiredBlobSets },
+    ) {
+        "The staged vault gained a record its retention purge did not write"
+    }
+    tombstones.forEach { key ->
+        val tombstone = actualByKey[key]
+        checkNotNull(tombstone) { "The retention purge left a purged task untombstoned" }
+        check(
+            BackupRecordFields.of(tombstone).long("deletedAtEpochMillis") ==
+                BackupRecordFields.of(purgedTasks.getValue(key.identity.first()))
+                    .nullableLong("deletedAtEpochMillis"),
+        ) {
+            "A retention tombstone does not describe the task it replaced"
+        }
+    }
+    detachedChildren.forEach { (key, before) ->
+        val after = checkNotNull(actualByKey[key]) {
+            "The retention purge removed a surviving direct child"
+        }
+        checkDetachedChild(before, after)
+    }
+    checkRetiredBlobSets(purgedBlobSets, actualByKey, purgedTasks, now)
+    check(journalEntryCount == removed.size + written.size) {
+        "The staged vault journalled changes beyond its retention purge"
+    }
+    return RetentionPurgeAccounting(
+        purgedTaskCount = purgedTasks.size,
+        removedRecordCount = removed.size,
+        journalEntryCount = journalEntryCount,
+    )
+}
+
+private fun checkDetachedChild(before: BackupRecordV1, after: BackupRecordV1) {
+    check(before.family == BackupRecordFamily.TASK && after.family == before.family)
+    check(after.identity == before.identity) {
+        "The retention purge changed a surviving child identity"
+    }
+    val mutable = setOf(
+        "parentTaskId",
+        "revisionWallMillis",
+        "revisionLogical",
+        "revisionDeviceId",
+    )
+    check(
+        before.fields.filterNot { it.name in mutable } ==
+            after.fields.filterNot { it.name in mutable },
+    ) {
+        "The retention purge changed a surviving child beyond detaching it"
+    }
+    val previous = BackupRecordFields.of(before)
+    val current = BackupRecordFields.of(after)
+    check(current.nullableString("parentTaskId") == null) {
+        "The retention purge left a surviving child attached"
+    }
+    check(current.long("revisionWallMillis") > previous.long("revisionWallMillis")) {
+        "The retention purge did not advance a surviving child wall revision"
+    }
+    check(current.int("revisionLogical") == previous.int("revisionLogical") + 1) {
+        "The retention purge did not advance a surviving child logical revision"
+    }
+    check(current.string("revisionDeviceId").isNotBlank()) {
+        "The retention purge wrote an invalid surviving child device revision"
+    }
+}
+
+/** The rows `VaultDatabase.purgeTask` removes for each expired task. */
+private fun retentionPurgeRemovals(
+    verified: List<BackupRecordV1>,
+    taskIds: Set<String>,
+): Set<BackupRecordKey> = verified.asSequence()
+    .filter { record ->
+        when (record.family) {
+            BackupRecordFamily.TASK -> record.identity.single() in taskIds
+            BackupRecordFamily.CHECKLIST_ITEM,
+            BackupRecordFamily.REMINDER,
+            BackupRecordFamily.ATTACHMENT,
+            BackupRecordFamily.TIME_ENTRY,
+            -> BackupRecordFields.of(record).string("taskId") in taskIds
+            BackupRecordFamily.ACTIVITY_ENTRY ->
+                BackupRecordFields.of(record).nullableString("taskId")
+                    ?.let { it in taskIds } == true
+            BackupRecordFamily.NOTE ->
+                BackupRecordFields.of(record).nullableString("taskId")
+                    ?.let { it in taskIds } == true
+            BackupRecordFamily.TASK_TAG -> record.identity.first() in taskIds
+            BackupRecordFamily.TASK_DEPENDENCY -> record.identity.any { it in taskIds }
+            else -> false
+        }
+    }
+    .map { BackupRecordKey(it) }
+    .toSet()
+
+/** One blob-bearing attachment a retention purge removed, and the identity of the retired row it must leave behind. */
+private data class PurgedAttachmentBlobSet(
+    val key: BackupRecordKey,
+    val attachment: BackupRecordV1,
+    val ownerTaskId: String,
+)
+
+/**
+ * The retired-blob-set identity a purge writes for each blob-bearing
+ * attachment it removes.
+ *
+ * Derived from the purged attachments' own `blobSetId`, not reused from
+ * [retentionPurgeRemovals]: a blob set is retired by that identity alone, so
+ * this is the only fact that may license a new `RETIRED_BLOB_SET` row.
+ */
+private fun purgedAttachmentBlobSets(
+    verified: List<BackupRecordV1>,
+    purgedTaskIds: Set<String>,
+): List<PurgedAttachmentBlobSet> = verified.asSequence()
+    .filter { it.family == BackupRecordFamily.ATTACHMENT }
+    .mapNotNull { attachment ->
+        val fields = BackupRecordFields.of(attachment)
+        val taskId = fields.string("taskId")
+        val blobSetId = fields.nullableString("blobSetId")
+        if (taskId !in purgedTaskIds || blobSetId == null) {
+            null
+        } else {
+            PurgedAttachmentBlobSet(
+                key = BackupRecordKey(BackupRecordFamily.RETIRED_BLOB_SET, listOf(blobSetId)),
+                attachment = attachment,
+                ownerTaskId = taskId,
+            )
+        }
+    }
+    .toList()
+
+/**
+ * Proves each retired blob set the purge is allowed to write actually
+ * describes the attachment it replaced.
+ *
+ * The purge's exact wall-clock instant is not knowable from here — it runs
+ * on the activating device's clock, not the verifier's — so this checks only
+ * what is deterministic: the retired chunk count matches the purged
+ * attachment's, the row carries no revision history (a retired blob set is
+ * created once, by construction), its own two timestamp fields agree with
+ * each other, it is not from the future relative to [now], it is late enough
+ * that its owning task really was eligible for purge by then, and every
+ * blob set retired by the one purge transaction shares one instant.
+ */
+private fun checkRetiredBlobSets(
+    purgedBlobSets: List<PurgedAttachmentBlobSet>,
+    actualByKey: Map<BackupRecordKey, BackupRecordV1>,
+    purgedTasks: Map<String, BackupRecordV1>,
+    now: () -> Instant,
+) {
+    val retiredInstants = mutableSetOf<Long>()
+    purgedBlobSets.forEach { purged ->
+        val retired = checkNotNull(actualByKey[purged.key]) {
+            "The retention purge removed an attachment without retiring its blob set"
+        }
+        val attachmentFields = BackupRecordFields.of(purged.attachment)
+        val retiredFields = BackupRecordFields.of(retired)
+        check(retiredFields.int("chunkCount") == attachmentFields.int("chunkCount")) {
+            "A retired blob set does not describe the attachment it replaced"
+        }
+        check(retiredFields.int("revisionLogical") == 0) {
+            "A retention purge retired a blob set with a revised history"
+        }
+        val retiredAt = retiredFields.long("retiredAtEpochMillis")
+        check(retiredAt == retiredFields.long("revisionWallMillis")) {
+            "A retired blob set's retirement instant does not match its own revision"
+        }
+        check(retiredAt <= now().toEpochMilli()) {
+            "A retired blob set's retirement instant is in the future"
+        }
+        val ownerDeletedAt = BackupRecordFields.of(purgedTasks.getValue(purged.ownerTaskId))
+            .nullableLong("deletedAtEpochMillis")
+        check(
+            ownerDeletedAt != null &&
+                TrashPolicy.isEligibleForPurge(
+                    Instant.ofEpochMilli(ownerDeletedAt),
+                    Instant.ofEpochMilli(retiredAt),
+                ),
+        ) {
+            "A retired blob set predates its owning task's retention eligibility"
+        }
+        retiredInstants += retiredAt
+    }
+    check(retiredInstants.size <= 1) {
+        "A single retention purge retired blob sets at different instants"
     }
 }

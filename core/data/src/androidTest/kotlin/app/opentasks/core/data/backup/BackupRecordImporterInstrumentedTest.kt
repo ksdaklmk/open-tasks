@@ -1161,6 +1161,55 @@ class BackupRecordImporterInstrumentedTest {
     }
 
     /**
+     * The retention purge also retires any blob-bearing attachment it
+     * removes; verification must accept that extra write as attributed
+     * drift instead of rejecting it, and Task 7 (encrypted vault import)
+     * reuses this same verifier for its own staged opens.
+     */
+    @Test
+    fun verificationAcceptsAndReportsTheRetentionPurgeOfABlobBearingAttachment() = runBlocking {
+        val request = request(
+            expiredTrashSnapshot(
+                attachmentBlobSetId = EXPIRED_ATTACHMENT_BLOB_SET_ID,
+                attachmentChunkCount = 2,
+            ),
+            expectedGeneration = BackupGeneration(12),
+        )
+        importer.importInto(staging(), request)
+        closeStaging()
+        installContentKey()
+
+        val verified = withTimeout(TIMEOUT_MILLIS) {
+            verifier().verify(
+                slot = slot,
+                expectedVaultId = VaultId(VAULT_ID),
+                expectedGeneration = BackupGeneration(12),
+                expectedCapture = request.expectedCapture(),
+            )
+        }
+
+        assertEquals(BackupGeneration(12), verified.recoveredGeneration)
+        assertEquals(BackupGeneration(13), verified.activationGeneration)
+        assertEquals(1, verified.retentionPurge.purgedTaskCount)
+        assertEquals(EXPIRED_TRASH_RECORDS, verified.retentionPurge.removedRecordCount)
+        // One more written record than the blob-less case: the retired blob set.
+        assertEquals(EXPIRED_TRASH_RECORDS + 3, verified.retentionPurge.journalEntryCount)
+
+        reopenStaging()
+        assertEquals(
+            verified.activationGeneration.value,
+            staging().backupStateDao().require(VAULT_ID).currentGeneration,
+        )
+        assertEquals(1, importedCount(staging(), BackupRecordFamily.RETIRED_BLOB_SET))
+        val retired = checkNotNull(
+            staging().workspaceDao().getRetiredBlobSet(EXPIRED_ATTACHMENT_BLOB_SET_ID),
+        ) { "expected the purged attachment's blob set to be retired" }
+        assertEquals(2, retired.chunkCount)
+        assertEquals(0, retired.revisionLogical)
+        assertEquals(retired.retiredAtEpochMillis, retired.revisionWallMillis)
+    }
+
+    /**
      * The same purge, judged by a clock under which that task was not yet
      * eligible: drift verification cannot attribute to expired trash is drift
      * that must fail closed.
@@ -1688,7 +1737,10 @@ class BackupRecordImporterInstrumentedTest {
      * normal repository purges it the moment it opens, together with every
      * child record that purge cascades through.
      */
-    private fun expiredTrashSnapshot(): BackupSnapshotPayloadV1 {
+    private fun expiredTrashSnapshot(
+        attachmentBlobSetId: String? = null,
+        attachmentChunkCount: Int = 0,
+    ): BackupSnapshotPayloadV1 {
         val complete = completeVaultSnapshot()
         return complete.copy(
             records = complete.records + listOf(
@@ -1744,8 +1796,8 @@ class BackupRecordImporterInstrumentedTest {
                     mimeType = "application/pdf",
                     byteCount = 8,
                     contentHash = CONTENT_HASH,
-                    blobSetId = null,
-                    chunkCount = 0,
+                    blobSetId = attachmentBlobSetId,
+                    chunkCount = attachmentChunkCount,
                     deletedAtEpochMillis = null,
                     revisionWallMillis = 1,
                     revisionLogical = 0,
@@ -2131,6 +2183,7 @@ class BackupRecordImporterInstrumentedTest {
         const val COMPLETE_PREREQUISITE_ID = "task-complete-prerequisite"
         const val EXPIRED_TASK_ID = "task-expired"
         const val EXPIRED_CHILD_TASK_ID = "task-expired-child"
+        const val EXPIRED_ATTACHMENT_BLOB_SET_ID = "blob-set-expired"
 
         /** The task itself plus every child record `purgeTask` cascades through. */
         const val EXPIRED_TRASH_RECORDS = 8
