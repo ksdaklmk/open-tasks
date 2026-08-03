@@ -2,7 +2,12 @@
 
 - Last updated: 3 August 2026
 - Branch: `main`
-- Session status: **Stage 4 is complete and qualified. Task 14's one-shot
+- Session status: **Stage 5 is in progress: Tasks 1–2 of the 13-task plan
+  (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
+  collection command) are complete and independently reviewed at
+  `eb343cb`. Execution is paused before Task 3 at the user's request;
+  resume via the checkpoint below. Stage 4 is complete and qualified.
+  Task 14's one-shot
   credentialed live attachment gate passed in 606.947 s; its preserved harness
   is `a813c41` and must not be rerun. The final disposable six-module gate was
   282 tests, 0 failures/errors, and exactly two expected skips: the
@@ -11,15 +16,19 @@
   post-Stage-4. Forced-fresh debug/unit/lint/APK, release, schema-drift,
   deterministic-fixture, diff, release-scope, and production-logging gates
   passed. The authoritative qualification is
-  `docs/qualification/stage4-notes-activity-attachments-search.md`. Stage 5
-  starts with two recorded limits: no retired-set index for purged attachment
-  blobs in frozen Room v8, and no product caller for
-  `AttachmentBlobCoordinator.resume()` (24-hour expiry, no in-row progress).
+  `docs/qualification/stage4-notes-activity-attachments-search.md`. Of the
+  two recorded Stage 4 limits, the retired-set index is now discharged by
+  Stage 5 Tasks 1–2 (Room v9); the second — no product caller for
+  `AttachmentBlobCoordinator.resume()` (24-hour expiry, no in-row
+  progress) — remains until Stage 5 Task 4 lands its silent auto-resume.
   Samsung Remote Test Lab RTL remains External-blocked pending the user's
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `b3da5d2` (`test: skip Pixel
+- Current product source implementation point: `eb343cb` (`fix: accept a
+  purge's own retired blob set as verified drift`), the tip of the Stage 5
+  Task 1–2 range `33ea364..eb343cb`. The prior Stage 4 implementation
+  point is `b3da5d2` (`test: skip Pixel
   fold harness transition`), the tip of the qualified Stage 4 Task 1–13,
   whole-branch-review, and Task 14 gate-fix range `6538dca..b3da5d2`. The
   prior adaptive-slice closure point
@@ -58,6 +67,50 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 5 Tasks 1–2 checkpoint — 3 August 2026
+
+Stage 5 execution follows the approved design
+`docs/superpowers/specs/2026-08-03-stage-5-platform-features-design.md` and
+plan `docs/superpowers/plans/2026-08-03-stage-5-platform-features-plan.md`
+(committed `981d8c1`, `1cd8cf4`), subagent-driven directly on `main` from
+base `1cd8cf4` with an independent review per task. The execution ledger is
+`.superpowers/sdd/2026-08-03-stage-5-platform-features-plan/progress.md`.
+
+- Task 1 (`33ea364`, fix `32a8a6f`) added the Room v9 `retired_blob_sets`
+  table with exported `9.json`, a non-destructive additive migration and
+  preservation test, `RetiredBlobSet` in `WorkspaceSnapshot` (retirement
+  time then id ordering), and same-transaction retirement of every
+  blob-bearing attachment row a purge removes. Review closed after one fix
+  round, which added trash-purge and tombstoned-with-blob coverage and
+  extended retirement to a third, review-found path: `restoreTaskStatus`'s
+  undo-of-generated-occurrence branch, whose in-memory arm previously
+  failed to remove the occurrence's attachments at all.
+- Task 2 (`35d54c3`, fix `eb343cb`) added the `RETIRED_BLOB_SET` backup
+  family end-to-end after `NOTE` (the reviewer verified no family ordinal
+  is persisted anywhere): strict mutation-codec validation (0..25 chunks),
+  journal emission in both engines via the snapshot diff, recovery import,
+  capture-DAO attribution, staged-vault verification, deterministic Stage 2
+  fixture regeneration, and the idempotent `MarkRetiredBlobSetCollected`
+  command (absent row → Success, no journal write, no Undo). The verifier's
+  settle-purge accounting was extracted as a pure, unit-tested rule that
+  accepts exactly the purge's own blobSetId-matched retired rows as drift
+  and fails closed on anything else — load-bearing for Task 7's import
+  reuse. The retired-row `revisionLogical = 0` decision was examined and
+  upheld. Review approved with zero Critical or Important findings.
+- No device suite ran; all new instrumented tests are compile-verified and
+  execute at the Task 13 connected gate. Notable deferred minors in the
+  ledger: the verifier's zero-slack `retiredAt <= now` check (a backwards
+  clock step between settle and verification would reject a legitimate
+  recovery), no Room-side execution of the collect arm before Task 13, and
+  the pre-existing in-memory `restoreTaskStatus` gap that still leaves a
+  generated occurrence's activity and time entries uncleaned.
+
+Resume by re-entering superpowers:subagent-driven-development with the plan
+and ledger above, dispatching Task 3 (GC closure over retired sets) from
+base `eb343cb`. Tasks 3–13 (GC closure, auto-resume, `.otvault` format/
+export/import, CSV, widget, app lock, input, calendar, qualification) have
+not started.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
@@ -2059,7 +2112,9 @@ product flows are implemented. Remote merge remains absent by design.
 The credential-free GitHub Actions matrix and release gate remain repaired;
 the queued dependency updates are resolved in the verified 30 July
 maintenance commit. The approved Stage 3, adaptive-slice, and Stage 4
-execution authorities are closed. Stage 5 is next. Samsung RTL, native fold
+execution authorities are closed. Stage 5 is in progress under its approved
+design and plan: Tasks 1–2 of 13 are complete and reviewed, paused before
+Task 3. Samsung RTL, native fold
 continuity, and broader two-installation live recovery evidence remain
 post-Stage-4/external work and are not implied by Stage 4 qualification.
 
@@ -2107,7 +2162,7 @@ recorded above.
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Done | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
 | 4 | Notes, activity, cloud attachments, and search | Done (qualified) | Notes/activity/search and attachment lifecycle/product flows are implemented; native fold and broader two-installation evidence remain post-Stage-4 |
-| 5 | Remaining platform features | Next | Import/export, widget, app lock, input, and calendar features use the final local schema |
+| 5 | Remaining platform features | In progress (Tasks 1–2 of 13 complete) | Import/export, widget, app lock, input, and calendar features use the final local schema |
 | 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
 The dependency chain is strict:
@@ -2118,9 +2173,12 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Start Stage 5 using the current live backlog. Preserve Stage 4 as a closed
-   authority, keep Samsung RTL External-blocked, and retain native fold and
-   broader two-installation live recovery evidence as post-Stage-4 work.
+1. Resume Stage 5 at Task 3 (GC closure over retired sets) from base
+   `eb343cb`, re-entering superpowers:subagent-driven-development with the
+   committed plan and the execution ledger named in the Stage 5 checkpoint.
+   Preserve Stage 4 as a closed authority, keep Samsung RTL
+   External-blocked, and retain native fold and broader two-installation
+   live recovery evidence as post-Stage-4 work.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -2225,11 +2283,11 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-Start Stage 5 from the current live backlog. Preserve Room as the sole live
-structured-data authority, treat the Stage 2 Android package as supplementary
-recovery input rather than upload evidence, and retain the External-blocked
-Samsung RTL rows plus native fold and broader two-installation recovery
-evidence as post-Stage-4 work.
+Resume Stage 5 at Task 3 from the checkpoint above. Preserve Room as the
+sole live structured-data authority, treat the Stage 2 Android package as
+supplementary recovery input rather than upload evidence, and retain the
+External-blocked Samsung RTL rows plus native fold and broader
+two-installation recovery evidence as post-Stage-4 work.
 
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly

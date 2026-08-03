@@ -85,12 +85,14 @@ race KSP while release Hilt sources are generated.
   activity body 500 characters and 500 entries per task or project; 50 search
   results; 100 active attachments per task; 100 MiB per attachment, 4 MiB
   chunks, at most 25 chunks; sessions expire after 24 hours; and cache
-  `min(128 MiB, 5% available storage)`. Room v8 is frozen: any durable
-  retired-set index requires a later migration and schema.
+  `min(128 MiB, 5% available storage)`. Room v9 adds the durable
+  `retired_blob_sets` index and its `RETIRED_BLOB_SET` backup family
+  (Stage 5); any further durable schema change requires a later migration
+  and exported schema.
 - `AttachmentBlobCoordinator.resume()` intentionally has no product caller;
   retain it and its tests. Do not add in-row transfer progress without a
   durable product contract.
-- Room v8 is the remote-backup persistence authority. An active runtime is
+- Room v9 is the remote-backup persistence authority. An active runtime is
   bound to one active vault slot and must stop when that slot is replaced,
   ownership is lost, or the lineage terminates.
 - Ownership claims, publications, recovery bases, and the terminal tombstone

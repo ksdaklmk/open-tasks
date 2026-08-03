@@ -15,7 +15,7 @@ updates records and appends ordered backup-journal entries in one transaction.
 The current foundation seeds the sample workspace into SQLCipher once, then
 treats Room as the authority for task, timer/time-entry, Bin, search, and
 backup-journal state.
-Room v8 assigns one local generation to each mutation-bearing accepted
+Room v9 assigns one local generation to each mutation-bearing accepted
 command and appends its ordered `BackupJournal` rows in the same transaction.
 The additive v7→v8 migration adds the first-class `notes` table, the
 finalised attachment metadata shape (dropping the obsolete keep-offline
@@ -39,9 +39,17 @@ noncanonical paths and never follows symlinks. Attachment garbage collection,
 attachment-only destructive deletion, and terminal attachment cleanup are
 bounded, ownership-authenticated, crash-resumable, and chunk-before-manifest.
 Runtime construction, share staging, and product flows are implemented;
-attachment-byte failure leaves structured Room work available. Room v8 is the
-Stage 4 schema freeze: a retired-set index or other durable change requires a
-later migration with an exported schema.
+attachment-byte failure leaves structured Room work available. The additive
+v8→v9 migration (Stage 5) adds the durable `retired_blob_sets` index: every
+path that permanently deletes a blob-bearing attachment record — permanent
+task deletion, expired-Bin purge, and the undo of a completion that
+generated a recurring occurrence — retires the blob set in the same
+transaction. Retired rows are a backed-up `RETIRED_BLOB_SET` record family
+that survives recovery; `MarkRetiredBlobSetCollected` releases a row
+idempotently after remote cleanup; staged-vault verification accepts
+exactly a settle purge's own retired rows as drift and fails closed on any
+other. Any further durable schema change requires a later migration with an
+exported schema.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
 legacy format-0 journal entries, and leaves `sync_operations` read-only until a
