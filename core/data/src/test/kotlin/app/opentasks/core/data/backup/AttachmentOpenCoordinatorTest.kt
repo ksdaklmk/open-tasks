@@ -30,6 +30,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AttachmentOpenCoordinatorTest {
@@ -50,6 +51,35 @@ class AttachmentOpenCoordinatorTest {
 
         assertEquals(AttachmentOpenResult.Opened(11), result)
         assertArrayEquals("hello world".toByteArray(), output.toByteArray())
+    }
+
+    @Test
+    fun openChunksDeliversPlaintextInOrderThroughTheCallback() = runOpenTest { cache ->
+        val fixture = fixture(listOf("hello ".toByteArray(), "world".toByteArray()))
+        val delivered = mutableListOf<Pair<Int, ByteArray>>()
+
+        val result = coordinator(cache).openChunks(fixture.store, fixture.attachment) { index, plaintext ->
+            delivered += index to plaintext.copyOf()
+        }
+
+        assertEquals(AttachmentOpenResult.Opened(11), result)
+        assertEquals(listOf(0, 1), delivered.map { it.first })
+        assertArrayEquals("hello ".toByteArray(), delivered[0].second)
+        assertArrayEquals("world".toByteArray(), delivered[1].second)
+    }
+
+    @Test
+    fun openChunksCorruptManifestFailsClosedBeforeAnyCallback() = runOpenTest { cache ->
+        val fixture = fixture(listOf("bytes".toByteArray()))
+        val delivered = mutableListOf<Int>()
+
+        val result = coordinator(cache).openChunks(
+            fixture.store,
+            fixture.attachment.copy(byteCount = 6),
+        ) { index, _ -> delivered += index }
+
+        assertEquals(corrupt(), result)
+        assertTrue(delivered.isEmpty())
     }
 
     @Test

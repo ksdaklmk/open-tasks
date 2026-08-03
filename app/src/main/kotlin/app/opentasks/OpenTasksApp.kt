@@ -185,6 +185,7 @@ fun OpenTasksApp(
     backupViewModel: BackupViewModel = viewModel(),
     encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
     attachmentViewModel: AttachmentIntakeViewModel = viewModel(),
+    vaultTransferViewModel: VaultTransferViewModel = viewModel(),
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -209,6 +210,15 @@ fun OpenTasksApp(
             attachmentViewModel.setupRequired.collectAsStateWithLifecycle()
         val attachmentCacheUsage by
             attachmentViewModel.cacheUsageBytes.collectAsStateWithLifecycle()
+        val vaultExportInProgress by
+            vaultTransferViewModel.exportInProgress.collectAsStateWithLifecycle()
+        val vaultExportOutcome by
+            vaultTransferViewModel.exportOutcome.collectAsStateWithLifecycle()
+        val vaultExportDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/octet-stream"),
+        ) { uri ->
+            vaultTransferViewModel.onExportDocumentSelected(uri)
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val accessibilityManager = LocalAccessibilityManager.current
         val showNavigationLabels =
@@ -225,6 +235,11 @@ fun OpenTasksApp(
         }
         LaunchedEffect(encryptedBackupViewModel, onOpenRecovery) {
             for (ignored in encryptedBackupViewModel.recoveryEffects) onOpenRecovery()
+        }
+        LaunchedEffect(vaultTransferViewModel) {
+            for (ignored in vaultTransferViewModel.createDocumentRequests) {
+                vaultExportDocumentLauncher.launch("open_tasks_vault.otvault")
+            }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
@@ -992,6 +1007,12 @@ fun OpenTasksApp(
                                     attachmentCacheUsageBytes = attachmentCacheUsage,
                                     onDeleteAttachmentContent =
                                         attachmentViewModel::deleteRemoteContent,
+                                    vaultExportInProgress = vaultExportInProgress,
+                                    vaultExportOutcome = vaultExportOutcome,
+                                    onExportVaultPassphraseConfirmed =
+                                        vaultTransferViewModel::beginExport,
+                                    onDismissVaultExportOutcome =
+                                        vaultTransferViewModel::dismissOutcome,
                                 )
                             }
                         },

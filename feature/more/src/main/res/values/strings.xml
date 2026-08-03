@@ -187,4 +187,20 @@
     <string name="recovery_failure_terminated">This backup history was deleted and cannot be restored.</string>
     <string name="recovery_failure_ambiguous">The backup state is ambiguous. Recovery stopped safely.</string>
     <string name="recovery_failure_local_key">This device cannot open the local recovery key.</string>
+
+    <string name="vault_transfer_heading">Vault transfer</string>
+    <string name="vault_transfer_explanation">Export the whole vault — every record and attachment — as one encrypted file you can move to another device.</string>
+    <string name="vault_export_action">Export encrypted vault</string>
+    <string name="vault_export_in_progress">Exporting the vault…</string>
+    <plurals name="vault_export_completed">
+        <item quantity="one">Vault exported with %1$d attachment.</item>
+        <item quantity="other">Vault exported with %1$d attachments.</item>
+    </plurals>
+    <string name="vault_export_missing_attachments">These attachments could not be included, so nothing was exported: %1$s</string>
+    <string name="vault_export_dismiss_action">Dismiss</string>
+    <string name="vault_export_sheet_title">Export encrypted vault</string>
+    <string name="vault_export_sheet_explanation">This passphrase becomes the archive\'s recovery passphrase. Whoever imports this file will need it to restore the vault, and it cannot be recovered if you forget it.</string>
+    <string name="vault_export_passphrase_label">Export passphrase</string>
+    <string name="vault_export_confirmation_label">Confirm export passphrase</string>
+    <string name="vault_export_submit_action">Export vault</string>
 </resources>

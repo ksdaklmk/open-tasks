@@ -137,6 +137,10 @@ fun MoreScreen(
     onDisconnectRemoteBackup: () -> Unit = {},
     onDeleteRemoteHistory: (String) -> Unit = {},
     onDeleteAttachmentContent: (String) -> Unit = {},
+    vaultExportInProgress: Boolean = false,
+    vaultExportOutcome: VaultExportOutcome? = null,
+    onExportVaultPassphraseConfirmed: (String) -> Unit = {},
+    onDismissVaultExportOutcome: () -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -243,6 +247,10 @@ fun MoreScreen(
                 onDisconnect = onDisconnectRemoteBackup,
                 onDeleteHistory = onDeleteRemoteHistory,
                 onDeleteAttachmentContent = onDeleteAttachmentContent,
+                vaultExportInProgress = vaultExportInProgress,
+                vaultExportOutcome = vaultExportOutcome,
+                onExportVaultPassphraseConfirmed = onExportVaultPassphraseConfirmed,
+                onDismissVaultExportOutcome = onDismissVaultExportOutcome,
                 onBack = closeBackupRecovery,
                 modifier = modifier,
             )

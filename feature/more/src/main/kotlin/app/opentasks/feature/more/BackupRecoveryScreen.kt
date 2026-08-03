@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -68,6 +69,19 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+/**
+ * The outcome of one whole-vault export attempt, ready for the transfer
+ * section to show. [Failed.reason] is already resolved, generic UK copy —
+ * never a resource ID — so it is rendered as-is.
+ */
+sealed interface VaultExportOutcome {
+    data class Completed(val byteCount: Long, val attachmentCount: Int) : VaultExportOutcome
+
+    data class MissingAttachmentBytes(val displayNames: List<String>) : VaultExportOutcome
+
+    data class Failed(val reason: String) : VaultExportOutcome
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRecoveryScreen(
@@ -84,6 +98,8 @@ fun BackupRecoveryScreen(
     passphraseChangeDisclosureVisible: Boolean = false,
     canReprepareInitialPackage: Boolean = false,
     attachmentCacheUsageBytes: Long = 0L,
+    vaultExportInProgress: Boolean = false,
+    vaultExportOutcome: VaultExportOutcome? = null,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -101,11 +117,14 @@ fun BackupRecoveryScreen(
     onDisconnect: () -> Unit = {},
     onDeleteHistory: (String) -> Unit = {},
     onDeleteAttachmentContent: (String) -> Unit = {},
+    onExportVaultPassphraseConfirmed: (String) -> Unit = {},
+    onDismissVaultExportOutcome: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showPassphraseSheet by remember { mutableStateOf(false) }
     var remoteSecretAction by remember { mutableStateOf<RemoteSecretAction?>(null) }
+    var showVaultExportSheet by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -234,6 +253,21 @@ fun BackupRecoveryScreen(
                 ) {
                     Text(stringResource(R.string.backup_system_settings_action))
                 }
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                Text(
+                    stringResource(R.string.vault_transfer_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .testTag("vault-transfer-heading")
+                        .semantics { heading() },
+                )
+                Spacer(Modifier.height(12.dp))
+                VaultTransferContent(
+                    inProgress = vaultExportInProgress,
+                    outcome = vaultExportOutcome,
+                    onExportClick = { showVaultExportSheet = true },
+                    onDismissOutcome = onDismissVaultExportOutcome,
+                )
             }
         }
     }
@@ -245,6 +279,16 @@ fun BackupRecoveryScreen(
             onPrepare = { passphrase ->
                 showPassphraseSheet = false
                 onPrepare(passphrase)
+            },
+        )
+    }
+    if (showVaultExportSheet) {
+        VaultExportPassphraseSheet(
+            validatePassphrase = validatePassphrase,
+            onDismiss = { showVaultExportSheet = false },
+            onExport = { passphrase ->
+                showVaultExportSheet = false
+                onExportVaultPassphraseConfirmed(passphrase)
             },
         )
     }
@@ -310,6 +354,72 @@ private fun CloudAttachmentContent(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * The whole-vault export action and its most recent progress or outcome.
+ *
+ * The action stays tappable throughout: re-entrancy is the exporter's own
+ * concern, not something this row enforces by hiding itself.
+ */
+@Composable
+private fun VaultTransferContent(
+    inProgress: Boolean,
+    outcome: VaultExportOutcome?,
+    onExportClick: () -> Unit,
+    onDismissOutcome: () -> Unit,
+) {
+    Text(
+        stringResource(R.string.vault_transfer_explanation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(12.dp))
+    BackupAction(R.string.vault_export_action, "vault-export", onExportClick)
+    if (inProgress) {
+        Spacer(Modifier.height(12.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val description = stringResource(R.string.vault_export_in_progress)
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(24.dp)
+                    .semantics { contentDescription = description },
+                strokeWidth = 3.dp,
+            )
+            Text(description, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+    if (outcome != null) {
+        Spacer(Modifier.height(12.dp))
+        Text(
+            when (outcome) {
+                is VaultExportOutcome.Completed -> pluralStringResource(
+                    R.plurals.vault_export_completed,
+                    outcome.attachmentCount,
+                    outcome.attachmentCount,
+                )
+                is VaultExportOutcome.MissingAttachmentBytes -> stringResource(
+                    R.string.vault_export_missing_attachments,
+                    outcome.displayNames.joinToString(", "),
+                )
+                is VaultExportOutcome.Failed -> outcome.reason
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.testTag("vault-export-outcome"),
+        )
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = onDismissOutcome,
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("vault-export-dismiss"),
+        ) {
+            Text(stringResource(R.string.vault_export_dismiss_action))
+        }
     }
 }
 
@@ -901,6 +1011,161 @@ private fun RecoveryPassphraseSheet(
                         .testTag("backup-submit"),
                 ) {
                     Text(stringResource(R.string.backup_submit_action))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A fresh passphrase and confirmation for one vault export, following the
+ * same shape as [RecoveryPassphraseSheet]. It is a separate entry rather than
+ * a shared one because this passphrase and the Android package's recovery
+ * passphrase protect independent artefacts: changing one must never read as
+ * changing the other.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VaultExportPassphraseSheet(
+    validatePassphrase: (String, String) -> RecoveryPassphraseValidation,
+    onDismiss: () -> Unit,
+    onExport: (String) -> Unit,
+) {
+    var passphrase by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var validation by remember {
+        mutableStateOf<RecoveryPassphraseValidation?>(null)
+    }
+    val focusManager = LocalFocusManager.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = {
+        passphrase = ""
+        confirmation = ""
+        validation = null
+        onDismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = dismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
+            Text(
+                stringResource(R.string.vault_export_sheet_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.vault_export_sheet_explanation),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = passphrase,
+                onValueChange = {
+                    passphrase = it
+                    validation = null
+                },
+                label = { Text(stringResource(R.string.vault_export_passphrase_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Next,
+                ),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(FocusDirection.Next) },
+                ),
+                isError = validation is RecoveryPassphraseValidation.TooShort ||
+                    validation is RecoveryPassphraseValidation.TooLong,
+                supportingText = if (
+                    validation is RecoveryPassphraseValidation.TooShort ||
+                    validation is RecoveryPassphraseValidation.TooLong
+                ) {
+                    {
+                        Text(stringResource(R.string.backup_passphrase_length_error))
+                    }
+                } else {
+                    null
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("vault-export-passphrase"),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = confirmation,
+                onValueChange = {
+                    confirmation = it
+                    validation = null
+                },
+                label = { Text(stringResource(R.string.vault_export_confirmation_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { focusManager.moveFocus(FocusDirection.Next) },
+                ),
+                isError = validation is RecoveryPassphraseValidation.ConfirmationMismatch,
+                supportingText = if (
+                    validation is RecoveryPassphraseValidation.ConfirmationMismatch
+                ) {
+                    {
+                        Text(stringResource(R.string.backup_passphrase_mismatch_error))
+                    }
+                } else {
+                    null
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("vault-export-confirmation"),
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(
+                    onClick = dismiss,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("vault-export-cancel"),
+                ) {
+                    Text(stringResource(R.string.backup_cancel_action))
+                }
+                Button(
+                    onClick = {
+                        when (
+                            val result = validatePassphrase(passphrase, confirmation)
+                        ) {
+                            RecoveryPassphraseValidation.Valid -> {
+                                val submittedPassphrase = passphrase
+                                passphrase = ""
+                                confirmation = ""
+                                validation = null
+                                onExport(submittedPassphrase)
+                            }
+                            else -> validation = result
+                        }
+                    },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("vault-export-submit"),
+                ) {
+                    Text(stringResource(R.string.vault_export_submit_action))
                 }
             }
         }

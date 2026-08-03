@@ -154,6 +154,41 @@ class AttachmentRuntime(
     }
 
     /**
+     * Streams one attachment's plaintext to [onChunk], verified exactly like
+     * [open] but delivered chunk-by-chunk instead of into an [OutputStream].
+     *
+     * Built for vault export: the caller learns per-chunk lengths and digests
+     * without this runtime ever writing an [OutputStream] itself. `false`
+     * means the bytes are unfetchable right now — a cache miss with no
+     * session, a refused session, or a corrupt or absent manifest all collapse
+     * to the one outcome an export cares about.
+     */
+    suspend fun readChunksForExport(
+        attachment: Attachment,
+        onChunk: suspend (chunkIndex: Int, plaintext: ByteArray) -> Unit,
+    ): Boolean {
+        val configuration = activeConfiguration() ?: return false
+        val key = openContentKey() ?: return false
+        return try {
+            when (val opened = session(configuration)) {
+                is AttachmentSessionResult.Unavailable -> false
+                is AttachmentSessionResult.Opened -> opened.session.use { session ->
+                    val result = AttachmentOpenCoordinator(
+                        cache = cache,
+                        manifestCodec = manifestCodec,
+                        codec = codec,
+                        lineageId = configuration.lineageId,
+                        contentKey = { key },
+                    ).openChunks(session.blobStore, attachment, onChunk)
+                    result is AttachmentOpenResult.Opened
+                }
+            }
+        } finally {
+            key.close()
+        }
+    }
+
+    /**
      * Abandons intake sessions this slot never finished.
      *
      * The coordinator authenticates ownership before it deletes anything, so

@@ -14,6 +14,7 @@ import app.opentasks.backup.DefaultRemoteBackupLifecycleCoordinator
 import app.opentasks.backup.DefaultRemoteBackupRunner
 import app.opentasks.backup.DefaultRemoteBackupRuntime
 import app.opentasks.backup.EncryptedBackupActionResult
+import app.opentasks.backup.OtVaultExporter
 import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
@@ -48,6 +49,7 @@ import app.opentasks.core.data.backup.DefaultLocalBackupObjectStore
 import app.opentasks.core.data.backup.DefaultOwnershipChainStore
 import app.opentasks.core.data.backup.DefaultPublicationCatalog
 import app.opentasks.core.data.backup.DefaultRemoteBackupCoordinator
+import app.opentasks.core.data.backup.OtVaultCodec
 import app.opentasks.core.data.backup.OwnershipClaimCodec
 import app.opentasks.core.data.backup.PortableBackupCodec
 import app.opentasks.core.data.backup.PortablePackageCodec
@@ -198,6 +200,34 @@ object AppModule {
     fun providePortableBackupPublisher(
         services: ActiveVaultServices,
     ): PortableBackupPublisher = services.requireSession().portableBackupPublisher
+
+    /**
+     * Built fresh per resolution rather than held on the session: an export is
+     * a one-shot, on-demand action, not a service the active slot needs to
+     * stop when replaced. It reads the active slot's own captures and
+     * attachment runtime, so nothing here outlives that slot either.
+     */
+    @Provides
+    fun provideOtVaultExporter(
+        runtime: LocalVaultRuntime,
+        crypto: VaultCrypto,
+        codec: AuthenticatedCloudObjectCodec,
+        services: ActiveVaultServices,
+    ): OtVaultExporter = OtVaultExporter(
+        vaultId = runtime.vaultId,
+        captureSource = runtime.backupCaptureSource,
+        vaultRepository = runtime.repository,
+        contentKeyStore = runtime.contentKeyStore,
+        codec = OtVaultCodec(codec),
+        prepareEnvelope = RecoveryEnvelopePreparer(
+            vaultId = runtime.vaultId,
+            keyStore = runtime.contentKeyStore,
+            crypto = crypto,
+        )::prepare,
+        readChunksForExport = { attachment, onChunk ->
+            services.requireSession().attachmentRuntime.readChunksForExport(attachment, onChunk)
+        },
+    )
 
     @Provides
     fun provideRecoveryPassphraseChanger(

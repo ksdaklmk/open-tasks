@@ -40,6 +40,28 @@ class AttachmentOpenCoordinator(
         store: AttachmentBlobStore,
         attachment: Attachment,
         destination: OutputStream,
+    ): AttachmentOpenResult = stream(store, attachment) { _, plaintext ->
+        destination.write(plaintext)
+    }
+
+    /**
+     * Streams the same verified chunks as [open], delivering plaintext through
+     * [onChunk] in ascending chunk-index order instead of an [OutputStream]
+     * sink. A result other than [AttachmentOpenResult.Opened] means [onChunk]
+     * may not have been called for every chunk.
+     */
+    suspend fun openChunks(
+        store: AttachmentBlobStore,
+        attachment: Attachment,
+        onChunk: suspend (chunkIndex: Int, plaintext: ByteArray) -> Unit,
+    ): AttachmentOpenResult = stream(store, attachment) { index, plaintext ->
+        onChunk(index, plaintext)
+    }
+
+    private suspend fun stream(
+        store: AttachmentBlobStore,
+        attachment: Attachment,
+        sink: suspend (chunkIndex: Int, plaintext: ByteArray) -> Unit,
     ): AttachmentOpenResult {
         val blobSetId = attachment.blobSetId ?: return AttachmentOpenResult.Unavailable
         val manifest = when (val result = findManifest(store, blobSetId)) {
@@ -105,7 +127,7 @@ class AttachmentOpenCoordinator(
                     }
                     digest.update(plaintext)
                     try {
-                        destination.write(plaintext)
+                        sink(chunk.index, plaintext)
                     } catch (_: IOException) {
                         return AttachmentOpenResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
                     }
