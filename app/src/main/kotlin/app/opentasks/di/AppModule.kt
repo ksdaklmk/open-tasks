@@ -558,6 +558,7 @@ object AppModule {
                         .map { it.currentGeneration }
                 },
                 expireAttachmentSessions = { attachmentRuntime.expireStaleSessions() },
+                resumeAttachmentSessions = { attachmentRuntime.resumeInterruptedSessions() },
             ),
             remoteBackupRunner = remoteRunner,
             attachmentRuntime = attachmentRuntime,

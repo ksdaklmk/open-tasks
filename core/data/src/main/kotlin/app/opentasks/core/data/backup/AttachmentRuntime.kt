@@ -176,6 +176,29 @@ class AttachmentRuntime(
     }
 
     /**
+     * Resumes intake sessions this slot started but never finished.
+     *
+     * The coordinator re-verifies every occupied chunk and the manifest
+     * before it registers anything, so nothing here trusts a session's
+     * persisted phase; what this adds is refusing to authorize at all when
+     * there is no live provider session to resume through. Callers are
+     * expected to run [expireStaleSessions] first in the same pass, so a
+     * session old enough to abandon is never also a candidate to resume.
+     */
+    suspend fun resumeInterruptedSessions(): Int {
+        val configuration = activeConfiguration() ?: return 0
+        val key = openContentKey() ?: return 0
+        return try {
+            val opened = session(configuration) as? AttachmentSessionResult.Opened ?: return 0
+            opened.session.use { session ->
+                coordinator(configuration, session, key).resume(session.blobStore)
+            }
+        } finally {
+            key.close()
+        }
+    }
+
+    /**
      * Collects the bytes of blob sets whose tombstone every retained
      * recoverable base already contains.
      *

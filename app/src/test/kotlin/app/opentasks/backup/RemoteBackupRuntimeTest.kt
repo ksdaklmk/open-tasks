@@ -748,6 +748,65 @@ class RemoteBackupRuntimeTest {
         fixture.close()
     }
 
+    /**
+     * `AttachmentBlobCoordinator.resume()` shipped with no product caller;
+     * this ordering is that caller's contract. Both run in the same
+     * coroutine activation starts, and expiring always finishes first, so a
+     * session old enough to abandon is never also offered to resume.
+     */
+    @Test
+    fun activatingTheRuntimeResumesAttachmentSessionsAfterExpiringThem() {
+        val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 4,
+            expireAttachmentSessions = { events += "expire" },
+            resumeAttachmentSessions = { events += "resume" },
+        )
+
+        fixture.runtime.start()
+
+        assertTrue(awaitListSize(events, 2))
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(listOf("expire", "resume"), events)
+        fixture.close()
+    }
+
+    /**
+     * A long-lived process never restarts, so activation alone is not
+     * enough: a session interrupted after the runtime is already up must
+     * still get another resume attempt, and a finished publication run is
+     * that retry point.
+     */
+    @Test
+    fun aCompletedPublicationRunResumesAttachmentSessionsAgain() {
+        val resumes = AtomicInteger()
+        val fixture = runtimeFixture(
+            verifiedGeneration = 4,
+            localGeneration = 5,
+            outcome = RemoteBackupRunResult.Retryable(
+                RemoteBackupFailureCategory.RETRYABLE_PROVIDER,
+            ),
+            resumeAttachmentSessions = { resumes.incrementAndGet() },
+        )
+        val release = CountDownLatch(1)
+        fixture.coordinator.gate = release
+
+        fixture.runtime.start()
+        assertTrue(fixture.scheduler.awaitEvents(2))
+        // Activation itself resumes once, right after expiring.
+        assertTrue(awaitCount(resumes, 1))
+
+        fixture.runtime.requestNow()
+        assertTrue(fixture.coordinator.awaitPasses(1))
+        assertTrue(fixture.awaitRunning(true))
+        release.countDown()
+        assertTrue(fixture.awaitRunning(false))
+
+        assertTrue(awaitCount(resumes, 2))
+        fixture.close()
+    }
+
     // -- Fixtures ---------------------------------------------------------------------------
 
     private fun runnerFixture(
@@ -834,6 +893,7 @@ class RemoteBackupRuntimeTest {
         configured: Boolean = true,
         outcome: RemoteBackupRunResult = RemoteBackupRunResult.NoChanges,
         expireAttachmentSessions: suspend () -> Unit = {},
+        resumeAttachmentSessions: suspend () -> Unit = {},
     ): RuntimeFixture {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val configurationFlow = MutableStateFlow(
@@ -860,6 +920,7 @@ class RemoteBackupRuntimeTest {
                 observeConfiguration = { configurationFlow },
                 observeLocalGeneration = { generationFlow },
                 expireAttachmentSessions = expireAttachmentSessions,
+                resumeAttachmentSessions = resumeAttachmentSessions,
             ),
         )
     }
@@ -872,6 +933,16 @@ class RemoteBackupRuntimeTest {
             Thread.sleep(5)
         }
         return counter.get() >= expected
+    }
+
+    /** Waits for a list a background pass appends to, or gives up. */
+    private fun awaitListSize(list: List<*>, expected: Int): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            if (list.size >= expected) return true
+            Thread.sleep(5)
+        }
+        return list.size >= expected
     }
 
     private class RuntimeFixture(

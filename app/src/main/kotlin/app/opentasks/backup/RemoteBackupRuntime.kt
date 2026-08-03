@@ -327,6 +327,7 @@ class DefaultRemoteBackupRuntime(
     private val observeConfiguration: () -> Flow<RemoteBackupConfiguration?>,
     private val observeLocalGeneration: () -> Flow<Long>,
     private val expireAttachmentSessions: suspend () -> Unit = {},
+    private val resumeAttachmentSessions: suspend () -> Unit = {},
 ) : RemoteBackupRuntime {
     private val started = AtomicBoolean()
     private val stopped = AtomicBoolean()
@@ -368,12 +369,15 @@ class DefaultRemoteBackupRuntime(
         // An intake this slot never finished holds provider objects no record
         // names. Activation is when that residue is abandoned; the attachment
         // runtime refuses the pass itself unless its lineage is still active.
+        // Resuming runs right after, in the same coroutine, so a session old
+        // enough to expire is never also offered to resume.
         scope.launch {
             try {
                 expireAttachmentSessions()
+                resumeAttachmentSessions()
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
-                // The next activation expires the same sessions again.
+                // The next activation expires and resumes the same sessions again.
             }
         }
     }
@@ -425,6 +429,22 @@ class DefaultRemoteBackupRuntime(
 
         val startedFrom = runStartGeneration
         runStartGeneration = null
+        if (startedFrom != null) {
+            // A publication run just finished; a session interrupted during
+            // or before that run may now be resumable under whatever
+            // ownership state the run settled. This does not depend on
+            // whether the run's outcome re-arms the debounce below, so a
+            // long-lived process keeps retrying even when nothing new is
+            // scheduled.
+            scope.launch {
+                try {
+                    resumeAttachmentSessions()
+                } catch (failure: Throwable) {
+                    if (failure is CancellationException) throw failure
+                    // The next completed run resumes the same sessions again.
+                }
+            }
+        }
         val verified = configuration.lastVerifiedGeneration?.value ?: NOTHING_VERIFIED
         if (observation.generation <= verified) return
         // The run that just finished already attempted exactly this
