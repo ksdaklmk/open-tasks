@@ -1,31 +1,25 @@
 # Open Tasks Handoff
 
-- Last updated: 2 August 2026
+- Last updated: 3 August 2026
 - Branch: `main`
-- Session status: **Stage 4 (notes, activity, cloud attachments, and search)
-  is paused after Tasks 1–11 of 14; Task 12 is next.
-  The approved design is
-  `docs/superpowers/specs/2026-08-02-stage-4-notes-activity-cloud-attachments-search-design.md`
-  (`7b5af15`); the execution authority is
-  `docs/superpowers/plans/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan.md`
-  (`6538dca`). Tasks 1–11 are complete with independent reviews closed (one
-  fix round each for Tasks 2, 3, 7, 8, and 9; two fix rounds for Task 10; Task
-  4 closed review-clean after a pre-review parity fix; Tasks 5 and 6 closed
-  review-clean; Task 11 closed after four scoped fix rounds; details in the
-  checkpoints below). No
-  emulator, ADB, or connected command ran in this session; the new v7→v8
-  migration and other instrumented tests are compile-verified and execute at
-  the Task 14 device gate. The protected Pixel AVD, the historical Google
-  Drive plan amendment, and user-owned `.kotlin/` and `artifacts/` remain
-  untouched and unstaged. Resume with plan Task 12 (attachment runtime,
-  recovery, and ownership boundaries) via
-  superpowers:subagent-driven-development; the execution
-  ledger is
-  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`.
-  Samsung Remote Test Lab remains External-blocked pending the user's
-  developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
-  Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
-  reviewed.**
+- Session status: **Stage 4 is paused mid-Task 14 (of 14) at a usage-limit
+  stop. Tasks 12 and 13 are complete and review-closed; the whole-branch
+  final review and its fix wave are closed at `f98d1c3`. Task 14's
+  credentialed live attachment gate PASSED once (606.9 s; harness preserved
+  in `a813c41` — never re-run it); the first full connected gate failed
+  10 of 282 tests, and the resumed agent was committing per-class fixes
+  when the session paused. Read the Stage 4 Task 12–14 checkpoint below,
+  then the execution ledger
+  `.superpowers/sdd/2026-08-02-stage-4-notes-activity-cloud-attachments-search-plan/progress.md`
+  and `…/task-14-report.md`, and `git log a813c41..main`, for the exact
+  per-class resume state before doing anything. Resume by re-entering
+  superpowers:subagent-driven-development at Task 14: finish the remaining
+  connected-failure fixes, run the full six-module connected gate to green,
+  then plan Steps 3–5 (forced-fresh gates, release inspection, contract
+  docs, scoped commit — never `git add -A` at root). Samsung Remote Test
+  Lab remains External-blocked pending the user's developer-account
+  approval. The Fold 8 adaptive slice, Stage 3, Stage 2, Train 1 Tasks
+  1.1–1.5, and Stage 1 remain complete and independently reviewed.**
 - Current product source implementation point: `73b8922` (`fix: reauthenticate
   before manifest deletion`), the tip of the Stage 4 Task 1–11 range
   `6538dca..73b8922`. The prior adaptive-slice closure point
@@ -913,8 +907,74 @@ independent review closed after four scoped fix rounds.
   547 actionable tasks and no failures. No emulator, ADB, or connected command
   ran.
 
-Stage 4 is paused at the user's request after Task 11. Tasks 12–14 remain.
-Resume Task 12 from `73b8922` with the approved plan and execution ledger.
+Stage 4 was paused after Task 11 and resumed in the 2–3 August session
+recorded in the checkpoint below.
+
+## Stage 4 Tasks 12–14 checkpoint — 3 August 2026
+
+Subagent-driven execution resumed from `2d3ca4f` on `main`.
+
+- Task 12 (`f323457`, fix `2db7e26`) wired the attachment runtime:
+  per-vault-slot construction of the store, coordinators, cache, and
+  collector in `AppModule` beside the `publicationGate` collaborators;
+  lifecycle-gated `AttachmentRuntime` (non-ACTIVE lineages make zero store
+  calls, tip mismatch refuses intake/GC); GC only after `Verified`
+  publication; session expiry on start; teardown with the slot. Review
+  closed after one fix round adding the shared GC eligibility pre-filter
+  and the journalled `MarkAttachmentContentCollected` command (both
+  repositories, no schema bump) so collected blob sets stop being
+  candidates; the destructive-deletion path releases markers via one
+  callback. The extended E2E proves the 9 MiB intake → publish → recover →
+  open-on-B → stale-A-refused → delete → GC → terminal-tombstone scenario
+  and asserts records persist with `blobSetId` cleared.
+- Task 13 (`5967c67`, fix `b2604c0`) added the product surfaces: model-free
+  `TimelineList`/`NotesTimelineSection` in designsystem; thin
+  `NotesActivitySection` mappers in tasks and projects; attachment rows
+  with state strings, 48 dp targets, and TalkBack descriptions; the Cloud
+  attachments block in Backup & recovery (connection line, combined
+  encrypted-frames-plus-staging cache figure, passphrase-guarded content
+  deletion); `AttachmentIntakeViewModel` owning pickers, sanitised intake,
+  FileProvider share staging, and per-attachment row states. `5967c67` is
+  an amend of `c95a825` purging a raw-NUL binary blob from history. Review
+  closed after two fix rounds (record-keyed note drafts, staging-cache
+  wipe + usage accounting, dedup extraction, neutral unavailable copy,
+  record-derived UNAVAILABLE after content deletion, atomic row-state
+  updates). Accepted deviations: `onRetry` retries the open (an unfinished
+  intake has no record); no in-row intake progress.
+- The whole-branch review (`6538dca..b2604c0`, most capable model) found
+  one Critical — note-edit Undo was a silent no-op in both repositories —
+  plus in-memory purge keeping attachments and a missing startup sweep of
+  plaintext share staging. The single fix wave (`f98d1c3`) closed all
+  three with executed-round-trip tests; the scoped re-review confirmed no
+  new breakage. Two recorded rulings stand as known limitations with
+  Stage 5 backlog entries: purged attachments' blob sets are never GC
+  candidates (conservative leak; destructive/terminal deletion still
+  clears bytes; durable fix needs a schema-backed retired-set index), and
+  `AttachmentBlobCoordinator.resume` has no product caller (interrupted
+  intakes expire after 24 h; `resume()` and its tests are kept).
+- Task 14 is in progress. The extended credentialed live gate PASSED once
+  on the sole audited read-only API 37 disposable (bounded PASS in
+  606.9 s; live exact-ID chunk create/occupied rejection, byte-identical
+  readbacks, single-manifest lookup, exact-ID cleanup; harness committed
+  as `a813c41` — the credentialed gate must NOT be re-run). The first
+  full six-module connected gate ran 282 tests with 10 failures and the
+  one expected credential-only skip. Fix commits so far: `1ba5d0e` (E2E
+  task selection), `b5e6a1f` (stale post-Task-5 activity expectations),
+  `3648595` (notes-section scroll), `a328695` (collected-attachment
+  projection wait), `bf2f95a` (fold-wait retry) — see
+  `git log a813c41..main` for any later ones and the ledger plus
+  `task-14-report.md` for per-class status and classifications. The
+  emulator procedure was followed exactly (read-only, no snapshots,
+  audits empty; protected workspace and account untouched).
+- Next session, in order: read the ledger and `task-14-report.md`; close
+  the remaining connected-failure classes (the Room activity-pruning
+  parity candidate and the two recreation failures were the undiagnosed
+  ones at the block — classify test-vs-production with evidence); rerun
+  the FULL six-module connected gate to zero failures; then Task 14
+  Steps 3–5 with the recorded controller rulings (scoped add only; the
+  qualification doc and this file must record the first gate's 10
+  failures, every fix commit, and the second gate's counts). Then the
+  Task 14 task review, ledger closure, and workspace deletion.
 
 ## Historical Stage 3 create-only Task 13 in-progress checkpoint — 1 August 2026
 
