@@ -1276,6 +1276,19 @@ class RoomVaultRepository(
                 database.workspaceDao().deleteTagsForTask(generatedId)
                 database.workspaceDao().deleteDependenciesForTask(generatedId)
                 database.workspaceDao().deleteRemindersForTask(generatedId)
+                database.workspaceDao().getAttachmentsWithBlobSetForTask(generatedId)
+                    .forEach { attachment ->
+                        database.workspaceDao().upsertRetiredBlobSet(
+                            RetiredBlobSetEntity(
+                                blobSetId = requireNotNull(attachment.blobSetId),
+                                chunkCount = attachment.chunkCount,
+                                retiredAtEpochMillis = command.restoredAt.toEpochMilli(),
+                                revisionWallMillis = command.restoredAt.toEpochMilli(),
+                                revisionLogical = 0,
+                                revisionDeviceId = deviceId.value,
+                            ),
+                        )
+                    }
                 database.workspaceDao().deleteAttachmentsForTask(generatedId)
                 database.workspaceDao().deleteActivityForTask(generatedId)
                 database.workspaceDao().deleteTimeForTask(generatedId)

@@ -1158,6 +1158,7 @@ class InMemoryVaultRepository internal constructor(
             completedAt = command.completedAt,
             revision = nextRevision(task),
         )
+        val generatedOccurrenceIds = setOfNotNull(command.generatedOccurrenceId)
         command.generatedOccurrenceId
             ?.let { id -> current.tasks.firstOrNull { it.id == id } }
             ?.let { generated ->
@@ -1170,6 +1171,9 @@ class InMemoryVaultRepository internal constructor(
             reminders = current.reminders.filterNot {
                 it.taskId == command.generatedOccurrenceId
             },
+            attachments = current.attachments.filterNot { it.taskId in generatedOccurrenceIds },
+            retiredBlobSets = current.retiredBlobSets +
+                current.attachments.retiredBlobSets(generatedOccurrenceIds, command.restoredAt),
         )
         val previousStatus = current.workflowStatuses.firstOrNull { it.id == task.statusId }
         recordActivity(

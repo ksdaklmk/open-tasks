@@ -16,6 +16,9 @@ import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.OpenTasksFixtures
@@ -564,6 +567,78 @@ class RoomVaultRepositoryInstrumentedTest {
             }
         }
         Unit
+    }
+
+    @Test
+    fun undoingGeneratedOccurrenceCompletionRetiresItsBlobBearingAttachments() = runBlocking {
+        openRepository()
+        val original = withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
+                .filterNotNull()
+                .first()
+        }
+        val due = ZonedMoment(
+            instant = Instant.parse("2026-07-31T09:30:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
+        repository!!.execute(
+            DomainCommand.UpdateTask(
+                taskId = original.id,
+                title = original.title,
+                description = original.description,
+                projectId = original.projectId,
+                priority = original.priority,
+                due = due,
+                recurrence = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3),
+                estimate = original.estimate,
+            ),
+        )
+        val completed = repository!!.execute(
+            DomainCommand.CompleteTask(
+                taskId = original.id,
+                completedAt = Instant.parse("2026-07-31T10:00:00Z"),
+            ),
+        ) as CommandResult.Success
+        val generated = withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .map { snapshot ->
+                    snapshot.tasks.singleOrNull {
+                        it.recurrenceSeriesId == original.id && it.id != original.id
+                    }
+                }
+                .filterNotNull()
+                .first()
+        }
+        val blobSetId = BlobSetId.new()
+        repository!!.execute(
+            DomainCommand.RegisterAttachment(
+                Attachment(
+                    id = AttachmentId.new(), taskId = generated.id,
+                    displayName = "occurrence-notes.pdf", mimeType = "application/pdf",
+                    byteCount = 1_000_000L, contentHash = "34".repeat(32),
+                    blobSetId = blobSetId, chunkCount = 1, deletedAt = null,
+                    revision = generated.revision,
+                ),
+            ),
+        )
+
+        repository!!.execute(checkNotNull(completed.undo))
+
+        withTimeout(5_000) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == generated.id }
+            }
+        }
+        assertTrue(
+            database!!.workspaceDao()
+                .getAttachmentsWithBlobSetForTask(generated.id.value)
+                .isEmpty(),
+        )
+        assertEquals(
+            blobSetId.value,
+            database!!.workspaceDao().getRetiredBlobSet(blobSetId.value)?.blobSetId,
+        )
     }
 
     @Test
@@ -2044,6 +2119,44 @@ class RoomVaultRepositoryInstrumentedTest {
         assertEquals(null, checkNotNull(detachedRecord).fields.single {
             it.name == "parentTaskId"
         }.value)
+    }
+
+    @Test
+    fun expiryPurgeRetiresBlobBearingAttachments() = runBlocking {
+        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
+        val purgedAt = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { deletedAt })
+        repository!!.execute(DomainCommand.CreateTask("Expired with attachment"))
+        val task = withTimeout(5_000) {
+            repository!!.observeWorkspace()
+                .map { snapshot ->
+                    snapshot.tasks.singleOrNull { it.title == "Expired with attachment" }
+                }
+                .filterNotNull()
+                .first()
+        }
+        val blobSetId = BlobSetId.new()
+        repository!!.execute(
+            DomainCommand.RegisterAttachment(
+                Attachment(
+                    id = AttachmentId.new(), taskId = task.id,
+                    displayName = "plan.pdf", mimeType = "application/pdf",
+                    byteCount = 2_000_000L, contentHash = "ab".repeat(32),
+                    blobSetId = blobSetId, chunkCount = 1, deletedAt = null,
+                    revision = task.revision,
+                ),
+            ),
+        )
+        repository!!.execute(DomainCommand.DeleteTask(task.id, deletedAt))
+
+        repository!!.execute(DomainCommand.PurgeExpiredTrash(purgedAt))
+
+        val retired = database!!.workspaceDao().getRetiredBlobSet(blobSetId.value)
+        assertEquals(blobSetId.value, retired?.blobSetId)
+        assertEquals(1, retired?.chunkCount)
+        assertTrue(
+            database!!.workspaceDao().getAttachmentsWithBlobSetForTask(task.id.value).isEmpty(),
+        )
     }
 
     @Test
