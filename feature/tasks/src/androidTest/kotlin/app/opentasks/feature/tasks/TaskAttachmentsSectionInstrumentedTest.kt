@@ -74,6 +74,30 @@ class TaskAttachmentsSectionInstrumentedTest {
     }
 
     @Test
+    fun releasedContentNeverReadsAsStillBackedUp() {
+        val released = attachment("released").copy(blobSetId = null)
+        composeRule.setContent {
+            OpenTasksTheme {
+                TaskAttachmentsSection(
+                    attachments = listOf(released),
+                    // Whatever the last transfer believed, the record knows
+                    // the bytes were released.
+                    states = mapOf(released.id to AttachmentRowState.REMOTE),
+                    onAddFromPhotos = {},
+                    onAddFromFiles = {},
+                    onOpen = {},
+                    onShare = {},
+                    onDelete = {},
+                    onRetry = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("In cloud backup", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Temporarily unavailable", substring = true).assertExists()
+    }
+
+    @Test
     fun failedRowRetriesOnlyItsOwnAttachment() {
         val retried = AtomicReference<AttachmentId?>()
         composeRule.setContent {

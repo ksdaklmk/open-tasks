@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -153,8 +154,15 @@ class AttachmentIntakeViewModel internal constructor(
             } finally {
                 secret.fill('\u0000')
             }
-            if (result == LifecycleResult.AttachmentContentDeleted) discardStagedPlaintext()
-            mutableStates.value = emptyMap()
+            if (result == LifecycleResult.AttachmentContentDeleted) {
+                discardStagedPlaintext()
+                // Every transfer state described bytes that no longer exist.
+                // What replaces it is not a claim made here: the records
+                // themselves are marked as released, and a record with no
+                // blob set reads as unavailable wherever it is shown — on
+                // this device now, and on any installation recovered later.
+                mutableStates.value = emptyMap()
+            }
             messages.send(
                 if (result == LifecycleResult.AttachmentContentDeleted) {
                     R.string.attachment_content_deleted
@@ -210,9 +218,13 @@ class AttachmentIntakeViewModel internal constructor(
                     deliveries.send(intentFor(staged, attachment.mimeType, share))
                 }
                 AttachmentOpenResult.Unavailable -> {
+                    // Absent bytes and an ownership or key condition on this
+                    // device arrive as the same result, and only the second
+                    // is even likely, so this says the one thing both have in
+                    // common — and says exactly what the row says.
                     staged.delete()
                     mark(attachment.id, AttachmentRowState.UNAVAILABLE)
-                    messages.send(R.string.attachment_content_missing)
+                    messages.send(R.string.attachment_unavailable)
                 }
                 is AttachmentOpenResult.Failed -> {
                     staged.delete()
@@ -242,12 +254,16 @@ class AttachmentIntakeViewModel internal constructor(
         return if (share) Intent.createChooser(base, null) else base
     }
 
+    // Opens run concurrently on the IO dispatcher, so these compose the map
+    // atomically: a read-modify-write could drop another row's transition,
+    // and a row stuck in DOWNLOADING offers no open, share, or retry — it
+    // would be dead for as long as this ViewModel lives.
     private fun mark(id: AttachmentId, state: AttachmentRowState) {
-        mutableStates.value = mutableStates.value + (id to state)
+        mutableStates.update { it + (id to state) }
     }
 
     private fun clear(id: AttachmentId) {
-        mutableStates.value = mutableStates.value - id
+        mutableStates.update { it - id }
     }
 
     /**

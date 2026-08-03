@@ -267,13 +267,20 @@ private fun RowAction(
 }
 
 /**
- * The record decides removal; only a live record's bytes have a transfer
- * state, so a tombstone is never presented as something to download.
+ * The record outranks any transfer state, because it carries facts a transfer
+ * cannot overturn.
+ *
+ * A tombstone is never presented as something to download. Neither is a live
+ * record whose blob set is gone: that is how a released content set is
+ * durably recorded, so a record still describing an attachment whose bytes no
+ * longer exist reads as unavailable — after the destructive action on this
+ * device, and on any installation that later recovers those records.
  */
 private fun Attachment.rowState(
     states: Map<AttachmentId, AttachmentRowState>,
 ): AttachmentRowState = when {
     deletedAt != null -> AttachmentRowState.TOMBSTONED
+    blobSetId == null -> AttachmentRowState.UNAVAILABLE
     else -> states[id] ?: AttachmentRowState.REMOTE
 }
 
