@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
@@ -203,6 +204,7 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("save-template-sheet").assertIsDisplayed()
         composeRule.onNodeWithTag("template-name-field")
             .performTextReplacement("  Client delivery  ")
+        composeRule.onNodeWithTag("template-name-field").performImeAction()
         composeRule.onNodeWithTag("confirm-save-template").performClick()
 
         assertEquals(project.id to "Client delivery", captured.get())
