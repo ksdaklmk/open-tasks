@@ -146,6 +146,10 @@ fun MoreScreen(
     onImportVaultPassphraseConfirmed: (String) -> Unit = {},
     onConfirmVaultImport: () -> Unit = {},
     onDismissVaultImport: () -> Unit = {},
+    csvExportInProgress: Boolean = false,
+    csvExportOutcome: CsvExportOutcome? = null,
+    onExportCsv: (Set<CsvExportTable>) -> Unit = {},
+    onDismissCsvExportOutcome: () -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -261,6 +265,10 @@ fun MoreScreen(
                 onImportVaultPassphraseConfirmed = onImportVaultPassphraseConfirmed,
                 onConfirmVaultImport = onConfirmVaultImport,
                 onDismissVaultImport = onDismissVaultImport,
+                csvExportInProgress = csvExportInProgress,
+                csvExportOutcome = csvExportOutcome,
+                onExportCsv = onExportCsv,
+                onDismissCsvExportOutcome = onDismissCsvExportOutcome,
                 onBack = closeBackupRecovery,
                 modifier = modifier,
             )

@@ -225,4 +225,22 @@
     <string name="vault_import_preview_passphrase">The archive passphrase becomes this vault\'s recovery passphrase.</string>
     <string name="vault_import_preview_beyond_cache">These attachments\' bytes will not be kept on this device, so keep the archive file: %1$s</string>
     <string name="vault_import_replace_action">Replace vault</string>
+
+    <string name="csv_export_heading">Plaintext CSV export</string>
+    <string name="csv_export_explanation">Export tasks, projects, time entries, or notes as plain CSV files you can open in a spreadsheet. Each table you choose is written as its own file.</string>
+    <string name="csv_export_action">Export CSV</string>
+    <string name="csv_export_in_progress">Exporting CSV…</string>
+    <plurals name="csv_export_completed">
+        <item quantity="one">%1$d CSV file exported.</item>
+        <item quantity="other">%1$d CSV files exported.</item>
+    </plurals>
+    <string name="csv_export_sheet_title">Choose tables to export</string>
+    <string name="csv_export_table_tasks">Tasks</string>
+    <string name="csv_export_table_projects">Projects</string>
+    <string name="csv_export_table_time_entries">Time entries</string>
+    <string name="csv_export_table_notes">Notes</string>
+    <string name="csv_export_sheet_continue">Continue</string>
+    <string name="csv_export_disclosure_title">Export as plain-text CSV?</string>
+    <string name="csv_export_disclosure_body">CSV files are not encrypted. Once exported, titles, descriptions, notes, dates, and time information become readable outside Open Tasks by anyone who opens the file.</string>
+    <string name="csv_export_disclosure_confirm">Export CSV</string>
 </resources>

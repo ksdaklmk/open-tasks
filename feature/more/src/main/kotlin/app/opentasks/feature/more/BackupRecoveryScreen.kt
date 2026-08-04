@@ -1,6 +1,7 @@
 package app.opentasks.feature.more
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.rounded.Sync
 import androidx.annotation.StringRes
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -103,6 +105,25 @@ sealed interface VaultImportOutcome {
     data class Failed(val reason: String) : VaultImportOutcome
 }
 
+/**
+ * The four tables a plaintext CSV export can include. Distinct from
+ * `:core:data`'s writer-facing `CsvTable` — feature modules depend only on
+ * `:core:model` and `:core:designsystem`, so the app layer maps between the
+ * two when it dispatches an export.
+ */
+enum class CsvExportTable { TASKS, PROJECTS, TIME_ENTRIES, NOTES }
+
+/**
+ * The outcome of one plaintext CSV export attempt, which may have written
+ * more than one table as separate documents. [Failed.reason] is already
+ * resolved, generic UK copy — never a resource ID — so it is rendered as-is.
+ */
+sealed interface CsvExportOutcome {
+    data class Completed(val tableCount: Int) : CsvExportOutcome
+
+    data class Failed(val reason: String) : CsvExportOutcome
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRecoveryScreen(
@@ -123,6 +144,8 @@ fun BackupRecoveryScreen(
     vaultExportOutcome: VaultExportOutcome? = null,
     vaultImportInProgress: Boolean = false,
     vaultImportOutcome: VaultImportOutcome? = null,
+    csvExportInProgress: Boolean = false,
+    csvExportOutcome: CsvExportOutcome? = null,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -145,6 +168,8 @@ fun BackupRecoveryScreen(
     onImportVaultPassphraseConfirmed: (String) -> Unit = {},
     onConfirmVaultImport: () -> Unit = {},
     onDismissVaultImport: () -> Unit = {},
+    onExportCsv: (Set<CsvExportTable>) -> Unit = {},
+    onDismissCsvExportOutcome: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -152,6 +177,8 @@ fun BackupRecoveryScreen(
     var remoteSecretAction by remember { mutableStateOf<RemoteSecretAction?>(null) }
     var showVaultExportSheet by remember { mutableStateOf(false) }
     var showVaultImportSheet by remember { mutableStateOf(false) }
+    var showCsvTableSheet by remember { mutableStateOf(false) }
+    var csvDisclosureTables by remember { mutableStateOf<Set<CsvExportTable>?>(null) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -299,6 +326,21 @@ fun BackupRecoveryScreen(
                     onImportClick = { showVaultImportSheet = true },
                     onDismissImportOutcome = onDismissVaultImport,
                 )
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                Text(
+                    stringResource(R.string.csv_export_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier
+                        .testTag("csv-export-heading")
+                        .semantics { heading() },
+                )
+                Spacer(Modifier.height(12.dp))
+                CsvExportContent(
+                    inProgress = csvExportInProgress,
+                    outcome = csvExportOutcome,
+                    onExportClick = { showCsvTableSheet = true },
+                    onDismissOutcome = onDismissCsvExportOutcome,
+                )
             }
         }
     }
@@ -330,6 +372,24 @@ fun BackupRecoveryScreen(
                 showVaultImportSheet = false
                 onImportVaultPassphraseConfirmed(passphrase)
             },
+        )
+    }
+    if (showCsvTableSheet) {
+        CsvTableSelectionSheet(
+            onDismiss = { showCsvTableSheet = false },
+            onContinue = { tables ->
+                showCsvTableSheet = false
+                csvDisclosureTables = tables
+            },
+        )
+    }
+    csvDisclosureTables?.let { tables ->
+        CsvDisclosureDialog(
+            onConfirm = {
+                csvDisclosureTables = null
+                onExportCsv(tables)
+            },
+            onCancel = { csvDisclosureTables = null },
         )
     }
     (vaultImportOutcome as? VaultImportOutcome.Ready)?.let { ready ->
@@ -473,6 +533,178 @@ private fun VaultTransferContent(
         )
         is VaultImportOutcome.Ready, null -> Unit
     }
+}
+
+/**
+ * The plaintext CSV export action and its most recent progress or outcome.
+ *
+ * Unlike the encrypted whole-vault transfer above, this writes unencrypted
+ * files, so tapping the action always leads through a table choice and a
+ * fresh disclosure before anything is written — never straight to export.
+ */
+@Composable
+private fun CsvExportContent(
+    inProgress: Boolean,
+    outcome: CsvExportOutcome?,
+    onExportClick: () -> Unit,
+    onDismissOutcome: () -> Unit,
+) {
+    Text(
+        stringResource(R.string.csv_export_explanation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(12.dp))
+    BackupAction(R.string.csv_export_action, "csv-export", onExportClick)
+    if (inProgress) {
+        TransferProgress(R.string.csv_export_in_progress)
+    }
+    if (outcome != null) {
+        TransferOutcome(
+            message = when (outcome) {
+                is CsvExportOutcome.Completed -> pluralStringResource(
+                    R.plurals.csv_export_completed,
+                    outcome.tableCount,
+                    outcome.tableCount,
+                )
+                is CsvExportOutcome.Failed -> outcome.reason
+            },
+            testTag = "csv-export-outcome",
+            dismissTestTag = "csv-export-dismiss",
+            onDismiss = onDismissOutcome,
+        )
+    }
+}
+
+private val CSV_TABLE_OPTIONS = listOf(
+    Triple(CsvExportTable.TASKS, R.string.csv_export_table_tasks, "csv-export-table-tasks"),
+    Triple(
+        CsvExportTable.PROJECTS,
+        R.string.csv_export_table_projects,
+        "csv-export-table-projects",
+    ),
+    Triple(
+        CsvExportTable.TIME_ENTRIES,
+        R.string.csv_export_table_time_entries,
+        "csv-export-table-time-entries",
+    ),
+    Triple(CsvExportTable.NOTES, R.string.csv_export_table_notes, "csv-export-table-notes"),
+)
+
+/**
+ * Which tables to export, chosen before the disclosure so the disclosure can
+ * describe a concrete, already-decided action rather than a hypothetical one.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CsvTableSelectionSheet(
+    onDismiss: () -> Unit,
+    onContinue: (Set<CsvExportTable>) -> Unit,
+) {
+    var selected by remember { mutableStateOf(emptySet<CsvExportTable>()) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("csv-export-table-sheet"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
+            Text(
+                stringResource(R.string.csv_export_sheet_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(12.dp))
+            CSV_TABLE_OPTIONS.forEach { (table, labelRes, tag) ->
+                val checked = table in selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clickable {
+                            selected = if (checked) selected - table else selected + table
+                        }
+                        .testTag(tag),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = checked, onCheckedChange = null)
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(labelRes), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("csv-export-tables-cancel"),
+                ) {
+                    Text(stringResource(R.string.backup_cancel_action))
+                }
+                Button(
+                    onClick = { onContinue(selected) },
+                    enabled = selected.isNotEmpty(),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("csv-export-tables-continue"),
+                ) {
+                    Text(stringResource(R.string.csv_export_sheet_continue))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The fresh, every-time disclosure a plaintext CSV export always presents
+ * before anything is written — there is no "do not ask again".
+ */
+@Composable
+private fun CsvDisclosureDialog(
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.csv_export_disclosure_title)) },
+        text = {
+            Text(
+                stringResource(R.string.csv_export_disclosure_body),
+                modifier = Modifier.testTag("csv-export-disclosure"),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("csv-export-disclosure-confirm"),
+            ) {
+                Text(stringResource(R.string.csv_export_disclosure_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("csv-export-disclosure-cancel"),
+            ) {
+                Text(stringResource(R.string.backup_cancel_action))
+            }
+        },
+    )
 }
 
 @Composable

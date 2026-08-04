@@ -12,10 +12,17 @@ import app.opentasks.backup.OtVaultExportResult
 import app.opentasks.backup.OtVaultExporter
 import app.opentasks.backup.OtVaultImportPreview
 import app.opentasks.backup.OtVaultImporter
+import app.opentasks.core.data.export.CsvTable
+import app.opentasks.core.data.export.WorkspaceCsvWriter
+import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.feature.more.CsvExportOutcome
+import app.opentasks.feature.more.CsvExportTable
 import app.opentasks.feature.more.VaultExportOutcome
 import app.opentasks.feature.more.VaultImportOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.OutputStreamWriter
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +38,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 /**
- * Owns the whole-vault export and import flows.
+ * Owns the whole-vault export/import flows and the plaintext CSV export flow.
  *
  * A confirmed passphrase asks the caller to launch the matching Storage Access
  * Framework picker. An export streams straight into the chosen document's own
@@ -40,12 +47,21 @@ import kotlinx.coroutines.withContext
  * deletes that (empty or partial) document immediately. An import reads the
  * chosen document straight through the importer, which touches no vault slot
  * until the person confirms the preview it produces.
+ *
+ * CSV export shares [operation] with the whole-vault flows above — one
+ * transfer of any kind at a time — and writes one document per chosen table,
+ * one [android.provider.DocumentsContract.createDocument] picker at a time,
+ * straight to that document's output stream with no retained plaintext copy.
+ * A write failure or a mid-batch cancellation deletes that document's partial
+ * bytes and ends the whole batch there; tables already written stand.
  */
 @HiltViewModel
 class VaultTransferViewModel @Inject constructor(
     @ApplicationContext context: Context,
     private val exporter: OtVaultExporter,
     private val importer: OtVaultImporter,
+    private val vaultRepository: VaultRepository,
+    private val csvWriter: WorkspaceCsvWriter,
 ) : ViewModel() {
     private val context: Context = context
     private val operation = Mutex()
@@ -58,17 +74,35 @@ class VaultTransferViewModel @Inject constructor(
     private val mutableExportOutcome = MutableStateFlow<VaultExportOutcome?>(null)
     private val mutableImportInProgress = MutableStateFlow(false)
     private val mutableImportOutcome = MutableStateFlow<VaultImportOutcome?>(null)
+    private val mutableCsvExportInProgress = MutableStateFlow(false)
+    private val mutableCsvExportOutcome = MutableStateFlow<CsvExportOutcome?>(null)
 
     val exportInProgress: StateFlow<Boolean> = mutableExportInProgress.asStateFlow()
     val exportOutcome: StateFlow<VaultExportOutcome?> = mutableExportOutcome.asStateFlow()
     val importInProgress: StateFlow<Boolean> = mutableImportInProgress.asStateFlow()
     val importOutcome: StateFlow<VaultImportOutcome?> = mutableImportOutcome.asStateFlow()
+    val csvExportInProgress: StateFlow<Boolean> = mutableCsvExportInProgress.asStateFlow()
+    val csvExportOutcome: StateFlow<CsvExportOutcome?> = mutableCsvExportOutcome.asStateFlow()
 
     /** A confirmed passphrase is ready; the caller launches the SAF create-document picker. */
     val createDocumentRequests = Channel<Unit>(Channel.BUFFERED)
 
     /** A confirmed passphrase is ready; the caller launches the SAF open-document picker. */
     val openDocumentRequests = Channel<Unit>(Channel.BUFFERED)
+
+    /** The next table to export; the caller launches a `text/csv` create-document picker for it. */
+    val csvCreateDocumentRequests = Channel<CsvTable>(Channel.BUFFERED)
+
+    /** Tables still to be asked for after the one currently in flight. */
+    private val pendingCsvTables = ArrayDeque<CsvTable>()
+    private var csvCompletedCount = 0
+
+    /**
+     * Captured once when a batch starts, so every table it writes reflects
+     * the same moment rather than whatever the live vault holds by the time
+     * each document's picker happens to return.
+     */
+    private var csvSnapshot: WorkspaceSnapshot? = null
 
     /** Holds a validated passphrase and asks the caller to pick a destination for it. */
     fun beginExport(passphrase: String) = beginTransfer(passphrase, createDocumentRequests)
@@ -210,6 +244,131 @@ class VaultTransferViewModel @Inject constructor(
         mutableExportOutcome.value = null
     }
 
+    /** Starts a plaintext CSV export of [tables], one document per table. */
+    fun beginCsvExport(tables: Set<CsvExportTable>) {
+        if (tables.isEmpty() || !operation.tryLock()) return
+        pendingCsvTables.clear()
+        pendingCsvTables.addAll(tables.map(::toCsvTable))
+        // A plain StateFlow read, not the suspending currentWorkspace(): capturing
+        // the snapshot here keeps beginCsvExport itself synchronous, so there is
+        // no async gap in which a cleared ViewModel could strand the lock this
+        // function just took.
+        csvSnapshot = vaultRepository.observeWorkspace().value
+        csvCompletedCount = 0
+        mutableCsvExportInProgress.value = true
+        requestNextCsvDocument()
+    }
+
+    /**
+     * The SAF picker returned [uri] for the table currently at the front of
+     * [pendingCsvTables], or null if the person cancelled it. A cancellation
+     * ends the whole batch where it stands: tables already written keep
+     * their documents, and nothing further is requested.
+     */
+    fun onCsvDocumentSelected(uri: Uri?) {
+        val table = pendingCsvTables.removeFirstOrNull() ?: return
+        if (uri == null) {
+            val completed = csvCompletedCount
+            abortCsvExport(if (completed > 0) CsvExportOutcome.Completed(completed) else null)
+            return
+        }
+        val snapshot = checkNotNull(csvSnapshot) {
+            "beginCsvExport must capture a snapshot before requesting any document"
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            var cancelled = false
+            try {
+                val stream = context.contentResolver.openOutputStream(uri)
+                if (stream != null) {
+                    // Closing the writer closes the stream it wraps, so this
+                    // is the one and only close — nesting a second `use` on
+                    // `stream` itself would close it twice.
+                    OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
+                        csvWriter.write(table, snapshot, writer)
+                    }
+                    success = true
+                }
+            } catch (cancellation: CancellationException) {
+                cancelled = true
+                throw cancellation
+            } catch (_: Exception) {
+                success = false
+            } finally {
+                // Cancellation (this ViewModel cleared mid-write) must not
+                // orphan the document the person just chose, nor strand the
+                // shared operation lock: this cleanup runs to completion even
+                // though the job that started it is itself cancelled, exactly
+                // as the whole-vault export above. A cancellation releases
+                // the lock here even with tables still pending — no further
+                // document will ever be requested — where an ordinary
+                // mid-batch success or failure defers release to whichever
+                // finally call finds the queue empty.
+                withContext(NonCancellable) {
+                    if (!success) {
+                        deletePartialDocument(uri)
+                        pendingCsvTables.clear()
+                    }
+                    if (cancelled || pendingCsvTables.isEmpty()) {
+                        operation.unlock()
+                        mutableCsvExportInProgress.value = false
+                    }
+                }
+            }
+            if (success) csvCompletedCount++
+            if (pendingCsvTables.isEmpty()) {
+                val completed = csvCompletedCount
+                csvCompletedCount = 0
+                csvSnapshot = null
+                mutableCsvExportOutcome.value = if (success) {
+                    CsvExportOutcome.Completed(completed)
+                } else {
+                    CsvExportOutcome.Failed(CSV_EXPORT_FAILED_REASON)
+                }
+            } else {
+                requestNextCsvDocument()
+            }
+        }
+    }
+
+    fun dismissCsvExportOutcome() {
+        mutableCsvExportOutcome.value = null
+    }
+
+    /**
+     * Asks the caller for the next pending table's document, or aborts the
+     * batch if the request itself cannot be sent (a closed channel — never
+     * expected with [Channel.BUFFERED], but left fail-safe rather than
+     * fail-silent).
+     */
+    private fun requestNextCsvDocument() {
+        val next = pendingCsvTables.firstOrNull() ?: return
+        if (!csvCreateDocumentRequests.trySend(next).isSuccess) {
+            abortCsvExport(CsvExportOutcome.Failed(CSV_EXPORT_FAILED_REASON))
+        }
+    }
+
+    /**
+     * Synchronously ends the batch: only ever called outside the write
+     * coroutine above (an immediate cancellation, or a request that could
+     * not even be sent), so there is no cancellation-safety concern here.
+     */
+    private fun abortCsvExport(outcome: CsvExportOutcome?) {
+        pendingCsvTables.clear()
+        csvCompletedCount = 0
+        csvSnapshot = null
+        operation.unlock()
+        mutableCsvExportInProgress.value = false
+        if (outcome != null) mutableCsvExportOutcome.value = outcome
+    }
+
+    private fun toCsvTable(table: CsvExportTable): CsvTable = when (table) {
+        CsvExportTable.TASKS -> CsvTable.TASKS
+        CsvExportTable.PROJECTS -> CsvTable.PROJECTS
+        CsvExportTable.TIME_ENTRIES -> CsvTable.TIME_ENTRIES
+        CsvExportTable.NOTES -> CsvTable.NOTES
+    }
+
     /**
      * Neither a passphrase awaiting the SAF picker's result nor the unlocked
      * key of a staged archive may outlive this ViewModel.
@@ -262,3 +421,10 @@ class VaultTransferViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * The one generic UK failure copy a CSV table write failure surfaces. Like
+ * [OT_VAULT_EXPORT_FAILED_REASON], it never distinguishes causes, so it never
+ * risks leaking one.
+ */
+private const val CSV_EXPORT_FAILED_REASON = "The CSV export could not be completed."

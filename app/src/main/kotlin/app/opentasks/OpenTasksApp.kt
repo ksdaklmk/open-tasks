@@ -90,6 +90,7 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import app.opentasks.backup.BackupViewModel
 import app.opentasks.backup.EncryptedBackupViewModel
+import app.opentasks.core.data.export.CsvTable
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
@@ -228,6 +229,15 @@ fun OpenTasksApp(
         ) { uri ->
             vaultTransferViewModel.onImportDocumentSelected(uri)
         }
+        val csvExportInProgress by
+            vaultTransferViewModel.csvExportInProgress.collectAsStateWithLifecycle()
+        val csvExportOutcome by
+            vaultTransferViewModel.csvExportOutcome.collectAsStateWithLifecycle()
+        val csvExportDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/csv"),
+        ) { uri ->
+            vaultTransferViewModel.onCsvDocumentSelected(uri)
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val accessibilityManager = LocalAccessibilityManager.current
         val showNavigationLabels =
@@ -255,6 +265,11 @@ fun OpenTasksApp(
                 // `.otvault` has no registered MIME type, so the picker offers
                 // the generic byte-stream filter every archive is served as.
                 vaultImportDocumentLauncher.launch(arrayOf("application/octet-stream"))
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, csvExportDocumentLauncher) {
+            for (table in vaultTransferViewModel.csvCreateDocumentRequests) {
+                csvExportDocumentLauncher.launch(csvExportFileName(table))
             }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -1037,6 +1052,11 @@ fun OpenTasksApp(
                                         vaultTransferViewModel::confirmImport,
                                     onDismissVaultImport =
                                         vaultTransferViewModel::dismissImport,
+                                    csvExportInProgress = csvExportInProgress,
+                                    csvExportOutcome = csvExportOutcome,
+                                    onExportCsv = vaultTransferViewModel::beginCsvExport,
+                                    onDismissCsvExportOutcome =
+                                        vaultTransferViewModel::dismissCsvExportOutcome,
                                 )
                             }
                         },
@@ -1135,6 +1155,13 @@ fun OpenTasksApp(
             )
         }
     }
+}
+
+private fun csvExportFileName(table: CsvTable): String = when (table) {
+    CsvTable.TASKS -> "open_tasks_tasks.csv"
+    CsvTable.PROJECTS -> "open_tasks_projects.csv"
+    CsvTable.TIME_ENTRIES -> "open_tasks_time_entries.csv"
+    CsvTable.NOTES -> "open_tasks_notes.csv"
 }
 
 private fun WorkspaceSnapshot.attachment(attachmentId: AttachmentId): Attachment? =

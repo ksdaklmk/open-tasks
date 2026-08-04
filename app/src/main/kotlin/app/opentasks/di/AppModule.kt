@@ -39,6 +39,7 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.VaultRuntimeManager
+import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.data.backup.AttachmentBlobSetManifestCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.AttachmentProviderSession
@@ -80,6 +81,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.time.ZoneId
 import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -124,6 +126,12 @@ object AppModule {
 
     @Provides
     fun provideVaultRepository(runtime: LocalVaultRuntime): VaultRepository = runtime.repository
+
+    // Stateless beyond the device's own zone: a fresh instance costs nothing
+    // to share, but there is likewise nothing to gain from scoping it.
+    @Provides
+    fun provideWorkspaceCsvWriter(): WorkspaceCsvWriter =
+        WorkspaceCsvWriter(ZoneId.systemDefault())
 
     @Provides
     @Singleton
