@@ -15,6 +15,7 @@ import app.opentasks.core.domain.AttachmentBlobSetManifest
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.sync.CloudHeaderIdentity
 import app.opentasks.core.sync.CloudObjectFamily
+import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Base64
@@ -61,12 +62,19 @@ sealed interface OtVaultImportPreview {
  * Archives are snapshot-only baselines, so an archive carrying an operation
  * segment is refused rather than silently reduced to its snapshot, and
  * [activate] hands the vault an empty segment list.
+ *
+ * Attachment bytes are staged in [stagingRoot], never in the live attachment
+ * cache: [cache] is what the vault this device still holds is using, and an
+ * import that is refused or never confirmed must not have cost it a single
+ * frame. Only [activate] promotes the staged frames into [cache], and only
+ * after the vault itself has been replaced.
  */
 class OtVaultImporter(
     private val codec: OtVaultCodec,
     private val authenticatedCodec: AuthenticatedCloudObjectCodec,
     private val crypto: VaultCrypto,
     private val cache: AttachmentCacheStore,
+    private val stagingRoot: File,
     private val activateImportedVault: suspend (
         snapshot: BackupSnapshotPayloadV1,
         recoveryEnvelope: VaultKeyEnvelope,
@@ -89,22 +97,32 @@ class OtVaultImporter(
     }
 
     /**
-     * Replaces the active vault with the staged archive.
+     * Replaces the active vault with the staged archive, then promotes the
+     * attachment frames this import staged into the live cache.
      *
      * Returns `false` when nothing is staged or the replacement failed, having
      * already discarded everything this import staged. The active vault is
      * restored by the slot replacement itself, which publishes the imported
      * slot only after it has proved that slot opens — the prior slot is the
      * rollback until then, and is released only afterwards.
+     *
+     * Promotion runs last, and only on success: by then the replaced vault's
+     * own cached frames are stale, so displacing them under the cache's
+     * ordinary bound is exactly what should happen.
      */
     suspend fun activate(): Boolean {
         val archive = staged ?: return false
         return try {
             activateImportedVault(archive.snapshot, archive.envelope, archive.contentKey)
             staged = null
-            // The imported vault owns the staged bytes now, so only the key
-            // material and the decoded records are released here.
-            archive.close()
+            try {
+                promote(archive)
+            } finally {
+                // The imported vault owns these bytes now; the staging root and
+                // the key material are released either way.
+                archive.close()
+                clearStagingRoot()
+            }
             true
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -114,22 +132,19 @@ class OtVaultImporter(
         }
     }
 
-    /** Discards everything [stage] held, leaving the active vault untouched. */
+    /**
+     * Discards everything [stage] held. The live attachment cache is not
+     * touched: nothing this import staged was ever written to it.
+     */
     suspend fun abandon() {
         val archive = staged ?: return
         staged = null
-        archive.stagedBlobSets.forEach { blobSetId ->
-            try {
-                cache.evict(blobSetId)
-            } catch (_: Exception) {
-                // A frame the eviction cannot remove is opaque ciphertext the
-                // cache's own bound will reclaim.
-            }
-        }
         archive.close()
+        clearStagingRoot()
     }
 
     private fun runStage(source: InputStream, passphrase: CharArray): OtVaultImportPreview {
+        clearStagingRoot()
         val header = try {
             codec.readHeader(source)
         } catch (_: Exception) {
@@ -142,7 +157,13 @@ class OtVaultImporter(
             // been authenticated and none has been decrypted.
             return OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_PASSPHRASE_REASON)
         }
-        val reader = ArchiveReader(contentKey)
+        val staging = try {
+            AttachmentCacheStore(stagingRoot) { stagingRoot.usableSpace }
+        } catch (_: Exception) {
+            contentKey.close()
+            return rejectedArchive()
+        }
+        val reader = ArchiveReader(contentKey, staging, retentionBudgetBytes())
         return try {
             codec.readAll(source, contentKey, header, reader::accept)
             val snapshot = reader.finish()
@@ -150,7 +171,8 @@ class OtVaultImporter(
                 snapshot = snapshot,
                 envelope = header.envelope,
                 contentKey = contentKey,
-                stagedBlobSets = reader.stagedBlobSets.toList(),
+                staging = staging,
+                retained = reader.retained.toList(),
             )
             OtVaultImportPreview.Ready(
                 recordCount = snapshot.records.size,
@@ -158,16 +180,55 @@ class OtVaultImporter(
                 attachmentsBeyondCache = reader.attachmentsBeyondCache.toList(),
             )
         } catch (failure: Throwable) {
-            reader.stagedBlobSets.forEach { blobSetId ->
-                try {
-                    cache.evict(blobSetId)
-                } catch (_: Exception) {
-                    // See [abandon]: an unremovable frame is still bounded.
-                }
-            }
             contentKey.close()
+            clearStagingRoot()
             if (failure is CancellationException) throw failure
             rejectedArchive()
+        }
+    }
+
+    /**
+     * How many bytes this import may stage.
+     *
+     * The `min(128 MiB, 5% available storage)` bound is one figure for the
+     * whole installation, so an import may claim only what the live cache is
+     * not already using: staging beside a full cache would otherwise put twice
+     * that bound on disk. A cache that cannot be measured retains nothing
+     * rather than guessing in the direction that overshoots.
+     */
+    private fun retentionBudgetBytes(): Long = try {
+        (cache.ceilingBytes() - cache.usageBytes()).coerceAtLeast(0)
+    } catch (_: Exception) {
+        0L
+    }
+
+    /** Moves the staged frames into the live cache, under its ordinary bound. */
+    private fun promote(archive: StagedArchive) {
+        archive.retained.forEach { retained ->
+            repeat(retained.chunkCount) { chunkIndex ->
+                val frame = try {
+                    archive.staging.read(retained.blobSetId, chunkIndex)
+                } catch (_: Exception) {
+                    null
+                } ?: return@repeat
+                try {
+                    cache.write(retained.blobSetId, chunkIndex, frame)
+                } catch (_: Exception) {
+                    // The imported vault is already live; a frame the cache
+                    // will not take is simply one it does not hold.
+                } finally {
+                    frame.fill(0)
+                }
+            }
+        }
+    }
+
+    private fun clearStagingRoot() {
+        try {
+            stagingRoot.deleteRecursively()
+        } catch (_: Exception) {
+            // A staging root that will not delete holds only opaque ciphertext,
+            // and the next import clears it before it stages anything.
         }
     }
 
@@ -185,15 +246,18 @@ class OtVaultImporter(
      * chunks it declares, and those chunks reproduce the content the manifest
      * and the attachment record both claim.
      */
-    private inner class ArchiveReader(private val contentKey: VaultKey) {
-        val stagedBlobSets = mutableListOf<BlobSetId>()
+    private inner class ArchiveReader(
+        private val contentKey: VaultKey,
+        private val staging: AttachmentCacheStore,
+        private val budgetBytes: Long,
+    ) {
+        val retained = mutableListOf<RetainedBlobSet>()
         val attachmentsBeyondCache = mutableListOf<String>()
         var attachmentCount = 0
             private set
 
-        private val ceilingBytes = cache.ceilingBytes()
         private var snapshot: BackupSnapshotPayloadV1? = null
-        private var cachedBytes = 0L
+        private var stagedBytes = 0L
         private var pending: PendingBlobSet? = null
         private val completedBlobSets = mutableSetOf<BlobSetId>()
 
@@ -275,9 +339,9 @@ class OtVaultImporter(
          * hands it to the attachment cache, or gives up on this blob set.
          *
          * A blob set is retained whole or not at all: the moment one of its
-         * frames would push this import past the cache bound, everything
-         * already written for it is evicted and the attachment is named in the
-         * preview instead. Bytes are never written in the clear, and the
+         * frames would push this import past its share of the cache bound,
+         * everything already staged for it is dropped and the attachment is
+         * named in the preview instead. Bytes are never written in the clear, and the
          * archive manifest's sentinel `ciphertextSha256` and `providerObjectId`
          * are never used — the frames are re-authenticated at an import-scoped
          * identity of this vault, so nothing here can be mistaken for a live
@@ -304,30 +368,37 @@ class OtVaultImporter(
                 return giveUp(current)
             }
             try {
-                if (cachedBytes + frame.size > ceilingBytes) return giveUp(current)
-                cache.write(blobSetId, chunkIndex, frame)
+                if (stagedBytes + frame.size > budgetBytes) return giveUp(current)
+                staging.write(blobSetId, chunkIndex, frame)
             } catch (_: Exception) {
                 return giveUp(current)
             } finally {
                 frame.fill(0)
             }
-            cachedBytes += frame.size
+            stagedBytes += frame.size
             current.retainedFrameBytes += frame.size
-            if (stagedBlobSets.lastOrNull() != blobSetId) stagedBlobSets += blobSetId
+            val last = retained.lastOrNull()
+            if (last != null && last.blobSetId == blobSetId) {
+                last.chunkCount = chunkIndex + 1
+            } else {
+                retained += RetainedBlobSet(blobSetId, chunkIndex + 1)
+            }
         }
 
         private fun giveUp(current: PendingBlobSet) {
             current.retaining = false
             val blobSetId = current.manifest.blobSetId
-            // Everything already written for this blob set is about to go, so
+            // Everything already staged for this blob set is about to go, so
             // the budget it consumed returns to the attachments still to come.
-            cachedBytes -= current.retainedFrameBytes
+            stagedBytes -= current.retainedFrameBytes
             current.retainedFrameBytes = 0
-            if (stagedBlobSets.remove(blobSetId)) {
+            if (retained.lastOrNull()?.blobSetId == blobSetId) {
+                retained.removeAt(retained.lastIndex)
                 try {
-                    cache.evict(blobSetId)
+                    staging.evict(blobSetId)
                 } catch (_: Exception) {
-                    // See [abandon]: an unremovable frame is still bounded.
+                    // The whole staging root is deleted on every outcome, so a
+                    // frame this cannot remove is still never promoted.
                 }
             }
             attachmentsBeyondCache += current.displayName
@@ -399,10 +470,17 @@ class OtVaultImporter(
         val snapshot: BackupSnapshotPayloadV1,
         val envelope: VaultKeyEnvelope,
         val contentKey: VaultKey,
-        val stagedBlobSets: List<BlobSetId>,
+        val staging: AttachmentCacheStore,
+        val retained: List<RetainedBlobSet>,
     ) {
         fun close() = contentKey.close()
     }
+
+    /** One blob set fully staged, and how many chunks of it are there. */
+    private class RetainedBlobSet(
+        val blobSetId: BlobSetId,
+        var chunkCount: Int,
+    )
 
     private companion object {
         /**

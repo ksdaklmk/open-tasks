@@ -145,8 +145,12 @@ class VaultTransferViewModel @Inject constructor(
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (_: Exception) {
-                    passphrase.fill('\u0000')
                     OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON)
+                } finally {
+                    // `stage` wipes its own copy, but a document that yields no
+                    // stream at all — revoked or deleted between the pick and
+                    // here — never reaches it. Wiping twice is harmless.
+                    passphrase.fill('\u0000')
                 }
             } finally {
                 // A cleared ViewModel must still release the lock and drop the

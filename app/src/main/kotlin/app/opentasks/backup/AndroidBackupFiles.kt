@@ -26,6 +26,18 @@ class AndroidBackupFiles(context: Context) {
      */
     val attachmentCacheRoot =
         File(context.cacheDir, "attachments/v1")
+
+    /**
+     * Attachment frames one unconfirmed vault import has staged.
+     *
+     * Deliberately not under [attachmentCacheRoot]: an import that is refused,
+     * abandoned, or still awaiting confirmation must not have displaced a
+     * single frame the live vault is using, and this root is deleted whole
+     * rather than swept. Confirming an import promotes what is here into the
+     * live cache.
+     */
+    val vaultImportStagingRoot =
+        File(context.noBackupFilesDir, "vault-import/attachments/v1")
 }
 
 interface AtomicPackageFile {

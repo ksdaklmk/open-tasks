@@ -218,8 +218,8 @@ object LocalVaultRepositoryFactory {
             keyManager = keyManager,
         )
         val session = staging.begin(operationId)
-        val verified = try {
-            session.reconstruct(
+        try {
+            val verified = session.reconstruct(
                 request = RecoveryImportRequest(
                     snapshot = snapshot,
                     segments = emptyList(),
@@ -228,11 +228,15 @@ object LocalVaultRepositoryFactory {
                 ),
                 contentKey = contentKey,
             )
+            staging.activate(session, verified)
         } catch (failure: Throwable) {
+            // Publication is inside this same guard on purpose: an activation
+            // that fails after the staging slot was proved would otherwise
+            // leave a full staged copy of the vault, and its key, on disk for
+            // ever — the recovery coordinator abandons on either failure too.
             runCatching { staging.abandon(session) }
             throw failure
         }
-        staging.activate(session, verified)
     }
 
     /**

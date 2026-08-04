@@ -234,8 +234,9 @@ object AppModule {
      * Built fresh per resolution, like the exporter, and deliberately bound to
      * no vault slot: an import replaces whichever slot is active when it is
      * confirmed, and a device holding no vault at all can still import one.
-     * Only the per-installation attachment cache is shared with the active
-     * slot's services.
+     * The live per-installation attachment cache is shared with the active
+     * slot's services, but only so a confirmed import can promote into it —
+     * staging happens in its own root, clear of anything the live vault uses.
      */
     @Provides
     fun provideOtVaultImporter(
@@ -251,6 +252,7 @@ object AppModule {
         cache = AttachmentCacheStore(files.attachmentCacheRoot) {
             files.attachmentCacheRoot.usableSpace
         },
+        stagingRoot = files.vaultImportStagingRoot,
         activateImportedVault = { snapshot, recoveryEnvelope, contentKey ->
             LocalVaultRepositoryFactory.activateArchivedVault(
                 context = context,

@@ -33,6 +33,7 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -47,14 +48,13 @@ class OtVaultImporterTest {
     private val codec = OtVaultCodec(authenticatedCodec)
 
     @Test
-    fun stagePresentsArchiveCountsAndRetainsEveryChunk() = runBlocking {
+    fun stagePresentsArchiveCountsAndStagesEveryChunkClearOfTheLiveCache() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
                 val archive = writeArchive(ATTACHMENTS)
                 val passphrase = PASSPHRASE.toCharArray()
 
-                val preview = importer(cache).stage(ByteArrayInputStream(archive), passphrase)
+                val preview = importer(roots).stage(ByteArrayInputStream(archive), passphrase)
 
                 assertEquals(
                     OtVaultImportPreview.Ready(
@@ -64,29 +64,53 @@ class OtVaultImporterTest {
                     ),
                     preview,
                 )
-                assertTrue(cache.usageBytes() > 0)
+                assertTrue(roots.stagedBytes() > 0)
+                // Nothing is confirmed yet, so the live vault's cache is
+                // exactly as this import found it.
+                assertEquals(0L, roots.liveBytes())
                 assertTrue(passphrase.all { it == '\u0000' })
             }
         }
     }
 
     @Test
-    fun corruptArchiveIsRejectedAndLeavesNoStagedChunks() = runBlocking {
+    fun stagingNeverDisplacesFramesTheLiveVaultIsUsing() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
+                val live = ByteArray(40_000) { (it % 211).toByte() }
+                roots.cache.write(LIVE_BLOB_SET, 0, live.copyOf())
+
+                importer(roots).stage(
+                    ByteArrayInputStream(writeArchive(ATTACHMENTS)),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertArrayEquals(live, roots.cache.read(LIVE_BLOB_SET, 0))
+                assertEquals(live.size.toLong(), roots.liveBytes())
+                assertTrue(roots.stagedBytes() > 0)
+            }
+        }
+    }
+
+    @Test
+    fun corruptArchiveIsRejectedAndLeavesNoStagingResidue() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
+                val live = ByteArray(40_000) { (it % 211).toByte() }
+                roots.cache.write(LIVE_BLOB_SET, 0, live.copyOf())
                 // The inventory is the archive's last frame, so flipping its
                 // final byte fails authentication only after every chunk has
-                // already been staged into the cache.
+                // already been staged.
                 val archive = writeArchive(ATTACHMENTS).also { bytes ->
                     bytes[bytes.lastIndex] = (bytes[bytes.lastIndex].toInt() xor 0x01).toByte()
                 }
 
-                val preview = importer(cache)
+                val preview = importer(roots)
                     .stage(ByteArrayInputStream(archive), PASSPHRASE.toCharArray())
 
                 assertTrue(preview is OtVaultImportPreview.Rejected)
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
+                assertArrayEquals(live, roots.cache.read(LIVE_BLOB_SET, 0))
             }
         }
     }
@@ -94,12 +118,11 @@ class OtVaultImporterTest {
     @Test
     fun wrongPassphraseIsRejectedWithoutDecryptingAnyFrame() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
                 val archive = writeArchive(ATTACHMENTS)
                 authenticatedCodec.decryptions.set(0)
 
-                val preview = importer(cache)
+                val preview = importer(roots)
                     .stage(ByteArrayInputStream(archive), "not the passphrase".toCharArray())
 
                 assertEquals(
@@ -107,7 +130,7 @@ class OtVaultImporterTest {
                     preview,
                 )
                 assertEquals(0, authenticatedCodec.decryptions.get())
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
             }
         }
     }
@@ -115,10 +138,9 @@ class OtVaultImporterTest {
     @Test
     fun attachmentsBeyondTheCacheBoundAreNamedInThePreview() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
                 // 5% of 2,000,000 leaves a 100,000 byte ceiling: the small
                 // attachment fits inside it, the 200,000 byte one cannot.
-                val cache = AttachmentCacheStore(root) { 2_000_000 }
                 val attachments = listOf(
                     ATTACHMENTS.first(),
                     archiveAttachment(
@@ -127,10 +149,9 @@ class OtVaultImporterTest {
                         bytes = ByteArray(200_000) { (it % 251).toByte() },
                     ),
                 )
-                val archive = writeArchive(attachments)
 
-                val preview = importer(cache)
-                    .stage(ByteArrayInputStream(archive), PASSPHRASE.toCharArray())
+                val preview = importer(roots)
+                    .stage(ByteArrayInputStream(writeArchive(attachments)), PASSPHRASE.toCharArray())
 
                 assertEquals(
                     OtVaultImportPreview.Ready(
@@ -140,7 +161,32 @@ class OtVaultImporterTest {
                     ),
                     preview,
                 )
-                assertTrue(cache.usageBytes() in 1 until 100_000)
+                assertTrue(roots.stagedBytes() in 1 until 100_000)
+            }
+        }
+    }
+
+    @Test
+    fun theRetentionBudgetAccountsForWhatTheLiveCacheAlreadyHolds() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
+                // The live cache is already at the whole installation's bound,
+                // so this import may claim none of it.
+                roots.cache.write(LIVE_BLOB_SET, 0, ByteArray(100_000) { (it % 211).toByte() })
+
+                val preview = importer(roots)
+                    .stage(ByteArrayInputStream(writeArchive(ATTACHMENTS)), PASSPHRASE.toCharArray())
+
+                assertEquals(
+                    OtVaultImportPreview.Ready(
+                        recordCount = records(ATTACHMENTS).size,
+                        attachmentCount = 2,
+                        attachmentsBeyondCache = listOf("notes.pdf", "plan.pdf"),
+                    ),
+                    preview,
+                )
+                assertEquals(0L, roots.stagedBytes())
+                assertEquals(100_000L, roots.liveBytes())
             }
         }
     }
@@ -148,11 +194,10 @@ class OtVaultImporterTest {
     @Test
     fun anAttachmentGivenUpOnReturnsItsBudgetToTheAttachmentsAfterIt() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
                 // A 100,000 byte ceiling: the first attachment's second chunk
                 // pushes it past the bound, and the 80,000 byte attachment
                 // after it only fits if the first one's bytes were given back.
-                val cache = AttachmentCacheStore(root) { 2_000_000 }
                 val attachments = listOf(
                     ArchiveAttachment(
                         id = "attachment-big",
@@ -170,7 +215,7 @@ class OtVaultImporterTest {
                     ),
                 )
 
-                val preview = importer(cache)
+                val preview = importer(roots)
                     .stage(ByteArrayInputStream(writeArchive(attachments)), PASSPHRASE.toCharArray())
 
                 assertEquals(
@@ -181,7 +226,7 @@ class OtVaultImporterTest {
                     ),
                     preview,
                 )
-                assertTrue(cache.usageBytes() in 80_000 until 100_000)
+                assertTrue(roots.stagedBytes() in 80_000 until 100_000)
             }
         }
     }
@@ -189,12 +234,9 @@ class OtVaultImporterTest {
     @Test
     fun aTinyCacheBoundRetainsNothingAndNamesEveryAttachment() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { 20 }
-                val archive = writeArchive(ATTACHMENTS)
-
-                val preview = importer(cache)
-                    .stage(ByteArrayInputStream(archive), PASSPHRASE.toCharArray())
+            withRoots(20L) { roots ->
+                val preview = importer(roots)
+                    .stage(ByteArrayInputStream(writeArchive(ATTACHMENTS)), PASSPHRASE.toCharArray())
 
                 assertEquals(
                     OtVaultImportPreview.Ready(
@@ -204,17 +246,16 @@ class OtVaultImporterTest {
                     ),
                     preview,
                 )
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
             }
         }
     }
 
     @Test
-    fun abandonDiscardsStagedChunksAndLeavesNothingToActivate() = runBlocking {
+    fun abandonDiscardsTheStagingRootAndLeavesNothingToActivate() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
-                val importer = importer(cache)
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val importer = importer(roots)
                 importer.stage(
                     ByteArrayInputStream(writeArchive(ATTACHMENTS)),
                     PASSPHRASE.toCharArray(),
@@ -222,46 +263,49 @@ class OtVaultImporterTest {
 
                 importer.abandon()
 
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
+                assertEquals(0L, roots.liveBytes())
                 assertFalse(importer.activate())
             }
         }
     }
 
     @Test
-    fun activateHandsTheArchiveSnapshotAndItsRecoveryEnvelopeToTheVault() = runBlocking {
+    fun activateHandsTheArchiveSnapshotToTheVaultAndPromotesItsFrames() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
                 var activated: BackupSnapshotPayloadV1? = null
                 var envelope: VaultKeyEnvelope? = null
-                val importer = importer(cache) { snapshot, recoveryEnvelope, _ ->
+                val importer = importer(roots) { snapshot, recoveryEnvelope, _ ->
                     activated = snapshot
                     envelope = recoveryEnvelope
+                    // Promotion may only follow a replaced vault, never precede it.
+                    assertEquals(0L, roots.liveBytes())
                 }
                 importer.stage(
                     ByteArrayInputStream(writeArchive(ATTACHMENTS)),
                     PASSPHRASE.toCharArray(),
                 )
+                val stagedBytes = roots.stagedBytes()
 
                 assertTrue(importer.activate())
 
                 assertEquals(VAULT_ID.value, checkNotNull(activated).vaultId)
                 assertEquals(GENERATION, checkNotNull(activated).coveredGeneration)
                 assertNotNull(envelope)
-                // A published import keeps the bytes it staged for the vault
-                // it just installed.
-                assertTrue(cache.usageBytes() > 0)
+                assertEquals(stagedBytes, roots.liveBytes())
+                assertEquals(0L, roots.stagedBytes())
             }
         }
     }
 
     @Test
-    fun aFailedActivationReportsFailureAndDiscardsTheStagedChunks() = runBlocking {
+    fun aFailedActivationReportsFailureAndDiscardsTheStagingRoot() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
-                val importer = importer(cache) { _, _, _ ->
+            withRoots(SMALL_AVAILABLE_BYTES) { roots ->
+                val live = ByteArray(40_000) { (it % 211).toByte() }
+                roots.cache.write(LIVE_BLOB_SET, 0, live.copyOf())
+                val importer = importer(roots) { _, _, _ ->
                     error("The staged vault could not be published")
                 }
                 importer.stage(
@@ -271,7 +315,8 @@ class OtVaultImporterTest {
 
                 assertFalse(importer.activate())
 
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
+                assertArrayEquals(live, roots.cache.read(LIVE_BLOB_SET, 0))
             }
         }
     }
@@ -279,21 +324,20 @@ class OtVaultImporterTest {
     @Test
     fun anArchiveMissingAChunkItsManifestDeclaresIsRejected() = runBlocking {
         withTimeout(5_000) {
-            withCacheRoot { root ->
-                val cache = AttachmentCacheStore(root) { GENEROUS_AVAILABLE_BYTES }
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
                 val archive = writeArchive(
                     attachments = ATTACHMENTS,
                     omitChunksOf = ATTACHMENTS.last().blobSetId,
                 )
 
-                val preview = importer(cache)
+                val preview = importer(roots)
                     .stage(ByteArrayInputStream(archive), PASSPHRASE.toCharArray())
 
                 assertEquals(
                     OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON),
                     preview,
                 )
-                assertEquals(0L, cache.usageBytes())
+                assertEquals(0L, roots.stagedBytes())
             }
         }
     }
@@ -301,14 +345,15 @@ class OtVaultImporterTest {
     // ------------------------------------------------------------- Fixtures
 
     private fun importer(
-        cache: AttachmentCacheStore,
+        roots: ImportRoots,
         activate: suspend (BackupSnapshotPayloadV1, VaultKeyEnvelope, VaultKey) -> Unit =
             { _, _, _ -> },
     ) = OtVaultImporter(
         codec = codec,
         authenticatedCodec = authenticatedCodec,
         crypto = crypto,
-        cache = cache,
+        cache = roots.cache,
+        stagingRoot = roots.stagingRoot,
         activateImportedVault = activate,
     )
 
@@ -371,12 +416,34 @@ class OtVaultImporterTest {
         }
     }
 
-    private inline fun withCacheRoot(block: (File) -> Unit) {
-        val root = Files.createTempDirectory("otvault-import-test").toFile()
+    /**
+     * The live attachment cache and the import staging root, on separate
+     * directories exactly as the product wires them.
+     */
+    private class ImportRoots(parent: File, availableBytes: Long) {
+        val stagingRoot: File = parent.resolve("import-staging")
+        val cache = AttachmentCacheStore(parent.resolve("cache").also(File::mkdirs)) {
+            availableBytes
+        }
+
+        private val cacheRoot: File = parent.resolve("cache")
+
+        /** Bytes the live cache holds, read from disk rather than from the store. */
+        fun liveBytes(): Long = frameBytes(cacheRoot)
+
+        /** Bytes an unconfirmed import has staged, clear of the live cache. */
+        fun stagedBytes(): Long = frameBytes(stagingRoot)
+
+        private fun frameBytes(root: File): Long =
+            root.walkTopDown().filter(File::isFile).sumOf(File::length)
+    }
+
+    private inline fun withRoots(availableBytes: Long, block: (ImportRoots) -> Unit) {
+        val parent = Files.createTempDirectory("otvault-import-test").toFile()
         try {
-            block(root)
+            block(ImportRoots(parent, availableBytes))
         } finally {
-            root.deleteRecursively()
+            parent.deleteRecursively()
         }
     }
 
@@ -439,6 +506,10 @@ class OtVaultImporterTest {
         const val PASSPHRASE = "correct horse battery staple"
         const val GENERATION = 12L
         const val GENEROUS_AVAILABLE_BYTES = 200_000_000L
+
+        /** 5% of this is a 100,000 byte cache ceiling. */
+        const val SMALL_AVAILABLE_BYTES = 2_000_000L
+        val LIVE_BLOB_SET = BlobSetId("blob-set-already-cached")
         const val WORKSPACE_ID = "workspace-1"
         const val MEMBER_ID = "member-1"
         const val TASK_ID = "task-1"
