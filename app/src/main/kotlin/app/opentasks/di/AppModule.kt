@@ -76,6 +76,7 @@ import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RemoteBackupVerifiedInfo
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
+import app.opentasks.widget.TodayWidgetPublisher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -294,6 +295,7 @@ object AppModule {
      */
     @Provides
     fun provideActiveVaultSession(
+        @ApplicationContext context: Context,
         runtime: LocalVaultRuntime,
         files: AndroidBackupFiles,
         codec: AuthenticatedCloudObjectCodec,
@@ -302,8 +304,24 @@ object AppModule {
         authorizationManager: GoogleDriveAuthorizationManager,
         workScheduler: BackupWorkScheduler,
     ): ActiveVaultSession {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // Named so the widget publisher's stop-on-close hook below can attach
+        // to exactly this slot's own job. `DefaultActiveVaultSession.close()`
+        // cancels `sessionJob` (via `scope`) before this slot can be replaced.
+        val sessionJob = SupervisorJob()
+        val scope = CoroutineScope(sessionJob + Dispatchers.Default)
         val contentKeyStore = runtime.contentKeyStore
+        // Built fresh per slot, started here alongside the slot's other
+        // services. Its own scope is never cancelled by `sessionJob`, so the
+        // clearing write `stop()` launches once `sessionJob` completes always
+        // finishes -- which is also why this needs no new member on
+        // `ActiveVaultSession` and no change to its production caller
+        // `ActiveVaultServices`.
+        val todayWidgetPublisher = TodayWidgetPublisher(
+            context = context,
+            repository = runtime.repository,
+        )
+        todayWidgetPublisher.start()
+        sessionJob.invokeOnCompletion { todayWidgetPublisher.stop() }
         val localObjectStore = DefaultLocalBackupObjectStore(files.localBackupRoot)
         val coordinator: BackupCoordinator = LocalVaultRepositoryFactory.createBackupCoordinator(
             runtime = runtime,

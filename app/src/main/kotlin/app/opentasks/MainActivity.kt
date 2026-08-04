@@ -175,6 +175,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_QUICK_ADD, false) == true) {
+            quickAddSignal++
+            return
+        }
         when (intent?.action) {
             QUICK_ADD_ACTION -> quickAddSignal++
             ReminderIntents.ACTION_OPEN_TASK -> {
@@ -186,6 +190,9 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"
+
+        /** Matches the Today widget's Quick Add action parameter key. */
+        const val EXTRA_OPEN_QUICK_ADD = "open_quick_add"
     }
 }
 

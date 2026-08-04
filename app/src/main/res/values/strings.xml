@@ -23,4 +23,9 @@
     <string name="attachment_no_viewer">No app on this device can open that attachment.</string>
     <string name="attachment_content_deleted">Attachment content deleted</string>
     <string name="attachment_content_delete_refused">Attachment content was not deleted.</string>
+
+    <string name="today_widget_label">Today</string>
+    <string name="today_widget_description">Today\'s open and overdue task counts, with quick add.</string>
+    <string name="today_widget_counts">%1$d open today · %2$d overdue</string>
+    <string name="today_widget_titles_hidden">Tasks are hidden</string>
 </resources>

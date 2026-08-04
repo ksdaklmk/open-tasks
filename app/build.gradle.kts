@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.google.play.services.auth)
     implementation(libs.work.runtime)
+    implementation(libs.glance.appwidget)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
