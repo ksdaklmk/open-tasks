@@ -50,6 +50,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private val OpenTodayCountKey = intPreferencesKey("today_open_count")
 private val OverdueCountKey = intPreferencesKey("today_overdue_count")
@@ -187,19 +189,57 @@ private fun TodayWidgetContent() {
 }
 
 /**
+ * Serializes every write a caller performs through [write], and guarantees
+ * that once [stop] has run its own action, no [write] -- already in
+ * flight, queued behind the gate, or requested afterwards -- can run its
+ * action later. `stopped` is only ever read or written while holding
+ * [gate], so the check in [write] and the flip in [stop] can never
+ * interleave: a [write] that is inside the gate when [stop] is requested
+ * finishes first (ordering is preserved, not corrupted), and every [write]
+ * that reaches the gate after [stop]'s own action has run sees `stopped`
+ * already `true` and is a no-op. [stop] itself only ever runs [action]
+ * once, even if called more than once.
+ *
+ * This exists so [TodayWidgetPublisher] has one mechanism -- not two -- for
+ * "no title write lands after the clear": both its continuous
+ * `observeWorkspace()` collection and its one-off [TodayWidgetPublisher.republish]
+ * (triggered by an arbitrary widget-host broadcast, so it can race a
+ * closing slot) route through the same [StopGatedWriter] instance.
+ */
+internal class StopGatedWriter {
+    private val gate = Mutex()
+    private var stopped = false
+
+    /** Runs [action] unless [stop] has already run; a no-op afterwards. */
+    suspend fun write(action: suspend () -> Unit) {
+        gate.withLock {
+            if (!stopped) action()
+        }
+    }
+
+    /** Marks this writer stopped and runs [action], exactly once. */
+    suspend fun stop(action: suspend () -> Unit) {
+        gate.withLock {
+            if (stopped) return@withLock
+            stopped = true
+            action()
+        }
+    }
+}
+
+/**
  * Publishes [TodayWidgetProjection] into Glance state for every placed
  * [TodayWidget].
  *
  * One instance is built fresh per active vault slot, mirroring
  * [app.opentasks.core.data.backup.AttachmentRuntime]: [start] launches an
  * `observeWorkspace()` collection on this publisher's own scope, and [stop]
- * cancels only that collection -- never the scope itself -- so the titles
- * it then clears always finish writing even though the slot that asked for
- * the clear is already gone. [stop] does not launch the clearing write
- * until the collection job has actually finished (via
- * [Job.invokeOnCompletion]): cancellation is cooperative, so a mid-flight
- * `publish` could otherwise land after the clear and leave a closed vault's
- * task titles on screen. Glance state lives under `filesDir`, outside the
+ * cancels that collection and, through [writer], guarantees the clearing
+ * write it performs can never be followed by a later title write -- from
+ * that collection, which is merely cancelled cooperatively and so cannot
+ * be relied on to have already stopped writing, or from [republish], which
+ * a widget-host broadcast can trigger at any time, including the instant
+ * [stop] itself runs. Glance state lives under `filesDir`, outside the
  * Auto Backup allow-list, so it is never backed up.
  */
 class TodayWidgetPublisher(
@@ -208,6 +248,7 @@ class TodayWidgetPublisher(
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val writer = StopGatedWriter()
     private var collection: Job? = null
     private var titlesPermitted: Boolean = true
 
@@ -220,25 +261,19 @@ class TodayWidgetPublisher(
         this.titlesPermitted = titlesPermitted
         collection?.cancel()
         collection = scope.launch {
-            repository.observeWorkspace().collect(::publishSnapshot)
+            repository.observeWorkspace().collect { snapshot ->
+                writer.write { writeProjection(snapshot) }
+            }
         }
         synchronized(activeLock) { active = this }
     }
 
-    /**
-     * Stops collection and, once it has fully finished, clears titles --
-     * but not counts -- from Glance state.
-     */
+    /** Stops collection and clears titles -- but not counts -- from Glance state. */
     fun stop() {
         synchronized(activeLock) { if (active === this) active = null }
-        val job = collection
+        collection?.cancel()
         collection = null
-        if (job == null) {
-            scope.launch { clearTitles() }
-            return
-        }
-        job.invokeOnCompletion { scope.launch { clearTitles() } }
-        job.cancel()
+        scope.launch { writer.stop { clearTitles() } }
     }
 
     /**
@@ -248,10 +283,11 @@ class TodayWidgetPublisher(
      * since [start].
      */
     fun republish() {
-        scope.launch { publishSnapshot(repository.observeWorkspace().value) }
+        val snapshot = repository.observeWorkspace().value
+        scope.launch { writer.write { writeProjection(snapshot) } }
     }
 
-    private suspend fun publishSnapshot(snapshot: WorkspaceSnapshot) {
+    private suspend fun writeProjection(snapshot: WorkspaceSnapshot) {
         val projection = computeTodayProjection(
             snapshot = snapshot,
             today = LocalDate.now(zone),
