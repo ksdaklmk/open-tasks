@@ -189,7 +189,7 @@
     <string name="recovery_failure_local_key">This device cannot open the local recovery key.</string>
 
     <string name="vault_transfer_heading">Vault transfer</string>
-    <string name="vault_transfer_explanation">Export the whole vault — every record and attachment — as one encrypted file you can move to another device.</string>
+    <string name="vault_transfer_explanation">Export the whole vault — every record and attachment — as one encrypted file you can move to another device, or import one to replace the vault on this device.</string>
     <string name="vault_export_action">Export encrypted vault</string>
     <string name="vault_export_in_progress">Exporting the vault…</string>
     <plurals name="vault_export_completed">
@@ -203,4 +203,26 @@
     <string name="vault_export_passphrase_label">Export passphrase</string>
     <string name="vault_export_confirmation_label">Confirm export passphrase</string>
     <string name="vault_export_submit_action">Export vault</string>
+    <string name="vault_import_action">Import encrypted vault</string>
+    <string name="vault_import_in_progress">Reading the vault archive…</string>
+    <string name="vault_import_completed">The vault was imported. This device now holds the imported vault.</string>
+    <string name="vault_import_sheet_title">Import encrypted vault</string>
+    <string name="vault_import_sheet_explanation">Enter the passphrase this archive was exported with, then choose the file. Nothing on this device changes until you confirm what the archive holds.</string>
+    <string name="vault_import_passphrase_label">Archive passphrase</string>
+    <string name="vault_import_submit_action">Choose archive</string>
+    <string name="vault_import_preview_title">Replace this vault?</string>
+    <string name="vault_import_preview_counts">This archive holds %1$s and %2$s.</string>
+    <plurals name="vault_import_preview_records">
+        <item quantity="one">%1$d record</item>
+        <item quantity="other">%1$d records</item>
+    </plurals>
+    <plurals name="vault_import_preview_attachments">
+        <item quantity="one">%1$d attachment</item>
+        <item quantity="other">%1$d attachments</item>
+    </plurals>
+    <string name="vault_import_preview_replacement">Importing replaces everything this vault holds on this device. The vault you have now is kept until the imported one opens for the first time, then removed.</string>
+    <string name="vault_import_preview_remote">Encrypted backup is disconnected by an import. Reconnect afterwards to back the imported vault up again.</string>
+    <string name="vault_import_preview_passphrase">The archive passphrase becomes this vault\'s recovery passphrase.</string>
+    <string name="vault_import_preview_beyond_cache">These attachments\' bytes will not be kept on this device, so keep the archive file: %1$s</string>
+    <string name="vault_import_replace_action">Replace vault</string>
 </resources>

@@ -5,7 +5,9 @@ import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKey
+import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.backup.BackupJournalDao
+import app.opentasks.core.data.backup.BackupSnapshotPayloadV1
 import app.opentasks.core.data.backup.DefaultBackupCoordinator
 import app.opentasks.core.data.backup.DefaultRecoveryCoordinator
 import app.opentasks.core.data.backup.DefaultRemoteBackupConfigurator
@@ -179,6 +181,59 @@ object LocalVaultRepositoryFactory {
         stagingRoot = recoveryStagingRoot,
         expectedAccountBindingDigest = expectedAccountBindingDigest,
     )
+
+    /**
+     * Rebuilds one authenticated `.otvault` archive into a fresh staging slot,
+     * proves it, and publishes it as the live vault.
+     *
+     * This is the recovery activation path with an archive as its source
+     * instead of a provider: the same isolated staging slot, the same
+     * [app.opentasks.core.data.backup.RoomBackupRecordImporter], the same
+     * staged-vault verification, and the same crash-safe slot replacement — so
+     * an imported vault inherits no journal, no publication checkpoint, and no
+     * remote binding, and the prior slot is the rollback until the imported one
+     * has proved it opens. A failure discards the staging slot and leaves the
+     * active vault exactly as it was.
+     *
+     * [segments] is deliberately empty: `.otvault` exports are snapshot-only
+     * baselines, so there is no operation history to replay and the recovered
+     * generation is the snapshot's own.
+     *
+     * [contentKey] stays the caller's to close.
+     */
+    suspend fun activateArchivedVault(
+        context: Context,
+        crypto: VaultCrypto,
+        runtimeManager: VaultRuntimeManager,
+        operationId: String,
+        snapshot: BackupSnapshotPayloadV1,
+        recoveryEnvelope: VaultKeyEnvelope,
+        contentKey: VaultKey,
+        keyManager: AndroidVaultKeyManager = AndroidVaultKeyManager(context),
+    ) {
+        val staging = LocalRecoveryStagingFactory(
+            context = context,
+            crypto = crypto,
+            runtimeManager = runtimeManager,
+            keyManager = keyManager,
+        )
+        val session = staging.begin(operationId)
+        val verified = try {
+            session.reconstruct(
+                request = RecoveryImportRequest(
+                    snapshot = snapshot,
+                    segments = emptyList(),
+                    recoveryEnvelope = recoveryEnvelope,
+                    expectedGeneration = BackupGeneration(snapshot.coveredGeneration),
+                ),
+                contentKey = contentKey,
+            )
+        } catch (failure: Throwable) {
+            runCatching { staging.abandon(session) }
+            throw failure
+        }
+        staging.activate(session, verified)
+    }
 
     /**
      * Creates a staged slot's database under a brand-new SQLCipher key.

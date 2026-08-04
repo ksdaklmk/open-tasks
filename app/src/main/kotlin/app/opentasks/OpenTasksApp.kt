@@ -219,6 +219,15 @@ fun OpenTasksApp(
         ) { uri ->
             vaultTransferViewModel.onExportDocumentSelected(uri)
         }
+        val vaultImportInProgress by
+            vaultTransferViewModel.importInProgress.collectAsStateWithLifecycle()
+        val vaultImportOutcome by
+            vaultTransferViewModel.importOutcome.collectAsStateWithLifecycle()
+        val vaultImportDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            vaultTransferViewModel.onImportDocumentSelected(uri)
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val accessibilityManager = LocalAccessibilityManager.current
         val showNavigationLabels =
@@ -239,6 +248,13 @@ fun OpenTasksApp(
         LaunchedEffect(vaultTransferViewModel) {
             for (ignored in vaultTransferViewModel.createDocumentRequests) {
                 vaultExportDocumentLauncher.launch("open_tasks_vault.otvault")
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, vaultImportDocumentLauncher) {
+            for (ignored in vaultTransferViewModel.openDocumentRequests) {
+                // `.otvault` has no registered MIME type, so the picker offers
+                // the generic byte-stream filter every archive is served as.
+                vaultImportDocumentLauncher.launch(arrayOf("application/octet-stream"))
             }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -1013,6 +1029,14 @@ fun OpenTasksApp(
                                         vaultTransferViewModel::beginExport,
                                     onDismissVaultExportOutcome =
                                         vaultTransferViewModel::dismissOutcome,
+                                    vaultImportInProgress = vaultImportInProgress,
+                                    vaultImportOutcome = vaultImportOutcome,
+                                    onImportVaultPassphraseConfirmed =
+                                        vaultTransferViewModel::beginImport,
+                                    onConfirmVaultImport =
+                                        vaultTransferViewModel::confirmImport,
+                                    onDismissVaultImport =
+                                        vaultTransferViewModel::dismissImport,
                                 )
                             }
                         },

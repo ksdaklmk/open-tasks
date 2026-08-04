@@ -15,6 +15,7 @@ import app.opentasks.backup.DefaultRemoteBackupRunner
 import app.opentasks.backup.DefaultRemoteBackupRuntime
 import app.opentasks.backup.EncryptedBackupActionResult
 import app.opentasks.backup.OtVaultExporter
+import app.opentasks.backup.OtVaultImporter
 import app.opentasks.backup.PersistedAndroidBackupStatusSource
 import app.opentasks.backup.PortableBackupPublisher
 import app.opentasks.backup.RecoveryEnvelopePreparer
@@ -226,6 +227,40 @@ object AppModule {
         )::prepare,
         readChunksForExport = { attachment, onChunk ->
             services.requireSession().attachmentRuntime.readChunksForExport(attachment, onChunk)
+        },
+    )
+
+    /**
+     * Built fresh per resolution, like the exporter, and deliberately bound to
+     * no vault slot: an import replaces whichever slot is active when it is
+     * confirmed, and a device holding no vault at all can still import one.
+     * Only the per-installation attachment cache is shared with the active
+     * slot's services.
+     */
+    @Provides
+    fun provideOtVaultImporter(
+        @ApplicationContext context: Context,
+        crypto: VaultCrypto,
+        codec: AuthenticatedCloudObjectCodec,
+        files: AndroidBackupFiles,
+        runtimeManager: DefaultVaultRuntimeManager,
+    ): OtVaultImporter = OtVaultImporter(
+        codec = OtVaultCodec(codec),
+        authenticatedCodec = codec,
+        crypto = crypto,
+        cache = AttachmentCacheStore(files.attachmentCacheRoot) {
+            files.attachmentCacheRoot.usableSpace
+        },
+        activateImportedVault = { snapshot, recoveryEnvelope, contentKey ->
+            LocalVaultRepositoryFactory.activateArchivedVault(
+                context = context,
+                crypto = crypto,
+                runtimeManager = runtimeManager,
+                operationId = "otvault-import:${snapshot.vaultId}:${snapshot.coveredGeneration}",
+                snapshot = snapshot,
+                recoveryEnvelope = recoveryEnvelope,
+                contentKey = contentKey,
+            )
         },
     )
 

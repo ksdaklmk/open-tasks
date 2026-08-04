@@ -27,6 +27,8 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.MoveToInbox
 import androidx.compose.material.icons.rounded.Sync
+import androidx.annotation.StringRes
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -82,6 +84,25 @@ sealed interface VaultExportOutcome {
     data class Failed(val reason: String) : VaultExportOutcome
 }
 
+/**
+ * Where one whole-vault import has got to.
+ *
+ * [Ready] is a staged archive awaiting an explicit replacement decision;
+ * dismissing it discards that staging. [Failed.reason] is already resolved,
+ * generic UK copy — never a resource ID — so it is rendered as-is.
+ */
+sealed interface VaultImportOutcome {
+    data class Ready(
+        val recordCount: Int,
+        val attachmentCount: Int,
+        val attachmentsBeyondCache: List<String>,
+    ) : VaultImportOutcome
+
+    data object Completed : VaultImportOutcome
+
+    data class Failed(val reason: String) : VaultImportOutcome
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRecoveryScreen(
@@ -100,6 +121,8 @@ fun BackupRecoveryScreen(
     attachmentCacheUsageBytes: Long = 0L,
     vaultExportInProgress: Boolean = false,
     vaultExportOutcome: VaultExportOutcome? = null,
+    vaultImportInProgress: Boolean = false,
+    vaultImportOutcome: VaultImportOutcome? = null,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -119,12 +142,16 @@ fun BackupRecoveryScreen(
     onDeleteAttachmentContent: (String) -> Unit = {},
     onExportVaultPassphraseConfirmed: (String) -> Unit = {},
     onDismissVaultExportOutcome: () -> Unit = {},
+    onImportVaultPassphraseConfirmed: (String) -> Unit = {},
+    onConfirmVaultImport: () -> Unit = {},
+    onDismissVaultImport: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showPassphraseSheet by remember { mutableStateOf(false) }
     var remoteSecretAction by remember { mutableStateOf<RemoteSecretAction?>(null) }
     var showVaultExportSheet by remember { mutableStateOf(false) }
+    var showVaultImportSheet by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -263,10 +290,14 @@ fun BackupRecoveryScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 VaultTransferContent(
-                    inProgress = vaultExportInProgress,
-                    outcome = vaultExportOutcome,
+                    exportInProgress = vaultExportInProgress,
+                    exportOutcome = vaultExportOutcome,
+                    importInProgress = vaultImportInProgress,
+                    importOutcome = vaultImportOutcome,
                     onExportClick = { showVaultExportSheet = true },
-                    onDismissOutcome = onDismissVaultExportOutcome,
+                    onDismissExportOutcome = onDismissVaultExportOutcome,
+                    onImportClick = { showVaultImportSheet = true },
+                    onDismissImportOutcome = onDismissVaultImport,
                 )
             }
         }
@@ -290,6 +321,22 @@ fun BackupRecoveryScreen(
                 showVaultExportSheet = false
                 onExportVaultPassphraseConfirmed(passphrase)
             },
+        )
+    }
+    if (showVaultImportSheet) {
+        VaultImportPassphraseSheet(
+            onDismiss = { showVaultImportSheet = false },
+            onImport = { passphrase ->
+                showVaultImportSheet = false
+                onImportVaultPassphraseConfirmed(passphrase)
+            },
+        )
+    }
+    (vaultImportOutcome as? VaultImportOutcome.Ready)?.let { ready ->
+        VaultImportPreviewDialog(
+            preview = ready,
+            onReplace = onConfirmVaultImport,
+            onCancel = onDismissVaultImport,
         )
     }
     remoteSecretAction?.let { action ->
@@ -358,17 +405,24 @@ private fun CloudAttachmentContent(
 }
 
 /**
- * The whole-vault export action and its most recent progress or outcome.
+ * The whole-vault export and import actions and their most recent progress or
+ * outcome.
  *
- * The action stays tappable throughout: re-entrancy is the exporter's own
- * concern, not something this row enforces by hiding itself.
+ * Both actions stay tappable throughout: re-entrancy is the transfer's own
+ * concern, not something these rows enforce by hiding themselves. An import
+ * awaiting confirmation is shown by its own dialog rather than here, so this
+ * section never states an outcome the person has not yet decided on.
  */
 @Composable
 private fun VaultTransferContent(
-    inProgress: Boolean,
-    outcome: VaultExportOutcome?,
+    exportInProgress: Boolean,
+    exportOutcome: VaultExportOutcome?,
+    importInProgress: Boolean,
+    importOutcome: VaultImportOutcome?,
     onExportClick: () -> Unit,
-    onDismissOutcome: () -> Unit,
+    onDismissExportOutcome: () -> Unit,
+    onImportClick: () -> Unit,
+    onDismissImportOutcome: () -> Unit,
 ) {
     Text(
         stringResource(R.string.vault_transfer_explanation),
@@ -377,50 +431,175 @@ private fun VaultTransferContent(
     )
     Spacer(Modifier.height(12.dp))
     BackupAction(R.string.vault_export_action, "vault-export", onExportClick)
-    if (inProgress) {
-        Spacer(Modifier.height(12.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val description = stringResource(R.string.vault_export_in_progress)
-            CircularProgressIndicator(
-                modifier = Modifier
-                    .size(24.dp)
-                    .semantics { contentDescription = description },
-                strokeWidth = 3.dp,
-            )
-            Text(description, style = MaterialTheme.typography.bodyLarge)
-        }
+    if (exportInProgress) {
+        TransferProgress(R.string.vault_export_in_progress)
     }
-    if (outcome != null) {
-        Spacer(Modifier.height(12.dp))
-        Text(
-            when (outcome) {
+    if (exportOutcome != null) {
+        TransferOutcome(
+            message = when (exportOutcome) {
                 is VaultExportOutcome.Completed -> pluralStringResource(
                     R.plurals.vault_export_completed,
-                    outcome.attachmentCount,
-                    outcome.attachmentCount,
+                    exportOutcome.attachmentCount,
+                    exportOutcome.attachmentCount,
                 )
                 is VaultExportOutcome.MissingAttachmentBytes -> stringResource(
                     R.string.vault_export_missing_attachments,
-                    outcome.displayNames.joinToString(", "),
+                    exportOutcome.displayNames.joinToString(", "),
                 )
-                is VaultExportOutcome.Failed -> outcome.reason
+                is VaultExportOutcome.Failed -> exportOutcome.reason
             },
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.testTag("vault-export-outcome"),
+            testTag = "vault-export-outcome",
+            dismissTestTag = "vault-export-dismiss",
+            onDismiss = onDismissExportOutcome,
         )
-        Spacer(Modifier.height(8.dp))
-        TextButton(
-            onClick = onDismissOutcome,
-            modifier = Modifier
-                .heightIn(min = 48.dp)
-                .testTag("vault-export-dismiss"),
-        ) {
-            Text(stringResource(R.string.vault_export_dismiss_action))
-        }
     }
+    Spacer(Modifier.height(12.dp))
+    BackupAction(R.string.vault_import_action, "vault-import", onImportClick)
+    if (importInProgress) {
+        TransferProgress(R.string.vault_import_in_progress)
+    }
+    when (importOutcome) {
+        VaultImportOutcome.Completed -> TransferOutcome(
+            message = stringResource(R.string.vault_import_completed),
+            testTag = "vault-import-outcome",
+            dismissTestTag = "vault-import-dismiss",
+            onDismiss = onDismissImportOutcome,
+        )
+        is VaultImportOutcome.Failed -> TransferOutcome(
+            message = importOutcome.reason,
+            testTag = "vault-import-outcome",
+            dismissTestTag = "vault-import-dismiss",
+            onDismiss = onDismissImportOutcome,
+        )
+        is VaultImportOutcome.Ready, null -> Unit
+    }
+}
+
+@Composable
+private fun TransferProgress(@StringRes message: Int) {
+    Spacer(Modifier.height(12.dp))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val description = stringResource(message)
+        CircularProgressIndicator(
+            modifier = Modifier
+                .size(24.dp)
+                .semantics { contentDescription = description },
+            strokeWidth = 3.dp,
+        )
+        Text(description, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun TransferOutcome(
+    message: String,
+    testTag: String,
+    dismissTestTag: String,
+    onDismiss: () -> Unit,
+) {
+    Spacer(Modifier.height(12.dp))
+    Text(
+        message,
+        style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier.testTag(testTag),
+    )
+    Spacer(Modifier.height(8.dp))
+    TextButton(
+        onClick = onDismiss,
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .testTag(dismissTestTag),
+    ) {
+        Text(stringResource(R.string.vault_export_dismiss_action))
+    }
+}
+
+/**
+ * Everything replacing this device's vault costs, before anything is replaced.
+ *
+ * The counts come from an archive that has already been authenticated whole,
+ * so they describe exactly what would arrive. Cancelling here discards the
+ * staged archive; only Replace touches the live vault.
+ */
+@Composable
+private fun VaultImportPreviewDialog(
+    preview: VaultImportOutcome.Ready,
+    onReplace: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.vault_import_preview_title)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .testTag("vault-import-preview"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(
+                        R.string.vault_import_preview_counts,
+                        pluralStringResource(
+                            R.plurals.vault_import_preview_records,
+                            preview.recordCount,
+                            preview.recordCount,
+                        ),
+                        pluralStringResource(
+                            R.plurals.vault_import_preview_attachments,
+                            preview.attachmentCount,
+                            preview.attachmentCount,
+                        ),
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    stringResource(R.string.vault_import_preview_replacement),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    stringResource(R.string.vault_import_preview_remote),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    stringResource(R.string.vault_import_preview_passphrase),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                if (preview.attachmentsBeyondCache.isNotEmpty()) {
+                    Text(
+                        stringResource(
+                            R.string.vault_import_preview_beyond_cache,
+                            preview.attachmentsBeyondCache.joinToString(", "),
+                        ),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onReplace,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("vault-import-replace"),
+            ) {
+                Text(stringResource(R.string.vault_import_replace_action))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("vault-import-cancel"),
+            ) {
+                Text(stringResource(R.string.backup_cancel_action))
+            }
+        },
+    )
 }
 
 @Composable
@@ -1166,6 +1345,95 @@ private fun VaultExportPassphraseSheet(
                         .testTag("vault-export-submit"),
                 ) {
                     Text(stringResource(R.string.vault_export_submit_action))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The passphrase one archive was exported with.
+ *
+ * There is no confirmation field: this is an existing secret being recalled,
+ * not a new one being chosen, so a second field could only disagree with a
+ * passphrase the archive itself is the authority on.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VaultImportPassphraseSheet(
+    onDismiss: () -> Unit,
+    onImport: (String) -> Unit,
+) {
+    var passphrase by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = {
+        passphrase = ""
+        onDismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = dismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
+            Text(
+                stringResource(R.string.vault_import_sheet_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.vault_import_sheet_explanation),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = passphrase,
+                onValueChange = { passphrase = it },
+                label = { Text(stringResource(R.string.vault_import_passphrase_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("vault-import-passphrase"),
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(
+                    onClick = dismiss,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("vault-import-passphrase-cancel"),
+                ) {
+                    Text(stringResource(R.string.backup_cancel_action))
+                }
+                Button(
+                    onClick = {
+                        val submitted = passphrase
+                        passphrase = ""
+                        onImport(submitted)
+                    },
+                    enabled = passphrase.isNotEmpty(),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("vault-import-submit"),
+                ) {
+                    Text(stringResource(R.string.vault_import_submit_action))
                 }
             }
         }

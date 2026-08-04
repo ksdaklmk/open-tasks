@@ -113,7 +113,7 @@ class AttachmentCacheStore(
         }
         val files = cacheFiles().sortedWith(compareBy(::lastModified, ::relativePath))
         var usage = files.sumOf(Files::size)
-        val ceiling = minOf(MAX_CACHE_BYTES, availableBytes().coerceAtLeast(0) / 20)
+        val ceiling = ceilingBytes()
         files.forEach { file ->
             if (usage > ceiling) {
                 val length = Files.size(file)
@@ -128,6 +128,16 @@ class AttachmentCacheStore(
         requireRoot()
         return cacheFiles().sumOf(Files::size)
     }
+
+    /**
+     * The most bytes this cache will hold right now.
+     *
+     * [sweep] enforces exactly this figure, so a caller planning a batch of
+     * writes — a vault import staging a whole archive's attachment chunks —
+     * reads the bound from here rather than restating it and drifting.
+     */
+    fun ceilingBytes(): Long =
+        minOf(MAX_CACHE_BYTES, availableBytes().coerceAtLeast(0) / 20)
 
     private fun blobDirectory(blobSetId: BlobSetId) = root.resolve(
         MessageDigest.getInstance("SHA-256")

@@ -141,6 +141,11 @@ fun MoreScreen(
     vaultExportOutcome: VaultExportOutcome? = null,
     onExportVaultPassphraseConfirmed: (String) -> Unit = {},
     onDismissVaultExportOutcome: () -> Unit = {},
+    vaultImportInProgress: Boolean = false,
+    vaultImportOutcome: VaultImportOutcome? = null,
+    onImportVaultPassphraseConfirmed: (String) -> Unit = {},
+    onConfirmVaultImport: () -> Unit = {},
+    onDismissVaultImport: () -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -251,6 +256,11 @@ fun MoreScreen(
                 vaultExportOutcome = vaultExportOutcome,
                 onExportVaultPassphraseConfirmed = onExportVaultPassphraseConfirmed,
                 onDismissVaultExportOutcome = onDismissVaultExportOutcome,
+                vaultImportInProgress = vaultImportInProgress,
+                vaultImportOutcome = vaultImportOutcome,
+                onImportVaultPassphraseConfirmed = onImportVaultPassphraseConfirmed,
+                onConfirmVaultImport = onConfirmVaultImport,
+                onDismissVaultImport = onDismissVaultImport,
                 onBack = closeBackupRecovery,
                 modifier = modifier,
             )
