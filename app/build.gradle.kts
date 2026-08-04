@@ -82,6 +82,7 @@ dependencies {
     implementation(libs.google.play.services.auth)
     implementation(libs.work.runtime)
     implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

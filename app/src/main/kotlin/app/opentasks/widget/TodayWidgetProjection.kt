@@ -23,22 +23,27 @@ data class TodayWidgetProjection(
 private const val MAX_FOCUS_TITLES = 3
 
 /**
- * Projects [snapshot] into the widget's minimal view for [today] in [zone].
+ * Projects [snapshot] into the widget's minimal view for [today] in [zone],
+ * as of [now].
  *
  * A task counts for today when it is open (`!isCompleted`,
  * `deletedAt == null`) and its `start`, or `due` when there is no `start`,
- * falls on [today] in that moment's own stored zone -- not [zone]. Due
- * instants need no zone conversion to compare against another instant, so
- * [zone] is used only to anchor the overdue boundary, the start of [today];
- * a task is overdue when it is open and its `due` is before that boundary.
- * Focus titles are today's open tasks ordered by due date (undated tasks
- * sort last) then by descending priority, capped at [MAX_FOCUS_TITLES], and
- * withheld entirely when [titlesPermitted] is false.
+ * falls on [today] in that moment's own stored zone -- not [zone]. A task is
+ * overdue when it is open and its `due` is strictly before [now] -- an
+ * instant comparison needing no zone conversion of its own, so a task due
+ * earlier today is overdue and one due later today is not, even though both
+ * still count for today. [zone] is therefore not read by this function's own
+ * overdue check; it remains only because the brief's original signature
+ * carried it, and every "today" computation elsewhere in the product is
+ * zone-relative. Focus titles are today's open tasks ordered by due date
+ * (undated tasks sort last) then by descending priority, capped at
+ * [MAX_FOCUS_TITLES], and withheld entirely when [titlesPermitted] is false.
  */
 fun computeTodayProjection(
     snapshot: WorkspaceSnapshot,
     today: LocalDate,
     zone: ZoneId,
+    now: Instant,
     titlesPermitted: Boolean,
 ): TodayWidgetProjection {
     val openTasks = snapshot.tasks.filter { !it.isCompleted && it.deletedAt == null }
@@ -48,9 +53,8 @@ fun computeTodayProjection(
         moment != null && moment.instant.atZone(moment.zone()).toLocalDate() == today
     }
 
-    val overdueBoundary = today.atStartOfDay(zone).toInstant()
     val overdueCount = openTasks.count { task ->
-        task.due?.instant?.isBefore(overdueBoundary) == true
+        task.due?.instant?.isBefore(now) == true
     }
 
     val focusTitles = if (titlesPermitted) {

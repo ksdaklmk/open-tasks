@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Shown for the brief instant before Glance replaces this with the
-    composed widget content; never seen once TodayWidgetPublisher has
-    written its first state.
+    Shown only for the brief instant before Glance's own first composition
+    runs. TodayWidgetPublisher.start() and TodayWidgetReceiver's
+    onUpdate/onEnabled hooks republish real data as soon as a vault is
+    active, but this still renders first for that instant, and for a
+    widget placed while no vault is active until one becomes active.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"

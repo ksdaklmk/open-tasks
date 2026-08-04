@@ -19,6 +19,9 @@ import org.junit.Test
 class TodayWidgetProjectionTest {
     private val zone: ZoneId = ZoneId.of("Asia/Bangkok")
     private val today: LocalDate = LocalDate.of(2026, 7, 26)
+
+    /** A representative "current instant": noon today, in [zone]. */
+    private val now: Instant = today.atTime(12, 0).atZone(zone).toInstant()
     private val revision = Revision(DeviceId("widget-test-device"), 1, 0)
 
     private fun task(
@@ -57,6 +60,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(startingToday)),
             today,
             zone,
+            now,
             titlesPermitted = true,
         )
 
@@ -72,6 +76,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(dueToday)),
             today,
             zone,
+            now,
             titlesPermitted = true,
         )
 
@@ -98,6 +103,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(completedToday, binnedToday)),
             today,
             zone,
+            now,
             titlesPermitted = true,
         )
 
@@ -107,31 +113,33 @@ class TodayWidgetProjectionTest {
     }
 
     @Test
-    fun overdueBoundaryAtNowExcludesDueExactlyAtStartOfTodayButCountsIt() {
-        val boundary = today.atStartOfDay(zone).toInstant()
-        val dueAtBoundary = task(
-            id = "task-e",
-            title = "Due at boundary",
-            due = ZonedMoment(boundary, zone.id),
+    fun overdueBoundaryAtNowDiscriminatesEarlierFromLaterToday() {
+        val dueEarlierToday = task(id = "task-e", title = "Due earlier today", due = momentAt(9))
+        val dueLaterToday = task(id = "task-f", title = "Due later today", due = momentAt(17))
+        val dueExactlyAtNow = task(
+            id = "task-m",
+            title = "Due exactly at now",
+            due = ZonedMoment(now, zone.id),
         )
-        val dueJustBeforeBoundary = task(
-            id = "task-f",
-            title = "Due before boundary",
-            due = ZonedMoment(boundary.minusSeconds(1), zone.id),
+        val dueJustBeforeNow = task(
+            id = "task-n",
+            title = "Due just before now",
+            due = ZonedMoment(now.minusSeconds(1), zone.id),
         )
 
         val projection = computeTodayProjection(
-            snapshotOf(listOf(dueAtBoundary, dueJustBeforeBoundary)),
+            snapshotOf(listOf(dueEarlierToday, dueLaterToday, dueExactlyAtNow, dueJustBeforeNow)),
             today,
             zone,
+            now,
             titlesPermitted = true,
         )
 
-        // The task due exactly at the boundary is not overdue, but does
-        // fall on today; the task due one second earlier is overdue, and
-        // fell on yesterday so it does not inflate today's count.
-        assertEquals(1, projection.overdueCount)
-        assertEquals(1, projection.openTodayCount)
+        // Earlier-today and one-second-before-now are strictly before `now`
+        // and so overdue; later-today and exactly-at-now are not, even
+        // though all four still land in today's count.
+        assertEquals(2, projection.overdueCount)
+        assertEquals(4, projection.openTodayCount)
     }
 
     @Test
@@ -165,6 +173,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(earlyLow, earlyHigh, midday, evening)),
             today,
             zone,
+            now,
             titlesPermitted = true,
         )
 
@@ -180,6 +189,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(dueToday)),
             today,
             zone,
+            now,
             titlesPermitted = false,
         )
 
@@ -203,6 +213,7 @@ class TodayWidgetProjectionTest {
             snapshotOf(listOf(tomorrowInBangkok)),
             today,
             deviceZone,
+            now,
             titlesPermitted = true,
         )
 
