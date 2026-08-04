@@ -1,17 +1,25 @@
 # Open Tasks Handoff
 
-- Last updated: 4 August 2026
+- Last updated: 5 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–6 of the 13-task plan
+- Session status: **Stage 5 is in progress: Tasks 1–9 of the 13-task plan
   (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
   collection command; retired-set GC closure; silent attachment intake
   auto-resume; frozen `.otvault` v1 archive format with independent Node
-  fixtures; encrypted vault export with SAF product surface) are complete
-  and independently reviewed at `b4b1ec4`. Execution is paused before
-  Task 7 at the user's request; resume via the Tasks 3–6 checkpoint
-  below. One controller ruling awaits user confirmation before Task 7:
-  `.otvault` exports are snapshot-only (no operation-segment frames) —
-  see the checkpoint. Both recorded Stage 4 limits are now discharged:
+  fixtures; encrypted vault export with SAF product surface; encrypted
+  vault import with staged activation and rollback; disclosed
+  formula-safe CSV export; Glance Today widget) are complete and
+  independently reviewed at `99db7dc`. Execution is paused before
+  Task 10 at the user's request; resume via the Tasks 7–9 checkpoint
+  below. The Task 6 snapshot-only export ruling was upheld by the user
+  before Task 7 and is discharged: import passes an empty segments
+  list. One newly verified pre-existing defect needs its own task
+  before Task 13: `RECOVERED_SCHEMA_VERSION = 7` rejects the schema
+  marker 8 that `MIGRATION_7_8` writes, breaking Drive recovery and
+  `.otvault` import on migrated devices — see the Tasks 7–9 checkpoint.
+  One user decision is open: keep or drop the unreferenced
+  `glance-material3` catalogue entry. Both recorded Stage 4 limits are
+  discharged:
   the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
   `AttachmentBlobCoordinator.resume()` product caller by Task 4's silent
   auto-resume. Stage 4 itself is complete and qualified. Task 14's
@@ -29,10 +37,11 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `b4b1ec4` (`fix: sentinel
-  manifest digests, NUL passphrase wipe, cancellation-safe export
-  cleanup`), the tip of the Stage 5 Task 3–6 range `1cb768e..b4b1ec4` on
-  top of the Task 1–2 range `33ea364..eb343cb` and its checkpoint commit
+- Current product source implementation point: `99db7dc` (`fix: close
+  today widget republish/stop race with a single write gate`), the tip
+  of the Stage 5 Task 7–9 range `5feb1e8..99db7dc` on top of the
+  checkpoint commit `afcfe07`, the Task 3–6 range `1cb768e..b4b1ec4`,
+  the Task 1–2 range `33ea364..eb343cb`, and its checkpoint commit
   `f2835b7`. The prior Stage 4 implementation
   point is `b3da5d2` (`test: skip Pixel
   fold harness transition`), the tip of the qualified Stage 4 Task 1–13,
@@ -172,8 +181,8 @@ authority spec never mentions segments, Task 7 imports into fresh-only
 operational state (empty remote tables — segments would have no
 consumer), and the brief's own Consumes list names no segment source.
 Task 7 would pass an empty segments list to `RecoveryImportRequest`. The
-ruling is reversible until Task 7 is dispatched; uphold or overturn it
-first.
+user upheld the ruling on 4 August before Task 7 was dispatched; it is
+discharged.
 
 Carry-forwards for Task 7, recorded in the ledger: archive manifests
 carry sentinel `ciphertextSha256`/`providerObjectId` values — the
@@ -188,11 +197,82 @@ inventory accumulator in `OtVaultCodec.readAll` (hostile archive could
 OOM instead of failing closed), and the export row remaining enabled
 during an in-flight export.
 
+This checkpoint's resume instruction is superseded: Tasks 7–9 were
+executed on 4–5 August and are recorded in the checkpoint below.
+
+## Stage 5 Tasks 7–9 checkpoint — 5 August 2026
+
+Execution resumed from `afcfe07` with the same plan, ledger, and
+independent-review-per-task discipline. The user upheld the Task 6
+segments ruling before dispatch, so `.otvault` stays snapshot-only and
+import passes an empty segments list. All three task boundaries closed
+with zero open Critical or Important findings. No device suite ran; new
+instrumented tests are compile-verified and execute at the Task 13
+connected gate.
+
+- Task 7 (`5feb1e8`, fix `e8962e1`) built encrypted vault import and
+  activation: `OtVaultImporter` stages into an isolated slot with full
+  import-policy verification (single snapshot, no segments, contiguous
+  manifest-authenticated chunks, digest reproduction, every live
+  attachment's blob set present), previews exact counts with
+  beyond-cache names, and activates through the proven recovery
+  slot-replacement path, retaining the previous slot as rollback until
+  first unlock. The archive envelope becomes the imported vault's
+  stored recovery envelope. The fix round moved retained chunks into an
+  import-scoped `vaultImportStagingRoot` that never mutates the live
+  attachment cache (budgeted ceiling-minus-usage, promoted only after
+  activation), joined `staging.activate` to `reconstruct` inside the
+  guarded try so any failure abandons the staged vault and key, and
+  moved the import passphrase wipe to a `finally` covering the
+  null-stream branch. Sentinel archive manifest digests never reach a
+  live open path; per-frame integrity is the inventory plus AEAD.
+- Task 8 (`b9ecd9b`) added disclosed formula-safe CSV export: a pure
+  `WorkspaceCsvWriter` with the four fixed tables, RFC 4180 quoting,
+  UK-display and ISO columns in the moment's stored zone,
+  `=`/`+`/`-`/`@` neutralisation, Bin exclusion, and the exact spec
+  disclosure copy with no "do not ask again"; one
+  `CreateDocument("text/csv")` per selected table, streamed with
+  partial-output deletion on failure. Review approved with no fix
+  round; two judgment calls upheld (ISO_LOCAL_DATE for bare project
+  due dates; a generic failure outcome on a partial batch).
+- Task 9 (`0f13b7c`, fixes `9a0353d`, `99db7dc`) added the Glance
+  Today widget: pure `computeTodayProjection` (today/overdue counts,
+  three focus titles, `titlesPermitted` seam for Task 10), a publisher
+  bound to the active-slot lifecycle, receiver republish on placement,
+  and Material typography role values. Two user rulings: overdue
+  follows the prose via a new `now: Instant` parameter (a task due
+  earlier today is overdue now, not at midnight), and
+  `glance-material3` was approved as a second catalogue entry — it
+  proved colour-only with no typography API, so it sits unreferenced
+  while role values come from `material3.Typography()`; keep-or-drop
+  is an open user decision. Fix round 2 extracted `StopGatedWriter`, a
+  mutex gate proven by deterministic tests, so no Glance write on any
+  path can land after the stop-time title clear.
+
+**Pre-existing defect requiring its own task (controller-verified in
+code):** `RECOVERED_SCHEMA_VERSION = 7` (`BackupRecordImporter.kt:443`,
+`:760`) rejects any captured vault whose schema marker exceeds 7, while
+`MIGRATION_7_8` sets marker 8 on every migrated vault
+(`VaultDatabase.kt:1125`). This already breaks Drive recovery — and now
+`.otvault` import — on migrated devices. Fresh vaults are written with
+marker 7 (`RoomVaultRepository.kt:3115`), so the existing deterministic
+and instrumented suites cannot catch it. Schedule a dedicated fix task
+before the Task 13 gates.
+
+Carry-forwards recorded in the ledger: Task 10 must wire the widget's
+`titlesPermitted` seam to lock/privacy state; the Task 13 device
+checklist gained the SAF `application/octet-stream` picker visibility
+check for `.otvault` and an on-device tap test that Glance's
+parameter-to-extra mapping reaches `MainActivity` as
+`"open_quick_add"`. Deferred minors are in the ledger (Task 7
+staging-promotion edges, Task 8 partial-batch messaging and the
+untested ViewModel batch machine, Task 9 zone capture at construction
+and midnight rollover).
+
 Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above: first confirm the segments ruling with the user,
-then dispatch Task 7 (encrypted vault import and activation) from base
-`b4b1ec4`. Tasks 7–13 (import, CSV, widget, app lock, input, calendar,
-qualification) have not started.
+plan and ledger above, dispatching Task 10 (app lock, title privacy,
+unified Quick Add) from base `99db7dc`. Tasks 10–13 (app lock, input,
+calendar, qualification) have not started.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
