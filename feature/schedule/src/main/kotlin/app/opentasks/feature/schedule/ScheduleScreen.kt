@@ -75,6 +75,8 @@ fun ScheduleScreen(
     modifier: Modifier = Modifier,
     reminders: List<Reminder> = emptyList(),
     today: LocalDate = LocalDate.now(),
+    calendarEligibleTaskIds: Set<TaskId> = emptySet(),
+    onAddToCalendar: (TaskId) -> Unit = {},
 ) {
     var selectedDateIso by rememberSaveable { mutableStateOf(today.toString()) }
     val selectedDate = selectedDateIso.toLocalDateOr(today)
@@ -95,6 +97,8 @@ fun ScheduleScreen(
             today = today,
             onSelectDate = { selectedDateIso = it.toString() },
             onOpenTask = onOpenTask,
+            calendarEligibleTaskIds = calendarEligibleTaskIds,
+            onAddToCalendar = onAddToCalendar,
             modifier = modifier,
         )
     } else {
@@ -107,6 +111,8 @@ fun ScheduleScreen(
             today = today,
             onSelectDate = { selectedDateIso = it.toString() },
             onOpenTask = onOpenTask,
+            calendarEligibleTaskIds = calendarEligibleTaskIds,
+            onAddToCalendar = onAddToCalendar,
             modifier = modifier,
         )
     }
@@ -122,6 +128,8 @@ private fun CompactAgenda(
     today: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
     onOpenTask: (TaskId) -> Unit,
+    calendarEligibleTaskIds: Set<TaskId>,
+    onAddToCalendar: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     val selectedTasks = tasks
@@ -187,6 +195,8 @@ private fun CompactAgenda(
                     projectName = projectNames[task.projectId] ?: "Inbox",
                     reminder = remindersByTask[task.id],
                     onClick = { onOpenTask(task.id) },
+                    onAddToCalendar = { onAddToCalendar(task.id) }
+                        .takeIf { task.id in calendarEligibleTaskIds },
                 )
             }
         }
@@ -213,6 +223,8 @@ private fun ExpandedWeek(
     today: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
     onOpenTask: (TaskId) -> Unit,
+    calendarEligibleTaskIds: Set<TaskId>,
+    onAddToCalendar: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     val weekStart = selectedDate.startOfWeek()
@@ -255,6 +267,8 @@ private fun ExpandedWeek(
                         projectNames = projectNames,
                         remindersByTask = remindersByTask,
                         onOpenTask = onOpenTask,
+                        calendarEligibleTaskIds = calendarEligibleTaskIds,
+                        onAddToCalendar = onAddToCalendar,
                     )
                 }
             }
@@ -330,6 +344,8 @@ private fun DayColumn(
     projectNames: Map<ProjectId, String>,
     remindersByTask: Map<TaskId, Reminder>,
     onOpenTask: (TaskId) -> Unit,
+    calendarEligibleTaskIds: Set<TaskId>,
+    onAddToCalendar: (TaskId) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -379,6 +395,8 @@ private fun DayColumn(
                     projectName = projectNames[task.projectId] ?: "Inbox",
                     reminder = remindersByTask[task.id],
                     onClick = { onOpenTask(task.id) },
+                    onAddToCalendar = { onAddToCalendar(task.id) }
+                        .takeIf { task.id in calendarEligibleTaskIds },
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -392,6 +410,7 @@ private fun TimelineTask(
     projectName: String,
     reminder: Reminder?,
     onClick: () -> Unit,
+    onAddToCalendar: (() -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick,
@@ -417,13 +436,31 @@ private fun TimelineTask(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                 )
-                reminder?.let {
-                    Icon(
-                        Icons.Rounded.NotificationsActive,
-                        contentDescription = it.reminderDescription(),
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.secondary,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    reminder?.let {
+                        Icon(
+                            Icons.Rounded.NotificationsActive,
+                            contentDescription = it.reminderDescription(),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                    if (onAddToCalendar != null) {
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = onAddToCalendar,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("schedule-add-to-calendar-${task.id.value}"),
+                        ) {
+                            Icon(
+                                Icons.Rounded.CalendarMonth,
+                                contentDescription = "Add to calendar",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.secondary,
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -509,6 +546,7 @@ private fun AgendaRow(
     projectName: String,
     reminder: Reminder?,
     onClick: () -> Unit,
+    onAddToCalendar: (() -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick,
@@ -574,6 +612,18 @@ private fun AgendaRow(
                         .size(24.dp),
                     tint = MaterialTheme.colorScheme.secondary,
                 )
+            }
+            if (onAddToCalendar != null) {
+                IconButton(
+                    onClick = onAddToCalendar,
+                    modifier = Modifier.testTag("schedule-add-to-calendar-${task.id.value}"),
+                ) {
+                    Icon(
+                        Icons.Rounded.CalendarMonth,
+                        contentDescription = "Add to calendar",
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
+                }
             }
         }
     }

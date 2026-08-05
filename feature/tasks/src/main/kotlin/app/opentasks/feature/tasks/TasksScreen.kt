@@ -219,6 +219,7 @@ fun TasksScreen(
     onDeleteAttachment: (AttachmentId) -> Unit = {},
     onRetryAttachment: (AttachmentId) -> Unit = {},
     onOpenAttachmentSetup: () -> Unit = {},
+    onAddToCalendar: (() -> Unit)? = null,
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
@@ -298,6 +299,7 @@ fun TasksScreen(
                 onRetryAttachment = onRetryAttachment,
                 onOpenAttachmentSetup = onOpenAttachmentSetup,
                 hingeExclusionBandDp = hingeExclusionBandDp,
+                onAddToCalendar = onAddToCalendar,
             )
         }
         return
@@ -395,6 +397,7 @@ fun TasksScreen(
                         onRetryAttachment = onRetryAttachment,
                         onOpenAttachmentSetup = onOpenAttachmentSetup,
                         hingeExclusionBandDp = hingeExclusionBandDp,
+                        onAddToCalendar = onAddToCalendar,
                         modifier = Modifier
                             .weight(1f - listPaneFraction)
                             .testTag("detailPane"),
@@ -545,6 +548,7 @@ private fun TaskDetailPane(
     onRetryAttachment: (AttachmentId) -> Unit,
     onOpenAttachmentSetup: () -> Unit,
     hingeExclusionBandDp: IntRange?,
+    onAddToCalendar: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sheetTopPaddingDp = hingeExclusionBandDp?.last ?: 0
@@ -1911,6 +1915,19 @@ private fun TaskDetailPane(
                 Icon(Icons.Rounded.Timer, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (timerRunning) "Stop timer" else "Start timer")
+            }
+            if (onAddToCalendar != null) {
+                OutlinedButton(
+                    onClick = onAddToCalendar,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("add-task-to-calendar"),
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.task_add_to_calendar))
+                }
             }
             TextButton(
                 onClick = onMoveToTrash,

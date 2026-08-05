@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -78,6 +80,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -93,6 +96,9 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import app.opentasks.backup.BackupViewModel
 import app.opentasks.backup.EncryptedBackupViewModel
+import app.opentasks.calendar.CalendarEventDraft
+import app.opentasks.calendar.calendarEventDraft
+import app.opentasks.calendar.calendarInsertIntent
 import app.opentasks.core.data.export.CsvTable
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
@@ -127,6 +133,10 @@ import app.opentasks.input.shortcutActionFor
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -167,6 +177,17 @@ internal data class SnackbarPresentation(
     val duration: SnackbarDuration,
     val withDismissAction: Boolean,
     val timeoutMillis: Long?,
+)
+
+/**
+ * [CalendarEventDraft] itself carries plain epoch millis with no zone --
+ * a provider event has none of its own -- so the preview dialog keeps the
+ * originating moment's zone here purely for display formatting.
+ */
+private data class CalendarPreviewState(
+    val draft: CalendarEventDraft,
+    val beginZoneId: String,
+    val endZoneId: String?,
 )
 
 internal const val UNDO_SNACKBAR_TIMEOUT_MILLIS = 8_000L
@@ -255,6 +276,11 @@ fun OpenTasksApp(
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
         var showShortcutHelp by rememberSaveable { mutableStateOf(false) }
+        // Not `rememberSaveable`: a `CalendarEventDraft` isn't a bundle-able
+        // type and this preview is transient -- losing it to process death
+        // simply closes the dialog, same as `calendarPreview` never having
+        // opened.
+        var calendarPreview by remember { mutableStateOf<CalendarPreviewState?>(null) }
         // Aggregated from the root: true while any descendant focus target is
         // active, not only genuinely editable ones. That is deliberately
         // conservative -- see `shortcutActionFor`'s doc comment -- so the `/`
@@ -363,6 +389,19 @@ fun OpenTasksApp(
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
         val selectedProjectId = selectedProjectValue?.let(::ProjectId)
         val projectNames = snapshot.projects.associate { it.id to it.name }
+        val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
+        // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
+        // case is keyed on a null project name, and `projectNames` has no Inbox entry.
+        fun calendarPreviewFor(task: Task): CalendarPreviewState? {
+            val projectName = task.projectId?.let(projectNames::get)
+            val draft = calendarEventDraft(task, projectName) ?: return null
+            val beginZoneId = (task.start ?: task.due)?.zoneId ?: return null
+            val endZoneId = task.due?.zoneId.takeIf { draft.endEpochMillis != null }
+            return CalendarPreviewState(draft, beginZoneId, endZoneId)
+        }
+        val calendarEligibleTaskIds = snapshot.tasks
+            .filter { task -> calendarPreviewFor(task) != null }
+            .mapTo(hashSetOf(), Task::id)
         val backStack = rememberWorkspaceBackStack()
         val currentRoute = backStack.lastOrNull() ?: HomeRoute
 
@@ -921,6 +960,9 @@ fun OpenTasksApp(
                                             ?.let(attachmentViewModel::retry)
                                     },
                                     onOpenAttachmentSetup = ::openBackupRecovery,
+                                    onAddToCalendar = selectedTask
+                                        ?.let(::calendarPreviewFor)
+                                        ?.let { preview -> { calendarPreview = preview } },
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -1045,6 +1087,13 @@ fun OpenTasksApp(
                                     onOpenTask = { taskId ->
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
+                                    },
+                                    calendarEligibleTaskIds = calendarEligibleTaskIds,
+                                    onAddToCalendar = { taskId ->
+                                        snapshot.tasks
+                                            .firstOrNull { it.id == taskId }
+                                            ?.let(::calendarPreviewFor)
+                                            ?.let { preview -> calendarPreview = preview }
                                     },
                                 )
                             }
@@ -1276,8 +1325,75 @@ fun OpenTasksApp(
                 },
             )
         }
+
+        calendarPreview?.let { preview ->
+            CalendarPreviewDialog(
+                preview = preview,
+                onDismiss = { calendarPreview = null },
+                onInsert = {
+                    try {
+                        activity.startActivity(calendarInsertIntent(preview.draft))
+                    } catch (_: ActivityNotFoundException) {
+                        // No calendar provider is registered; the dialog already showed
+                        // exactly what would have been inserted, so there is nothing
+                        // further to reconcile.
+                    }
+                    calendarPreview = null
+                },
+            )
+        }
     }
 }
+
+/**
+ * "Formatted times in the moment's stored zone": begin and end are shown in
+ * whichever [ZonedMoment][app.opentasks.core.model.ZonedMoment] zone
+ * produced them, per [CalendarPreviewState], not the device's current zone.
+ */
+@Composable
+private fun CalendarPreviewDialog(
+    preview: CalendarPreviewState,
+    onDismiss: () -> Unit,
+    onInsert: () -> Unit,
+) {
+    val beginText = CALENDAR_PREVIEW_TIME_FORMAT.format(
+        Instant.ofEpochMilli(preview.draft.beginEpochMillis).atZone(ZoneId.of(preview.beginZoneId)),
+    )
+    val endText = preview.endZoneId?.let { zoneId ->
+        CALENDAR_PREVIEW_TIME_FORMAT.format(
+            Instant.ofEpochMilli(checkNotNull(preview.draft.endEpochMillis))
+                .atZone(ZoneId.of(zoneId)),
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
+        title = { Text(preview.draft.title) },
+        text = {
+            Column {
+                Text(stringResource(R.string.calendar_preview_starts, beginText))
+                endText?.let { Text(stringResource(R.string.calendar_preview_ends, it)) }
+                if (preview.draft.description.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(preview.draft.description)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onInsert) {
+                Text(stringResource(R.string.calendar_insert_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.calendar_cancel_action))
+            }
+        },
+    )
+}
+
+private val CALENDAR_PREVIEW_TIME_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.UK)
 
 private fun csvExportFileName(table: CsvTable): String = when (table) {
     CsvTable.TASKS -> "open_tasks_tasks.csv"

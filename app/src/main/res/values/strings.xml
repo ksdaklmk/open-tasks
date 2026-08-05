@@ -45,4 +45,9 @@
     <string name="shortcut_help_action_show_help">Show this help</string>
     <string name="shortcut_help_key_dismiss">Esc</string>
     <string name="shortcut_help_action_dismiss">Close the topmost dialog, sheet, or search</string>
+
+    <string name="calendar_preview_starts">Starts %1$s</string>
+    <string name="calendar_preview_ends">Ends %1$s</string>
+    <string name="calendar_insert_action">Insert</string>
+    <string name="calendar_cancel_action">Cancel</string>
 </resources>
