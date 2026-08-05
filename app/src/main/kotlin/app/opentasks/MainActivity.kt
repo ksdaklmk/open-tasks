@@ -1,7 +1,11 @@
 package app.opentasks
 
 import android.content.Intent
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,6 +20,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -28,6 +33,9 @@ import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
+import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockScreen
+import app.opentasks.lock.AppLockSettings
 import app.opentasks.reminders.ReminderIntents
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -41,18 +49,29 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var activeVaultServices: ActiveVaultServices
 
+    @Inject
+    lateinit var appLockSettings: AppLockSettings
+
+    @Inject
+    lateinit var appLockController: AppLockController
+
     private var quickAddSignal by mutableIntStateOf(0)
     private var openTaskSignal by mutableIntStateOf(0)
     private var openTaskId by mutableStateOf<String?>(null)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
     private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
     private var activeRecovery by mutableStateOf(false)
+    private var biometricCancellationSignal: CancellationSignal? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIntent(intent)
         observeVaultRuntime()
+        applyPrivacyFlags()
+        lifecycleScope.launch {
+            appLockSettings.observe().collect { applyPrivacyFlags() }
+        }
 
         setContent {
             when (runtimeState) {
@@ -67,18 +86,85 @@ class MainActivity : ComponentActivity() {
                     if (activeRecovery) {
                         RecoverySurface(runtimeState, activeReplacement = true)
                     } else {
-                        val signal = quickAddSignal
-                        OpenTasksApp(
-                            activity = this,
-                            quickAddSignal = signal,
-                            openTaskSignal = openTaskSignal,
-                            openTaskId = openTaskId,
-                            onOpenRecovery = { activeRecovery = true },
-                        )
+                        val locked by appLockController.locked.collectAsStateWithLifecycle()
+                        if (locked) {
+                            LaunchedEffect(Unit) { promptUnlock() }
+                            OpenTasksTheme {
+                                AppLockScreen(onUnlockClick = ::promptUnlock)
+                            }
+                        } else {
+                            val signal = quickAddSignal
+                            OpenTasksApp(
+                                activity = this,
+                                appLockSettings = appLockSettings,
+                                quickAddSignal = signal,
+                                openTaskSignal = openTaskSignal,
+                                openTaskId = openTaskId,
+                                onOpenRecovery = { activeRecovery = true },
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Applies the recents-thumbnail and screenshot-blocking flags for the
+     * settings' current values.
+     *
+     * Recents hiding follows the settings alone, not [appLockController]'s
+     * runtime [AppLockController.locked] state: once either privacy feature
+     * is turned on, the thumbnail must stay hidden even in the instant
+     * before a background span reaches the lock delay.
+     */
+    private fun applyPrivacyFlags() {
+        setRecentsScreenshotEnabled(
+            !(appLockSettings.lockEnabled || appLockSettings.titlePrivacy),
+        )
+        if (appLockSettings.screenshotBlocking) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    /**
+     * Shows the platform biometric prompt, with a device-credential
+     * fallback, and unlocks on success. Triggered automatically when the
+     * overlay appears and again by its "Unlock Open Tasks" button, so a
+     * dismissed or failed attempt can always be retried.
+     */
+    private fun promptUnlock() {
+        val biometricManager = getSystemService(BiometricManager::class.java) ?: return
+        val allowedAuthenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            BiometricManager.Authenticators.BIOMETRIC_WEAK or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (biometricManager.canAuthenticate(allowedAuthenticators) !=
+            BiometricManager.BIOMETRIC_SUCCESS
+        ) {
+            return
+        }
+
+        biometricCancellationSignal?.cancel()
+        val cancellationSignal = CancellationSignal()
+        biometricCancellationSignal = cancellationSignal
+
+        val prompt = BiometricPrompt.Builder(this)
+            .setTitle(getString(R.string.app_lock_unlock_action))
+            .setAllowedAuthenticators(allowedAuthenticators)
+            .build()
+        prompt.authenticate(
+            cancellationSignal,
+            ContextCompat.getMainExecutor(this),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult,
+                ) {
+                    appLockController.onUnlocked()
+                }
+            },
+        )
     }
 
     @androidx.compose.runtime.Composable
@@ -163,9 +249,18 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStart() {
         super.onStart()
+        // The single activity makes a process-level foreground observer
+        // unnecessary: every foregrounding of the app passes through here.
+        appLockController.onAppForegrounded()
         lifecycleScope.launch {
             runCatching { vaultRuntimeManager.initialize() }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        biometricCancellationSignal?.cancel()
+        appLockController.onAppBackgrounded()
     }
 
     override fun onNewIntent(intent: Intent) {

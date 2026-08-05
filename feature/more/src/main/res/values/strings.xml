@@ -243,4 +243,20 @@
     <string name="csv_export_disclosure_title">Export as plain-text CSV?</string>
     <string name="csv_export_disclosure_body">CSV files are not encrypted. Once exported, titles, descriptions, notes, dates, and time information become readable outside Open Tasks by anyone who opens the file.</string>
     <string name="csv_export_disclosure_confirm">Export CSV</string>
+
+    <string name="privacy_lock_title">Privacy &amp; lock</string>
+    <string name="privacy_lock_back">Back to More</string>
+    <string name="privacy_lock_summary_on">App lock is on</string>
+    <string name="privacy_lock_summary_off">App lock is off</string>
+    <string name="privacy_lock_enable_title">Lock the app</string>
+    <string name="privacy_lock_enable_supporting">Require unlocking after the app has been in the background.</string>
+    <string name="privacy_lock_delay_heading">Lock after</string>
+    <string name="privacy_lock_delay_immediate">Immediately</string>
+    <string name="privacy_lock_delay_one_minute">1 minute</string>
+    <string name="privacy_lock_delay_five_minutes">5 minutes</string>
+    <string name="privacy_lock_delay_fifteen_minutes">15 minutes</string>
+    <string name="privacy_lock_title_privacy_title">Hide task titles</string>
+    <string name="privacy_lock_title_privacy_supporting">Keep task titles out of notifications, the Today widget, and recents.</string>
+    <string name="privacy_lock_screenshot_title">Block screenshots</string>
+    <string name="privacy_lock_screenshot_supporting">Prevent screenshots and screen recording while the app is open.</string>
 </resources>

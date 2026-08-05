@@ -107,6 +107,7 @@ import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.feature.home.HomeScreen
+import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
 import app.opentasks.feature.projects.NewProjectSheet
 import app.opentasks.feature.projects.ProjectEdit
@@ -117,6 +118,8 @@ import app.opentasks.feature.tasks.TaskEdit
 import app.opentasks.feature.tasks.TasksScreen
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import app.opentasks.lock.AppLockSettings
+import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -178,6 +181,7 @@ internal fun rememberWorkspaceBackStack(): NavBackStack<NavKey> =
 @Composable
 fun OpenTasksApp(
     activity: Activity,
+    appLockSettings: AppLockSettings,
     quickAddSignal: Int,
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
@@ -314,6 +318,22 @@ fun OpenTasksApp(
         }
         val preciseRemindersAvailable = remember(permissionStateVersion) {
             activity.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        }
+
+        // Mirrors `appLockSettings`, the app process's own SharedPreferences
+        // wrapper, so the More screen's Privacy & lock section stays plain
+        // data in / lambdas out, like every other feature composable.
+        var lockEnabled by remember { mutableStateOf(appLockSettings.lockEnabled) }
+        var lockDelay by remember { mutableStateOf(appLockSettings.lockDelay) }
+        var titlePrivacy by remember { mutableStateOf(appLockSettings.titlePrivacy) }
+        var screenshotBlocking by remember { mutableStateOf(appLockSettings.screenshotBlocking) }
+        LaunchedEffect(appLockSettings) {
+            appLockSettings.observe().collect {
+                lockEnabled = appLockSettings.lockEnabled
+                lockDelay = appLockSettings.lockDelay
+                titlePrivacy = appLockSettings.titlePrivacy
+                screenshotBlocking = appLockSettings.screenshotBlocking
+            }
         }
 
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
@@ -1057,6 +1077,18 @@ fun OpenTasksApp(
                                     onExportCsv = vaultTransferViewModel::beginCsvExport,
                                     onDismissCsvExportOutcome =
                                         vaultTransferViewModel::dismissCsvExportOutcome,
+                                    lockEnabled = lockEnabled,
+                                    onLockEnabledChange = { appLockSettings.lockEnabled = it },
+                                    lockDelayOption = lockDelay.toLockDelayOption(),
+                                    onLockDelayOptionChange = { option ->
+                                        appLockSettings.lockDelay = option.toLockDelay()
+                                    },
+                                    titlePrivacyEnabled = titlePrivacy,
+                                    onTitlePrivacyChange = { appLockSettings.titlePrivacy = it },
+                                    screenshotBlockingEnabled = screenshotBlocking,
+                                    onScreenshotBlockingChange = { value ->
+                                        appLockSettings.screenshotBlocking = value
+                                    },
                                 )
                             }
                         },
@@ -1162,6 +1194,28 @@ private fun csvExportFileName(table: CsvTable): String = when (table) {
     CsvTable.PROJECTS -> "open_tasks_projects.csv"
     CsvTable.TIME_ENTRIES -> "open_tasks_time_entries.csv"
     CsvTable.NOTES -> "open_tasks_notes.csv"
+}
+
+/**
+ * `:app` is the only side that may reference both `:app`'s own
+ * [app.opentasks.lock.LockDelay] and `feature:more`'s UI-facing
+ * [LockDelayOption] -- `feature:more` depends only on `:core:model` and
+ * `:core:designsystem`, never on `:app`, so MoreScreen's picker uses its
+ * own small enum instead, the same way it already has its own
+ * `CsvExportTable`.
+ */
+private fun LockDelay.toLockDelayOption(): LockDelayOption = when (this) {
+    LockDelay.IMMEDIATE -> LockDelayOption.IMMEDIATE
+    LockDelay.ONE_MINUTE -> LockDelayOption.ONE_MINUTE
+    LockDelay.FIVE_MINUTES -> LockDelayOption.FIVE_MINUTES
+    LockDelay.FIFTEEN_MINUTES -> LockDelayOption.FIFTEEN_MINUTES
+}
+
+private fun LockDelayOption.toLockDelay(): LockDelay = when (this) {
+    LockDelayOption.IMMEDIATE -> LockDelay.IMMEDIATE
+    LockDelayOption.ONE_MINUTE -> LockDelay.ONE_MINUTE
+    LockDelayOption.FIVE_MINUTES -> LockDelay.FIVE_MINUTES
+    LockDelayOption.FIFTEEN_MINUTES -> LockDelay.FIFTEEN_MINUTES
 }
 
 private fun WorkspaceSnapshot.attachment(attachmentId: AttachmentId): Attachment? =

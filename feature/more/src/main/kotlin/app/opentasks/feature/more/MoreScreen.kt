@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -25,9 +28,9 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestoreFromTrash
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,7 +44,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -59,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -150,6 +156,14 @@ fun MoreScreen(
     csvExportOutcome: CsvExportOutcome? = null,
     onExportCsv: (Set<CsvExportTable>) -> Unit = {},
     onDismissCsvExportOutcome: () -> Unit = {},
+    lockEnabled: Boolean = false,
+    onLockEnabledChange: (Boolean) -> Unit = {},
+    lockDelayOption: LockDelayOption = LockDelayOption.ONE_MINUTE,
+    onLockDelayOptionChange: (LockDelayOption) -> Unit = {},
+    titlePrivacyEnabled: Boolean = false,
+    onTitlePrivacyChange: (Boolean) -> Unit = {},
+    screenshotBlockingEnabled: Boolean = false,
+    onScreenshotBlockingChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -274,6 +288,22 @@ fun MoreScreen(
             )
             return
         }
+        MoreDestination.PRIVACY_LOCK -> {
+            BackHandler { destination = MoreDestination.OVERVIEW }
+            PrivacyLockScreen(
+                lockEnabled = lockEnabled,
+                onLockEnabledChange = onLockEnabledChange,
+                lockDelayOption = lockDelayOption,
+                onLockDelayOptionChange = onLockDelayOptionChange,
+                titlePrivacyEnabled = titlePrivacyEnabled,
+                onTitlePrivacyChange = onTitlePrivacyChange,
+                screenshotBlockingEnabled = screenshotBlockingEnabled,
+                onScreenshotBlockingChange = onScreenshotBlockingChange,
+                onBack = { destination = MoreDestination.OVERVIEW },
+                modifier = modifier,
+            )
+            return
+        }
         MoreDestination.OVERVIEW -> Unit
     }
 
@@ -342,8 +372,15 @@ fun MoreScreen(
             )
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             DestinationRow(
-                Icons.Rounded.Settings,
-                "Settings",
+                icon = Icons.Rounded.Fingerprint,
+                title = stringResource(R.string.privacy_lock_title),
+                supportingText = if (lockEnabled) {
+                    stringResource(R.string.privacy_lock_summary_on)
+                } else {
+                    stringResource(R.string.privacy_lock_summary_off)
+                },
+                onClick = { destination = MoreDestination.PRIVACY_LOCK },
+                modifier = Modifier.testTag("open-privacy-lock"),
             )
             DestinationRow(
                 Icons.Rounded.Lock,
@@ -969,6 +1006,162 @@ private fun TrashTaskRow(
     }
 }
 
+/** How long the app may sit in the background before it must be unlocked. */
+enum class LockDelayOption {
+    IMMEDIATE,
+    ONE_MINUTE,
+    FIVE_MINUTES,
+    FIFTEEN_MINUTES,
+}
+
+@Composable
+private fun PrivacyLockScreen(
+    lockEnabled: Boolean,
+    onLockEnabledChange: (Boolean) -> Unit,
+    lockDelayOption: LockDelayOption,
+    onLockDelayOptionChange: (LockDelayOption) -> Unit,
+    titlePrivacyEnabled: Boolean,
+    onTitlePrivacyChange: (Boolean) -> Unit,
+    screenshotBlockingEnabled: Boolean,
+    onScreenshotBlockingChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("privacy-lock-screen"),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = 8.dp,
+            end = 16.dp,
+            bottom = 112.dp,
+        ),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.privacy_lock_back),
+                    )
+                }
+                Text(
+                    stringResource(R.string.privacy_lock_title),
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .semantics { heading() },
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            PrivacyToggleRow(
+                title = stringResource(R.string.privacy_lock_enable_title),
+                supportingText = stringResource(R.string.privacy_lock_enable_supporting),
+                checked = lockEnabled,
+                onCheckedChange = onLockEnabledChange,
+                testTag = "privacy-lock-enable",
+            )
+        }
+        if (lockEnabled) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                SectionHeader(stringResource(R.string.privacy_lock_delay_heading))
+                Spacer(Modifier.height(4.dp))
+            }
+            items(LOCK_DELAY_OPTIONS, key = { (option, _) -> option.name }) { (option, labelRes) ->
+                LockDelayRow(
+                    label = stringResource(labelRes),
+                    selected = option == lockDelayOption,
+                    onClick = { onLockDelayOptionChange(option) },
+                    testTag = "privacy-lock-delay-${option.name.lowercase()}",
+                )
+            }
+        }
+        item {
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            PrivacyToggleRow(
+                title = stringResource(R.string.privacy_lock_title_privacy_title),
+                supportingText = stringResource(R.string.privacy_lock_title_privacy_supporting),
+                checked = titlePrivacyEnabled,
+                onCheckedChange = onTitlePrivacyChange,
+                testTag = "privacy-lock-title-privacy",
+            )
+            PrivacyToggleRow(
+                title = stringResource(R.string.privacy_lock_screenshot_title),
+                supportingText = stringResource(R.string.privacy_lock_screenshot_supporting),
+                checked = screenshotBlockingEnabled,
+                onCheckedChange = onScreenshotBlockingChange,
+                testTag = "privacy-lock-screenshot-blocking",
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrivacyToggleRow(
+    title: String,
+    supportingText: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun LockDelayRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    testTag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+private val LOCK_DELAY_OPTIONS = listOf(
+    LockDelayOption.IMMEDIATE to R.string.privacy_lock_delay_immediate,
+    LockDelayOption.ONE_MINUTE to R.string.privacy_lock_delay_one_minute,
+    LockDelayOption.FIVE_MINUTES to R.string.privacy_lock_delay_five_minutes,
+    LockDelayOption.FIFTEEN_MINUTES to R.string.privacy_lock_delay_fifteen_minutes,
+)
+
 @Composable
 private fun InsightSummary(snapshot: InsightsSnapshot) {
     Surface(
@@ -1070,6 +1263,7 @@ private enum class MoreDestination {
     TRASH,
     TEMPLATES,
     BACKUP_RECOVERY,
+    PRIVACY_LOCK,
 }
 
 @Composable

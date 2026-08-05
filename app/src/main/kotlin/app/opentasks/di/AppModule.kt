@@ -76,6 +76,8 @@ import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RemoteBackupVerifiedInfo
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
+import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockSettings
 import app.opentasks.widget.TodayWidgetPublisher
 import dagger.Module
 import dagger.Provides
@@ -93,6 +95,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
 @Module
@@ -105,6 +108,21 @@ object AppModule {
     @Provides
     @Singleton
     fun provideInsightsEngine(): InsightsEngine = DefaultInsightsEngine()
+
+    // Process-scoped, independent of any vault slot: app lock and title
+    // privacy apply to the app itself, not to the data inside one vault.
+    @Provides
+    @Singleton
+    fun provideAppLockSettings(
+        @ApplicationContext context: Context,
+    ): AppLockSettings = AppLockSettings(
+        context.getSharedPreferences("app_lock", Context.MODE_PRIVATE),
+    )
+
+    @Provides
+    @Singleton
+    fun provideAppLockController(settings: AppLockSettings): AppLockController =
+        AppLockController(settings)
 
     @Provides
     @Singleton
@@ -303,6 +321,8 @@ object AppModule {
         crypto: VaultCrypto,
         authorizationManager: GoogleDriveAuthorizationManager,
         workScheduler: BackupWorkScheduler,
+        appLockSettings: AppLockSettings,
+        appLockController: AppLockController,
     ): ActiveVaultSession {
         // Named so the widget publisher's stop-on-close hook below can attach
         // to exactly this slot's own job. `DefaultActiveVaultSession.close()`
@@ -320,7 +340,21 @@ object AppModule {
             context = context,
             repository = runtime.repository,
         )
-        todayWidgetPublisher.start()
+        fun titlesPermitted() = !(appLockSettings.titlePrivacy || appLockController.locked.value)
+        todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
+        // Neither source alone is enough: a lock/unlock must republish even
+        // between title-privacy changes, and a title-privacy change must
+        // republish even while the lock state itself is unchanged.
+        scope.launch {
+            appLockController.locked.collect {
+                todayWidgetPublisher.setTitlesPermitted(titlesPermitted())
+            }
+        }
+        scope.launch {
+            appLockSettings.observe().collect {
+                todayWidgetPublisher.setTitlesPermitted(titlesPermitted())
+            }
+        }
         sessionJob.invokeOnCompletion { todayWidgetPublisher.stop() }
         val localObjectStore = DefaultLocalBackupObjectStore(files.localBackupRoot)
         val coordinator: BackupCoordinator = LocalVaultRepositoryFactory.createBackupCoordinator(

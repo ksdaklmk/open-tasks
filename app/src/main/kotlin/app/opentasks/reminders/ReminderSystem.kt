@@ -26,6 +26,8 @@ import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockSettings
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -174,6 +176,8 @@ object ReminderNotifications {
 @Singleton
 class ReminderNotifier @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val appLockSettings: AppLockSettings,
+    private val appLockController: AppLockController,
 ) {
     fun canPostNotifications(): Boolean = ReminderNotifications.areEnabled(context)
 
@@ -186,6 +190,11 @@ class ReminderNotifier @Inject constructor(
         if (!canPostNotifications()) return
         ReminderNotifications.createChannel(context)
 
+        // Title privacy and an active lock both conceal task text from the
+        // notification's main content, not only from its lock-screen-public
+        // version below.
+        val concealed = appLockSettings.titlePrivacy || appLockController.locked.value
+
         val publicNotification = NotificationCompat.Builder(
             context,
             ReminderNotifications.CHANNEL_ID,
@@ -197,8 +206,16 @@ class ReminderNotifier @Inject constructor(
 
         val builder = NotificationCompat.Builder(context, ReminderNotifications.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(task.title)
-            .setContentText(reminderContext(task, projectName))
+            .setContentTitle(
+                if (concealed) context.getString(R.string.reminder_public_title) else task.title,
+            )
+            .setContentText(
+                if (concealed) {
+                    context.getString(R.string.reminder_public_text)
+                } else {
+                    reminderContext(task, projectName)
+                },
+            )
             .setContentIntent(openTaskIntent(task.id, reminder.id))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

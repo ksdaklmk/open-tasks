@@ -250,12 +250,19 @@ class TodayWidgetPublisher(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val writer = StopGatedWriter()
     private var collection: Job? = null
+
+    // Read from the internal snapshot collection and written from whatever
+    // external caller reacts to lock/privacy-setting changes (AppModule's
+    // `provideActiveVaultSession`) -- both can run on different `Dispatchers
+    // .Default` threads, so this needs a visibility guarantee a plain `var`
+    // does not give.
+    @Volatile
     private var titlesPermitted: Boolean = true
 
     /**
      * Starts collecting the slot's workspace and republishing the
-     * projection on every change. [titlesPermitted] is unconditionally
-     * `true` until Task 10 wires real lock/privacy state through here.
+     * projection on every change, using [titlesPermitted] for every write
+     * until [setTitlesPermitted] changes it.
      */
     fun start(titlesPermitted: Boolean = true) {
         this.titlesPermitted = titlesPermitted
@@ -285,6 +292,18 @@ class TodayWidgetPublisher(
     fun republish() {
         val snapshot = repository.observeWorkspace().value
         scope.launch { writer.write { writeProjection(snapshot) } }
+    }
+
+    /**
+     * Updates whether titles may be shown and, if that changed, republishes
+     * immediately through [republish]'s existing gated write -- a lock,
+     * unlock, or title-privacy flip is reflected without waiting for the
+     * next unrelated workspace change.
+     */
+    fun setTitlesPermitted(titlesPermitted: Boolean) {
+        if (this.titlesPermitted == titlesPermitted) return
+        this.titlesPermitted = titlesPermitted
+        republish()
     }
 
     private suspend fun writeProjection(snapshot: WorkspaceSnapshot) {
