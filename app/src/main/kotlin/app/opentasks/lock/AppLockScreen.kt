@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.opentasks.R
 
@@ -27,11 +28,16 @@ import app.opentasks.R
  * This is deliberately thin and lives in `:app`, not a feature module: the
  * caller (`MainActivity`) must compose this *in place of* the workspace,
  * never alongside it, so no workspace data is ever composed behind it.
+ *
+ * @param unlockUnavailable `true` when the platform could not show a
+ * prompt at all (most commonly no device credential is enrolled) --
+ * without this, tapping "Unlock Open Tasks" would visibly do nothing.
  */
 @Composable
 fun AppLockScreen(
     onUnlockClick: () -> Unit,
     modifier: Modifier = Modifier,
+    unlockUnavailable: Boolean = false,
 ) {
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -55,6 +61,17 @@ fun AppLockScreen(
                 Text(
                     stringResource(R.string.app_lock_title),
                     style = MaterialTheme.typography.titleLarge,
+                )
+            }
+            if (unlockUnavailable) {
+                Text(
+                    stringResource(R.string.app_lock_unavailable_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .padding(bottom = 16.dp)
+                        .testTag("app-lock-unavailable-message"),
                 )
             }
             Button(

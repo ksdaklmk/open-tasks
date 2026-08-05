@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
     private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
     private var activeRecovery by mutableStateOf(false)
+    private var biometricUnavailable by mutableStateOf(false)
     private var biometricCancellationSignal: CancellationSignal? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,26 +84,34 @@ class MainActivity : ComponentActivity() {
                 is VaultRuntimeState.Recovering,
                 -> RecoverySurface(runtimeState)
                 is VaultRuntimeState.Active -> {
-                    if (activeRecovery) {
-                        RecoverySurface(runtimeState, activeReplacement = true)
-                    } else {
-                        val locked by appLockController.locked.collectAsStateWithLifecycle()
-                        if (locked) {
-                            LaunchedEffect(Unit) { promptUnlock() }
-                            OpenTasksTheme {
-                                AppLockScreen(onUnlockClick = ::promptUnlock)
-                            }
-                        } else {
-                            val signal = quickAddSignal
-                            OpenTasksApp(
-                                activity = this,
-                                appLockSettings = appLockSettings,
-                                quickAddSignal = signal,
-                                openTaskSignal = openTaskSignal,
-                                openTaskId = openTaskId,
-                                onOpenRecovery = { activeRecovery = true },
+                    // Checked before `activeRecovery`: the in-app recovery
+                    // shell exposes destructive vault-replacement actions
+                    // (restore, takeover, start-without-restoring), so a
+                    // background span that reaches the lock delay must not
+                    // return to it unauthenticated. `NoVault`/`Unreadable`/
+                    // `Recovering` above are unaffected -- there is no
+                    // workspace to protect yet, and they must stay reachable.
+                    val locked by appLockController.locked.collectAsStateWithLifecycle()
+                    if (locked) {
+                        LaunchedEffect(Unit) { promptUnlock() }
+                        OpenTasksTheme {
+                            AppLockScreen(
+                                onUnlockClick = ::promptUnlock,
+                                unlockUnavailable = biometricUnavailable,
                             )
                         }
+                    } else if (activeRecovery) {
+                        RecoverySurface(runtimeState, activeReplacement = true)
+                    } else {
+                        val signal = quickAddSignal
+                        OpenTasksApp(
+                            activity = this,
+                            appLockSettings = appLockSettings,
+                            quickAddSignal = signal,
+                            openTaskSignal = openTaskSignal,
+                            openTaskId = openTaskId,
+                            onOpenRecovery = { activeRecovery = true },
+                        )
                     }
                 }
             }
@@ -134,17 +143,25 @@ class MainActivity : ComponentActivity() {
      * fallback, and unlocks on success. Triggered automatically when the
      * overlay appears and again by its "Unlock Open Tasks" button, so a
      * dismissed or failed attempt can always be retried.
+     *
+     * When the platform cannot show anything at all -- most commonly no
+     * device credential is enrolled, but a transient hardware error hits
+     * this same path -- [biometricUnavailable] tells the overlay to say so
+     * instead of leaving the button looking like it did nothing.
      */
     private fun promptUnlock() {
-        val biometricManager = getSystemService(BiometricManager::class.java) ?: return
+        val biometricManager = getSystemService(BiometricManager::class.java)
         val allowedAuthenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.BIOMETRIC_WEAK or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        if (biometricManager.canAuthenticate(allowedAuthenticators) !=
+        if (biometricManager == null ||
+            biometricManager.canAuthenticate(allowedAuthenticators) !=
             BiometricManager.BIOMETRIC_SUCCESS
         ) {
+            biometricUnavailable = true
             return
         }
+        biometricUnavailable = false
 
         biometricCancellationSignal?.cancel()
         val cancellationSignal = CancellationSignal()

@@ -6,6 +6,7 @@ import android.app.AlarmManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.biometrics.BiometricManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -318,6 +319,18 @@ fun OpenTasksApp(
         }
         val preciseRemindersAvailable = remember(permissionStateVersion) {
             activity.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        }
+        // Re-read on the same trigger as the permission checks above: this
+        // most commonly changes when a person leaves for system settings to
+        // set a screen lock and returns (ON_RESUME bumps
+        // `permissionStateVersion`), the same path that already refreshes
+        // notification/alarm availability.
+        val lockAvailable = remember(permissionStateVersion) {
+            val allowedAuthenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            activity.getSystemService(BiometricManager::class.java)
+                ?.canAuthenticate(allowedAuthenticators) == BiometricManager.BIOMETRIC_SUCCESS
         }
 
         // Mirrors `appLockSettings`, the app process's own SharedPreferences
@@ -1078,6 +1091,7 @@ fun OpenTasksApp(
                                     onDismissCsvExportOutcome =
                                         vaultTransferViewModel::dismissCsvExportOutcome,
                                     lockEnabled = lockEnabled,
+                                    lockAvailable = lockAvailable,
                                     onLockEnabledChange = { appLockSettings.lockEnabled = it },
                                     lockDelayOption = lockDelay.toLockDelayOption(),
                                     onLockDelayOptionChange = { option ->

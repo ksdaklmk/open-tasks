@@ -250,6 +250,7 @@
     <string name="privacy_lock_summary_off">App lock is off</string>
     <string name="privacy_lock_enable_title">Lock the app</string>
     <string name="privacy_lock_enable_supporting">Require unlocking after the app has been in the background.</string>
+    <string name="privacy_lock_enable_unavailable">Set a screen lock on this device to use this.</string>
     <string name="privacy_lock_delay_heading">Lock after</string>
     <string name="privacy_lock_delay_immediate">Immediately</string>
     <string name="privacy_lock_delay_one_minute">1 minute</string>

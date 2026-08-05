@@ -157,6 +157,7 @@ fun MoreScreen(
     onExportCsv: (Set<CsvExportTable>) -> Unit = {},
     onDismissCsvExportOutcome: () -> Unit = {},
     lockEnabled: Boolean = false,
+    lockAvailable: Boolean = true,
     onLockEnabledChange: (Boolean) -> Unit = {},
     lockDelayOption: LockDelayOption = LockDelayOption.ONE_MINUTE,
     onLockDelayOptionChange: (LockDelayOption) -> Unit = {},
@@ -292,6 +293,7 @@ fun MoreScreen(
             BackHandler { destination = MoreDestination.OVERVIEW }
             PrivacyLockScreen(
                 lockEnabled = lockEnabled,
+                lockAvailable = lockAvailable,
                 onLockEnabledChange = onLockEnabledChange,
                 lockDelayOption = lockDelayOption,
                 onLockDelayOptionChange = onLockDelayOptionChange,
@@ -1017,6 +1019,7 @@ enum class LockDelayOption {
 @Composable
 private fun PrivacyLockScreen(
     lockEnabled: Boolean,
+    lockAvailable: Boolean,
     onLockEnabledChange: (Boolean) -> Unit,
     lockDelayOption: LockDelayOption,
     onLockDelayOptionChange: (LockDelayOption) -> Unit,
@@ -1060,9 +1063,18 @@ private fun PrivacyLockScreen(
             Spacer(Modifier.height(24.dp))
             PrivacyToggleRow(
                 title = stringResource(R.string.privacy_lock_enable_title),
-                supportingText = stringResource(R.string.privacy_lock_enable_supporting),
+                supportingText = if (lockAvailable || lockEnabled) {
+                    stringResource(R.string.privacy_lock_enable_supporting)
+                } else {
+                    stringResource(R.string.privacy_lock_enable_unavailable)
+                },
                 checked = lockEnabled,
                 onCheckedChange = onLockEnabledChange,
+                // Availability can regress after the fact (a screen lock
+                // removed after this was turned on), so a person who
+                // already has it on can always turn it back off; only
+                // turning it on is gated on canAuthenticate() succeeding.
+                enabled = lockAvailable || lockEnabled,
                 testTag = "privacy-lock-enable",
             )
         }
@@ -1109,6 +1121,7 @@ private fun PrivacyToggleRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     testTag: String,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
@@ -1116,6 +1129,7 @@ private fun PrivacyToggleRow(
             .heightIn(min = 56.dp)
             .toggleable(
                 value = checked,
+                enabled = enabled,
                 role = Role.Switch,
                 onValueChange = onCheckedChange,
             )
@@ -1130,7 +1144,7 @@ private fun PrivacyToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
