@@ -11,15 +11,16 @@
   formula-safe CSV export; Glance Today widget; app lock with title
   privacy and unified Quick Add; keyboard shortcuts with help dialog and
   accessible-action audit; one-way calendar insertion) are complete and
-  independently reviewed at `bd8f650`. Only Task 13 (qualification)
-  remains, gated behind the dedicated `RECOVERED_SCHEMA_VERSION` fix
-  task; resume via the Task 12 checkpoint below. The Task 6
+  independently reviewed at `bd8f650`, and the dedicated pre-Task-13
+  `RECOVERED_SCHEMA_VERSION` fix is complete and independently reviewed
+  at `d8c89e3`. Only Task 13 (qualification) remains; resume via the
+  schema-fix checkpoint below. The Task 6
   snapshot-only export ruling was upheld by the user
   before Task 7 and is discharged: import passes an empty segments
-  list. One verified pre-existing defect needs its own task
-  before Task 13: `RECOVERED_SCHEMA_VERSION = 7` rejects the schema
+  list. The pre-existing recovery defect recorded at the Tasks 7–9
+  checkpoint (`RECOVERED_SCHEMA_VERSION = 7` rejecting the schema
   marker 8 that `MIGRATION_7_8` writes, breaking Drive recovery and
-  `.otvault` import on migrated devices — see the Tasks 7–9 checkpoint.
+  `.otvault` import on migrated devices) is discharged by that fix.
   Both recorded Stage 4 limits are
   discharged:
   the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
@@ -39,9 +40,10 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `bd8f650` (`fix: use
-  stringResource copy and show a snackbar on missing calendar app`),
-  the tip of the Stage 5 Task 12 range `c0ad0ac..bd8f650` on top of the
+- Current product source implementation point: `d8c89e3` (`fix: accept
+  migrated schema markers in recovery import`), the dedicated
+  schema-fix commit on top of the checkpoint commit `1767514`, the
+  Stage 5 Task 12 range `c0ad0ac..bd8f650` and its
   checkpoint commit `7693fb7`, the Task 11 range `11e4bcb..2ec80aa` and
   its checkpoint commit `aeb013e`, the user-ruled `glance-material3`
   drop `4652a2b`, the Task 10 range `a6c52eb..f76f2a6` and its
@@ -426,9 +428,58 @@ the runtime widget/notification concealment checks, and
 `ShortcutRootWiringInstrumentedTest`. Deferred minors are in the
 ledger.
 
+This checkpoint's resume instruction is superseded: the dedicated
+schema-fix task was executed on 6 August and is recorded in the
+checkpoint below.
+
+## Stage 5 schema-fix checkpoint — 6 August 2026
+
+Execution resumed from `1767514` with the same plan, ledger, and
+independent-review-per-task discipline. The dedicated pre-Task-13
+`RECOVERED_SCHEMA_VERSION` fix task (not a numbered plan task; its
+brief was authored from the Tasks 7–9 checkpoint defect record) closed
+with zero Critical or Important findings and no fix round. No device
+suite ran; the changed instrumented tests are compile-verified and
+execute at the Task 13 connected gate.
+
+- The fix (`d8c89e3`) ties the recovery gate to the Room database
+  version: a shared `internal const val VAULT_DATABASE_VERSION = 9` in
+  `VaultDatabase.kt` now feeds the `@Database` annotation,
+  `RECOVERED_SCHEMA_VERSION` (previously a hand-tracked literal 7), and
+  the fresh-vault seed (previously 7). Captured vaults with markers
+  1..9 are accepted and normalized to 9; migrated devices keep row
+  marker 8 and recover cleanly; a future migration can no longer reopen
+  this defect class because migrations write markers at most the
+  database version by construction. No migration was edited, no version
+  bumped, and no exported schema or frozen fixture changed — the frozen
+  `.otvault` v1 fixture's marker-9 vault record, previously rejected by
+  the gate, now imports without a byte of it changing.
+- Evidence: the new deterministic `BackupRecordImporterTest` ran RED
+  against the pre-fix constant (3/4 cases failing) and GREEN after; the
+  CI gate passed (all unit suites zero failures, lint clean, debug
+  APK); `:core:data:assembleDebugAndroidTest` compiles;
+  `scripts/check-schema-drift.sh` clean. `futureSchemaVersionIsRejected`
+  now rejects `VAULT_DATABASE_VERSION + 1` instead of enshrining the
+  defect; a marker-8 import-acceptance case and a migration-chain
+  marker-bound assertion were added and run at Task 13.
+- Reviewer minors are deferred in the ledger, notably: the
+  migration-test guard comment overstates its reach (the deterministic
+  JVM test is the real guard); two weak assertions (a bare `assertTrue`
+  and an unpinned exception message); and one disclosed compatibility
+  note — post-fix captures carry marker 9, which pre-fix builds would
+  reject as unreadable (brief-mandated; no released builds exist).
+
+Carry-forwards: only Task 13 (qualification) remains. Its device
+checklist is unchanged from the Task 12 checkpoint (the SAF
+`application/octet-stream` picker visibility check for `.otvault`, the
+Glance parameter-to-extra tap test, `AppLockOverlayInstrumentedTest`,
+the runtime widget/notification concealment checks, and
+`ShortcutRootWiringInstrumentedTest`) and now also confirms the new
+marker-8 import acceptance and migration-chain assertions execute green
+on device.
+
 Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above, dispatching the `RECOVERED_SCHEMA_VERSION` fix
-task from base `bd8f650`, then Task 13.
+plan and ledger above, dispatching Task 13 from base `d8c89e3`.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
