@@ -576,13 +576,18 @@ fun OpenTasksApp(
                 .fillMaxSize()
                 .onFocusEvent { focusState -> editableFocused = focusState.hasFocus }
                 // `Ctrl` combinations run in the preview (top-down) pass, ahead
-                // of any focused text field, so they always fire.
+                // of any focused text field, so they always fire. Gated on
+                // `isCtrlPressed` so a bare `/` -- which resolves to the same
+                // `OPEN_SEARCH` action as `Ctrl+K` -- is never handled here;
+                // it is left for the bubbling handler below.
                 .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
+                        return@onPreviewKeyEvent false
+                    }
                     when (
                         shortcutActionFor(
                             key = event.key,
-                            isCtrlPressed = event.isCtrlPressed,
+                            isCtrlPressed = true,
                             isShiftPressed = event.isShiftPressed,
                             inProjectsRoute = currentRoute == ProjectsRoute,
                             editableFocused = editableFocused,
@@ -595,20 +600,25 @@ fun OpenTasksApp(
                     }
                     true
                 }
-                // Single-key shortcuts run in the bubbling (bottom-up) pass, so
-                // a focused text field claims ordinary typing -- `/` and `?`
-                // included -- before the root ever sees it.
+                // Single-key shortcuts (`/`, `?`, `Esc`) run in the bubbling
+                // (bottom-up) pass, so a focused text field claims ordinary
+                // typing before the root ever sees it. Gated on
+                // `!isCtrlPressed` so this never re-handles a `Ctrl` combo --
+                // those are fully claimed by the preview handler above.
                 .onKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    if (event.type != KeyEventType.KeyDown || event.isCtrlPressed) {
+                        return@onKeyEvent false
+                    }
                     when (
                         shortcutActionFor(
                             key = event.key,
-                            isCtrlPressed = event.isCtrlPressed,
+                            isCtrlPressed = false,
                             isShiftPressed = event.isShiftPressed,
                             inProjectsRoute = currentRoute == ProjectsRoute,
                             editableFocused = editableFocused,
                         )
                     ) {
+                        ShortcutAction.OPEN_SEARCH -> showSearch = true
                         ShortcutAction.SHOW_HELP -> showShortcutHelp = true
                         ShortcutAction.DISMISS_TOP -> dismissTopShortcutSurface()
                         else -> return@onKeyEvent false

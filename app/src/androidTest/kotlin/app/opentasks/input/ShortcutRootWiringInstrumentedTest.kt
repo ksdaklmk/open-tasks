@@ -61,12 +61,12 @@ class ShortcutRootWiringInstrumentedTest {
                         .testTag("shortcut-root")
                         .onFocusEvent { focusState -> editableFocused = focusState.hasFocus }
                         .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) {
+                            if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
                                 return@onPreviewKeyEvent false
                             }
                             val action = shortcutActionFor(
                                 key = event.key,
-                                isCtrlPressed = event.isCtrlPressed,
+                                isCtrlPressed = true,
                                 isShiftPressed = event.isShiftPressed,
                                 inProjectsRoute = false,
                                 editableFocused = editableFocused,
@@ -109,10 +109,12 @@ class ShortcutRootWiringInstrumentedTest {
                         .testTag("shortcut-root")
                         .onFocusEvent { focusState -> editableFocused = focusState.hasFocus }
                         .onKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            if (event.type != KeyEventType.KeyDown || event.isCtrlPressed) {
+                                return@onKeyEvent false
+                            }
                             val action = shortcutActionFor(
                                 key = event.key,
-                                isCtrlPressed = event.isCtrlPressed,
+                                isCtrlPressed = false,
                                 isShiftPressed = event.isShiftPressed,
                                 inProjectsRoute = false,
                                 editableFocused = editableFocused,
