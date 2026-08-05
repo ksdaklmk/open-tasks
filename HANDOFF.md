@@ -2,7 +2,7 @@
 
 - Last updated: 5 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–11 of the 13-task plan
+- Session status: **Stage 5 is in progress: Tasks 1–12 of the 13-task plan
   (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
   collection command; retired-set GC closure; silent attachment intake
   auto-resume; frozen `.otvault` v1 archive format with independent Node
@@ -10,9 +10,10 @@
   vault import with staged activation and rollback; disclosed
   formula-safe CSV export; Glance Today widget; app lock with title
   privacy and unified Quick Add; keyboard shortcuts with help dialog and
-  accessible-action audit) are complete and independently
-  reviewed at `2ec80aa`. Execution stops before Task 12; resume via the
-  Task 11 checkpoint below. The Task 6
+  accessible-action audit; one-way calendar insertion) are complete and
+  independently reviewed at `bd8f650`. Only Task 13 (qualification)
+  remains, gated behind the dedicated `RECOVERED_SCHEMA_VERSION` fix
+  task; resume via the Task 12 checkpoint below. The Task 6
   snapshot-only export ruling was upheld by the user
   before Task 7 and is discharged: import passes an empty segments
   list. One verified pre-existing defect needs its own task
@@ -38,12 +39,13 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `2ec80aa` (`fix: route
-  OPEN_SEARCH by key phase, not resolved action`), the tip of the
-  Stage 5 Task 11 range `11e4bcb..2ec80aa` on top of the checkpoint
-  commit `aeb013e`, the user-ruled `glance-material3` drop `4652a2b`,
-  the Task 10 range `a6c52eb..f76f2a6` and its checkpoint commit
-  `36b98b5`, the
+- Current product source implementation point: `bd8f650` (`fix: use
+  stringResource copy and show a snackbar on missing calendar app`),
+  the tip of the Stage 5 Task 12 range `c0ad0ac..bd8f650` on top of the
+  checkpoint commit `7693fb7`, the Task 11 range `11e4bcb..2ec80aa` and
+  its checkpoint commit `aeb013e`, the user-ruled `glance-material3`
+  drop `4652a2b`, the Task 10 range `a6c52eb..f76f2a6` and its
+  checkpoint commit `36b98b5`, the
   Task 7–9 range `5feb1e8..99db7dc` on top of the
   checkpoint commit `afcfe07`, the Task 3–6 range `1cb768e..b4b1ec4`,
   the Task 1–2 range `33ea364..eb343cb`, and its checkpoint commit
@@ -376,11 +378,57 @@ several surfaces; `Ctrl+Escape` dismissed pre-fix and is now dropped by
 both phase guards; the instrumented test exercises a replica of the
 root wiring rather than `OpenTasksApp` itself).
 
+This checkpoint's resume instruction is superseded: Task 12 was
+executed on 6 August and is recorded in the checkpoint below.
+
+## Stage 5 Task 12 checkpoint — 6 August 2026
+
+Execution resumed from `7693fb7` with the same plan, ledger, and
+independent-review-per-task discipline. The task boundary closed with
+zero open Critical or Important findings after one fix round. No device
+suite ran.
+
+- Task 12 (`c0ad0ac`, fix `bd8f650`) added one-way calendar insertion:
+  a pure `calendarEventDraft` in `:app` with the pinned rules (undated
+  → null; start present → begin at `start.instant` with end at
+  `due?.instant` only when strictly after; due-only → begin at
+  `due.instant` with null end; description `Project: <name>` or empty),
+  and an intent wrapper carrying exactly `ACTION_INSERT`,
+  `Events.CONTENT_URI`, begin, conditional end, title, and description
+  — no permission, no stored event id, no result handling. "Add to
+  calendar" appears in the task editor and both Schedule layout modes
+  only when the draft is non-null (the reviewer upheld the
+  both-modes judgment call), via nullable `onAddToCalendar` lambdas
+  that keep feature modules platform-free. A preview dialog shows
+  title, times formatted in each moment's stored zone (UK format), and
+  description with Insert/Cancel. The fix round moved the
+  `feature:schedule` content-description copy into that module's first
+  `res/values/strings.xml` (read via `stringResource`) and replaced the
+  silent `ActivityNotFoundException` catch with the
+  `calendar_no_provider` snackbar on the scaffold host, matching the
+  attachment-delivery precedent.
+- Evidence: 6/6 `CalendarInsertionTest` pinned cases (RED/GREEN); CI
+  gate passed; `:app`, `:feature:tasks`, and `:feature:schedule`
+  instrumented-test compilation green.
+
+Carry-forwards: all 12 implementation tasks are complete; only Task 13
+(qualification) remains. Before its gates, the dedicated
+`RECOVERED_SCHEMA_VERSION` fix task must land — it is not in the plan;
+author its brief from the Tasks 7–9 checkpoint defect record
+(`RECOVERED_SCHEMA_VERSION = 7` at `BackupRecordImporter.kt:443`,
+`:760` rejects the schema marker 8 that `MIGRATION_7_8` writes at
+`VaultDatabase.kt:1125`; fresh vaults write marker 7 at
+`RoomVaultRepository.kt:3115`, so existing suites cannot catch it).
+The Task 13 device checklist retains the SAF
+`application/octet-stream` picker visibility check for `.otvault`, the
+Glance parameter-to-extra tap test, `AppLockOverlayInstrumentedTest`,
+the runtime widget/notification concealment checks, and
+`ShortcutRootWiringInstrumentedTest`. Deferred minors are in the
+ledger.
+
 Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above, dispatching Task 12 (one-way calendar insertion)
-from base `2ec80aa`. Tasks 12–13 (calendar, qualification) have not
-started; schedule the dedicated `RECOVERED_SCHEMA_VERSION` fix task
-before Task 13.
+plan and ledger above, dispatching the `RECOVERED_SCHEMA_VERSION` fix
+task from base `bd8f650`, then Task 13.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
