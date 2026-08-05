@@ -2,17 +2,17 @@
 
 - Last updated: 5 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–10 of the 13-task plan
+- Session status: **Stage 5 is in progress: Tasks 1–11 of the 13-task plan
   (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
   collection command; retired-set GC closure; silent attachment intake
   auto-resume; frozen `.otvault` v1 archive format with independent Node
   fixtures; encrypted vault export with SAF product surface; encrypted
   vault import with staged activation and rollback; disclosed
   formula-safe CSV export; Glance Today widget; app lock with title
-  privacy and unified Quick Add) are complete and independently
-  reviewed at `f76f2a6`, with the user-ruled `glance-material3` drop on
-  top at `4652a2b`. Execution is paused before Task 11 at the user's
-  request; resume via the Task 10 checkpoint below. The Task 6
+  privacy and unified Quick Add; keyboard shortcuts with help dialog and
+  accessible-action audit) are complete and independently
+  reviewed at `2ec80aa`. Execution stops before Task 12; resume via the
+  Task 11 checkpoint below. The Task 6
   snapshot-only export ruling was upheld by the user
   before Task 7 and is discharged: import passes an empty segments
   list. One verified pre-existing defect needs its own task
@@ -38,9 +38,12 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `4652a2b` (`chore: drop
-  unused glance-material3 dependency`), on top of the Stage 5 Task 10
-  range `a6c52eb..f76f2a6` and its checkpoint commit `36b98b5`, the
+- Current product source implementation point: `2ec80aa` (`fix: route
+  OPEN_SEARCH by key phase, not resolved action`), the tip of the
+  Stage 5 Task 11 range `11e4bcb..2ec80aa` on top of the checkpoint
+  commit `aeb013e`, the user-ruled `glance-material3` drop `4652a2b`,
+  the Task 10 range `a6c52eb..f76f2a6` and its checkpoint commit
+  `36b98b5`, the
   Task 7–9 range `5feb1e8..99db7dc` on top of the
   checkpoint commit `afcfe07`, the Task 3–6 range `1cb768e..b4b1ec4`,
   the Task 1–2 range `33ea364..eb343cb`, and its checkpoint commit
@@ -327,10 +330,57 @@ concealment checks. Deferred minors are in the ledger (notably: no
 case, and the untested `setTitlesPermitted`/concealed-notification
 branches until the device suite).
 
+This checkpoint's resume instruction is superseded: Task 11 was
+executed on 5 August and is recorded in the checkpoint below.
+
+## Stage 5 Task 11 checkpoint — 5 August 2026
+
+Execution resumed from `aeb013e` with the same plan, ledger, and
+independent-review-per-task discipline. The task boundary closed with
+zero open Critical or Important findings after one fix round. No device
+suite ran; the new instrumented test is compile-verified and executes
+at the Task 13 connected gate.
+
+- Task 11 (`11e4bcb`, fix `2ec80aa`) added keyboard, mouse, and
+  accessible actions: a pure `shortcutActionFor` dispatcher with the
+  pinned mapping (`Ctrl+K` and `/` → search; `Ctrl+N` → Quick Add;
+  `Ctrl+Shift+N` → new project only in the Projects route; `?` → help;
+  `Esc` → dismiss top), single-key suppression while an editable is
+  focused, a `ShortcutHelpDialog` listing every shortcut via
+  `stringResource`, and root wiring in `OpenTasksApp` whose
+  `DISMISS_TOP` closes help dialog → open sheet → expanded search and
+  never finishes the Activity. Quick Add routes through the Task 10
+  shared sheet. The accessible-action audit found no drag-only action
+  on the five feature screens (workflow reordering is explicit up/down
+  IconButtons). The fix round enforced the pinned phase split
+  structurally: the preview handler early-returns unless Ctrl is
+  pressed and dispatches only Ctrl combos, the bubbling handler
+  early-returns when Ctrl is pressed and is the sole path for bare
+  single keys including `/`, making the two phases mutually exclusive
+  by construction, with the dispatcher KDoc and root comments corrected
+  to match the real dispatch paths.
+- Evidence: 15/15 `ShortcutDispatcherTest` unit tests (RED/GREEN); the
+  CI gate passed; `ShortcutRootWiringInstrumentedTest` (Ctrl+K asserts
+  search focus, Esc asserts sheet dismissal) compiles and runs at
+  Task 13.
+
+Carry-forwards unchanged: the dedicated `RECOVERED_SCHEMA_VERSION` fix
+task must land before the Task 13 gates, and the Task 13 device
+checklist retains the SAF `application/octet-stream` picker visibility
+check for `.otvault`, the Glance parameter-to-extra tap test, running
+`AppLockOverlayInstrumentedTest`, and the runtime widget/notification
+concealment checks; it now also covers running
+`ShortcutRootWiringInstrumentedTest`. Deferred minors are in the ledger
+(notably: held-`Esc` key repeat can cascade the dismiss order through
+several surfaces; `Ctrl+Escape` dismissed pre-fix and is now dropped by
+both phase guards; the instrumented test exercises a replica of the
+root wiring rather than `OpenTasksApp` itself).
+
 Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above, dispatching Task 11 (keyboard, mouse, and
-accessible actions) from base `4652a2b`. Tasks 11–13 (input, calendar,
-qualification) have not started.
+plan and ledger above, dispatching Task 12 (one-way calendar insertion)
+from base `2ec80aa`. Tasks 12–13 (calendar, qualification) have not
+started; schedule the dedicated `RECOVERED_SCHEMA_VERSION` fix task
+before Task 13.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
