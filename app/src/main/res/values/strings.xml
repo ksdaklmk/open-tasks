@@ -50,4 +50,5 @@
     <string name="calendar_preview_ends">Ends %1$s</string>
     <string name="calendar_insert_action">Insert</string>
     <string name="calendar_cancel_action">Cancel</string>
+    <string name="calendar_no_provider">No app on this device can accept a calendar event.</string>
 </resources>

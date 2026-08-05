@@ -65,6 +65,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -138,6 +139,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 
@@ -270,6 +272,7 @@ fun OpenTasksApp(
             vaultTransferViewModel.onCsvDocumentSelected(uri)
         }
         val snackbarHostState = remember { SnackbarHostState() }
+        val coroutineScope = rememberCoroutineScope()
         val accessibilityManager = LocalAccessibilityManager.current
         val showNavigationLabels =
             shouldShowNavigationLabels(LocalDensity.current.fontScale)
@@ -1334,9 +1337,11 @@ fun OpenTasksApp(
                     try {
                         activity.startActivity(calendarInsertIntent(preview.draft))
                     } catch (_: ActivityNotFoundException) {
-                        // No calendar provider is registered; the dialog already showed
-                        // exactly what would have been inserted, so there is nothing
-                        // further to reconcile.
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                activity.getString(R.string.calendar_no_provider),
+                            )
+                        }
                     }
                     calendarPreview = null
                 },

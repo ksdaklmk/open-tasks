@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
@@ -455,7 +456,7 @@ private fun TimelineTask(
                         ) {
                             Icon(
                                 Icons.Rounded.CalendarMonth,
-                                contentDescription = "Add to calendar",
+                                contentDescription = stringResource(R.string.schedule_add_to_calendar),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.secondary,
                             )
@@ -620,7 +621,7 @@ private fun AgendaRow(
                 ) {
                     Icon(
                         Icons.Rounded.CalendarMonth,
-                        contentDescription = "Add to calendar",
+                        contentDescription = stringResource(R.string.schedule_add_to_calendar),
                         tint = MaterialTheme.colorScheme.secondary,
                     )
                 }
