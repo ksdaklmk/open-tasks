@@ -32,4 +32,17 @@
     <string name="app_lock_title">Open Tasks is locked</string>
     <string name="app_lock_unlock_action">Unlock Open Tasks</string>
     <string name="app_lock_unavailable_message">Unlocking isn\'t available on this device. Set a screen lock in system settings, then try again.</string>
+
+    <string name="shortcut_help_title">Keyboard shortcuts</string>
+    <string name="shortcut_help_close">Close</string>
+    <string name="shortcut_help_key_search">Ctrl+K or /</string>
+    <string name="shortcut_help_action_search">Search</string>
+    <string name="shortcut_help_key_quick_add">Ctrl+N</string>
+    <string name="shortcut_help_action_quick_add">Quick add a task</string>
+    <string name="shortcut_help_key_new_project">Ctrl+Shift+N</string>
+    <string name="shortcut_help_action_new_project">New project, on the Projects tab</string>
+    <string name="shortcut_help_key_show_help">?</string>
+    <string name="shortcut_help_action_show_help">Show this help</string>
+    <string name="shortcut_help_key_dismiss">Esc</string>
+    <string name="shortcut_help_action_dismiss">Close the topmost dialog, sheet, or search</string>
 </resources>

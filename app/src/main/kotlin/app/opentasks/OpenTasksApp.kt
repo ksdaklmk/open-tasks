@@ -66,11 +66,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalAccessibilityManager
@@ -119,6 +121,9 @@ import app.opentasks.feature.tasks.TaskEdit
 import app.opentasks.feature.tasks.TasksScreen
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import app.opentasks.input.ShortcutAction
+import app.opentasks.input.ShortcutHelpDialog
+import app.opentasks.input.shortcutActionFor
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
@@ -249,6 +254,12 @@ fun OpenTasksApp(
             shouldShowNavigationLabels(LocalDensity.current.fontScale)
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
+        var showShortcutHelp by rememberSaveable { mutableStateOf(false) }
+        // Aggregated from the root: true while any descendant focus target is
+        // active, not only genuinely editable ones. That is deliberately
+        // conservative -- see `shortcutActionFor`'s doc comment -- so the `/`
+        // and `?` shortcuts never race a focused text field's own typing.
+        var editableFocused by remember { mutableStateOf(false) }
 
         LaunchedEffect(encryptedBackupViewModel) {
             for (pendingIntent in encryptedBackupViewModel.resolutionEffects) {
@@ -373,6 +384,24 @@ fun OpenTasksApp(
                 openBackupOnMore = false
             }
             navigate(route)
+        }
+
+        /**
+         * `Esc` target for [ShortcutAction.DISMISS_TOP]: closes the topmost
+         * shortcut-reachable surface -- the help dialog, then either sheet,
+         * then expanded search -- and falls through to nothing when none of
+         * those are open. Never calls `activity.finish()`.
+         */
+        fun dismissTopShortcutSurface() {
+            when {
+                showShortcutHelp -> showShortcutHelp = false
+                showQuickAdd -> showQuickAdd = false
+                showNewProject -> showNewProject = false
+                showSearch -> {
+                    showSearch = false
+                    viewModel.clearSearch()
+                }
+            }
         }
 
         /**
@@ -545,13 +574,46 @@ fun OpenTasksApp(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
+                .onFocusEvent { focusState -> editableFocused = focusState.hasFocus }
+                // `Ctrl` combinations run in the preview (top-down) pass, ahead
+                // of any focused text field, so they always fire.
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val opensSearch =
-                        (event.isCtrlPressed && event.key == Key.K) ||
-                            (!event.isCtrlPressed && event.key == Key.Slash)
-                    if (opensSearch) showSearch = true
-                    opensSearch
+                    when (
+                        shortcutActionFor(
+                            key = event.key,
+                            isCtrlPressed = event.isCtrlPressed,
+                            isShiftPressed = event.isShiftPressed,
+                            inProjectsRoute = currentRoute == ProjectsRoute,
+                            editableFocused = editableFocused,
+                        )
+                    ) {
+                        ShortcutAction.OPEN_SEARCH -> showSearch = true
+                        ShortcutAction.QUICK_ADD -> showQuickAdd = true
+                        ShortcutAction.NEW_PROJECT -> showNewProject = true
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    true
+                }
+                // Single-key shortcuts run in the bubbling (bottom-up) pass, so
+                // a focused text field claims ordinary typing -- `/` and `?`
+                // included -- before the root ever sees it.
+                .onKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    when (
+                        shortcutActionFor(
+                            key = event.key,
+                            isCtrlPressed = event.isCtrlPressed,
+                            isShiftPressed = event.isShiftPressed,
+                            inProjectsRoute = currentRoute == ProjectsRoute,
+                            editableFocused = editableFocused,
+                        )
+                    ) {
+                        ShortcutAction.SHOW_HELP -> showShortcutHelp = true
+                        ShortcutAction.DISMISS_TOP -> dismissTopShortcutSurface()
+                        else -> return@onKeyEvent false
+                    }
+                    true
                 }
                 .focusable(),
         ) {
@@ -1164,6 +1226,10 @@ fun OpenTasksApp(
                     navigate(ProjectsRoute)
                 },
             )
+        }
+
+        if (showShortcutHelp) {
+            ShortcutHelpDialog(onDismiss = { showShortcutHelp = false })
         }
 
         if (pendingBlocked != null) {
