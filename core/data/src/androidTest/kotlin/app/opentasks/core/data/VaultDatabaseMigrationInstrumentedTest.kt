@@ -6,6 +6,7 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.opentasks.core.data.backup.RECOVERED_SCHEMA_VERSION
 import app.opentasks.core.data.db.VaultDatabase
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -331,6 +332,14 @@ class VaultDatabaseMigrationInstrumentedTest {
 
         assertEquals(before, migrated.captureVersion8Bytes())
         assertEquals(0L, migrated.longValue("SELECT COUNT(*) FROM retired_blob_sets"))
+        // MIGRATION_8_9 does not bump the vault row marker, so a device
+        // migrated through v7->v8 still carries marker 8 here. This is the
+        // durable guard that catches the next migration author who bumps
+        // the row marker without also widening the recovery import gate.
+        assertTrue(
+            migrated.longValue("SELECT schemaVersion FROM vaults WHERE id = 'vault-a'") <=
+                RECOVERED_SCHEMA_VERSION,
+        )
         migrated.close()
     }
 

@@ -21,6 +21,7 @@ import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
 import app.opentasks.core.data.db.TimeEntryEntity
 import app.opentasks.core.data.db.TombstoneEntity
+import app.opentasks.core.data.db.VAULT_DATABASE_VERSION
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.data.db.VaultEntity
 import app.opentasks.core.data.db.MemberEntity
@@ -3112,7 +3113,7 @@ class RoomVaultRepository(
                     id = VAULT_ID.value,
                     storageMode = "LOCAL",
                     createdAtEpochMillis = now().toEpochMilli(),
-                    schemaVersion = 7,
+                    schemaVersion = VAULT_DATABASE_VERSION,
                     cryptoVersion = 1,
                     minimumReaderVersion = 1,
                 ),

@@ -28,6 +28,7 @@ import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
 import app.opentasks.core.data.db.TimeEntryEntity
 import app.opentasks.core.data.db.TombstoneEntity
+import app.opentasks.core.data.db.VAULT_DATABASE_VERSION
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.data.db.VaultEntity
 import app.opentasks.core.data.db.WorkflowStatusEntity
@@ -105,7 +106,7 @@ class BackupRecordImporterInstrumentedTest {
                 "id" to VAULT_ID,
                 "storageMode" to "LOCAL",
                 "createdAtEpochMillis" to 1_700_000_000_000L,
-                "schemaVersion" to 7,
+                "schemaVersion" to VAULT_DATABASE_VERSION,
                 "cryptoVersion" to 1,
                 "minimumReaderVersion" to 1,
             ),
@@ -600,7 +601,7 @@ class BackupRecordImporterInstrumentedTest {
                 "id" to VAULT_ID,
                 "storageMode" to "LOCAL",
                 "createdAtEpochMillis" to 1_700_000_099_000L,
-                "schemaVersion" to 7,
+                "schemaVersion" to VAULT_DATABASE_VERSION,
                 "cryptoVersion" to 1,
                 "minimumReaderVersion" to 1,
             ),
@@ -844,10 +845,40 @@ class BackupRecordImporterInstrumentedTest {
     fun futureSchemaVersionIsRejected() = runBlocking {
         val snapshot = replacing(
             oneRecordPerFamilySnapshot(),
-            vaultEntity().copy(schemaVersion = 8).toBackupRecordV1(),
+            vaultEntity().copy(schemaVersion = VAULT_DATABASE_VERSION + 1).toBackupRecordV1(),
         )
 
         assertRejected { importer.importInto(staging(), request(snapshot)) }
+    }
+
+    /**
+     * A vault that migrated through Room v7->v8 before it was captured
+     * carries row marker 8. Recovery must accept it, not reject it as
+     * unreadable, and normalize it to the database version the recovered
+     * vault now lives in.
+     */
+    @Test
+    fun migratedSchemaVersionIsAcceptedAndNormalizedToTheDatabaseVersion() = runBlocking {
+        val snapshot = replacing(
+            oneRecordPerFamilySnapshot(),
+            vaultEntity().copy(schemaVersion = 8).toBackupRecordV1(),
+        )
+
+        importer.importInto(staging(), request(snapshot))
+
+        assertRow(
+            table = "vaults",
+            where = "id = ?",
+            whereArgs = arrayOf(VAULT_ID),
+            expected = mapOf(
+                "id" to VAULT_ID,
+                "storageMode" to "LOCAL",
+                "createdAtEpochMillis" to 1_700_000_000_000L,
+                "schemaVersion" to VAULT_DATABASE_VERSION,
+                "cryptoVersion" to 1,
+                "minimumReaderVersion" to 1,
+            ),
+        )
     }
 
     @Test

@@ -494,6 +494,17 @@ interface AttachmentTransferDao {
     suspend fun delete(blobSetId: String): Int
 }
 
+/**
+ * The Room schema version this database migrates to.
+ *
+ * Shared so every place that needs to reason about "the database version" —
+ * the `@Database` annotation, the vault row marker a fresh vault is seeded
+ * with, and the gate that decides which captured vault row markers a
+ * recovery import accepts — reads the same number instead of a copy that can
+ * drift out of sync with it.
+ */
+internal const val VAULT_DATABASE_VERSION = 9
+
 @Database(
     entities = [
         VaultEntity::class,
@@ -525,7 +536,7 @@ interface AttachmentTransferDao {
         AttachmentTransferEntity::class,
         RetiredBlobSetEntity::class,
     ],
-    version = 9,
+    version = VAULT_DATABASE_VERSION,
     exportSchema = true,
 )
 abstract class VaultDatabase : RoomDatabase() {

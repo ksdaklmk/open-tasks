@@ -19,6 +19,7 @@ import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
 import app.opentasks.core.data.db.TimeEntryEntity
 import app.opentasks.core.data.db.TombstoneEntity
+import app.opentasks.core.data.db.VAULT_DATABASE_VERSION
 import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.data.db.VaultEntity
 import app.opentasks.core.data.db.WorkflowStatusEntity
@@ -432,11 +433,22 @@ internal class RecoveryImportPlan private constructor(
         }
 
         /**
-         * Rejects a vault this reader cannot represent and marks every readable
-         * one as the current logical schema, so a vault captured at v6 is
-         * recovered as the v7 database it now lives in.
+         * Rejects a vault this reader cannot represent and normalizes every
+         * readable one to the Room database version the recovered vault will
+         * live in.
+         *
+         * A migration can only ever write a row marker less than or equal to
+         * the database version it migrates to, so binding the gate to
+         * [RECOVERED_SCHEMA_VERSION] (the shared `VAULT_DATABASE_VERSION`
+         * constant) rather than a separately tracked logical schema number
+         * accepts every marker a real device can carry and prevents this
+         * defect class permanently: a vault captured at row marker 6 through
+         * 9 is recovered as the v9 database it now lives in.
+         *
+         * Internal (rather than private) so a deterministic unit test can
+         * reach it without Room.
          */
-        private fun normalizeForRecovery(record: BackupRecordV1): BackupRecordV1 {
+        internal fun normalizeForRecovery(record: BackupRecordV1): BackupRecordV1 {
             if (record.family != BackupRecordFamily.VAULT) return record
             val fields = BackupRecordFields.of(record)
             val schemaVersion = fields.int("schemaVersion")
@@ -756,8 +768,17 @@ private fun BackupRecordKey.second(): String {
     return identity[1]
 }
 
-/** The logical schema marker every recovered vault is normalized to. */
-internal const val RECOVERED_SCHEMA_VERSION = 7
+/**
+ * The vault row marker every recovered vault is normalized to.
+ *
+ * This is not an independent logical schema number: it is the Room database
+ * version the recovered vault will live in. A migration can only ever write
+ * a row marker less than or equal to the database version it migrates to, so
+ * binding this gate to [VAULT_DATABASE_VERSION] rather than a value tracked
+ * by hand accepts every marker a real, possibly-migrated device can carry
+ * and prevents this defect class permanently.
+ */
+internal const val RECOVERED_SCHEMA_VERSION = VAULT_DATABASE_VERSION
 internal const val NOT_PREPARED_PACKAGE_STATE = "NOT_PREPARED"
 private const val SUPPORTED_READER_VERSION = 1
 private const val PAYLOAD_FORMAT_VERSION = 1
