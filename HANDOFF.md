@@ -2,23 +2,24 @@
 
 - Last updated: 5 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–9 of the 13-task plan
+- Session status: **Stage 5 is in progress: Tasks 1–10 of the 13-task plan
   (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
   collection command; retired-set GC closure; silent attachment intake
   auto-resume; frozen `.otvault` v1 archive format with independent Node
   fixtures; encrypted vault export with SAF product surface; encrypted
   vault import with staged activation and rollback; disclosed
-  formula-safe CSV export; Glance Today widget) are complete and
-  independently reviewed at `99db7dc`. Execution is paused before
-  Task 10 at the user's request; resume via the Tasks 7–9 checkpoint
-  below. The Task 6 snapshot-only export ruling was upheld by the user
+  formula-safe CSV export; Glance Today widget; app lock with title
+  privacy and unified Quick Add) are complete and independently
+  reviewed at `f76f2a6`, with the user-ruled `glance-material3` drop on
+  top at `4652a2b`. Execution is paused before Task 11 at the user's
+  request; resume via the Task 10 checkpoint below. The Task 6
+  snapshot-only export ruling was upheld by the user
   before Task 7 and is discharged: import passes an empty segments
-  list. One newly verified pre-existing defect needs its own task
+  list. One verified pre-existing defect needs its own task
   before Task 13: `RECOVERED_SCHEMA_VERSION = 7` rejects the schema
   marker 8 that `MIGRATION_7_8` writes, breaking Drive recovery and
   `.otvault` import on migrated devices — see the Tasks 7–9 checkpoint.
-  One user decision is open: keep or drop the unreferenced
-  `glance-material3` catalogue entry. Both recorded Stage 4 limits are
+  Both recorded Stage 4 limits are
   discharged:
   the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
   `AttachmentBlobCoordinator.resume()` product caller by Task 4's silent
@@ -37,9 +38,10 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `99db7dc` (`fix: close
-  today widget republish/stop race with a single write gate`), the tip
-  of the Stage 5 Task 7–9 range `5feb1e8..99db7dc` on top of the
+- Current product source implementation point: `4652a2b` (`chore: drop
+  unused glance-material3 dependency`), on top of the Stage 5 Task 10
+  range `a6c52eb..f76f2a6` and its checkpoint commit `36b98b5`, the
+  Task 7–9 range `5feb1e8..99db7dc` on top of the
   checkpoint commit `afcfe07`, the Task 3–6 range `1cb768e..b4b1ec4`,
   the Task 1–2 range `33ea364..eb343cb`, and its checkpoint commit
   `f2835b7`. The prior Stage 4 implementation
@@ -269,10 +271,66 @@ staging-promotion edges, Task 8 partial-batch messaging and the
 untested ViewModel batch machine, Task 9 zone capture at construction
 and midnight rollover).
 
+This checkpoint's resume instruction is superseded: Task 10 was
+executed on 5 August and is recorded in the checkpoint below.
+
+## Stage 5 Task 10 checkpoint — 5 August 2026
+
+Execution resumed from `36b98b5` with the same plan, ledger, and
+independent-review-per-task discipline. The task boundary closed with
+zero open Critical or Important findings after one fix round. No device
+suite ran; new instrumented tests are compile-verified and execute at
+the Task 13 connected gate.
+
+- Task 10 (`a6c52eb`, fix `f76f2a6`) added the app lock, title privacy,
+  and unified Quick Add: `AppLockSettings` over SharedPreferences,
+  a clock-injected pure `AppLockController` (cold start locked when
+  enabled; foreground after a background span >= the chosen delay
+  locks; IMMEDIATE/1/5/15-minute options), and an `AppLockScreen`
+  overlay that replaces all content with no workspace data composed
+  behind it. Unlock is one platform `BiometricPrompt` with
+  device-credential fallback and changes no key material.
+  `titlePrivacy || locked` drives `titlesPermitted = false` into the
+  Task 9 widget publisher strictly through the existing
+  `StopGatedWriter` gate with an immediate republish on engage, plus
+  the generic notification content path and generic external Quick Add
+  labels. `setRecentsScreenshotEnabled(false)` applies whenever
+  `lockEnabled || titlePrivacy`; `FLAG_SECURE` only under
+  `screenshotBlocking`. A static launcher shortcut and the widget
+  extra both route through `MainActivity.handleIntent` to the one
+  shared `QuickAddSheet` after unlock; exported intents carry only the
+  boolean extra. The fix round hoisted the `locked` check above the
+  `activeRecovery` branch (a user-opened recovery shell with
+  destructive restore/takeover actions can no longer render unlocked
+  after a background span; `NoVault`/`Unreadable`/`Recovering` stay
+  ungated), added the plan-named `AppLockOverlayInstrumentedTest`
+  (compile-verified, runs at Task 13), and closed the silent unlock
+  no-op at both ends: the overlay shows an unavailable message when
+  the prompt cannot be shown, and the More toggle is gated on
+  `canAuthenticate` success while an already-enabled lock can still be
+  turned off.
+- The open `glance-material3` decision was resolved by user ruling:
+  dropped. `4652a2b` removes the catalogue entry and the unused `:app`
+  dependency; Material role values continue to come from a plain
+  `material3.Typography()` baseline, and the rationale comment in
+  `TodayWidget.kt` stays.
+
+Carry-forwards unchanged from the Tasks 7–9 checkpoint: the dedicated
+`RECOVERED_SCHEMA_VERSION` fix task must land before the Task 13
+gates, and the Task 13 device checklist retains the SAF
+`application/octet-stream` picker visibility check for `.otvault` and
+the Glance parameter-to-extra tap test reaching `MainActivity` as
+`"open_quick_add"`; it now also covers running
+`AppLockOverlayInstrumentedTest` and the runtime widget/notification
+concealment checks. Deferred minors are in the ledger (notably: no
+`AppLockSettings` persistence-key tests, the exactly-at-delay boundary
+case, and the untested `setTitlesPermitted`/concealed-notification
+branches until the device suite).
+
 Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above, dispatching Task 10 (app lock, title privacy,
-unified Quick Add) from base `99db7dc`. Tasks 10–13 (app lock, input,
-calendar, qualification) have not started.
+plan and ledger above, dispatching Task 11 (keyboard, mouse, and
+accessible actions) from base `4652a2b`. Tasks 11–13 (input, calendar,
+qualification) have not started.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
