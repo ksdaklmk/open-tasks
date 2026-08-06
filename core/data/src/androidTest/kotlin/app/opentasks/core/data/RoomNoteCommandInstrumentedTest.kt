@@ -66,7 +66,7 @@ class RoomNoteCommandInstrumentedTest {
 
     @Test
     fun addUpdateDeleteRestoreRoundTripPersistsThroughRoom() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
 
             val added = repository!!.execute(
@@ -102,7 +102,7 @@ class RoomNoteCommandInstrumentedTest {
 
     @Test
     fun addNoteRequiresExactlyOneOwner() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
             val project = repository!!.currentWorkspace().projects.first()
 
@@ -120,7 +120,7 @@ class RoomNoteCommandInstrumentedTest {
 
     @Test
     fun addNoteJournalsANoteFamilyEntryAtTheCommandGeneration() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
             val before = database!!.backupStateDao().require(VAULT_ID)
 
@@ -148,7 +148,7 @@ class RoomNoteCommandInstrumentedTest {
      */
     @Test
     fun executingTheUpdateUndoRevertsTheStoredNoteAndJournalsTheRestoredBody() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
             repository!!.execute(
                 DomainCommand.AddNote(taskId = task.id, projectId = null, body = "v1"),
@@ -196,7 +196,7 @@ class RoomNoteCommandInstrumentedTest {
 
     @Test
     fun permanentlyDeleteTaskRemovesNotesAndJournalsTheNoteDelete() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
             repository!!.execute(
                 DomainCommand.AddNote(

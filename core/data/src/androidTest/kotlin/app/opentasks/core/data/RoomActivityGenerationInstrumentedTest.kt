@@ -52,7 +52,7 @@ class RoomActivityGenerationInstrumentedTest {
 
     @Test
     fun completionWritesActivityAndJournalAtTheCommandGeneration() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val task = repository!!.currentWorkspace().tasks.first()
             val before = database!!.backupStateDao().require(VAULT_ID)
 
