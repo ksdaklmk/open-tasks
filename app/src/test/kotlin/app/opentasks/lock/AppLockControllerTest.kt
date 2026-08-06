@@ -50,6 +50,24 @@ class AppLockControllerTest {
     }
 
     @Test
+    fun backgroundExactlyAtDelayLocks() {
+        var clock = baseInstant
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, now = { clock })
+        controller.onUnlocked()
+
+        controller.onAppBackgrounded()
+        clock = clock.plus(Duration.ofMinutes(5))
+        val mustLock = controller.onAppForegrounded()
+
+        assertTrue(mustLock)
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
     fun backgroundAtOrBeyondDelayLocks() {
         var clock = baseInstant
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
