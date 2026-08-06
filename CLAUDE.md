@@ -13,7 +13,7 @@ Read `@docs/architecture.md` before changing data or command flow, `@DESIGN.md` 
 ./gradlew :core:domain:testDebugUnitTest --tests "*RecurrenceEngineTest.monthEndDoesNotDrift"
 ```
 
-Instrumented tests need a device. CI runs them on API 36 and 37; use the same
+Instrumented tests need a device. CI runs them on API 36 and 37.0; use the same
 command locally for device-specific diagnosis:
 
 ```bash

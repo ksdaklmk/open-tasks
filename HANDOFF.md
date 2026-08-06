@@ -35,6 +35,12 @@
   checkpoint (`RECOVERED_SCHEMA_VERSION = 7` rejecting the schema
   marker 8 that `MIGRATION_7_8` writes, breaking Drive recovery and
   `.otvault` import on migrated devices) is discharged by that fix.
+  Post-closure: the recommended hardening task is discharged at
+  `81cf642`; remote CI provisioning is restored at `52f63aa` after the
+  discovery that the Android workflow had zero green runs in its entire
+  history; and the follow-up test-fix task is PAUSED mid-flight on
+  branch `test-fix` with a bench run in progress — resume via the CI
+  restoration checkpoint below.
   Both recorded Stage 4 limits are
   discharged:
   the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
@@ -679,6 +685,68 @@ clean, instrumented compile green, no schema drift, frozen fixtures
 byte-identical. Residual one-word comment miscount and small test
 housekeeping items stay in the ignored SDD ledger.
 
+## CI restoration checkpoint — 6 August 2026 (test-fix PAUSED)
+
+Investigation for a routine post-stage CI check found the GitHub
+Actions `Android` workflow had ZERO green runs in its entire visible
+history (red on every branch since at least 26 July; the 30 July
+matrix rework was never proven). All local gates were always green;
+the breakage was CI provisioning and CI resources.
+
+- The CI-fix task landed `97e8016` + `b56dada` + `52f63aa` on `main`
+  (pushed): minor-versioned SDK provisioning
+  (`--channel=3 platforms;android-37.0`; the flat `platforms;android-37`
+  id no longer exists), emulator-runner bumped to the verified v2.38.0
+  SHA with quoted `api-level: "37.0"`, androidTest APKs pre-built
+  before emulator boot (the API 36 emulator previously crashed under
+  compile/execute overlap), runner disk-space freeing, fixed AVD disk
+  size, and Gradle-daemon stop before boot.
+  `scripts/verify-actions-workflow.sh` was updated in lock-step. Three
+  bench iterations plus one confirmation run; the obsolete Dependabot
+  emulator-runner PR is closed.
+- API 37.0 verdict: the canary system image itself is defective — an
+  FBE/credential-storage unlock failure cascades into SQLCipher
+  `SQLiteCantOpenDatabaseException` and package-manager death
+  (`INSTRUMENTATION_ABORTED`), confirmed non-resource. Documented as an
+  image-quality blocker, not worked around; the matrix entry stays. A
+  later canary image may self-heal (the runner fetches current canary).
+- The healthy pipeline exposed real test failures, catalogued from
+  baseline run `31088309158` in `ci-fix-report.md` (ignored SDD
+  workspace): F1 verify JVM race
+  (`BackupViewModelTest.prepareCanRunAgainAfterPreviousPublisherCallCompletes`,
+  deterministic on CI); F2
+  `RoomActivityGenerationInstrumentedTest.completionWritesActivityAndJournalAtTheCommandGeneration`
+  (root-caused as the F3 timeout class, NOT a product defect); F3 six
+  load-sensitive 5,000 ms timeouts; F4 two deterministic `:app` UI
+  failures (Quick Add IME geometry; Ctrl+K cross-window focus); F5 the
+  four feature modules have never executed on CI; F6 the API 37.0
+  image blocker (observe only).
+- The test-fix task is PAUSED with all F1–F5 fixes implemented and
+  pushed on branch `test-fix` (head `91095e2`; per-finding commits
+  `30ad043` F1 latch gate, `3fb9ce2` F3/F2 shared
+  `DEVICE_TEST_TIMEOUT_MILLIS = 30_000` across `:core:data` device
+  suites, `3e5b751` + `3bfa0c6` F4 synthetic IME insets and bounded
+  cross-window focus poll, `91095e2` F5 `--continue` on the
+  instrumented job). Draft PR #13 is the CI bench; bench iteration 1
+  (run `31091532438`, cap 8) was IN FLIGHT and unwatched at pause.
+  Local gates green at the pause point; the branch is in sync with
+  origin; `main` is untouched at `52f63aa`.
+
+Standing user rulings: land and push the test fixes to `main` only
+once the matrix is fully green (verify, Instrumented API 36 all six
+modules, release; API 37.0 as the image allows — if it stays
+image-blocked, that residual needs an explicit user decision). The
+lifecycle and upload-artifact Dependabot PRs remain open and untouched.
+
+Resume by reading bench run `31091532438`'s outcome first
+(`gh run view 31091532438 --json status,conclusion,jobs`) — never push
+blindly — then continue the loop from `test-fix-brief.md` and the
+RESUME STATE section of `test-fix-report.md` in the ignored SDD
+workspace, either by resuming the paused implementer pattern (relay
+run outcomes, one hypothesis per iteration) or a fresh agent given
+those two files. F5's first-ever feature-module CI results are the
+largest remaining unknown.
+
 ## Stage 4 closure checkpoint — 3 August 2026
 
 Stage 4 closes at the commit containing the contract documents and
@@ -742,7 +810,7 @@ The private GitHub authority is
 [ksdaklmk/open-tasks](https://github.com/ksdaklmk/open-tasks); local `main`
 tracks `origin/main`. Secret scanning, push protection, Dependabot alerts and
 security updates are enabled. The Android workflow now uses explicit compact
-API 36/stable/Pixel 6 and expanded API 37/canary/Pixel Tablet instrumented
+API 36/stable/Pixel 6 and expanded API 37.0/canary/Pixel Tablet instrumented
 matrix entries, passes the matching channel and profile to the emulator runner,
 and runs a separate release-assembly job after verification. Its local
 structural verifier prevents mutable Action references. The 30 July maintenance
