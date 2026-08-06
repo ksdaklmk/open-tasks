@@ -296,10 +296,14 @@ class BackupViewModelTest {
     @Test
     fun prepareCanRunAgainAfterPreviousPublisherCallCompletes() {
         val calls = AtomicInteger()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
         val unavailable =
             AndroidBackupStatus.Unavailable(BackupUnavailableReason.ENCODING_OR_CRYPTO)
         val viewModel = viewModel(
             preparePackage = {
+                entered.countDown()
+                release.await(5, TimeUnit.SECONDS)
                 if (calls.incrementAndGet() == 1) {
                     unavailable
                 } else {
@@ -309,7 +313,9 @@ class BackupViewModelTest {
         )
 
         viewModel.prepare("correct horse")
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
         assertEquals(AndroidBackupStatus.Preparing, viewModel.presentation.value.status)
+        release.countDown()
         assertTrue(waitUntil { viewModel.presentation.value.status == unavailable })
 
         viewModel.prepare("another valid passphrase")
