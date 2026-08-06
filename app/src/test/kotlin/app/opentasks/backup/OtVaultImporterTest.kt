@@ -393,6 +393,21 @@ class OtVaultImporterTest {
     }
 
     @Test
+    fun aDuplicateAttachmentManifestIsRejected() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val preview = importer(roots).stage(
+                    ByteArrayInputStream(writeArchiveWithDuplicateManifest()),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON), preview)
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
     fun aLiveAttachmentNamingABlobSetTheArchiveNeverProvidesAManifestForIsRejected() = runBlocking {
         withTimeout(5_000) {
             withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
@@ -582,17 +597,50 @@ class OtVaultImporterTest {
         )
     }
 
-    // Duplicate manifests (brief item 6b) has no fixture here: a manifest's
-    // object ID is `attachmentManifestObjectId(blobSetId)` with no writer
-    // override, and the read side re-derives and checks that same ID before
-    // delivering a manifest event, so a second manifest naming a blob set
-    // one manifest already named is never a distinct archive object — the
-    // inventory itself refuses the resulting duplicate object ID
-    // (`OtVaultCodec.validateInventoryEntries`) before such an archive could
-    // even be assembled. No byte stream this frozen codec's public write API
-    // can produce, nor one its own read-side inventory check would let
-    // through, reaches `OtVaultImporter`'s "The archive repeats an
-    // attachment manifest" guard: it is unreachable defense-in-depth.
+    /**
+     * A blob set whose manifest is written twice: `writeAttachmentManifest`
+     * has no duplicate detection of its own, so a second physical manifest
+     * frame naming the same blob set writes fine. `OtVaultCodec.readAll`
+     * delivers each `AttachmentManifest` event as its frame is read, and
+     * verifies the inventory only once the last frame arrives — so the
+     * importer's own guard fires deterministically on the second manifest
+     * event, long before any inventory-level check could matter. The
+     * inventory entries are deduplicated here (`writeInventory` never does
+     * that itself) purely so the archive's own inventory stays internally
+     * consistent and it is the importer's guard under test here, not a
+     * codec-level inventory mismatch.
+     */
+    private fun writeArchiveWithDuplicateManifest(): ByteArray {
+        val attachment = ATTACHMENTS.first()
+        val key = crypto.createKey()
+        return try {
+            val header = header(records(listOf(attachment)).size, attachmentCount = 1, key)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val entries = mutableListOf<OtVaultInventoryEntryV1>()
+            entries += codec.writeSnapshot(
+                destination,
+                key,
+                header,
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = GENERATION,
+                    records = records(listOf(attachment)),
+                ),
+            )
+            entries += codec.writeAttachmentManifest(destination, key, header, attachment.manifest())
+            attachment.chunks.forEachIndexed { index, chunk ->
+                entries += codec.writeAttachmentChunk(
+                    destination, key, header, attachment.blobSetId, index, chunk.copyOf(),
+                )
+            }
+            entries += codec.writeAttachmentManifest(destination, key, header, attachment.manifest())
+            codec.writeInventory(destination, key, header, entries.distinctBy { it.objectId })
+            destination.toByteArray()
+        } finally {
+            key.close()
+        }
+    }
 
     /** Chunk 1 written to the archive before chunk 0, both otherwise valid. */
     private fun writeArchiveWithChunksOutOfOrder(): ByteArray {
