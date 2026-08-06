@@ -101,6 +101,31 @@ from backup data or a restored portable package. `BackupCoordinator`,
 `PortableBackupPublisher`, and `AttachmentBlobCoordinator` cannot mutate
 structured product records.
 
+The `.otvault` v1 archive format (Stage 5) is a separate, frozen
+whole-vault export/import path with no online lineage of its own.
+`OtVaultExporter` captures one point-in-time `WorkspaceSnapshot`
+baseline, wraps the archive's content key in a real recovery envelope
+(export passphrase = recovery passphrase), and streams the frozen Stage
+1 authenticated frame family at archive-scoped object identifiers to a
+person-chosen document; exports are snapshot-only, with no
+operation-segment frames. `OtVaultImporter` stages an archive into an
+isolated vault slot, verifies it in full before any live state changes,
+and activates through the same proven recovery slot-replacement path as
+`RecoveryCoordinator`, retaining the previous slot as rollback until
+first unlock of the newly activated vault. The format version is frozen:
+an independent fixture generator must regenerate it byte-identically,
+and any future change requires a new version rather than an in-place
+edit.
+
+`WorkspaceCsvWriter` is a pure, Android-free formatter over the same
+`WorkspaceSnapshot` for the four fixed CSV export tables (tasks,
+projects, time entries, notes). It applies RFC 4180 quoting and
+neutralises any cell beginning `=`, `+`, `-`, or `@` against formula
+injection in the opening spreadsheet application. Unlike every other
+export path above, CSV output is disclosed plaintext by design and
+carries no encryption; the product surface requires an explicit
+disclosure before any write.
+
 `RoomVaultRepository` owns its observation scope. Closing the repository
 cancels and joins that scope before its database owner closes SQLCipher. This
 ordering is part of the lifecycle contract: no Room flow collector may outlive
@@ -249,6 +274,16 @@ non-completed tasks without either date. Reminder indicators are joined by
 task ID from the same snapshot. Selecting an item deep-links to the existing
 task editor, so Schedule introduces no alternate mutation path.
 
+The Home-screen Today widget is a second read-only projection of
+`WorkspaceSnapshot`, computed by the pure `computeTodayProjection`
+function (today/overdue counts and up to three focus task titles). A
+publisher is bound to the active vault-slot lifecycle: it starts and
+republishes only while a vault is active, and stops when that slot is
+replaced or the runtime tears down. Every title write passes through the
+mutex-gated `StopGatedWriter`, which exposes one `titlesPermitted` seam
+consulted at write time, so no write can land after a stop-time title
+clear.
+
 Time entries are first-class records in `WorkspaceSnapshot`. Starting a timer
 inserts an open entry; stopping it closes that same entry, and elapsed time is
 derived from its original instant rather than UI state. Manual add, edit,
@@ -311,6 +346,14 @@ payloads. Android owns this transient bundle and protects device at-rest state
 with the platform credential boundary, but it is not a second
 vault-encryption format.
 
+App lock is a clock-injected, pure `AppLockController`: cold start is
+locked whenever the lock is enabled, and an unlocked session locks again
+only after a background span reaches the chosen delay. `MainActivity`
+checks the locked state ahead of every other top-level state, including
+an open recovery shell, so the lock overlay always takes precedence
+inside the Active state and replaces all content with no workspace data
+composed behind it.
+
 Project creation assigns the ID before execution so successful creation can
 open the new workbench without a name-based lookup. Its project row, five
 default workflow rows and six independent backup-journal entries are one
@@ -365,6 +408,9 @@ a product or release dependency.
   remain excluded.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
   attachment names, or encryption metadata.
+- Biometric app-lock unlock changes no key material: it gates UI content
+  composition only and never re-wraps, re-derives, or otherwise touches
+  the vault-content key or the SQLCipher database key.
 
 The asset inventory, trust boundaries, adversaries, residual risks and release
 gates are maintained in [Threat Model](threat-model.md).
