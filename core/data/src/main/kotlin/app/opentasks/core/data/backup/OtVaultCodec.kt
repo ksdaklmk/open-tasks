@@ -340,6 +340,11 @@ class OtVaultCodec(
                                 sha256 = sha256(frame),
                                 byteCount = frame.size.toLong(),
                             )
+                            if (observed.size > CloudBounds.MAX_MANIFEST_INVENTORY_ENTRIES) {
+                                throw OtVaultFormatException(
+                                    "Vault archive inventory accumulation exceeds its bound",
+                                )
+                            }
                             when (val event = decodeObject(identity, plaintext)) {
                                 is OtVaultReadEvent.Snapshot -> {
                                     snapshotRecords += event.payload.records.size

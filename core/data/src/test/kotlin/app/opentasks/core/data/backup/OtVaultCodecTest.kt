@@ -14,6 +14,7 @@ import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.Sha256Digest
 import app.opentasks.core.model.VaultId
+import app.opentasks.core.sync.CloudBounds
 import app.opentasks.core.sync.CloudHeaderIdentity
 import app.opentasks.core.sync.CloudObjectFamily
 import java.io.ByteArrayInputStream
@@ -291,6 +292,43 @@ class OtVaultCodecTest {
             assertThrows(OtVaultFormatException::class.java) {
                 codec.readAll(input, key, read) { }
             }
+        } finally {
+            key.close()
+        }
+    }
+
+    @Test
+    fun observedInventoryAccumulationFailsClosedPastItsBound() {
+        val key = crypto.createKey()
+        try {
+            val header = header()
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val overLimitCount = CloudBounds.MAX_MANIFEST_INVENTORY_ENTRIES + 1
+            repeat(overLimitCount) { index ->
+                codec.writeAttachmentChunk(
+                    destination,
+                    key,
+                    header,
+                    BlobSetId("blob-set-$index"),
+                    0,
+                    "chunk".toByteArray(Charsets.UTF_8),
+                )
+            }
+            // No inventory frame is written: a hostile archive would keep
+            // streaming non-inventory frames past the bound rather than ever
+            // closing with a valid one.
+
+            val input = ByteArrayInputStream(destination.toByteArray())
+            val read = codec.readHeader(input)
+            val failure = assertThrows(OtVaultFormatException::class.java) {
+                codec.readAll(input, key, read) { }
+            }
+
+            assertEquals(
+                "Vault archive inventory accumulation exceeds its bound",
+                failure.message,
+            )
         } finally {
             key.close()
         }
