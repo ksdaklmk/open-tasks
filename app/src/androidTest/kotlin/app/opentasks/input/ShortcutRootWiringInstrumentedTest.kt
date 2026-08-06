@@ -1,5 +1,6 @@
 package app.opentasks.input
 
+import android.view.View
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasTestTag
@@ -53,7 +55,9 @@ class ShortcutRootWiringInstrumentedTest {
 
     @Test
     fun ctrlKOpensSearchAndFocusesTheQueryField() {
+        lateinit var hostView: View
         composeRule.setContent {
+            hostView = LocalView.current
             var showSearch by remember { mutableStateOf(false) }
             var editableFocused by remember { mutableStateOf(false) }
             OpenTasksTheme {
@@ -91,6 +95,8 @@ class ShortcutRootWiringInstrumentedTest {
             }
         }
 
+        // Synthetic key input bypasses Android's window-focus precondition.
+        composeRule.waitUntil(timeoutMillis = 10_000) { hostView.hasWindowFocus() }
         composeRule.onNodeWithTag("shortcut-root").requestFocus()
         composeRule.onNodeWithTag("shortcut-root").performKeyInput {
             withKeyDown(Key.CtrlLeft) { pressKey(Key.K) }
