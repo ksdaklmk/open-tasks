@@ -13,6 +13,7 @@ import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRuntimeFactory
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.data.VaultSlot
+import app.opentasks.core.model.VaultId
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -77,7 +78,7 @@ class OtVaultImportInstrumentedTest {
         assertTrue(state is VaultRuntimeState.Active)
         val runtime = (state as VaultRuntimeState.Active).runtime
         assertNotEquals(priorSlot, runtime.slot)
-        assertEquals(imported.vaultId, runtime.vaultId)
+        assertEquals(VaultId(imported.vaultId), runtime.vaultId)
         assertFalse(runtimeFactory.hasVault(priorSlot))
         assertTrue(runtimeFactory.listStagedSlots().contains(runtime.slot))
 

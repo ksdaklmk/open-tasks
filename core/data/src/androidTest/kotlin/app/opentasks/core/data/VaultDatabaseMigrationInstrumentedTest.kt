@@ -401,7 +401,7 @@ class VaultDatabaseMigrationInstrumentedTest {
             ) VALUES (
                 'task-a', 'workspace-a', NULL, NULL, 'workflow-a', 'TODO',
                 'Task A', ?, 'MEDIUM', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10, 1, 'device-a'
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10, 1, 'device-a'
             )
             """.trimIndent(),
             arrayOf<Any?>(byteArrayOf(0x01, 0x02, 0x03)),
