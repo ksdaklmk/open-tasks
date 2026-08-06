@@ -157,6 +157,20 @@ class ShortcutDispatcherTest {
     }
 
     @Test
+    fun ctrlShiftNCreatesProjectInProjectsRouteEvenWhenEditableFocused() {
+        assertEquals(
+            ShortcutAction.NEW_PROJECT,
+            shortcutActionFor(
+                key = Key.N,
+                isCtrlPressed = true,
+                isShiftPressed = true,
+                inProjectsRoute = true,
+                editableFocused = true,
+            ),
+        )
+    }
+
+    @Test
     fun escapeDismissesTopWhenNotEditableFocused() {
         assertEquals(
             ShortcutAction.DISMISS_TOP,
@@ -182,6 +196,27 @@ class ShortcutDispatcherTest {
                 editableFocused = true,
             ),
         )
+    }
+
+    @Test
+    fun heldEscapeRepeatsDismissTopOnEveryKeyDown() {
+        // OpenTasksApp's onKeyEvent handler gates only on KeyEventType.KeyDown,
+        // not on the native event's repeat count, and shortcutActionFor itself
+        // is stateless -- so a held Escape's repeated KeyDown events each
+        // resolve to DISMISS_TOP again with no debounce. This pins that
+        // current cascade rather than proposing a change to it.
+        repeat(5) {
+            assertEquals(
+                ShortcutAction.DISMISS_TOP,
+                shortcutActionFor(
+                    key = Key.Escape,
+                    isCtrlPressed = false,
+                    isShiftPressed = false,
+                    inProjectsRoute = false,
+                    editableFocused = false,
+                ),
+            )
+        }
     }
 
     @Test
