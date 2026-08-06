@@ -335,6 +335,83 @@ class OtVaultCodecTest {
     }
 
     @Test
+    fun inventoryOverCapacityIsRejectedAtWriteTime() {
+        val key = crypto.createKey()
+        try {
+            val header = header()
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val overLimitEntries = (0..CloudBounds.MAX_MANIFEST_INVENTORY_ENTRIES).map { index ->
+                OtVaultInventoryEntryV1(
+                    objectId = "otvault:attachment-chunk:blob-set-$index:0",
+                    family = CloudObjectFamily.ATTACHMENT_CHUNK.name,
+                    sha256 = ZERO_SHA256,
+                    byteCount = 1,
+                )
+            }
+
+            val failure = assertThrows(OtVaultFormatException::class.java) {
+                codec.writeInventory(destination, key, header, overLimitEntries)
+            }
+
+            assertEquals(
+                "Vault archive inventory size is outside its bound",
+                failure.message,
+            )
+        } finally {
+            key.close()
+        }
+    }
+
+    @Test
+    fun zeroLengthChunkIsRejectedAtWriteTime() {
+        val key = crypto.createKey()
+        try {
+            val header = header()
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+
+            val failure = assertThrows(OtVaultFormatException::class.java) {
+                codec.writeAttachmentChunk(destination, key, header, BLOB_SET, 0, ByteArray(0))
+            }
+
+            assertEquals("Vault archive chunk is outside its bound", failure.message)
+        } finally {
+            key.close()
+        }
+    }
+
+    @Test
+    fun objectsAfterTheInventoryFrameAreRejectedAsTrailingBytes() {
+        val key = crypto.createKey()
+        try {
+            val header = header().copy(recordCount = 0, attachmentCount = 0)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val segmentEntry = codec.writeSegment(destination, key, header, segment())
+            codec.writeInventory(destination, key, header, listOf(segmentEntry))
+            codec.writeAttachmentChunk(
+                destination,
+                key,
+                header,
+                BLOB_SET,
+                0,
+                chunkPlaintexts().first(),
+            )
+
+            val input = ByteArrayInputStream(destination.toByteArray())
+            val read = codec.readHeader(input)
+            val failure = assertThrows(OtVaultFormatException::class.java) {
+                codec.readAll(input, key, read) { }
+            }
+
+            assertEquals("Vault archive contains trailing bytes", failure.message)
+        } finally {
+            key.close()
+        }
+    }
+
+    @Test
     fun headerEnvelopeUnlocksTheArchiveUnderTheExportPassphrase() {
         val key = crypto.createKey()
         val passphrase = "export passphrase".toCharArray()
