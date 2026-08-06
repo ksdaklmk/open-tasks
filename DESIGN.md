@@ -171,6 +171,19 @@ for floating controls and temporary surfaces.
   never rely on colour alone.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
+- Today widget: a Home-screen Glance widget shows today and overdue counts
+  plus up to three focus task titles. Titles conceal to a generic
+  count-only state whenever title privacy or app lock is engaged; widget
+  state never appears in a backup.
+- App-lock overlay: an unlock screen replaces all content, with no
+  workspace data composed behind it, using one platform biometric prompt
+  with device-credential fallback. It takes precedence over the recovery
+  shell: a locked device always shows the overlay first, even mid-recovery.
+- Shortcut help dialog: a plain dialog opened by `?` lists every keyboard
+  and mouse shortcut with its action, read from `stringResource`.
+- Calendar preview dialog: shows the exact title, start/end times in the
+  moment's stored zone, and description that Insert will hand to the
+  device calendar app, with explicit Insert/Cancel actions.
 
 All interactive components cover default, pressed, focused, selected, disabled,
 loading, error, and empty states where relevant.
@@ -198,6 +211,15 @@ are masked, non-saveable, and cleared after submission. Task 13 is complete:
 transient provider failures receive truthful temporary-unavailability retry
 copy rather than Sign in guidance, and genuine `MainActivity` production-route
 recreation coverage proves private passphrase input is not restored.
+
+Whole-vault export and import add two more independent rows to More.
+Export asks for a passphrase with confirmation, then hands the person a
+Storage Access Framework picker; the archive streams straight to the
+chosen document, and any result other than success deletes the partial
+file. Import asks for the archive's passphrase, stages it, and shows a
+confirmable preview of exact record and attachment counts before
+replacing the device's vault; declining the preview discards the staged
+archive.
 
 The programme retains four independent concerns:
 

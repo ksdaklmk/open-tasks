@@ -1,6 +1,6 @@
 # Threat Model
 
-Last reviewed: 3 August 2026
+Last reviewed: 6 August 2026
 
 This document covers the implemented local-authority foundation and the
 approved backup, recovery-takeover, and cloud-attachment programme. It is a
@@ -62,6 +62,9 @@ separate create-only blob namespace; remote merge is not connected.
 | Writer epoch and opaque device identity | Sensitive metadata | Encrypted local state and authenticated control manifest; never Android backup |
 | Provider object identifiers and account data | Sensitive metadata | Private encrypted operation/configuration state or memory-only authorized session; never logs or Android backup |
 | Build, signing, and OAuth credentials | Release secrets | Not present in this repository |
+| Today-widget state (task titles) | Private content, plaintext at rest, concealment-gated | Glance state files under `filesDir`; cleared through `StopGatedWriter` on a qualifying lock or title-privacy transition; excluded from Android Auto Backup and device transfer |
+| Whole-vault archive (`.otvault`) and its export passphrase | Private encrypted recovery input; a recovery-equivalent secret | The archive is a standard file the person chooses a destination for; the export passphrase is the same recovery passphrase and is never persisted |
+| Exported plaintext CSV file | Private content, disclosed plaintext once written | A standard file the person chooses a destination for, after a mandatory disclosure dialog; not encrypted and not tracked further by the application |
 
 ## Trust boundaries and data flows
 
@@ -149,6 +152,9 @@ fails safely where practical and must not weaken platform protections.
 | T23 | Saved UI state duplicates secrets outside SQLCipher | Saveable state is limited to bounded UI text, routes, filters, and record IDs; keys, passphrases, attachment bytes, and vault payloads are prohibited | Saved-instance state is not encrypted with the vault key; new sensitive input requires review |
 | T24 | Malformed workflow, milestone, dependency, template, or time-entry data corrupts local state | Repository bounds, ownership checks, acyclic relation checks, atomic Room writes, exact Undo, and strict template/time-entry limits | Backup/import parsers must apply the same bounds before staging or activation |
 | T25 | Portable restore activates beside an extant cloud writer | Restored packages are quarantined as inert input and Stage 2 exposes no activation action | If the cloud lineage is absent, Stage 3 portable recovery must activate under a new vault identity after warning; retaining identity requires successful takeover |
+| T26 | A widget host, launcher preview, or app-drawer surface exposes a concealed task title | `titlesPermitted = !(titlePrivacy || locked)` gates every Glance title write through the mutex-gated `StopGatedWriter`, so no title write can land after a stop-time clear; title privacy is a dedicated always-on control independent of the lock feature; widget state sits outside the Android Auto Backup allow-list | Task titles remain plaintext at rest in the Glance state file until concealment engages; `locked` flips only on a qualifying foreground transition (cold start locked when the lock is enabled, or a background span at or beyond the chosen delay), not at the instant the lock toggle is turned on |
+| T27 | The `.otvault` archive is stolen, intercepted, or its custody is compromised | The export passphrase is the same recovery passphrase; the archive envelope is a real recovery envelope (Argon2id 64 MiB, three iterations, parallelism one, random 16-byte salt), identical to the live vault's recovery envelope | Anyone who learns the export passphrase and obtains the archive gains the same access as a full recovery takeover; archive custody is equivalent to recovery-credential custody and must be protected with the same care as the passphrase itself |
+| T28 | Plaintext CSV export discloses workspace content outside the vault, including formula injection against the opening spreadsheet application | A mandatory, undismissable-without-choice disclosure dialog explains the file is unencrypted before any write begins; cell values beginning `=`, `+`, `-`, or `@` are neutralised with a leading `'` | The exported file itself is permanently plaintext once created; this is a disclosed boundary-crossing control, not a confidentiality guarantee, and the exporting person is responsible for the file's custody thereafter |
 
 ## Cryptographic invariants
 
@@ -185,6 +191,57 @@ Dependabot checks Gradle and GitHub Actions weekly, but maintenance execution is
 paused. Dependency changes must not be merged solely because a newer version
 exists. Cryptography, database, and compiler upgrades require focused
 compatibility tests and a fresh threat-model review.
+
+## Stage 5 addendum
+
+Stage 5 adds three platform-facing surfaces that cross the vault's normal
+confidentiality boundary by design. Each is a disclosed, bounded exception
+rather than a defect; see T26–T28 above for the corresponding gate rows.
+
+**(a) Widget plaintext titles at rest.** The Glance Today widget's state
+files hold up to three focus task titles in plaintext at rest, because
+Glance state is a platform-managed file the widget host reads outside the
+app process. Concealment is governed by one precise predicate:
+
+```text
+titlesPermitted = !(titlePrivacy || locked)
+```
+
+`titlePrivacy` is a dedicated, always-on widget-concealment setting,
+independent of whether the lock feature is enabled at all — a person who
+never enables app lock can still conceal widget titles. `locked` flips to
+`true` only on a qualifying foreground transition: cold start is locked
+when the lock is enabled, and an ordinary foreground resume locks only
+once the prior background span is at or beyond the chosen delay
+(Immediate, one, five, or fifteen minutes). Enabling the lock toggle does
+**not** by itself flip `locked` or conceal titles; concealment takes
+effect at the next qualifying transition, not at the moment of the
+settings change. Every title write is gated through the mutex-gated
+`StopGatedWriter`, so a stop-time title clear can never be raced by a
+write already in flight, and widget state is excluded from Android Auto
+Backup and device transfer along with every other non-portable-package
+path.
+
+**(b) Export passphrase equals recovery passphrase.** The `.otvault`
+archive envelope is a real recovery envelope — Argon2id with 64 MiB
+memory, three iterations, parallelism one, and a random 16-byte salt —
+identical in kind to the live vault's own recovery envelope. There is no
+separate, weaker "export password": the passphrase a person sets to
+encrypt an archive is the same credential that later reconstructs the
+vault's content key on import. Archive custody is therefore equivalent to
+recovery-credential custody; anyone who obtains both the archive file and
+its passphrase has the same access as a successful recovery takeover.
+
+**(c) CSV export is disclosed plaintext.** CSV export is plaintext by
+design — it exists so workspace data can leave the app for other tools —
+and carries no encryption. A mandatory pre-export disclosure dialog states
+this before any document write begins, with no "do not ask again" option.
+Cell values that begin with `=`, `+`, `-`, or `@` are neutralised with a
+leading `'` to block formula injection against the spreadsheet application
+that later opens the file. This is a disclosed boundary-crossing control:
+it protects the opening application from a hostile cell value, not the
+exported content's confidentiality, which the disclosure already
+surrenders by design.
 
 ## Security acceptance gates
 

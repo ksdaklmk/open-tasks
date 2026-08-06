@@ -1,20 +1,27 @@
 # Open Tasks Handoff
 
-- Last updated: 5 August 2026
+- Last updated: 6 August 2026
 - Branch: `main`
-- Session status: **Stage 5 is in progress: Tasks 1–12 of the 13-task plan
-  (Room v9 retired blob-set index; RETIRED_BLOB_SET backup family and
-  collection command; retired-set GC closure; silent attachment intake
-  auto-resume; frozen `.otvault` v1 archive format with independent Node
-  fixtures; encrypted vault export with SAF product surface; encrypted
-  vault import with staged activation and rollback; disclosed
-  formula-safe CSV export; Glance Today widget; app lock with title
-  privacy and unified Quick Add; keyboard shortcuts with help dialog and
-  accessible-action audit; one-way calendar insertion) are complete and
-  independently reviewed at `bd8f650`, and the dedicated pre-Task-13
-  `RECOVERED_SCHEMA_VERSION` fix is complete and independently reviewed
-  at `d8c89e3`. Only Task 13 (qualification) remains; resume via the
-  schema-fix checkpoint below. The Task 6
+- Session status: **Stage 5 is complete and qualified: all 13 tasks of
+  the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
+  family and collection command; retired-set GC closure; silent
+  attachment intake auto-resume; frozen `.otvault` v1 archive format
+  with independent Node fixtures; encrypted vault export with SAF
+  product surface; encrypted vault import with staged activation and
+  rollback; disclosed formula-safe CSV export; Glance Today widget; app
+  lock with title privacy and unified Quick Add; keyboard shortcuts
+  with help dialog and accessible-action audit; one-way calendar
+  insertion; and Task 13 qualification and exit gates), plus the
+  dedicated pre-Task-13 `RECOVERED_SCHEMA_VERSION` fix, are complete and
+  independently reviewed. Stage 5 closes at the commit containing the
+  Step 4 contract documents, on top of the Part 1 passphrase-wipe fix
+  `6bfafa8`; see the closure checkpoint below. The authoritative
+  qualification record is
+  `docs/qualification/stage5-platform-features.md`. The final
+  whole-branch review returned Ready to merge with fixes, zero
+  Critical; both Important findings — the then-missing contract
+  documents and the export passphrase wipe — are discharged by this
+  closure. The Task 6
   snapshot-only export ruling was upheld by the user
   before Task 7 and is discharged: import passes an empty segments
   list. The pre-existing recovery defect recorded at the Tasks 7–9
@@ -40,7 +47,14 @@
   developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `d8c89e3` (`fix: accept
+- Current product source implementation point: `6bfafa8` (`fix: wipe
+  export passphrase when the output stream cannot be opened`), Task
+  13's Part 1 fix, on top of the Task 13 six-module connected-gate fix
+  range `f0a8550..d53a9f9` (`334fcae` seed-fixture and `VaultId`
+  assertion fixes, `31dd9fc` FoldContinuity teardown hardening,
+  `5df2917` app-lock recovery baseline, `d53a9f9` search-focus
+  `waitForIdle`) and its checkpoint commit `f0a8550`, on top of
+  `d8c89e3` (`fix: accept
   migrated schema markers in recovery import`), the dedicated
   schema-fix commit on top of the checkpoint commit `1767514`, the
   Stage 5 Task 12 range `c0ad0ac..bd8f650` and its
@@ -478,8 +492,68 @@ the runtime widget/notification concealment checks, and
 marker-8 import acceptance and migration-chain assertions execute green
 on device.
 
-Resume by re-entering superpowers:subagent-driven-development with the
-plan and ledger above, dispatching Task 13 from base `d8c89e3`.
+This checkpoint's resume instruction is superseded: Task 13 was executed
+on 6 August and is recorded in the checkpoint below.
+
+## Stage 5 closure checkpoint — 6 August 2026
+
+Stage 5 closes at the commit containing the Step 4 contract documents,
+on top of the Part 1 passphrase-wipe fix `6bfafa8`. Execution resumed
+from `f0a8550` with the same plan, ledger, and independent-review
+discipline; Task 13 (qualification and exit gates) is the plan's final
+task.
+
+- The six-module connected gate's first run (10m13s) failed 7 tests
+  across `:core:data` and `:app`. All seven were root-caused as
+  test-only defects and fixed with no product code touched: a v8 seed
+  fixture missing one `NULL` value, a raw-`String`-vs-`VaultId`
+  assertion mismatch, `FoldContinuityInstrumentedTest` teardown that
+  interleaved verification with destructive cleanup, a stale
+  `lock_enabled` device baseline ahead of a recovery-restoration test,
+  and a search-focus assertion racing its own `LaunchedEffect`. The
+  official rerun at `d53a9f9` (9m05s) passed **293 tests, 0 failures, 0
+  errors, 2 expected skips** — the credential-only qualification row and
+  the exact `Pixel_10_Pro_Fold` cross-display exception, exactly the
+  Stage 4 pair. This reconciles the plan's "only expected skip" wording,
+  which undercounts by one. The `FoldContinuity` suite remains
+  residue-independent only against residue this repository's own suites
+  can create; residue from device history outside those suites, on the
+  never-wiped protected AVD, can still trip the deliberate guard, and no
+  code-only fix exists without weakening the guard or wiping the AVD,
+  both forbidden.
+- Forced-fresh `testDebugUnitTest lintDebug :app:assembleDebug` passed
+  547/547 tasks with 1,045 JVM unit tests and zero failures; forced-fresh
+  `:app:assembleRelease` passed 441/441 tasks. Schema drift, all three
+  fixture generators, and `git diff --check` were clean. Release
+  inspection found no new exported component (the widget receiver is
+  `exported="false"`), no debug qualification activity, the expected
+  `USE_BIOMETRIC` addition, and `auth/drive.appdata` as the sole Drive
+  scope string.
+- Privacy scans over the whole Stage 5 range (`1cd8cf4..d53a9f9`) found
+  zero added `Log.`/`println`/`Timber` calls, shortcut and widget
+  intents carrying only the boolean `open_quick_add` extra, disclosed
+  calendar-intent content, and `CharArray`-only passphrase handling with
+  the pending passphrase NUL-wiped.
+- The final whole-branch review (`1cd8cf4..d53a9f9`, most capable tier)
+  returned **Ready to merge with fixes; 0 Critical**. Its two Important
+  findings are both closed by this wave: the Step 4 contract documents
+  (this commit) and the export-path passphrase wipe (`6bfafa8`), which
+  mirrors the import twin's existing `finally` shape exactly and needs
+  no new test because the `:app` module's JVM unit tests cannot exercise
+  a `ContentResolver` failure path (stub `android.jar`, no Robolectric
+  by policy). Everything else in the deferred-minors backlog stays
+  deferred and is bundled into the post-merge hardening task below.
+- The authoritative qualification record is
+  `docs/qualification/stage5-platform-features.md`.
+
+Carry-forwards: Samsung Remote Test Lab RTL remains External-blocked
+pending the user's developer-account approval; Play Console work remains
+externally pending. A recommended post-merge hardening task bundles the
+deferred test-coverage minors recorded through the Stage 5 checkpoints
+(notably: no `AppLockSettings` persistence-key tests, the exactly-at-delay
+lock boundary, held-`Esc` key-repeat cascade behaviour, and the untested
+CSV batch ViewModel state machine) plus adding a leading-tab prefix to
+`WorkspaceCsvWriter`'s `FORMULA_PREFIXES` formula-neutralisation set.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 

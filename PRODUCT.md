@@ -62,6 +62,23 @@ merges live structured records. The one-shot credentialed attachment check
 proves its exact create/readback/manifest/cleanup properties only; it is not a
 broader live-provider or protected-workspace claim.
 
+Stage 5 adds a Room v9 retired-blob-set index and its `RETIRED_BLOB_SET`
+backup family, so a purged attachment's remote bytes become a bounded
+garbage-collection candidate instead of a permanent conservative leak, plus
+silent attachment-intake auto-resume. It adds a frozen whole-vault archive
+format (`.otvault`) with an independent Node fixture generator, encrypted
+export through the Storage Access Framework, and encrypted import with a
+confirmable preview, staged activation, and rollback until first unlock.
+It adds disclosed, formula-safe CSV export; a Home-screen Today widget;
+app lock with title privacy and a unified Quick Add reachable from a
+launcher shortcut, the widget, and the app itself; keyboard, mouse, and
+accessible-action shortcuts with a help dialog; and one-way calendar
+insertion from the task editor and Schedule. Stage 5 explicitly ships no
+bidirectional sync path, no in-row attachment transfer-progress display,
+nothing beyond a snapshot-only `.otvault` export, and no stored calendar
+event identifier: calendar insertion is a one-way, fire-and-forget
+hand-off to the device calendar app with no result handling.
+
 ## Approved future contract
 
 - Structured workspace data remains local in Room during normal use.
