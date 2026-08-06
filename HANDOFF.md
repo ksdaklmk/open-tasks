@@ -555,12 +555,21 @@ Carry-forwards: the Samsung Remote Test Lab item is closed — the user
 ruled on 6 August 2026 that RTL is unusable for the time being, so its
 real-device rows lapse without verification and any future Samsung
 real-device work needs a fresh decision; Play Console work remains
-externally pending. A recommended post-merge hardening task bundles the
-deferred test-coverage minors recorded through the Stage 5 checkpoints
-(notably: no `AppLockSettings` persistence-key tests, the exactly-at-delay
-lock boundary, held-`Esc` key-repeat cascade behaviour, and the untested
-CSV batch ViewModel state machine) plus adding a leading-tab prefix to
-`WorkspaceCsvWriter`'s `FORMULA_PREFIXES` formula-neutralisation set.
+externally pending. The recommended post-merge hardening task is
+discharged: the range `79e4aea..81cf642` (16 commits, tests plus two
+sanctioned product hardenings) adds the leading-tab CSV formula prefix,
+a fail-closed `.otvault` read-side inventory bound, and coverage for
+every bundled item — GC shared-budget/duplicate/tombstone accounting,
+`.otvault` write-time and import-policy edges (including the
+duplicate-manifest guard, whose claimed unreachability the independent
+review disproved), zero-attachment export, the app-lock exact-delay
+boundary and literal persisted keys, shortcut dispatcher cases, the
+schema-fix test polish, and the CSV batch machine's two JVM-reachable
+terminal states (the two `Completed` states remain Robolectric-blocked
+by design). Final gates: 1,070 JVM tests with zero failures, lint
+clean, instrumented compile green, no schema drift, frozen fixtures
+byte-identical. Residual one-word comment miscount and small test
+housekeeping items stay in the ignored SDD ledger.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
