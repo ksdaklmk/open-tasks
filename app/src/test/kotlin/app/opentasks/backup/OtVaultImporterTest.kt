@@ -10,14 +10,18 @@ import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.BackupFieldType
 import app.opentasks.core.data.backup.BackupFieldV1
+import app.opentasks.core.data.backup.BackupMutationPayloadV1
+import app.opentasks.core.data.backup.BackupOperationSegmentPayloadV1
 import app.opentasks.core.data.backup.BackupRecordFamily
 import app.opentasks.core.data.backup.BackupRecordV1
+import app.opentasks.core.data.backup.BackupSegmentEntryV1
 import app.opentasks.core.data.backup.BackupSnapshotPayloadV1
 import app.opentasks.core.data.backup.OtVaultCodec
 import app.opentasks.core.data.backup.OtVaultHeaderV1
 import app.opentasks.core.data.backup.OtVaultInventoryEntryV1
 import app.opentasks.core.domain.AttachmentBlobSetManifest
 import app.opentasks.core.domain.AttachmentChunkRef
+import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ProviderObjectId
 import app.opentasks.core.model.Sha256Digest
@@ -33,6 +37,7 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -342,6 +347,104 @@ class OtVaultImporterTest {
         }
     }
 
+    @Test
+    fun anArchiveHoldingAnOperationSegmentIsRejected() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val preview = importer(roots).stage(
+                    ByteArrayInputStream(writeArchiveWithSegment()),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON), preview)
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
+    fun archiveDeliveringAChunkOutOfOrderIsRejected() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val preview = importer(roots).stage(
+                    ByteArrayInputStream(writeArchiveWithChunksOutOfOrder()),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON), preview)
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
+    fun aManifestDisagreeingWithItsRecordContentHashIsRejected() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val preview = importer(roots).stage(
+                    ByteArrayInputStream(writeArchiveWithManifestRecordContentMismatch()),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON), preview)
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
+    fun aLiveAttachmentNamingABlobSetTheArchiveNeverProvidesAManifestForIsRejected() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val preview = importer(roots).stage(
+                    ByteArrayInputStream(writeArchiveMissingAWholeManifest()),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(OtVaultImportPreview.Rejected(OT_VAULT_IMPORT_FAILED_REASON), preview)
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
+    fun secondStageCallDiscardsWhatTheFirstStaged() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                var activatedRecordCount: Int? = null
+                val importer = importer(roots) { snapshot, _, _ ->
+                    activatedRecordCount = snapshot.records.size
+                }
+                importer.stage(
+                    ByteArrayInputStream(writeArchive(ATTACHMENTS)),
+                    PASSPHRASE.toCharArray(),
+                )
+                val firstStagedBytes = roots.stagedBytes()
+                assertTrue(firstStagedBytes > 0)
+
+                val secondAttachments = listOf(ATTACHMENTS.first())
+                val preview = importer.stage(
+                    ByteArrayInputStream(writeArchive(secondAttachments)),
+                    PASSPHRASE.toCharArray(),
+                )
+
+                assertEquals(
+                    OtVaultImportPreview.Ready(
+                        recordCount = records(secondAttachments).size,
+                        attachmentCount = 1,
+                        attachmentsBeyondCache = emptyList(),
+                    ),
+                    preview,
+                )
+                // The first stage's bytes were discarded outright, not added to.
+                assertTrue(roots.stagedBytes() in 1 until firstStagedBytes)
+
+                assertTrue(importer.activate())
+                assertEquals(records(secondAttachments).size, activatedRecordCount)
+            }
+        }
+    }
+
     // ------------------------------------------------------------- Fixtures
 
     private fun importer(
@@ -415,6 +518,208 @@ class OtVaultImporterTest {
             key.close()
         }
     }
+
+    /**
+     * An otherwise-empty archive whose one frame after the snapshot is an
+     * operation segment. Exports are snapshot-only baselines, so the
+     * importer refuses this regardless of what the segment itself contains
+     * — its `payloadBase64` only needs to satisfy [BackupOperationSegmentCodec]'s
+     * own canonical-encoding check, replicated here with a matching [Json]
+     * config since the real encoder is `:core:data`-internal.
+     */
+    private fun writeArchiveWithSegment(): ByteArray {
+        val key = crypto.createKey()
+        return try {
+            val header = header(records(emptyList()).size, attachmentCount = 0, key)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val entries = mutableListOf<OtVaultInventoryEntryV1>()
+            entries += codec.writeSnapshot(
+                destination,
+                key,
+                header,
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = GENERATION,
+                    records = records(emptyList()),
+                ),
+            )
+            entries += codec.writeSegment(destination, key, header, segment())
+            codec.writeInventory(destination, key, header, entries)
+            destination.toByteArray()
+        } finally {
+            key.close()
+        }
+    }
+
+    private fun segment(): BackupOperationSegmentPayloadV1 {
+        val mutation = BackupMutationPayloadV1(
+            mutationKind = BackupMutationKind.DELETE,
+            record = null,
+            deletedFamily = BackupRecordFamily.TAG,
+            deletedIdentity = listOf("tag-1"),
+        )
+        val mutationBytes = MUTATION_JSON
+            .encodeToString(BackupMutationPayloadV1.serializer(), mutation)
+            .toByteArray(Charsets.UTF_8)
+        val entry = BackupSegmentEntryV1(
+            operationId = "operation-1",
+            generation = 1,
+            sequence = 0,
+            objectId = "tag-1",
+            objectType = BackupRecordFamily.TAG.name,
+            revisionWallMillis = 1,
+            revisionLogical = 0,
+            sourceDeviceId = DEVICE_ID,
+            payloadBase64 = Base64.getEncoder().withoutPadding().encodeToString(mutationBytes),
+        )
+        return BackupOperationSegmentPayloadV1(
+            vaultId = VAULT_ID.value,
+            firstGeneration = 1,
+            lastGeneration = 1,
+            entries = listOf(entry),
+            entryCount = 1,
+        )
+    }
+
+    // Duplicate manifests (brief item 6b) has no fixture here: a manifest's
+    // object ID is `attachmentManifestObjectId(blobSetId)` with no writer
+    // override, and the read side re-derives and checks that same ID before
+    // delivering a manifest event, so a second manifest naming a blob set
+    // one manifest already named is never a distinct archive object — the
+    // inventory itself refuses the resulting duplicate object ID
+    // (`OtVaultCodec.validateInventoryEntries`) before such an archive could
+    // even be assembled. No byte stream this frozen codec's public write API
+    // can produce, nor one its own read-side inventory check would let
+    // through, reaches `OtVaultImporter`'s "The archive repeats an
+    // attachment manifest" guard: it is unreachable defense-in-depth.
+
+    /** Chunk 1 written to the archive before chunk 0, both otherwise valid. */
+    private fun writeArchiveWithChunksOutOfOrder(): ByteArray {
+        val attachment = ArchiveAttachment(
+            id = "attachment-a",
+            displayName = "notes.pdf",
+            blobSetId = BlobSetId("blob-set-attachment-a"),
+            chunks = listOf(
+                ByteArray(16) { (it % 191).toByte() },
+                ByteArray(16) { (it % 193).toByte() },
+            ),
+        )
+        val key = crypto.createKey()
+        return try {
+            val header = header(records(listOf(attachment)).size, attachmentCount = 1, key)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val entries = mutableListOf<OtVaultInventoryEntryV1>()
+            entries += codec.writeSnapshot(
+                destination,
+                key,
+                header,
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = GENERATION,
+                    records = records(listOf(attachment)),
+                ),
+            )
+            entries += codec.writeAttachmentManifest(destination, key, header, attachment.manifest())
+            // Each chunk frame is authenticated at its own object ID
+            // (blob set + chunk index), so archive order need not match
+            // chunk-index order at the codec level — only the importer's own
+            // completeness policy requires ascending order.
+            entries += codec.writeAttachmentChunk(
+                destination, key, header, attachment.blobSetId, 1, attachment.chunks[1].copyOf(),
+            )
+            entries += codec.writeAttachmentChunk(
+                destination, key, header, attachment.blobSetId, 0, attachment.chunks[0].copyOf(),
+            )
+            codec.writeInventory(destination, key, header, entries)
+            destination.toByteArray()
+        } finally {
+            key.close()
+        }
+    }
+
+    /** A manifest whose declared content digest disagrees with its attachment record's. */
+    private fun writeArchiveWithManifestRecordContentMismatch(): ByteArray {
+        val attachment = ATTACHMENTS.first()
+        val key = crypto.createKey()
+        return try {
+            val header = header(records(listOf(attachment)).size, attachmentCount = 1, key)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val entries = mutableListOf<OtVaultInventoryEntryV1>()
+            entries += codec.writeSnapshot(
+                destination,
+                key,
+                header,
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = GENERATION,
+                    records = records(listOf(attachment)),
+                ),
+            )
+            val tamperedManifest = attachment.manifest().copy(contentSha256 = Sha256Digest.of(ZERO_SHA256))
+            entries += codec.writeAttachmentManifest(destination, key, header, tamperedManifest)
+            attachment.chunks.forEachIndexed { index, chunk ->
+                entries += codec.writeAttachmentChunk(
+                    destination, key, header, attachment.blobSetId, index, chunk.copyOf(),
+                )
+            }
+            codec.writeInventory(destination, key, header, entries)
+            destination.toByteArray()
+        } finally {
+            key.close()
+        }
+    }
+
+    /**
+     * Two live attachment records, but the archive only ever attempts the
+     * first one's manifest — distinct from [writeArchive]'s `omitChunksOf`,
+     * which still writes the manifest and only skips the chunks.
+     * `header.attachmentCount` is set to the one manifest actually written,
+     * so the codec's own header/inventory cross-check passes and the
+     * mismatch surfaces only at the importer's archived-vs-completed check.
+     */
+    private fun writeArchiveMissingAWholeManifest(): ByteArray {
+        val attachments = ATTACHMENTS
+        val key = crypto.createKey()
+        return try {
+            val header = header(records(attachments).size, attachmentCount = 1, key)
+            val destination = ByteArrayOutputStream()
+            codec.writeHeader(destination, header)
+            val entries = mutableListOf<OtVaultInventoryEntryV1>()
+            entries += codec.writeSnapshot(
+                destination,
+                key,
+                header,
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = GENERATION,
+                    records = records(attachments),
+                ),
+            )
+            val first = attachments.first()
+            entries += codec.writeAttachmentManifest(destination, key, header, first.manifest())
+            first.chunks.forEachIndexed { index, chunk ->
+                entries += codec.writeAttachmentChunk(
+                    destination, key, header, first.blobSetId, index, chunk.copyOf(),
+                )
+            }
+            codec.writeInventory(destination, key, header, entries)
+            destination.toByteArray()
+        } finally {
+            key.close()
+        }
+    }
+
+    private fun header(recordCount: Int, attachmentCount: Int, key: VaultKey) = OtVaultHeaderV1(
+        formatVersion = OtVaultCodec.FORMAT_VERSION,
+        vaultId = VAULT_ID,
+        createdAtEpochMillis = 1_700_000_000_000,
+        envelope = crypto.wrapForRecovery(key, PASSPHRASE.toCharArray()),
+        recordCount = recordCount,
+        attachmentCount = attachmentCount,
+    )
 
     /**
      * The live attachment cache and the import staging root, on separate
@@ -516,6 +821,21 @@ class OtVaultImporterTest {
         const val DEVICE_ID = "device-alpha"
         const val ZERO_SHA256 =
             "0000000000000000000000000000000000000000000000000000000000000000"
+
+        /**
+         * Matches the private `Json` config `BackupMutationCodec.encode` uses
+         * internally (`:core:data`-internal, so not callable here): a segment
+         * entry's embedded mutation payload must round-trip byte-identically
+         * through that exact config to pass `BackupOperationSegmentCodec`'s
+         * canonical-encoding check.
+         */
+        val MUTATION_JSON = Json {
+            encodeDefaults = true
+            explicitNulls = true
+            ignoreUnknownKeys = false
+            isLenient = false
+            coerceInputValues = false
+        }
 
         val ATTACHMENTS = listOf(
             archiveAttachment("attachment-a", "notes.pdf", "hello there".toByteArray()),
