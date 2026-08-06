@@ -621,7 +621,9 @@ class OtVaultImporterTest {
                     records = records(listOf(attachment)),
                 ),
             )
-            entries += codec.writeAttachmentManifest(destination, key, header, attachment.manifest())
+            entries += codec.writeAttachmentManifest(
+                destination, key, header, attachment.manifest(),
+            )
             // Each chunk frame is authenticated at its own object ID
             // (blob set + chunk index), so archive order need not match
             // chunk-index order at the codec level — only the importer's own
@@ -658,7 +660,8 @@ class OtVaultImporterTest {
                     records = records(listOf(attachment)),
                 ),
             )
-            val tamperedManifest = attachment.manifest().copy(contentSha256 = Sha256Digest.of(ZERO_SHA256))
+            val tamperedManifest = attachment.manifest()
+                .copy(contentSha256 = Sha256Digest.of(ZERO_SHA256))
             entries += codec.writeAttachmentManifest(destination, key, header, tamperedManifest)
             attachment.chunks.forEachIndexed { index, chunk ->
                 entries += codec.writeAttachmentChunk(
