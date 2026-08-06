@@ -64,37 +64,42 @@ class FoldContinuityInstrumentedTest {
 
         override fun after() {
             val owned = ownedVault ?: return
-            check(baselineClean) { "The continuity fixture did not start from a clean baseline" }
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
             val application = context as OpenTasksApplication
-            val active = application.vaultRuntimeManager.state.value as? VaultRuntimeState.Active
-                ?: error("The owned continuity vault is no longer active")
-            check(active.runtime.slot == owned.slot && active.runtime.vaultId == owned.vaultId) {
-                "The active vault is not the exact continuity fixture"
-            }
-            val registered = VaultSlotRegistry(
-                directory = File(context.filesDir, "vault_runtime"),
-                fileOperations = AtomicFileVaultRegistryOperations(),
-            ).read()
-            check(registered == owned.slot) {
-                "The active-slot marker is not the exact continuity fixture"
-            }
-            check(owned.slot == VaultSlot.LEGACY) {
-                "The production new-vault flow created an unexpected slot"
-            }
-            requireExpectedLegacyAliases(owned.vaultId)
-            application.activeVaultServices.quiesce()
-            active.runtime.contentKeyStore.delete(owned.vaultId)
-            check(!androidKeyStore().containsAlias(LEGACY_CONTENT_ALIAS)) {
-                "The owned continuity content-key alias was not removed"
-            }
-            application.vaultRuntimeManager.close()
             val databaseName = LocalVaultRuntimeFactory.databaseName(owned.slot)
-            check(context.deleteDatabase(databaseName) || !context.getDatabasePath(databaseName).exists()) {
-                "Unable to delete the owned continuity database"
+            try {
+                check(baselineClean) { "The continuity fixture did not start from a clean baseline" }
+                val active = application.vaultRuntimeManager.state.value as? VaultRuntimeState.Active
+                    ?: error("The owned continuity vault is no longer active")
+                check(active.runtime.slot == owned.slot && active.runtime.vaultId == owned.vaultId) {
+                    "The active vault is not the exact continuity fixture"
+                }
+                val registered = VaultSlotRegistry(
+                    directory = File(context.filesDir, "vault_runtime"),
+                    fileOperations = AtomicFileVaultRegistryOperations(),
+                ).read()
+                check(registered == owned.slot) {
+                    "The active-slot marker is not the exact continuity fixture"
+                }
+                check(owned.slot == VaultSlot.LEGACY) {
+                    "The production new-vault flow created an unexpected slot"
+                }
+                requireExpectedLegacyAliases(owned.vaultId)
+            } finally {
+                // Every step below is best-effort and unconditional: a
+                // verification failure above must still fail this test, but it
+                // must never leave `open_tasks.db` (or its Keystore aliases)
+                // behind for the *next* test run to inherit -- that is exactly
+                // the state `requireCleanLegacyStorageBaseline` exists to
+                // refuse. An aborted teardown here would otherwise poison
+                // every later run of this fixture, not just this one.
+                runCatching { application.activeVaultServices.quiesce() }
+                runCatching { AndroidVaultContentKeyStore(context).delete(owned.vaultId) }
+                runCatching { application.vaultRuntimeManager.close() }
+                runCatching { context.deleteDatabase(databaseName) }
+                runCatching { AndroidVaultKeyManager(context).deleteDatabaseKey(owned.slot) }
+                runCatching { AtomicFileVaultRegistryOperations().delete(activeSlotMarker(context)) }
             }
-            AndroidVaultKeyManager(context).deleteDatabaseKey(owned.slot)
-            AtomicFileVaultRegistryOperations().delete(activeSlotMarker(context))
             requireAbsentOwnedLegacyResources(context, databaseName)
             runBlocking { application.vaultRuntimeManager.initialize() }
             check(application.vaultRuntimeManager.state.value is VaultRuntimeState.NoVault) {
