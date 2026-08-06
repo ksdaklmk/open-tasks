@@ -497,11 +497,14 @@ on 6 August and is recorded in the checkpoint below.
 
 ## Stage 5 closure checkpoint — 6 August 2026
 
-Stage 5 closes at the commit containing the Step 4 contract documents,
-on top of the Part 1 passphrase-wipe fix `6bfafa8`. Execution resumed
-from `f0a8550` with the same plan, ledger, and independent-review
-discipline; Task 13 (qualification and exit gates) is the plan's final
-task.
+Stage 5 closes at `4df0af5` (`docs: fix stage 5 review round-2
+findings`), which amends the Step 4 contract documents committed in
+`8c7fcd0` (a broken threat-model table row and four architecture.md
+sections the brief required), on top of the Part 1 passphrase-wipe fix
+`6bfafa8`. The round-2 scoped re-review verified both amendments clean
+against source with no new breakage. Execution resumed from `f0a8550`
+with the same plan, ledger, and independent-review discipline; Task 13
+(qualification and exit gates) is the plan's final task.
 
 - The six-module connected gate's first run (10m13s) failed 7 tests
   across `:core:data` and `:app`. All seven were root-caused as
