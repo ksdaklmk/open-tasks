@@ -134,6 +134,11 @@ class VaultTransferViewModel @Inject constructor(
                     throw cancellation
                 } catch (_: Exception) {
                     OtVaultExportResult.Failed(OT_VAULT_EXPORT_FAILED_REASON)
+                } finally {
+                    // `export` wipes its own copy, but a document that yields no
+                    // stream at all — revoked or deleted between the pick and
+                    // here — never reaches it. Wiping twice is harmless.
+                    passphrase.fill('\u0000')
                 }
             } finally {
                 // Cancellation (this ViewModel cleared mid-export) must not
