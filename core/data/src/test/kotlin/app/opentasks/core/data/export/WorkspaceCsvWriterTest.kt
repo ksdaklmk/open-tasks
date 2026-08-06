@@ -103,6 +103,18 @@ class WorkspaceCsvWriterTest {
     }
 
     @Test
+    fun tabPrefixedTitleIsNeutralised() {
+        val task = task(
+            id = "task-1",
+            title = "\t=SUM(A1:A9)",
+        )
+        val out = StringBuilder()
+        writer.write(CsvTable.TASKS, snapshot(tasks = listOf(task)), out)
+
+        assertEquals("'\t=SUM(A1:A9)", dataLine(out, 0).split(",")[1])
+    }
+
+    @Test
     fun rowsEndWithCrlf() {
         val project = Project(
             id = ProjectId("project-1"),

@@ -22,7 +22,7 @@ enum class CsvTable { TASKS, PROJECTS, TIME_ENTRIES, NOTES }
  *
  * Pure Kotlin — no Android import anywhere in this file — so its behaviour is
  * proven entirely on the JVM. Every field is formula-injection neutralised
- * (a leading `=`, `+`, `-`, or `@` gets a `'` prefix) and RFC 4180 quoted
+ * (a leading `=`, `+`, `-`, `@`, or tab gets a `'` prefix) and RFC 4180 quoted
  * before it reaches [out]; the writer holds nothing beyond the one row it is
  * currently building. It is a plaintext writer only, never touching
  * encryption or Android storage — the caller streams [out] to wherever it is
@@ -192,7 +192,7 @@ class WorkspaceCsvWriter(private val zone: ZoneId) {
     }
 
     private companion object {
-        val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@')
+        val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@', '\t')
 
         val UK_DATE_TIME_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMMM yyyy HH:mm", Locale.UK)
