@@ -42,7 +42,6 @@ import app.opentasks.SearchSurface
 import app.opentasks.core.designsystem.OpenTasksTheme
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.function.Consumer
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -67,9 +66,7 @@ class ShortcutRootWiringInstrumentedTest {
     @Test
     fun ctrlKOpensSearchAndFocusesTheQueryField() {
         val rootFocused = CountDownLatch(1)
-        val dialogWindowCreated = CountDownLatch(1)
         lateinit var hostRoot: View
-        lateinit var dialogRoot: View
         activityRule.scenario.onActivity { activity ->
             hostRoot = activity.window.decorView
             activity.setContent {
@@ -121,42 +118,35 @@ class ShortcutRootWiringInstrumentedTest {
             rootFocused.await(10, TimeUnit.SECONDS),
         )
 
-        val windowListener = Consumer<List<View>> { roots ->
-            roots.singleOrNull { it !== hostRoot }?.let {
-                dialogRoot = it
-                dialogWindowCreated.countDown()
-            }
+        val nextFrame = CountDownLatch(1)
+        activityRule.scenario.onActivity {
+            it.dispatchCtrlK()
+            it.window.decorView.postOnAnimation { nextFrame.countDown() }
         }
-        activityRule.scenario.onActivity { activity ->
-            WindowInspector.addGlobalWindowViewsListener(activity.mainExecutor, windowListener)
-            activity.dispatchCtrlK()
-        }
-        try {
-            assertTrue(
-                "Ctrl+K never created the search Dialog window",
-                dialogWindowCreated.await(10, TimeUnit.SECONDS),
-            )
+        assertTrue(
+            "The shortcut did not settle on the next frame",
+            nextFrame.await(10, TimeUnit.SECONDS),
+        )
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        val dialogRoot = WindowInspector.getGlobalWindowViews().single { it !== hostRoot }
 
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            automation.executeAndWaitForEvent(
-                {
-                    activityRule.scenario.onActivity {
-                        // The headless CI window manager never focuses the host Activity.
-                        // Deliver its missing Dialog transition; SearchSurface's own
-                        // FocusRequester remains responsible for choosing the query field.
-                        dialogRoot.dispatchWindowFocusChanged(true)
-                    }
-                },
-                { event ->
-                    event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
-                        event.packageName?.toString() == "app.opentasks" &&
-                        event.className?.toString() == "android.widget.EditText"
-                },
-                10_000,
-            )
-        } finally {
-            WindowInspector.removeGlobalWindowViewsListener(windowListener)
-        }
+        instrumentation.uiAutomation.executeAndWaitForEvent(
+            {
+                activityRule.scenario.onActivity {
+                    // The headless CI window manager never focuses the host Activity.
+                    // Deliver its missing Dialog transition; SearchSurface's own
+                    // FocusRequester remains responsible for choosing the query field.
+                    dialogRoot.dispatchWindowFocusChanged(true)
+                }
+            },
+            { event ->
+                event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+                    event.packageName?.toString() == "app.opentasks" &&
+                    event.className?.toString() == "android.widget.EditText"
+            },
+            10_000,
+        )
     }
 }
 
