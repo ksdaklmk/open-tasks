@@ -42,19 +42,23 @@ import org.junit.Test
  * Covers [VaultTransferViewModel]'s CSV batch/cancel state machine as far as
  * this module's constraints allow.
  *
- * Of the four terminal [CsvExportOutcome] states, only "cancelled before
- * anything completed" (the picker returns a null [android.net.Uri] for the
- * very first requested table) is reachable here: it is the only path that
- * never needs a real [android.net.Uri] instance or a working
- * [android.content.ContentResolver]. The other three -- full success,
- * partial-success-then-cancelled, and a write failure -- all require
- * [VaultTransferViewModel.onCsvDocumentSelected] to be called with a
- * *non-null* `Uri`, and this module has no way to produce one: `Uri.parse`
- * and every other public factory throw `RuntimeException: ... not mocked`
- * under the stub `android.jar` (verified directly against this project's
- * test runtime, not assumed), `Uri.EMPTY` resolves to `null` there rather
- * than a real instance, and `Uri`'s own no-arg constructor is package-private
- * to `android.net` so it cannot be subclassed from this module either. No
+ * Of the four terminal [CsvExportOutcome] states, three are reachable here:
+ * "cancelled before anything completed" (the picker returns a null
+ * [android.net.Uri] for the very first requested table), and `Failed` via
+ * [VaultTransferViewModel.requestNextCsvDocument]'s synchronous
+ * closed-channel guard -- closing [VaultTransferViewModel.csvCreateDocumentRequests]
+ * before [VaultTransferViewModel.beginCsvExport] makes its first `trySend`
+ * fail, which aborts the batch with `Failed` before any coroutine, `Uri`, or
+ * [android.content.ContentResolver] is ever involved. The remaining two --
+ * full success and partial-success-then-cancelled -- are not reachable: both
+ * require [VaultTransferViewModel.onCsvDocumentSelected] to be called with a
+ * *non-null* `Uri` that a write actually succeeds against, and this module
+ * has no way to produce a non-null `Uri` at all: `Uri.parse` and every other
+ * public factory throw `RuntimeException: ... not mocked` under the stub
+ * `android.jar` (verified directly against this project's test runtime, not
+ * assumed), `Uri.EMPTY` resolves to `null` there rather than a real
+ * instance, and `Uri`'s own no-arg constructor is package-private to
+ * `android.net` so it cannot be subclassed from this module either. No
  * mocking library and no Robolectric are available to work around that (repo
  * rules), and the product is not refactored for testability here.
  */
@@ -95,6 +99,23 @@ class VaultTransferViewModelTest {
 
         assertNull(viewModel.csvExportOutcome.value)
         assertTrue(waitUntil { !viewModel.csvExportInProgress.value })
+    }
+
+    @Test
+    fun aClosedCsvDocumentRequestChannelFailsTheBatchSynchronously() {
+        val viewModel = viewModel()
+        viewModel.csvCreateDocumentRequests.close()
+
+        viewModel.beginCsvExport(setOf(CsvExportTable.TASKS))
+
+        // requestNextCsvDocument's trySend fails against a closed channel,
+        // which aborts the batch synchronously -- no coroutine, no Uri, no
+        // ContentResolver ever enters the picture.
+        assertEquals(
+            CsvExportOutcome.Failed("The CSV export could not be completed."),
+            viewModel.csvExportOutcome.value,
+        )
+        assertTrue(!viewModel.csvExportInProgress.value)
     }
 
     @Test
