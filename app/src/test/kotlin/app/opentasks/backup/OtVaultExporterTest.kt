@@ -106,6 +106,43 @@ class OtVaultExporterTest {
     }
 
     @Test
+    fun zeroAttachmentExportRoundTripsCleanly() = runBlocking {
+        withTimeout(5_000) {
+            val destination = ByteArrayOutputStream()
+            val passphrase = "correct horse battery staple".toCharArray()
+            val passphraseCopy = passphrase.copyOf()
+            val exporter = exporter(
+                attachments = emptyList(),
+                readChunks = fakeChunkReader(emptyMap(), unfetchable = emptySet()),
+            )
+
+            val result = exporter.export(destination, passphrase)
+
+            assertTrue(result is OtVaultExportResult.Completed)
+            val completed = result as OtVaultExportResult.Completed
+            assertEquals(0, completed.attachmentCount)
+            assertEquals(destination.size().toLong(), completed.byteCount)
+
+            val input = ByteArrayInputStream(destination.toByteArray())
+            val header = codec.readHeader(input)
+            assertEquals(0, header.attachmentCount)
+            assertEquals(RECORDS.size, header.recordCount)
+            val key = crypto.unlock(passphraseCopy, header.envelope)
+            val events = try {
+                buildList {
+                    codec.readAll(input, key, header) { event -> add(event) }
+                }
+            } finally {
+                key.close()
+            }
+
+            assertEquals(1, events.size)
+            val snapshot = events.single() as OtVaultReadEvent.Snapshot
+            assertEquals(RECORDS.size, snapshot.payload.records.size)
+        }
+    }
+
+    @Test
     fun unfetchableAttachmentYieldsMissingBytesAndWritesNothing() = runBlocking {
         withTimeout(5_000) {
             val bytes = "content".toByteArray()
