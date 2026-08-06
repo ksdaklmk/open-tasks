@@ -1,5 +1,6 @@
 package app.opentasks
 
+import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -20,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.lock.AppLockSettings
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
@@ -119,6 +121,19 @@ class MainActivityRecoveryRestorationInstrumentedTest {
     }
     private val recoveryFixtureRule = object : ExternalResource() {
         override fun before() {
+            // MainActivity checks `locked` ahead of `activeRecovery` (Task 10),
+            // and AppLockController's cold-start value is a Hilt @Singleton
+            // read once from this real preferences file -- whichever test
+            // first triggers its construction in this instrumentation
+            // session latches it in. A stale `lock_enabled=true` left by an
+            // earlier session would show the lock overlay instead of the
+            // recovery shell this test depends on, so this establishes the
+            // clean baseline this test needs before `composeRule` (the inner
+            // rule) launches the production activity.
+            AppLockSettings(
+                InstrumentationRegistry.getInstrumentation().targetContext
+                    .getSharedPreferences("app_lock", Context.MODE_PRIVATE),
+            ).lockEnabled = false
             check(!recoveryInbox.exists()) { "The disposable recovery inbox is not empty" }
             check(
                 recoveryInbox.parentFile?.mkdirs() != false ||
