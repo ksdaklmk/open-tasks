@@ -43,8 +43,10 @@
   deterministic-fixture, diff, release-scope, and production-logging gates
   passed. The authoritative qualification is
   `docs/qualification/stage4-notes-activity-attachments-search.md`.
-  Samsung Remote Test Lab RTL remains External-blocked pending the user's
-  developer-account approval. The Fold 8 adaptive slice, Stage 3, Stage 2,
+  The Samsung Remote Test Lab item is closed: the user ruled on
+  6 August 2026 that RTL is unusable for the time being, so its
+  real-device rows lapse without verification. The Fold 8 adaptive
+  slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
 - Current product source implementation point: `6bfafa8` (`fix: wipe
@@ -549,8 +551,10 @@ with the same plan, ledger, and independent-review discipline; Task 13
 - The authoritative qualification record is
   `docs/qualification/stage5-platform-features.md`.
 
-Carry-forwards: Samsung Remote Test Lab RTL remains External-blocked
-pending the user's developer-account approval; Play Console work remains
+Carry-forwards: the Samsung Remote Test Lab item is closed — the user
+ruled on 6 August 2026 that RTL is unusable for the time being, so its
+real-device rows lapse without verification and any future Samsung
+real-device work needs a fresh decision; Play Console work remains
 externally pending. A recommended post-merge hardening task bundles the
 deferred test-coverage minors recorded through the Stage 5 checkpoints
 (notably: no `AppLockSettings` persistence-key tests, the exactly-at-delay
