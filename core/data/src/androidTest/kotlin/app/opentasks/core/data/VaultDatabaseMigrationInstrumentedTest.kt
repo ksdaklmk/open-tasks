@@ -333,10 +333,18 @@ class VaultDatabaseMigrationInstrumentedTest {
         assertEquals(before, migrated.captureVersion8Bytes())
         assertEquals(0L, migrated.longValue("SELECT COUNT(*) FROM retired_blob_sets"))
         // MIGRATION_8_9 does not bump the vault row marker, so a device
-        // migrated through v7->v8 still carries marker 8 here. This is the
-        // durable guard that catches the next migration author who bumps
-        // the row marker without also widening the recovery import gate.
+        // migrated through v7->v8 still carries marker 8 here -- this proves
+        // that for the one concrete migration under test, and only on the
+        // connected API 36/37 matrix. The bound itself is checked against
+        // RECOVERED_SCHEMA_VERSION (== VAULT_DATABASE_VERSION), which any
+        // migration necessarily satisfies, so this assertion cannot by
+        // itself catch a future migration author who bumps the row marker
+        // without widening the recovery import gate. BackupRecordImporterTest's
+        // row-marker bound tests are the real, deterministic guard for that
+        // class of bug: they exercise normalizeForRecovery directly on the
+        // JVM and run on every testDebugUnitTest.
         assertTrue(
+            "A migrated row marker must never exceed RECOVERED_SCHEMA_VERSION",
             migrated.longValue("SELECT schemaVersion FROM vaults WHERE id = 'vault-a'") <=
                 RECOVERED_SCHEMA_VERSION,
         )
