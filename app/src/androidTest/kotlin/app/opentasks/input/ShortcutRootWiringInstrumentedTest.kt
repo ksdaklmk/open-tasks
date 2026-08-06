@@ -19,6 +19,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performKeyInput
@@ -93,15 +95,21 @@ class ShortcutRootWiringInstrumentedTest {
         composeRule.onNodeWithTag("shortcut-root").performKeyInput {
             withKeyDown(Key.CtrlLeft) { pressKey(Key.K) }
         }
-        // SearchSurface requests focus for its query field from a
-        // `LaunchedEffect(Unit)` fired by its own composition, one step
-        // behind the key event that flips `showSearch` on. `performKeyInput`
-        // only synchronizes the input dispatch itself; it does not block
-        // until that later effect has resumed and applied focus, so the
-        // query field can still be unfocused the instant control returns
-        // here. Waiting for idle lets that effect run before the assertion
-        // reads the semantics tree.
-        composeRule.waitForIdle()
+        // SearchSurface renders in its own `Dialog`, a separate Android
+        // window from the one this test's content lives in. Its query
+        // field's `LaunchedEffect(Unit) { focusRequester.requestFocus() }`
+        // can only succeed once that new window actually holds input
+        // focus, which the window manager grants asynchronously and is not
+        // captured by `waitForIdle()` -- that only settles Compose's own
+        // recomposition/snapshot/coroutine state, not cross-window focus
+        // handoff at the platform level. Poll the semantics tree for the
+        // real settled outcome instead of assuming one idle pass covers it.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule
+                .onAllNodes(hasTestTag("workspace-search-query") and isFocused())
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
 
         composeRule.onNodeWithTag("workspace-search-query").assertIsFocused()
     }
