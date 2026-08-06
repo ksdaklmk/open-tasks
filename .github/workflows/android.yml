@@ -70,6 +70,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Build instrumented APKs before the emulator boots
         run: ./gradlew packageDebugAndroidTest :app:packageDebug --stacktrace
+      - name: Stop the Gradle daemon before the emulator boots
+        run: ./gradlew --stop
       - name: Run device suites
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -79,6 +81,7 @@ jobs:
           target: google_apis
           profile: ${{ matrix.profile }}
           disable-animations: true
+          disk-size: 8192M
           script: >-
             ./gradlew
             :core:data:connectedDebugAndroidTest
