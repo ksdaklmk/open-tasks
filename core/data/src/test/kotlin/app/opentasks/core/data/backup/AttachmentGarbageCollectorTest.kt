@@ -105,6 +105,54 @@ class AttachmentGarbageCollectorTest {
     }
 
     @Test
+    fun deleteBudgetIsSharedAcrossCandidatesFromDifferentSources() = runBlocking {
+        withTimeout(5_000) {
+            // "attachment" and "retired" stand in for the two candidate
+            // sources AttachmentRuntime.collectable() merges into one list
+            // before calling runBatch; neither alone reaches the 32-delete
+            // default budget, but the two together exceed it.
+            val store = FakeAttachmentStore(
+                *(0 until 20).map { listed("attachment", "attachment-chunk-$it", CHUNK_ROLE) }
+                    .toTypedArray(),
+                *(0 until 20).map { listed("retired", "retired-chunk-$it", CHUNK_ROLE) }
+                    .toTypedArray(),
+            )
+
+            val result = collector().runBatch(
+                store,
+                listOf(candidate("attachment"), candidate("retired")),
+                NOW,
+            )
+
+            assertEquals(32, result.deletedObjects)
+            assertEquals(32, store.deleted.size)
+        }
+    }
+
+    @Test
+    fun aBlobSetNamedByCandidatesFromBothSourcesIsExcludedFailClosed() = runBlocking {
+        withTimeout(5_000) {
+            val store = FakeAttachmentStore(
+                listed("shared", "shared-chunk", CHUNK_ROLE),
+                listed("clean", "clean-chunk", CHUNK_ROLE),
+            )
+
+            val result = collector().runBatch(
+                store,
+                // The same blob set named once by each source is a shape the
+                // two candidate builders should never produce together, but
+                // runBatch must still refuse to guess which one is right.
+                listOf(candidate("shared"), candidate("shared"), candidate("clean")),
+                NOW,
+            )
+
+            assertEquals(listOf("clean-chunk"), store.deleted)
+            assertEquals(1, result.deletedObjects)
+            assertEquals(0, result.blockers)
+        }
+    }
+
+    @Test
     fun budgetExhaustionResumesFromRemainingImmutableObjects() = runBlocking {
         withTimeout(5_000) {
             val store = FakeAttachmentStore(

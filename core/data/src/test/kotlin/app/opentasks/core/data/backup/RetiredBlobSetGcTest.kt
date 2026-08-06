@@ -141,6 +141,49 @@ class RetiredBlobSetGcTest {
     }
 
     /**
+     * A tombstone generation recorded under some other objectType string is,
+     * to [AttachmentRuntime.collectable], indistinguishable from one never
+     * recorded at all: `latestGenerationFor` always queries this path's
+     * candidates with `BackupRecordFamily.RETIRED_BLOB_SET.name`, so a row
+     * missing under that exact key drops silently out of the `mapNotNull` —
+     * one candidate short, not the whole batch. A second, correctly
+     * documented row in the same batch proves that: a wrong result here
+     * would be either both collected (the drop did nothing) or neither
+     * (misread as "nothing collectable"), not exactly one.
+     */
+    @Test
+    fun aTombstoneGenerationMissingUnderTheQueriedObjectTypeDropsOnlyThatCandidate() = runBlocking {
+        withTimeout(5_000) {
+            val undocumented = retireViaPurge(
+                taskId = TASK_PROPOSAL,
+                retiredAt = NOW.minus(Duration.ofDays(30)),
+                tombstoneGeneration = PREVIOUS_GENERATION,
+            )
+            journalDao.generations.remove(undocumented.value)
+            val documented = retireViaPurge(
+                taskId = TASK_INVOICES,
+                retiredAt = NOW.minus(Duration.ofDays(30)),
+                tombstoneGeneration = PREVIOUS_GENERATION,
+            )
+            val store = FakeAttachmentStore(
+                listed(undocumented.value, "undocumented-chunk", CHUNK_ROLE),
+                listed(documented.value, "documented-manifest", MANIFEST_ROLE),
+                listed(documented.value, "documented-chunk", CHUNK_ROLE),
+            )
+
+            val result = runtime(store, now = NOW).collectRetiredBytes()
+
+            assertEquals(listOf("documented-chunk", "documented-manifest"), store.deleted)
+            assertEquals(2, result.deletedObjects)
+            assertEquals(setOf(documented), result.collectedBlobSets)
+            assertEquals(
+                setOf(undocumented),
+                repository.currentWorkspace().retiredBlobSets.map { it.blobSetId }.toSet(),
+            )
+        }
+    }
+
+    /**
      * A blob set a live attachment still names is a replacement edge, not a
      * collection candidate — the runtime's candidate builder excludes it
      * before any session is authorized or any object listed, so this asserts
