@@ -409,6 +409,9 @@ class VaultTransferViewModel @Inject constructor(
         pendingPassphrase = null
         if (uri != null && passphrase != null) return uri to passphrase
         passphrase?.fill('\u0000')
+        // operation is always held here: beginTransfer locks it before sending
+        // the picker request, and this callback is the only code that observes
+        // that request's result, so the lock can never belong to anyone else.
         if (operation.isLocked) operation.unlock()
         return null
     }
