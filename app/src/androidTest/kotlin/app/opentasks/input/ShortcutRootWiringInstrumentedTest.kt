@@ -42,6 +42,7 @@ import app.opentasks.SearchSurface
 import app.opentasks.core.designsystem.OpenTasksTheme
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -131,22 +132,39 @@ class ShortcutRootWiringInstrumentedTest {
         instrumentation.waitForIdleSync()
         val dialogRoot = WindowInspector.getGlobalWindowViews().single { it !== hostRoot }
 
-        instrumentation.uiAutomation.executeAndWaitForEvent(
-            {
-                activityRule.scenario.onActivity {
-                    // The headless CI window manager never focuses the host Activity.
-                    // Deliver its missing Dialog transition; SearchSurface's own
-                    // FocusRequester remains responsible for choosing the query field.
-                    dialogRoot.dispatchWindowFocusChanged(true)
-                }
-            },
-            { event ->
-                event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
-                    event.packageName?.toString() == "app.opentasks" &&
-                    event.className?.toString() == "android.widget.EditText"
-            },
-            10_000,
-        )
+        val observedEvents = mutableListOf<String>()
+        try {
+            instrumentation.uiAutomation.executeAndWaitForEvent(
+                {
+                    activityRule.scenario.onActivity {
+                        // The headless CI window manager never focuses the host Activity.
+                        // Deliver its missing Dialog transition; SearchSurface's own
+                        // FocusRequester remains responsible for choosing the query field.
+                        dialogRoot.dispatchWindowFocusChanged(true)
+                    }
+                },
+                { event ->
+                    if (observedEvents.size < 16) {
+                        observedEvents += "type=${event.eventType}, " +
+                            "class=${event.className}, package=${event.packageName}"
+                    }
+                    event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+                        event.packageName?.toString() == "app.opentasks" &&
+                        event.className?.toString() == "android.widget.EditText"
+                },
+                10_000,
+            )
+        } catch (error: TimeoutException) {
+            val focusedView = dialogRoot.findFocus()
+            throw AssertionError(
+                "Search query focus event timed out: " +
+                    "dialogAttached=${dialogRoot.isAttachedToWindow}, " +
+                    "dialogWindowFocused=${dialogRoot.hasWindowFocus()}, " +
+                    "dialogFocused=${dialogRoot.isFocused}, " +
+                    "focusedView=${focusedView?.javaClass?.name}, " +
+                    "events=$observedEvents",
+            ).apply { initCause(error) }
+        }
     }
 }
 
