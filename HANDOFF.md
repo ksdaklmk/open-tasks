@@ -1,14 +1,19 @@
 # Open Tasks Handoff
 
 - Last updated: 7 August 2026
-- Branch: `test-fix` at `34f6de0` (pushed and synchronized with
-  `origin/test-fix`; draft PR #13); the approved API 36 exception is local and
-  uncommitted.
-- Active follow-up: **The controller selected a narrow Ctrl+K API 36
-  headless-focus exception.** The test now skips the query-focus proof only
-  when the Dialog lacks real window focus; a focus-capable runner retains the
-  original focused-EditText assertion. Local gates passed. Bench 2 remains
-  unused; pause before any commit, push, rerun, or merge.
+- Branch: `main` (local tracks `origin/main`). The CI test-fix task is
+  CLOSED: the user authorised the Ctrl+K API 36 exception (`39d2dc5`),
+  bench 2 (run `31190499051`) returned API 36 fully green — 293 pass, 0
+  failures, 3 skips (the two standing expected skips plus the new
+  headless-focus assumption) with `verify` and `release` green — and PR
+  #13 was merged to `main` as `1cdab0b` with branch `test-fix` deleted.
+- Standing residuals: **F6** — the expanded API 37.0 canary image still
+  fails before tests run (credential-encrypted storage unavailable); it
+  is an image-quality blocker, not a code defect, and per the standing
+  ruling its lapse-or-wait disposition remains an explicit user
+  decision. **CI blind spot** — CI never proves Ctrl+K focuses the
+  query field (the headless runner cannot grant Dialog window focus);
+  only focus-capable device runs execute that assertion.
 - Session status: **Stage 5 is complete and qualified: all 13 tasks of
   the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
   family and collection command; retired-set GC closure; silent
@@ -38,9 +43,9 @@
   Post-closure: the recommended hardening task is discharged at
   `81cf642`; remote CI provisioning is restored at `52f63aa` after the
   discovery that the Android workflow had zero green runs in its entire
-  history; and the follow-up test-fix task is PAUSED mid-flight on
-  branch `test-fix` with a bench run in progress — resume via the CI
-  restoration checkpoint below.
+  history; and the follow-up test-fix task is complete and merged to
+  `main` (`1cdab0b`) with API 36 fully green — see the Ctrl+K closure
+  below.
   Both recorded Stage 4 limits are
   discharged:
   the retired-set index by Tasks 1–3 (Room v9 + GC closure) and the
@@ -181,7 +186,9 @@ and the adjacent `test-fix-report.md`.
 
 The eight-run cap is exhausted and API 36 still fails. Stop and report this
 evidence; do not rerun, push, merge, or change product or test code. The
-controller owns any landing or follow-up decision.
+controller owns any landing or follow-up decision. (Superseded: the
+controller authorised the two-run diagnostic follow-up below, which
+closed the failure and merged the branch.)
 
 ## Controller-authorized Ctrl+K diagnostic follow-up — 7 August 2026
 
@@ -210,10 +217,21 @@ exception: after proving Ctrl+K created the Dialog, the test uses
 `assumeTrue(dialogRoot.hasWindowFocus())`. It skips only the impossible
 query-focus assertion on this headless API 36 runner; environments with real
 Dialog focus still run the original focused-EditText accessibility assertion
-and retain the timeout diagnostic. The source change is local and uncommitted;
-the full local gate, workflow verifier, and diff check passed. Bench 2 remains
-unused. Pause: do not commit, push, rerun, or merge without new controller
-authority.
+and retain the timeout diagnostic. The full local gate, workflow verifier, and
+diff check passed on the change before commit.
+
+Closure, later on 7 August 2026: the user authorised proceeding. The
+exception was committed as `39d2dc5` (with the diagnostic plan and design
+docs) and pushed, triggering bench 2, run `31190499051`. `verify` and
+`release` passed; API 36 was fully green — 293 pass, 0 failures, 3 skips
+(the credential-only row, the exact `Pixel_10_Pro_Fold` cross-display
+exception, and the new headless-focus assumption, whose SKIPPED result is
+recorded in the job log). API 37.0 failed on the standing F6 image
+blocker, out of scope. PR #13 was marked ready and merged to `main` as
+`1cdab0b`; branch `test-fix` is deleted. The accepted trade-off: CI does
+not prove Ctrl+K focuses the query field on the headless API 36 runner;
+focus-capable device runs (for example the Task-13-style connected gate)
+still execute the original assertion.
 
 Preserve the three unrelated pre-existing workspace items: modified
 `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
@@ -746,6 +764,12 @@ workspace, either by resuming the paused implementer pattern (relay
 run outcomes, one hypothesis per iteration) or a fresh agent given
 those two files. F5's first-ever feature-module CI results are the
 largest remaining unknown.
+
+This checkpoint's resume instruction is superseded: the test-fix task
+completed on 7 August and is recorded in the CI test-fix final
+checkpoint and Ctrl+K closure above. The fully-green-matrix landing
+ruling was satisfied by bench 2 (API 36 all six modules, verify,
+release green; API 37.0 image-blocked per F6) and the merge of PR #13.
 
 ## Stage 4 closure checkpoint — 3 August 2026
 
