@@ -44,6 +44,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -131,6 +132,10 @@ class ShortcutRootWiringInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
         val dialogRoot = WindowInspector.getGlobalWindowViews().single { it !== hostRoot }
+        assumeTrue(
+            "Headless API 36 runner did not grant the search Dialog window focus",
+            dialogRoot.hasWindowFocus(),
+        )
 
         val observedEvents = mutableListOf<String>()
         try {

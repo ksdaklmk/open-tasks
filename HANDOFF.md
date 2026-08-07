@@ -1,7 +1,14 @@
 # Open Tasks Handoff
 
-- Last updated: 6 August 2026
-- Branch: `main`
+- Last updated: 7 August 2026
+- Branch: `test-fix` at `34f6de0` (pushed and synchronized with
+  `origin/test-fix`; draft PR #13); the approved API 36 exception is local and
+  uncommitted.
+- Active follow-up: **The controller selected a narrow Ctrl+K API 36
+  headless-focus exception.** The test now skips the query-focus proof only
+  when the Dialog lacks real window focus; a focus-capable runner retains the
+  original focused-EditText assertion. Local gates passed. Bench 2 remains
+  unused; pause before any commit, push, rerun, or merge.
 - Session status: **Stage 5 is complete and qualified: all 13 tasks of
   the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
   family and collection command; retired-set GC closure; silent
@@ -107,6 +114,107 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## CI test-fix final checkpoint — 7 August 2026
+
+The post-Stage-5 CI test-fix task completed on branch `test-fix` at
+`c9e30daf2b429304a62d05e4b8a16ad5e4355434`, synchronized with
+`origin/test-fix`. Draft PR #13 remains the sole bench. The authoritative
+scope and evidence are
+`.superpowers/sdd/2026-08-03-stage-5-platform-features-plan/test-fix-brief.md`
+and the adjacent `test-fix-report.md`.
+
+- F1's JVM race is fixed with a deterministic latch (`30ad043`). F2 was
+  verified as a device-load timeout rather than a product defect and folded
+  into F3's shared 30 s `:core:data` androidTest bound (`3fb9ce2`).
+- F4's Quick Add IME assumption is fixed by directly driving the platform
+  inset path (`3e5b751`). The remaining Ctrl+K test now models the headless
+  API 36 window manager without changing product code; `b295c1e` replaces the
+  iteration-5 API 37-only `WindowInspector` listener with the API 36-compatible
+  snapshot API.
+- F5's one-line Gradle `--continue` workflow change (`91095e2`) exposed all
+  feature suites. At the last executed bench, `:feature:tasks` was 36/36,
+  `:feature:projects` 16/16, `:feature:schedule` 2/2 and `:feature:more` 54/54.
+- Executed iteration 5, run `31115797148`, had green `verify` and `release`.
+  API 36 was 293 pass, one failure and two expected skips; the sole failure
+  was the unavailable API 37 `WindowInspector` listener overload now removed
+  by `b295c1e`. API 37.0 again lost package/activity-manager services before
+  tests could run, the existing F6 canary-image blocker.
+- Iteration 6, run `31118576902`, queued for 15 minutes during GitHub's
+  official Actions outage, then all three entry jobs were cancelled with
+  `runner_id: 0`, no assigned runner and no steps. `release` was skipped.
+  This is infrastructure-only and provides no test signal. Six of the eight
+  allowed CI runs have been issued; conservatively count a rerun as run 7.
+- Fresh local verification at `b295c1e` is green:
+  `testDebugUnitTest lintDebug :app:assembleDebug
+  :app:assembleDebugAndroidTest :core:data:assembleDebugAndroidTest`,
+  `scripts/verify-actions-workflow.sh`, and `git diff --check`.
+- GitHub's official status page reports Actions operational and its 6 August
+  incident resolved. After `gh run view` confirmed the cancelled run had zero
+  steps, the exact workflow was manually rerun as iteration 7. `verify` and
+  `release` passed; compact API 36 had 293 pass, one failure, and two expected
+  skips; `:core:data` and all four feature modules were green. The sole API 36
+  failure was the test's `ACTION_UP` consumption assertion at
+  `ShortcutRootWiringInstrumentedTest.kt:213`; production intentionally handles
+  only key-down. Expanded API 37.0 again ran zero tests after its system-service
+  failure, the standing F6 image blocker.
+- `c9e30da` keeps dispatching key-up but drops that invalid assertion. The full
+  local JVM/lint/debug/APK and Android-test-assembly gate, workflow verifier,
+  and diff check passed. It was pushed without unrelated files, triggering
+  final iteration 8, run `31177454111`, at `2026-08-07T12:15:50Z`.
+- Iteration 8 completed with failure. `verify` and `release` passed. API 36
+  recorded 293 passes, one failure, and two expected skips: `:core:data`
+  (158), `:feature:tasks` (36), `:feature:projects` (16),
+  `:feature:schedule` (2), and `:feature:more` (54) were green; the sole
+  failure was
+  `ShortcutRootWiringInstrumentedTest.ctrlKOpensSearchAndFocusesTheQueryField`,
+  which timed out in `UiAutomation.executeAndWaitForEvent` at test line 134
+  with no event received. API 37.0 again hit F6: credential-encrypted storage
+  was unavailable, producing 28 failures out of the 35 `:core:data` cases
+  reached and subsequent activity-resolution failures in app and feature jobs.
+
+The eight-run cap is exhausted and API 36 still fails. Stop and report this
+evidence; do not rerun, push, merge, or change product or test code. The
+controller owns any landing or follow-up decision.
+
+## Controller-authorized Ctrl+K diagnostic follow-up — 7 August 2026
+
+The controller authorised a fresh, strict two-run follow-up for the sole API
+36 Ctrl+K wiring failure. Scope is the existing instrumented test only; product
+code, workflow logic, formats, and API 37.0 F6 remain out of scope. The
+diagnostic keeps the original focused-EditText event predicate, but on timeout
+records the dialog's attachment/window/native-focus state and the bounded
+accessibility events observed during the synthetic focus transition. This
+distinguishes a missing accessibility event from missing window focus without
+faking focus or weakening the assertion.
+
+The focused test compiles, and the required local
+`testDebugUnitTest lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+:core:data:assembleDebugAndroidTest` gate, workflow verifier, and diff check
+passed. The diagnostic was committed as `34f6de0` and pushed to `test-fix`,
+triggering bench 1 of 2, run `31186660700`. `verify` and `release` passed;
+API 36 again had 293 passes, one failure, and two expected skips. The sole
+failure recorded `dialogAttached=true`, `dialogWindowFocused=false`,
+`dialogFocused=false`, `focusedView=androidx.compose.ui.platform.AndroidComposeView`,
+and `events=[]`.
+The headless WindowManager has not focused the dialog, so the manual
+`dispatchWindowFocusChanged(true)` callback cannot prove query input focus or
+produce an accessibility event. The controller selected the narrow capability
+exception: after proving Ctrl+K created the Dialog, the test uses
+`assumeTrue(dialogRoot.hasWindowFocus())`. It skips only the impossible
+query-focus assertion on this headless API 36 runner; environments with real
+Dialog focus still run the original focused-EditText accessibility assertion
+and retain the timeout diagnostic. The source change is local and uncommitted;
+the full local gate, workflow verifier, and diff check passed. Bench 2 remains
+unused. Pause: do not commit, push, rerun, or merge without new controller
+authority.
+
+Preserve the three unrelated pre-existing workspace items: modified
+`docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+untracked `.kotlin/`, and untracked `artifacts/`. The test-fix task made no
+product-code change and did not touch those items. The brief still prohibits
+subagents/forks unless the user explicitly overrides it; the model discussion
+did not itself grant that override.
 
 ## Stage 5 Tasks 1–2 checkpoint — 3 August 2026
 
@@ -2568,45 +2676,27 @@ the Task 5 qualification change containing this handoff. Stage 4 is complete
 and qualified: notes, activity, search, attachment transport, and attachment
 product flows are implemented. Remote merge remains absent by design.
 
-The credential-free GitHub Actions matrix and release gate remain repaired;
-the queued dependency updates are resolved in the verified 30 July
-maintenance commit. The approved Stage 3, adaptive-slice, and Stage 4
-execution authorities are closed. Stage 5 is in progress under its approved
-design and plan: Tasks 1–2 of 13 are complete and reviewed, paused before
-Task 3. Samsung RTL, native fold
-continuity, and broader two-installation live recovery evidence remain
-post-Stage-4/external work and are not implied by Stage 4 qualification.
+The approved Stage 3, adaptive-slice, Stage 4 and Stage 5 execution
+authorities are closed. Stage 5 is complete and qualified. The active work is
+paused after the controller-approved, uncommitted API 36 headless-focus
+exception described above: the remote branch is at `34f6de0`, local gates
+passed, and new authority is required before publication or bench 2.
+Samsung RTL is closed by user ruling; native fold continuity and broader
+two-installation live recovery evidence remain external future work and are
+not implied by Stage 4 or Stage 5 qualification.
 
 ## Resume instructions
 
-1. Read this file first, the
-   completed
-   [Stage 2 design](docs/superpowers/specs/2026-07-28-stage-2-local-backup-android-auto-backup-design.md),
-   the
-   [production programme](docs/superpowers/plans/2026-07-27-open-tasks-production-master-plan.md),
-   then
-   [docs/architecture.md](docs/architecture.md),
-   [docs/threat-model.md](docs/threat-model.md), [DESIGN.md](DESIGN.md) and
-   [PRODUCT.md](PRODUCT.md).
-2. Re-scan the working tree and preserve any user changes. Train 1 Tasks
-   1.1–1.5, Stage 1, and Stage 2 are complete; do not amend or reopen their
-   reviewed commits without a new verified finding.
-3. Start Stage 5 from the current live backlog. Retain the External-blocked
-   Samsung RTL gap and route native fold continuity plus broader
-   two-installation live recovery evidence as post-Stage-4 work.
-4. Run any device suite on a sole disposable emulator. Verify the disposable
-   font scale as well as AVD/API/posture before instrumentation. Do not let
-   Keystore or App instrumentation mutate the protected workspace.
-5. Preserve the read-only legacy outbox, Room v8 local authority, exact Android
-   package allow-list, inert restored-package inbox, and local no-upload copy.
-   Treat encrypted Google transport backup/restore as external evidence until
-   it is actually qualified.
-6. Follow the six-stage dependency chain; historical Train 1–6 plans are
-   evidence or replanning inputs, not executable contracts.
-7. Before recording the next pause or completion, run the repository gate from
-   `CLAUDE.md`, affected device suites, release assembly when production code
-   changed, and `git diff --check`; update this hand-off and every affected
-   contract document in the same change.
+1. Read the controller-authorized Ctrl+K follow-up above, then read
+   `.superpowers/sdd/2026-08-03-stage-5-platform-features-plan/test-fix-brief.md`
+   and its adjacent report. Historical Stage 5 resume instructions are
+   superseded.
+2. Confirm branch `test-fix` is at `34f6de0`, synchronized with
+   `origin/test-fix`, and preserve the local uncommitted exception plus all
+   unrelated working-tree changes.
+3. Pause. Do not commit, push, rerun, or merge without new controller
+   authority. If authorisation resumes the work, review the local exception
+   before deciding whether to spend bench 2.
 
 ## Live backlog: six dependency-ordered stages
 
@@ -2621,8 +2711,8 @@ recorded above.
 | 2 | Local backup and Android Auto Backup | Done | Local generations produce verified primary snapshots and one strictly whitelisted portable package |
 | 3 | App-managed backup and recovery takeover | Done | Drive backup, retention, recovery, writer epochs, stale-writer rejection, credential rotation, remote lifecycle, and approved product surfaces are proven |
 | 4 | Notes, activity, cloud attachments, and search | Done (qualified) | Notes/activity/search and attachment lifecycle/product flows are implemented; native fold and broader two-installation evidence remain post-Stage-4 |
-| 5 | Remaining platform features | In progress (Tasks 1–2 of 13 complete) | Import/export, widget, app lock, input, and calendar features use the final local schema |
-| 6 | Production qualification and rollout | Blocked by Stage 5 and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
+| 5 | Remaining platform features | Done (qualified) | Import/export, widget, app lock, input, and calendar features use the final local schema |
+| 6 | Production qualification and rollout | Paused pending CI authorization and external owner gates | Backup, attachment, takeover, recovery, accessibility, performance, privacy, and release gates pass |
 
 The dependency chain is strict:
 
@@ -2632,12 +2722,8 @@ Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 
 ### Current execution order
 
-1. Resume Stage 5 at Task 3 (GC closure over retired sets) from base
-   `eb343cb`, re-entering superpowers:subagent-driven-development with the
-   committed plan and the execution ledger named in the Stage 5 checkpoint.
-   Preserve Stage 4 as a closed authority, keep Samsung RTL
-   External-blocked, and retain native fold and broader two-installation
-   live recovery evidence as post-Stage-4 work.
+1. Remain paused at the controller-approved local exception. Any future
+   publication or use of bench 2 needs fresh controller authority.
 
 GitHub dependency-PR checks and resolution remain paused. Android Auto Backup
 and device transfer retain the verified exact-file allow-list. Existing Room,
@@ -2742,11 +2828,8 @@ explicitly planned, verified boundaries.
 
 ## Recommended next action
 
-Resume Stage 5 at Task 3 from the checkpoint above. Preserve Room as the
-sole live structured-data authority, treat the Stage 2 Android package as
-supplementary recovery input rather than upload evidence, and retain the
-External-blocked Samsung RTL rows plus native fold and broader
-two-installation recovery evidence as post-Stage-4 work.
+Remain paused with the documented local exception. Obtain controller authority
+before committing, pushing, rerunning, or using bench 2.
 
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly
