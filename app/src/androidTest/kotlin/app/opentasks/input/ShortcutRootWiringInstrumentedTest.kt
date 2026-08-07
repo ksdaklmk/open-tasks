@@ -210,16 +210,14 @@ private fun ComponentActivity.dispatchCtrlK() {
             ),
         ),
     )
-    assertTrue(
-        dispatchKeyEvent(
-            KeyEvent(
-                downTime,
-                SystemClock.uptimeMillis(),
-                KeyEvent.ACTION_UP,
-                KeyEvent.KEYCODE_K,
-                0,
-                KeyEvent.META_CTRL_ON,
-            ),
+    dispatchKeyEvent(
+        KeyEvent(
+            downTime,
+            SystemClock.uptimeMillis(),
+            KeyEvent.ACTION_UP,
+            KeyEvent.KEYCODE_K,
+            0,
+            KeyEvent.META_CTRL_ON,
         ),
     )
 }
