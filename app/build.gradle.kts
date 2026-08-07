@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -15,7 +17,7 @@ android {
         minSdk = 36
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -26,8 +28,23 @@ android {
         buildConfig = true
     }
 
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                val props = Properties()
+                keystorePropertiesFile.inputStream().use(props::load)
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
