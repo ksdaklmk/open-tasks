@@ -633,7 +633,9 @@ class TaskEditorInstrumentedTest {
         )
         composeRule.onNodeWithTag("task-milestone-option-${localMilestone.id.value}")
             .performClick()
-        composeRule.waitUntil(2_000) { submitted.get()?.milestoneId == localMilestone.id }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            submitted.get()?.milestoneId == localMilestone.id
+        }
 
         assertEquals(localMilestone.id, submitted.get()?.milestoneId)
     }

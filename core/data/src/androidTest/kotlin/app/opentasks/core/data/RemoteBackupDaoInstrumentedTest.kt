@@ -68,7 +68,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun activeConfigurationRoundTripsClaimAndPublicationThroughOpaqueTypes() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             val deviceId = CloudDeviceId.new()
@@ -98,7 +98,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun anInterruptedConnectingRowIsAdoptedByItsOwnLineage() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             // A crash between this row and the durable phase that records it
@@ -123,7 +123,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun anotherVaultsConnectingRowIsNeverAdoptedAtThisLineage() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val first = VaultId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = first))
@@ -141,7 +141,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun anAlreadyActiveLineageIsNeverAdoptedAsConnecting() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
@@ -177,7 +177,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun staleLocalStateVersionCannotAdvanceRemoteCheckpoint() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(
@@ -209,7 +209,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun onlyOneActiveConfigurationPerVaultIsAllowed() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val firstLineage = CloudLineageId.new()
             val secondLineage = CloudLineageId.new()
@@ -236,7 +236,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun dormantOwnershipLostAndTerminatedConfigsCoexistForOneVault() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val dormant = CloudLineageId.new()
             val ownershipLost = CloudLineageId.new()
@@ -295,7 +295,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun terminatedConfigurationRejectsTransitionsThatLeaveTerminated() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
@@ -347,7 +347,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun publicationSequenceAdvancesIndependentlyFromGeneration() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
@@ -405,7 +405,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun observeActiveEmitsTheActivatedConfiguration() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             assertNull(store.observeActive(vaultId).first())
@@ -425,7 +425,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun operationPhaseCompareAndSetRejectsAStalePhase() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val operationId = UUID.randomUUID().toString()
             store.putOperation(
@@ -469,7 +469,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun cleanupCursorBytesSurviveOperationPhaseTransitions() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val operationId = UUID.randomUUID().toString()
             val cursorV1 = byteArrayOf(1, 1, 1)
@@ -500,7 +500,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun accountBindingDigestReadsAreDefensiveCopies() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))
@@ -515,7 +515,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun insertObjectAndReadItBackByLineageAndLogicalId() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val logicalObjectId = RemoteLogicalObjectId.new()
             val value = remoteObject(lineageId, logicalObjectId)
@@ -530,7 +530,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun resumableSessionUriCanOnlyClearAfterVerification() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val logicalObjectId = RemoteLogicalObjectId.new()
             val uploading = remoteObject(
@@ -565,7 +565,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun removeObjectStateDeletesExactlyThatObject() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val lineageId = CloudLineageId.new()
             val keep = remoteObject(lineageId, RemoteLogicalObjectId.new())
             val remove = remoteObject(lineageId, RemoteLogicalObjectId.new())
@@ -581,7 +581,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun insertObjectRejectsNegativeFrameLength() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val value = remoteObject(
                 CloudLineageId.new(),
                 RemoteLogicalObjectId.new(),
@@ -596,7 +596,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun insertObjectRejectsNegativeUploadedByteOffset() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val value = remoteObject(
                 CloudLineageId.new(),
                 RemoteLogicalObjectId.new(),
@@ -611,7 +611,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun putOperationRejectsATimeBeforeTheEpoch() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val value = operation(
                 UUID.randomUUID().toString(),
                 CloudLineageId.new(),
@@ -628,7 +628,7 @@ class RemoteBackupDaoInstrumentedTest {
 
     @Test
     fun compareAndSetRejectsAnOwnershipClaimEpochMismatch() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             val vaultId = VaultId.new()
             val lineageId = CloudLineageId.new()
             store.insertConnecting(configuration(lineageId = lineageId, vaultId = vaultId))

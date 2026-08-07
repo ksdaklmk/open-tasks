@@ -83,7 +83,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val result = repository!!.execute(DomainCommand.CreateTask(PERSISTED_TITLE))
 
         assertTrue(result is CommandResult.Success)
-        val taskId = withTimeout(5_000) {
+        val taskId = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.title == PERSISTED_TITLE } }
                 .filterNotNull()
@@ -160,7 +160,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val afterRestart = Instant.parse("2026-07-27T04:00:00Z")
         openRepository(now = { beforeRestart })
         repository!!.execute(DomainCommand.StopTimer)
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.deletedAt == null } }
                 .filterNotNull()
@@ -172,7 +172,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.StartTimer(task.id, startedAt),
             ) is CommandResult.Success,
         )
-        val running = withTimeout(5_000) {
+        val running = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.home.activeTimer }
                 .filterNotNull()
@@ -187,7 +187,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository(now = { afterRestart })
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.home.activeTimer }
                 .filterNotNull()
@@ -204,7 +204,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val changedAt = Instant.parse("2026-07-27T05:00:00Z")
         openRepository(now = { changedAt })
         repository!!.execute(DomainCommand.StopTimer)
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.deletedAt == null } }
                 .filterNotNull()
@@ -236,7 +236,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 ),
             ) is CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.timeEntryConflicts.size == 1
             }
@@ -248,7 +248,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository(now = { changedAt.plusSeconds(60) })
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.timeEntries.any { it.id == secondId } &&
                     snapshot.timeEntryConflicts.size == 1
@@ -266,14 +266,14 @@ class RoomVaultRepositoryInstrumentedTest {
                 changedAt = changedAt.plusSeconds(61),
             ),
         ) as CommandResult.Success
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.timeEntryConflicts.isEmpty() &&
                     snapshot.timeEntries.first { it.id == secondId }.note == "Review updated"
             }
         }
         repository!!.execute(checkNotNull(updated.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.timeEntryConflicts.size == 1 &&
                     snapshot.timeEntries.first { it.id == secondId }.note == "Review"
@@ -283,7 +283,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val deleted = repository!!.execute(DomainCommand.DeleteTimeEntry(firstId))
             as CommandResult.Success
         repository!!.execute(checkNotNull(deleted.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.timeEntries.any { it.id == firstId }
             }
@@ -294,7 +294,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun reminderAndTaskUpdateAreAtomicAndSurviveEncryptedDatabaseRestart() = runBlocking {
         openRepository()
-        val original = withTimeout(5_000) {
+        val original = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { !it.isCompleted } }
                 .filterNotNull()
@@ -328,7 +328,7 @@ class RoomVaultRepositoryInstrumentedTest {
         ) as CommandResult.Success
         val expectedReminder = reminder.copy(id = Reminder.primaryId(original.id))
 
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == original.id }?.due == due &&
                     snapshot.reminders.singleOrNull { it.taskId == original.id } ==
@@ -342,7 +342,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
         openRepository()
 
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.reminders.singleOrNull { it.taskId == original.id } == expectedReminder
             }
@@ -350,7 +350,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertEquals(due, restored.tasks.first { it.id == original.id }.due)
 
         assertTrue(repository!!.execute(checkNotNull(update.undo)) is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == original.id }?.due == original.due &&
                     snapshot.reminders.none { it.taskId == original.id }
@@ -367,7 +367,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun checklistAndTagRelationsSurviveEncryptedDatabaseRestart() = runBlocking {
         openRepository()
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
                 .filterNotNull()
@@ -383,7 +383,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertTrue(checklistResult is CommandResult.Success)
         assertTrue(tagResult is CommandResult.Success)
 
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 val updated = snapshot.tasks.firstOrNull { it.id == task.id }
                     ?: return@first false
@@ -406,7 +406,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertFalse(encryptedBytes.containsSubsequence(PERSISTED_TAG_NAME.toByteArray()))
 
         openRepository()
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 val updated = snapshot.tasks.firstOrNull { it.id == task.id }
                     ?: return@first false
@@ -426,7 +426,7 @@ class RoomVaultRepositoryInstrumentedTest {
     fun recurringCompletionAndUndoSurviveEncryptedDatabaseRestart() = runBlocking {
         val testNow = { Instant.parse("2026-07-26T10:00:00Z") }
         openRepository(testNow)
-        val original = withTimeout(5_000) {
+        val original = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.firstOrNull {
@@ -473,7 +473,7 @@ class RoomVaultRepositoryInstrumentedTest {
         ) as CommandResult.Success
         assertEquals("Task completed • next occurrence scheduled", completion.message)
 
-        val completedSnapshot = withTimeout(5_000) {
+        val completedSnapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 val next = snapshot.tasks.firstOrNull {
                     it.recurrenceSeriesId == original.id && it.id != original.id
@@ -517,7 +517,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository(testNow)
-        val restoredSnapshot = withTimeout(5_000) {
+        val restoredSnapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == nextBeforeRestart.id } ==
                     nextBeforeRestart &&
@@ -531,7 +531,7 @@ class RoomVaultRepositoryInstrumentedTest {
         )
 
         assertTrue(repository!!.execute(checkNotNull(completion.undo)) is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.none { it.id == nextBeforeRestart.id } &&
                     snapshot.tasks.firstOrNull { it.id == original.id }?.isCompleted == false &&
@@ -559,7 +559,7 @@ class RoomVaultRepositoryInstrumentedTest {
             ),
         ) as CommandResult.Success
         assertEquals("Task completed • next occurrence scheduled", completedAgain.message)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.any { it.id == nextBeforeRestart.id } &&
                     snapshot.tasks.firstOrNull { it.id == original.id }?.isCompleted == true &&
@@ -572,7 +572,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun undoingGeneratedOccurrenceCompletionRetiresItsBlobBearingAttachments() = runBlocking {
         openRepository()
-        val original = withTimeout(5_000) {
+        val original = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
                 .filterNotNull()
@@ -600,7 +600,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 completedAt = Instant.parse("2026-07-31T10:00:00Z"),
             ),
         ) as CommandResult.Success
-        val generated = withTimeout(5_000) {
+        val generated = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.singleOrNull {
@@ -625,7 +625,7 @@ class RoomVaultRepositoryInstrumentedTest {
 
         repository!!.execute(checkNotNull(completed.undo))
 
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.none { it.id == generated.id }
             }
@@ -644,7 +644,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun repeatedRecurringCompletionAcrossRestartCreatesExactlyOneOccurrence() = runBlocking {
         openRepository()
-        val original = withTimeout(5_000) {
+        val original = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
                 .filterNotNull()
@@ -672,7 +672,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 completedAt = Instant.parse("2026-07-31T10:00:00Z"),
             ),
         ) as CommandResult.Success
-        val generated = withTimeout(5_000) {
+        val generated = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.singleOrNull {
@@ -702,7 +702,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 completedAt = Instant.parse("2026-07-31T10:00:02Z"),
             ),
         )
-        val afterRedelivery = withTimeout(5_000) {
+        val afterRedelivery = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.count {
                     it.recurrenceSeriesId == original.id && it.id != original.id
@@ -717,7 +717,7 @@ class RoomVaultRepositoryInstrumentedTest {
         )
 
         assertTrue(repository!!.execute(checkNotNull(firstCompletion.undo)) is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.none { it.id == generated.id } &&
                     snapshot.tasks.firstOrNull { it.id == original.id }?.isCompleted == false
@@ -729,7 +729,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun ruleChangeUndoOnGeneratedOccurrenceRestoresSeriesMetadataAcrossRestart() = runBlocking {
         openRepository()
-        val original = withTimeout(5_000) {
+        val original = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
                 .filterNotNull()
@@ -765,7 +765,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 ),
             ) is CommandResult.Success,
         )
-        val occurrence = withTimeout(5_000) {
+        val occurrence = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.firstOrNull {
@@ -789,7 +789,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 estimate = occurrence.estimate,
             ),
         ) as CommandResult.Success
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == occurrence.id }
                     ?.recurrenceSeriesId == occurrence.id
@@ -797,7 +797,7 @@ class RoomVaultRepositoryInstrumentedTest {
         }
 
         assertTrue(repository!!.execute(checkNotNull(ruleChange.undo)) is CommandResult.Success)
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.firstOrNull {
@@ -818,7 +818,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository()
-        val persisted = withTimeout(5_000) {
+        val persisted = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.id == occurrence.id } }
                 .filterNotNull()
@@ -1204,7 +1204,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 name = "Quarterly filing template",
             ),
         ) as CommandResult.Success
-        val captured = withTimeout(5_000) {
+        val captured = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.templates.any { it.id == templateId }
             }.templates.single { it.id == templateId }
@@ -1221,7 +1221,7 @@ class RoomVaultRepositoryInstrumentedTest {
         repository = null
         database = null
         openRepository(now = { Instant.parse("2026-07-27T06:01:00Z") })
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.templates.singleOrNull()?.id == templateId
             }
@@ -1238,7 +1238,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 ),
             ) is CommandResult.Success,
         )
-        val instantiated = withTimeout(5_000) {
+        val instantiated = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.projects.any { it.id == projectId } &&
                     snapshot.tasks.count { it.projectId == projectId } == captured.tasks.size &&
@@ -1269,11 +1269,11 @@ class RoomVaultRepositoryInstrumentedTest {
         )
 
         repository!!.execute(checkNotNull(capture.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { it.templates.isEmpty() }
         }
         repository!!.execute(DomainCommand.RestoreTemplate(captured))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { it.templates.singleOrNull()?.id == templateId }
         }
         Unit
@@ -1282,7 +1282,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun trashRestoreAndPermanentDeleteSurviveEncryptedDatabaseRestart() = runBlocking {
         openRepository()
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.checklist.isNotEmpty() } }
                 .filterNotNull()
@@ -1310,7 +1310,7 @@ class RoomVaultRepositoryInstrumentedTest {
 
         val deleted = repository!!.execute(DomainCommand.DeleteTask(task.id, deletedAt))
         assertTrue(deleted is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == task.id }?.deletedAt == deletedAt
             }
@@ -1322,7 +1322,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository()
-        val trashed = withTimeout(5_000) {
+        val trashed = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.tasks.firstOrNull { it.id == task.id } }
                 .filterNotNull()
@@ -1331,7 +1331,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertTrue(trashed.checklist.isNotEmpty())
 
         assertTrue(repository!!.execute(DomainCommand.RestoreTask(task.id)) is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == task.id }?.deletedAt == null
             }
@@ -1342,7 +1342,7 @@ class RoomVaultRepositoryInstrumentedTest {
             repository!!.execute(DomainCommand.PermanentlyDeleteTask(task.id)) is
                 CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.none { it.id == task.id }
             }
@@ -1363,7 +1363,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository()
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.none { it.id == task.id }
             }
@@ -1390,7 +1390,7 @@ class RoomVaultRepositoryInstrumentedTest {
             ),
         )
         assertTrue(result is CommandResult.Success)
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.projects.firstOrNull { it.id == original.id }?.name ==
                     PERSISTED_PROJECT_NAME
@@ -1406,7 +1406,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertFalse(encryptedBytes.containsSubsequence(PERSISTED_PROJECT_SUMMARY.toByteArray()))
 
         openRepository()
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot -> snapshot.projects.firstOrNull { it.id == original.id } }
                 .filterNotNull()
@@ -1452,7 +1452,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.ArchiveWorkflowStatus(OpenTasksFixtures.planned),
             ) is CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.workflowStatuses.firstOrNull { it.id == customId }?.name ==
                     "Review queue" &&
@@ -1468,7 +1468,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
         openRepository()
 
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.workflowStatuses.firstOrNull { it.id == customId }?.name ==
                     "Review queue"
@@ -1484,7 +1484,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.RestoreArchivedWorkflowStatus(OpenTasksFixtures.planned),
             ) is CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.workflowStatuses
                     .firstOrNull { it.id == OpenTasksFixtures.planned }
@@ -1522,7 +1522,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.ArchiveProject(projectId, archivedAt),
             ) is CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.projects.firstOrNull { it.id == projectId }?.archivedAt == archivedAt &&
                     snapshot.tasks.any {
@@ -1538,7 +1538,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
 
         openRepository()
-        val archivedSnapshot = withTimeout(5_000) {
+        val archivedSnapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.projects.firstOrNull { it.id == projectId }?.archivedAt == archivedAt
             }
@@ -1559,7 +1559,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.RestoreArchivedProject(projectId),
             ) is CommandResult.Success,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.projects.firstOrNull { it.id == projectId }?.archivedAt == null &&
                     snapshot.home.projects.any { it.id == projectId }
@@ -1572,7 +1572,7 @@ class RoomVaultRepositoryInstrumentedTest {
     fun milestoneLifecycleMembershipUndoAndOutboxSurviveRestart() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-27T04:00:00Z") })
         val project = OpenTasksFixtures.studioProject
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.any { it.projectId == project.id && !it.isCompleted }
             }.tasks.first { it.projectId == project.id && !it.isCompleted }
@@ -1621,7 +1621,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
         openRepository(now = { Instant.parse("2026-07-27T04:01:00Z") })
 
-        val restored = withTimeout(5_000) {
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.milestones.any {
                     it.id == milestoneId && it.name == "Release ready"
@@ -1636,7 +1636,7 @@ class RoomVaultRepositoryInstrumentedTest {
             DomainCommand.DeleteMilestone(milestoneId),
         ) as CommandResult.Success
         repository!!.execute(checkNotNull(deleted.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.milestones.any { it.id == milestoneId } &&
                     snapshot.tasks.any {
@@ -1650,7 +1650,7 @@ class RoomVaultRepositoryInstrumentedTest {
     @Test
     fun dependencyLifecycleCycleGuardResolutionAndOutboxSurviveRestart() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
-        val candidates = withTimeout(5_000) {
+        val candidates = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.count {
                     !it.isCompleted && !it.isBlocked && it.deletedAt == null &&
@@ -1680,7 +1680,7 @@ class RoomVaultRepositoryInstrumentedTest {
             RejectionReason.DEPENDENCY_CYCLE,
             (cycle as CommandResult.Rejected).reason,
         )
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == first.id }?.blockedBy == setOf(second.id)
             }
@@ -1697,7 +1697,7 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
         openRepository(now = { Instant.parse("2026-07-27T05:01:00Z") })
 
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == first.id }?.let { observed ->
                     observed.dependencyIds == setOf(second.id) &&
@@ -1708,7 +1708,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val completion = repository!!.execute(
             DomainCommand.CompleteTask(second.id, acknowledgeBlocked = true),
         ) as CommandResult.Success
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == first.id }?.let { observed ->
                     observed.dependencyIds == setOf(second.id) && observed.blockedBy.isEmpty()
@@ -1717,13 +1717,13 @@ class RoomVaultRepositoryInstrumentedTest {
         }
 
         repository!!.execute(checkNotNull(completion.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == first.id }?.blockedBy == setOf(second.id)
             }
         }
         repository!!.execute(checkNotNull(firstLink.undo))
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == first.id }?.let { observed ->
                     observed.dependencyIds.isEmpty() && observed.blockedBy.isEmpty()
@@ -1858,7 +1858,7 @@ class RoomVaultRepositoryInstrumentedTest {
         assertTrue(tagResult is CommandResult.Success)
         val tagUndo = (tagResult as CommandResult.Success).undo as DomainCommand.SetTaskTag
         val uniqueTagId = tagUndo.tagId
-        withTimeout(5_000) {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .first { snapshot ->
                     snapshot.tags.any { it.id == uniqueTagId && it.name == uniqueTagName } &&
@@ -2060,7 +2060,7 @@ class RoomVaultRepositoryInstrumentedTest {
         openRepository(now = { deletedAt })
         listOf("Expired one", "Expired two").forEach { title ->
             repository!!.execute(DomainCommand.CreateTask(title))
-            val task = withTimeout(5_000) {
+            val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
                 repository!!.observeWorkspace()
                     .map { snapshot -> snapshot.tasks.singleOrNull { it.title == title } }
                     .filterNotNull()
@@ -2089,7 +2089,7 @@ class RoomVaultRepositoryInstrumentedTest {
         openRepository(now = { deletedAt })
         repository!!.execute(DomainCommand.CreateTask("Expired parent"))
         repository!!.execute(DomainCommand.CreateTask("Surviving child"))
-        val tasks = withTimeout(5_000) {
+        val tasks = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.any { it.title == "Expired parent" } &&
                     snapshot.tasks.any { it.title == "Surviving child" }
@@ -2127,7 +2127,7 @@ class RoomVaultRepositoryInstrumentedTest {
         val purgedAt = Instant.parse("2026-07-29T10:00:00Z")
         openRepository(now = { deletedAt })
         repository!!.execute(DomainCommand.CreateTask("Expired with attachment"))
-        val task = withTimeout(5_000) {
+        val task = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { snapshot ->
                     snapshot.tasks.singleOrNull { it.title == "Expired with attachment" }

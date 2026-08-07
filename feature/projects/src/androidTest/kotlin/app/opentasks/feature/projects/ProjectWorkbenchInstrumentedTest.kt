@@ -15,7 +15,6 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.espresso.Espresso
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
@@ -204,7 +203,6 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("save-template-sheet").assertIsDisplayed()
         composeRule.onNodeWithTag("template-name-field")
             .performTextReplacement("  Client delivery  ")
-        Espresso.closeSoftKeyboard()
         composeRule.onNodeWithTag("confirm-save-template").performClick()
 
         assertEquals(project.id to "Client delivery", captured.get())

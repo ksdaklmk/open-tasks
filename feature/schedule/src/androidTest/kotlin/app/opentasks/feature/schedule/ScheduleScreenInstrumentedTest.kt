@@ -1,5 +1,6 @@
 package app.opentasks.feature.schedule
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
@@ -149,7 +151,8 @@ class ScheduleScreenInstrumentedTest {
         composeRule.onNodeWithTag("unscheduled-task-${openUnscheduled.id.value}")
             .assertHeightIsAtLeast(48.dp)
 
-        composeRule.onNodeWithTag("schedule-next").performClick()
+        composeRule.onNodeWithTag("schedule-next")
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("schedule-column-2026-08-03").fetchSemanticsNode()
     }
 

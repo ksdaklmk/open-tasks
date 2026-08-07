@@ -1,7 +1,10 @@
 package app.opentasks.feature.more
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -34,7 +37,6 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.DurationQuality
@@ -71,7 +73,9 @@ class InsightsScreenInstrumentedTest {
 
     @Test
     fun moreOpensInsightsAndOnScreenAndSystemBackReturnToOverview() {
+        lateinit var backDispatcher: OnBackPressedDispatcher
         composeRule.setContent {
+            backDispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
             OpenTasksTheme {
                 MoreScreen(
                     tasks = emptyList(),
@@ -103,7 +107,7 @@ class InsightsScreenInstrumentedTest {
             .performScrollTo()
             .performClick()
         composeRule.onNodeWithTag("insights-screen").assertIsDisplayed()
-        Espresso.pressBack()
+        composeRule.runOnUiThread(backDispatcher::onBackPressed)
         composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
     }
 
@@ -289,16 +293,24 @@ class InsightsScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText("Trusted time 1 h").assertIsDisplayed()
-        composeRule.onNodeWithText("Conflicted time 30 min, excluded").assertIsDisplayed()
-        composeRule.onNodeWithText("Included total 1 h").assertIsDisplayed()
+        composeRule.onNodeWithText("Trusted time 1 h").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Conflicted time 30 min, excluded")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Included total 1 h")
+            .performScrollTo()
+            .assertIsDisplayed()
 
         composeRule.onNodeWithTag("insights-include-conflicted")
             .performScrollTo()
             .performClick()
 
-        composeRule.onNodeWithText("Conflicted time 30 min, included").assertIsDisplayed()
-        composeRule.onNodeWithText("Included total 1 h 30 min").assertIsDisplayed()
+        composeRule.onNodeWithText("Conflicted time 30 min, included")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Included total 1 h 30 min")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -667,7 +679,7 @@ class InsightsScreenInstrumentedTest {
             OpenTasksTheme {
                 Box(
                     modifier = Modifier
-                        .width(772.dp)
+                        .requiredWidth(772.dp)
                         .height(800.dp),
                 ) {
                     TestInsightsScreen(populatedState())
@@ -676,17 +688,15 @@ class InsightsScreenInstrumentedTest {
         }
 
         val projects = composeRule.onNodeWithText("Projects")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
         val view = composeRule.onNodeWithText("View")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
 
         assertTrue(
             "The report should be to the right of filters at the usable expanded width",
             view.left > projects.left,
         )
-        assertEquals(projects.top, view.top, 1f)
+        assertEquals(projects.top.value, view.top.value, 1f)
     }
 
     @Test
@@ -695,7 +705,7 @@ class InsightsScreenInstrumentedTest {
             OpenTasksTheme {
                 Box(
                     modifier = Modifier
-                        .width(719.dp)
+                        .requiredWidth(719.dp)
                         .height(800.dp),
                 ) {
                     TestInsightsScreen(populatedState())
@@ -704,11 +714,9 @@ class InsightsScreenInstrumentedTest {
         }
 
         val projects = composeRule.onNodeWithText("Projects")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
         val view = composeRule.onNodeWithText("View")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
 
         assertTrue("The report should be below filters at 719 dp", view.top > projects.top)
     }
@@ -719,7 +727,7 @@ class InsightsScreenInstrumentedTest {
             OpenTasksTheme {
                 Box(
                     modifier = Modifier
-                        .width(720.dp)
+                        .requiredWidth(720.dp)
                         .height(800.dp),
                 ) {
                     TestInsightsScreen(populatedState())
@@ -728,14 +736,12 @@ class InsightsScreenInstrumentedTest {
         }
 
         val projects = composeRule.onNodeWithText("Projects")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
         val view = composeRule.onNodeWithText("View")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
 
         assertTrue("The report should be right of filters at 720 dp", view.left > projects.left)
-        assertEquals(projects.top, view.top, 1f)
+        assertEquals(projects.top.value, view.top.value, 1f)
     }
 
     @Test
@@ -748,7 +754,7 @@ class InsightsScreenInstrumentedTest {
                 OpenTasksTheme {
                     Box(
                         modifier = Modifier
-                            .width(720.dp)
+                            .requiredWidth(720.dp)
                             .height(640.dp),
                     ) {
                         TestInsightsScreen(qualifiedState())
@@ -758,11 +764,9 @@ class InsightsScreenInstrumentedTest {
         }
 
         val projects = composeRule.onNodeWithText("Projects")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
         val view = composeRule.onNodeWithText("View")
-            .fetchSemanticsNode()
-            .boundsInRoot
+            .getUnclippedBoundsInRoot()
         assertTrue(
             "At 200% text, the report should stack below filters",
             view.top > projects.top,
