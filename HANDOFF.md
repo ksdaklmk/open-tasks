@@ -9,11 +9,25 @@
   #13 was merged to `main` as `1cdab0b` with branch `test-fix` deleted.
 - Standing residuals: **F6** — the expanded API 37.0 canary image still
   fails before tests run (credential-encrypted storage unavailable); it
-  is an image-quality blocker, not a code defect, and per the standing
-  ruling its lapse-or-wait disposition remains an explicit user
-  decision. **CI blind spot** — CI never proves Ctrl+K focuses the
-  query field (the headless runner cannot grant Dialog window focus);
-  only focus-capable device runs execute that assertion.
+  is an image-quality blocker, not a code defect. User ruling, 7 August
+  2026: keep the matrix entry and observe only — the runner fetches the
+  current canary, so a healed image restores the lane for free; expect
+  the lane red until then and treat API 36 plus verify plus release as
+  the green signal. **CI blind spot** — CI never proves Ctrl+K focuses
+  the query field (the headless runner cannot grant Dialog window
+  focus); only focus-capable device runs execute that assertion.
+- Dependency maintenance, 7 August 2026: Dependabot queue cleared.
+  Stale PRs #4/#5/#7/#8 were closed (their versions were already on
+  `main` from the 30 July audit). lifecycle 2.11.0 landed as `81f644e`
+  and actions/upload-artifact v7.0.1 as `f175ef6` (SHA verified against
+  the upstream tag; workflow verifier green). CI run `31194601589`
+  validated both: verify, API 36 (all six modules), and release green;
+  all three report artifacts uploaded under v7; API 37.0 red on F6
+  only. PRs #9 and #11 are closed; no open PRs or issues remain.
+- Next decision (user-owned, needs a brainstorming session): the
+  product direction after Stage 5 — release preparation (signing
+  config, Play Console) versus a new feature stage. Nothing is
+  in-flight; the repo is clean and green.
 - Session status: **Stage 5 is complete and qualified: all 13 tasks of
   the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
   family and collection command; retired-set GC closure; silent
