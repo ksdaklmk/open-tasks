@@ -151,6 +151,23 @@ data class TimeEntryEdit(
     val note: String,
 )
 
+/**
+ * The focus cycles this screen can ask for.
+ *
+ * A module-owned twin of `:app`'s own preset enum, on the `LockDelayOption`
+ * precedent: `feature:tasks` depends only on `:core:model` and
+ * `:core:designsystem`, so `:app` maps between the two.
+ */
+enum class FocusPresetOption {
+    TWENTY_FIVE_FIVE,
+    FIFTY_TEN,
+}
+
+private val FOCUS_PRESET_OPTIONS = listOf(
+    FocusPresetOption.TWENTY_FIVE_FIVE to R.string.task_focus_preset_twenty_five_five,
+    FocusPresetOption.FIFTY_TEN to R.string.task_focus_preset_fifty_ten,
+)
+
 private enum class TaskFilter(val label: String) {
     INBOX("Inbox"),
     TODAY("Today"),
@@ -220,6 +237,7 @@ fun TasksScreen(
     onRetryAttachment: (AttachmentId) -> Unit = {},
     onOpenAttachmentSetup: () -> Unit = {},
     onAddToCalendar: (() -> Unit)? = null,
+    onStartFocus: ((FocusPresetOption) -> Unit)? = null,
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
@@ -300,6 +318,7 @@ fun TasksScreen(
                 onOpenAttachmentSetup = onOpenAttachmentSetup,
                 hingeExclusionBandDp = hingeExclusionBandDp,
                 onAddToCalendar = onAddToCalendar,
+                onStartFocus = onStartFocus,
             )
         }
         return
@@ -398,6 +417,7 @@ fun TasksScreen(
                         onOpenAttachmentSetup = onOpenAttachmentSetup,
                         hingeExclusionBandDp = hingeExclusionBandDp,
                         onAddToCalendar = onAddToCalendar,
+                        onStartFocus = onStartFocus,
                         modifier = Modifier
                             .weight(1f - listPaneFraction)
                             .testTag("detailPane"),
@@ -549,6 +569,7 @@ private fun TaskDetailPane(
     onOpenAttachmentSetup: () -> Unit,
     hingeExclusionBandDp: IntRange?,
     onAddToCalendar: (() -> Unit)? = null,
+    onStartFocus: ((FocusPresetOption) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sheetTopPaddingDp = hingeExclusionBandDp?.last ?: 0
@@ -1906,15 +1927,23 @@ private fun TaskDetailPane(
                 Spacer(Modifier.width(8.dp))
                 Text(if (task.isCompleted) "Completed" else "Complete task")
             }
-            OutlinedButton(
-                onClick = onToggleTimer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.Timer, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (timerRunning) "Stop timer" else "Start timer")
+                OutlinedButton(
+                    onClick = onToggleTimer,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                ) {
+                    Icon(Icons.Rounded.Timer, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (timerRunning) "Stop timer" else "Start timer")
+                }
+                if (onStartFocus != null && !timerRunning) {
+                    FocusPresetMenu(onStartFocus = onStartFocus)
+                }
             }
             if (onAddToCalendar != null) {
                 OutlinedButton(
@@ -2061,6 +2090,36 @@ private fun TaskDetailPane(
             },
         ) {
             DatePicker(state = datePickerState)
+        }
+    }
+}
+
+@Composable
+private fun FocusPresetMenu(onStartFocus: (FocusPresetOption) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("focus-preset-menu"),
+        ) {
+            Icon(
+                Icons.Rounded.ArrowDropDown,
+                contentDescription = stringResource(R.string.task_focus_start),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            FOCUS_PRESET_OPTIONS.forEach { (option, labelRes) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(labelRes)) },
+                    onClick = {
+                        expanded = false
+                        onStartFocus(option)
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                )
+            }
         }
     }
 }

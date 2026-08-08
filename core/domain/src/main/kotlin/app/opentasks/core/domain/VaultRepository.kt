@@ -265,6 +265,18 @@ sealed interface DomainCommand {
 
     data object StopTimer : DomainCommand
 
+    /**
+     * Stops the running timer only when [taskId] still owns it.
+     *
+     * The comparison and the stop happen inside one repository transaction, so
+     * an automated caller -- a focus-cycle boundary, say -- can never stop a
+     * timer that a person started on a different task in between. No running
+     * timer at all is an idempotent success; a timer another task owns is
+     * rejected with [RejectionReason.TIMER_OWNERSHIP_CHANGED] and writes
+     * nothing.
+     */
+    data class StopTimerIfOwned(val taskId: TaskId) : DomainCommand
+
     data class AddTimeEntry(
         val entryId: TimeEntryId,
         val taskId: TaskId,
@@ -418,6 +430,7 @@ enum class RejectionReason {
     BLOCKED_TASK_WARNING_REQUIRED,
     DEPENDENCY_CYCLE,
     INVALID_TIME_ENTRY_RANGE,
+    TIMER_OWNERSHIP_CHANGED,
     TIME_ENTRY_NOTE_TOO_LONG,
     TIME_ENTRY_LIMIT_REACHED,
     INVALID_STATE,

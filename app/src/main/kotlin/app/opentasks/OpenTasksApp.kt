@@ -23,9 +23,13 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -54,6 +58,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -69,6 +74,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -82,6 +88,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -125,6 +132,7 @@ import app.opentasks.feature.projects.ProjectEdit
 import app.opentasks.feature.projects.ProjectsScreen
 import app.opentasks.feature.projects.WorkflowMove
 import app.opentasks.feature.schedule.ScheduleScreen
+import app.opentasks.feature.tasks.FocusPresetOption
 import app.opentasks.feature.tasks.TaskEdit
 import app.opentasks.feature.tasks.TasksScreen
 import androidx.core.content.ContextCompat
@@ -132,9 +140,14 @@ import androidx.core.net.toUri
 import app.opentasks.input.ShortcutAction
 import app.opentasks.input.ShortcutHelpDialog
 import app.opentasks.input.shortcutActionFor
+import app.opentasks.focus.FocusNotifications
+import app.opentasks.focus.FocusPhaseKind
+import app.opentasks.focus.FocusPreset
+import app.opentasks.focus.FocusSession
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -242,6 +255,7 @@ fun OpenTasksApp(
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
         val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
         val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+        val focusSession by viewModel.focusSession.collectAsStateWithLifecycle()
         val attachmentStates by attachmentViewModel.rowStates.collectAsStateWithLifecycle()
         val attachmentSetupRequired by
             attachmentViewModel.setupRequired.collectAsStateWithLifecycle()
@@ -367,6 +381,13 @@ fun OpenTasksApp(
         }
         val preciseRemindersAvailable = remember(permissionStateVersion) {
             activity.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        }
+        // Its own channel, so a person can silence focus boundaries without
+        // silencing reminders. A refusal here only costs the alert: the cycle
+        // itself keeps running and the banner offers the existing
+        // enable-notifications route rather than a second permission flow.
+        val focusAlertsEnabled = remember(permissionStateVersion) {
+            FocusNotifications.areEnabled(activity)
         }
         // Re-read on the same trigger as the permission checks above: this
         // most commonly changes when a person leaves for system settings to
@@ -520,6 +541,11 @@ fun OpenTasksApp(
                     Lifecycle.Event.ON_RESUME -> {
                         permissionStateVersion++
                         viewModel.setInsightsForegrounded(true)
+                        // A boundary the system delivered while this process
+                        // was gone, or an alarm a force-stop cancelled, is
+                        // settled here -- through the same ownership decision
+                        // the boundary receiver uses.
+                        viewModel.reconcileFocus()
                     }
                     Lifecycle.Event.ON_PAUSE -> viewModel.setInsightsForegrounded(false)
                     else -> Unit
@@ -707,27 +733,38 @@ fun OpenTasksApp(
                 contentWindowInsets = WindowInsets.safeDrawing,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 bottomBar = {
-                    if (compact) {
-                        NavigationBar {
-                            destinations.forEach { destination ->
-                                NavigationBarItem(
-                                    selected = currentRoute == destination.route,
-                                    onClick = {
-                                        navigateFromPrimaryNavigation(destination.route)
-                                    },
-                                    icon = {
-                                        Icon(
-                                            destination.icon,
-                                            contentDescription = destination.label
-                                                .takeUnless { showNavigationLabels },
-                                        )
-                                    },
-                                    label = if (showNavigationLabels) {
-                                        { Text(destination.label) }
-                                    } else {
-                                        null
-                                    },
-                                )
+                    Column {
+                        focusSession?.let { session ->
+                            FocusBanner(
+                                session = session,
+                                notificationsEnabled = focusAlertsEnabled,
+                                hasNavigationBarBelow = compact,
+                                onEnableNotifications = ::enableNotifications,
+                                onStop = viewModel::stopFocus,
+                            )
+                        }
+                        if (compact) {
+                            NavigationBar {
+                                destinations.forEach { destination ->
+                                    NavigationBarItem(
+                                        selected = currentRoute == destination.route,
+                                        onClick = {
+                                            navigateFromPrimaryNavigation(destination.route)
+                                        },
+                                        icon = {
+                                            Icon(
+                                                destination.icon,
+                                                contentDescription = destination.label
+                                                    .takeUnless { showNavigationLabels },
+                                            )
+                                        },
+                                        label = if (showNavigationLabels) {
+                                            { Text(destination.label) }
+                                        } else {
+                                            null
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -986,6 +1023,14 @@ fun OpenTasksApp(
                                     onAddToCalendar = selectedTask
                                         ?.let(::calendarPreviewFor)
                                         ?.let { preview -> { calendarPreview = preview } },
+                                    onStartFocus = selectedTask?.let { task ->
+                                        { option: FocusPresetOption ->
+                                            viewModel.startFocus(
+                                                task.id,
+                                                option.toFocusPreset(),
+                                            )
+                                        }
+                                    },
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -1477,6 +1522,101 @@ private fun LockDelayOption.toLockDelay(): LockDelay = when (this) {
     LockDelayOption.FIVE_MINUTES -> LockDelay.FIVE_MINUTES
     LockDelayOption.FIFTEEN_MINUTES -> LockDelay.FIFTEEN_MINUTES
 }
+
+/** The same one-sided mapping as [toLockDelay], for `feature:tasks`. */
+private fun FocusPresetOption.toFocusPreset(): FocusPreset = when (this) {
+    FocusPresetOption.TWENTY_FIVE_FIVE -> FocusPreset.TWENTY_FIVE_FIVE
+    FocusPresetOption.FIFTY_TEN -> FocusPreset.FIFTY_TEN
+}
+
+/**
+ * A compact strip above the bottom bar while a focus cycle runs: which phase
+ * it is in, how long that phase has left, and the one way out. There is no
+ * skip control -- a cycle is either running or stopped.
+ *
+ * The remaining time ticks once a second off the phase end, so it stays right
+ * across a recomposition and needs no state of its own beyond the tick.
+ */
+@Composable
+private fun FocusBanner(
+    session: FocusSession,
+    notificationsEnabled: Boolean,
+    hasNavigationBarBelow: Boolean,
+    onEnableNotifications: () -> Unit,
+    onStop: () -> Unit,
+) {
+    var now by remember(session) { mutableStateOf(Instant.now()) }
+    LaunchedEffect(session) {
+        while (true) {
+            delay(1_000L)
+            now = Instant.now()
+        }
+    }
+    val remaining = Duration.between(now, session.phaseEndsAt).coerceAtLeast(Duration.ZERO)
+    // The navigation bar consumes the bottom inset itself when it is there;
+    // without it this strip is the bottom-most surface and must do so.
+    val insetSides = if (hasNavigationBarBelow) {
+        WindowInsetsSides.Horizontal
+    } else {
+        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+    }
+    Surface(
+        tonalElevation = 3.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("focus-banner"),
+    ) {
+        Row(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(insetSides))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(
+                        when (session.phase) {
+                            FocusPhaseKind.FOCUS -> R.string.focus_banner_focus_phase
+                            FocusPhaseKind.REST -> R.string.focus_banner_rest_phase
+                        },
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(
+                        R.string.focus_banner_remaining,
+                        formatFocusRemaining(remaining),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (!notificationsEnabled) {
+                TextButton(
+                    onClick = onEnableNotifications,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.focus_banner_enable_notifications))
+                }
+            }
+            TextButton(
+                onClick = onStop,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("focus-stop"),
+            ) {
+                Text(stringResource(R.string.focus_banner_stop))
+            }
+        }
+    }
+}
+
+private fun formatFocusRemaining(remaining: Duration): String = String.format(
+    Locale.UK,
+    "%d:%02d",
+    remaining.toMinutes(),
+    remaining.toSecondsPart(),
+)
 
 private fun WorkspaceSnapshot.attachment(attachmentId: AttachmentId): Attachment? =
     attachments.firstOrNull { it.id == attachmentId }

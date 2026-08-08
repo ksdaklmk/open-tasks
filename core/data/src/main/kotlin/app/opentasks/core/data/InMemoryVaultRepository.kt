@@ -215,6 +215,7 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.PurgeExpiredTrash -> purgeExpiredTrash(command)
             is DomainCommand.StartTimer -> startTimer(command)
             DomainCommand.StopTimer -> stopTimer()
+            is DomainCommand.StopTimerIfOwned -> stopTimerIfOwned(command)
             is DomainCommand.AddTimeEntry -> addTimeEntry(command)
             is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
             is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
@@ -1925,6 +1926,28 @@ class InMemoryVaultRepository internal constructor(
         val active = current.home.activeTimer
         if (active == null) {
             return CommandResult.Rejected(RejectionReason.INVALID_STATE, "No timer is running.")
+        }
+        val stoppedAt = maxOf(now(), active.startedAt)
+        mutableWorkspace.value = current.withReconciledTimeState(
+            at = stoppedAt,
+            entries = current.timeEntries.map { entry ->
+                if (entry.id == active.entryId) entry.copy(stoppedAt = stoppedAt) else entry
+            },
+        )
+        return CommandResult.Success("Timer stopped")
+    }
+
+    // Mirrors RoomVaultRepository.stopTimerIfOwned: the owner check and the
+    // stop share one accepted mutation, and a mismatch writes nothing at all.
+    private fun stopTimerIfOwned(command: DomainCommand.StopTimerIfOwned): CommandResult {
+        val current = mutableWorkspace.value
+        val active = current.home.activeTimer
+            ?: return CommandResult.Success("No timer is running")
+        if (active.taskId != command.taskId) {
+            return CommandResult.Rejected(
+                RejectionReason.TIMER_OWNERSHIP_CHANGED,
+                "Another task owns the running timer.",
+            )
         }
         val stoppedAt = maxOf(now(), active.startedAt)
         mutableWorkspace.value = current.withReconciledTimeState(

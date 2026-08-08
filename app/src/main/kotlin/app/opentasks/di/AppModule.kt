@@ -76,6 +76,8 @@ import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RemoteBackupVerifiedInfo
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
+import app.opentasks.focus.FocusSessionController
+import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.widget.TodayWidgetPublisher
@@ -84,6 +86,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.time.Clock
 import java.time.ZoneId
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -123,6 +126,22 @@ object AppModule {
     @Singleton
     fun provideAppLockController(settings: AppLockSettings): AppLockController =
         AppLockController(settings)
+
+    // Process-scoped for the same reason app lock is: a focus cycle is a
+    // device-local timing aid over whichever vault slot happens to be open,
+    // and it stores no task text.
+    @Provides
+    @Singleton
+    fun provideFocusSessionStore(
+        @ApplicationContext context: Context,
+    ): FocusSessionStore = FocusSessionStore(
+        context.getSharedPreferences("focus_session", Context.MODE_PRIVATE),
+    )
+
+    @Provides
+    @Singleton
+    fun provideFocusSessionController(): FocusSessionController =
+        FocusSessionController(Clock.systemUTC())
 
     @Provides
     @Singleton

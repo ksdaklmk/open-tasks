@@ -12,6 +12,16 @@
     <string name="reminder_action_snooze">Snooze 15 min</string>
     <string name="reminder_action_complete">Complete</string>
 
+    <string name="focus_channel_name">Focus cycles</string>
+    <string name="focus_channel_description">Focus and break boundaries while a focus cycle runs</string>
+    <string name="focus_phase_ended_focus">Focus block finished — take a break</string>
+    <string name="focus_phase_ended_rest">Break over — back to it</string>
+    <string name="focus_banner_focus_phase">Focus</string>
+    <string name="focus_banner_rest_phase">Break</string>
+    <string name="focus_banner_remaining">%1$s left</string>
+    <string name="focus_banner_stop">Stop focus</string>
+    <string name="focus_banner_enable_notifications">Turn on alerts</string>
+
     <string name="attachment_default_name">Attachment</string>
     <string name="attachment_adding">Adding attachment…</string>
     <string name="attachment_added">Attachment added</string>

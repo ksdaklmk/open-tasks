@@ -1,5 +1,6 @@
 package app.opentasks.core.data
 
+import app.opentasks.core.data.backup.InMemoryBackupJournal
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
@@ -21,6 +22,7 @@ import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.core.model.WorkflowStatusId
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,8 +32,10 @@ import java.time.Instant
 import java.time.LocalDate
 
 class InMemoryVaultRepositoryTest {
+    private val journal = InMemoryBackupJournal()
     private val repository = InMemoryVaultRepository(
         now = { Instant.parse("2026-07-26T10:00:00Z") },
+        backupJournal = journal,
     )
 
     @Test
@@ -759,6 +763,47 @@ class InMemoryVaultRepositoryTest {
 
         repository.execute(DomainCommand.StopTimer)
         assertEquals(null, repository.observeWorkspace().value.home.activeTimer)
+    }
+
+    @Test
+    fun stopTimerIfOwnedStopsTheMatchingTimer() = runBlocking {
+        withTimeout(5_000) {
+            repository.execute(DomainCommand.StopTimer)
+            val task = OpenTasksFixtures.tasks.first()
+            repository.execute(
+                DomainCommand.StartTimer(task.id, Instant.parse("2026-07-26T09:30:00Z")),
+            )
+
+            val stopped = repository.execute(DomainCommand.StopTimerIfOwned(task.id))
+
+            assertTrue(stopped is CommandResult.Success)
+            assertEquals(null, repository.observeWorkspace().value.home.activeTimer)
+        }
+    }
+
+    @Test
+    fun stopTimerIfOwnedRejectsAnotherOwnerWithoutMutation() = runBlocking {
+        withTimeout(5_000) {
+            repository.execute(DomainCommand.StopTimer)
+            val owner = OpenTasksFixtures.tasks.first()
+            val other = OpenTasksFixtures.tasks.last()
+            repository.execute(
+                DomainCommand.StartTimer(owner.id, Instant.parse("2026-07-26T09:30:00Z")),
+            )
+            val activeBefore = repository.observeWorkspace().value.home.activeTimer
+            val entriesBefore = repository.observeWorkspace().value.timeEntries
+            val journalEntriesBefore = journal.entries.size
+
+            val rejected = repository.execute(DomainCommand.StopTimerIfOwned(other.id))
+
+            assertEquals(
+                RejectionReason.TIMER_OWNERSHIP_CHANGED,
+                (rejected as CommandResult.Rejected).reason,
+            )
+            assertEquals(activeBefore, repository.observeWorkspace().value.home.activeTimer)
+            assertEquals(entriesBefore, repository.observeWorkspace().value.timeEntries)
+            assertEquals(journalEntriesBefore, journal.entries.size)
+        }
     }
 
     @Test

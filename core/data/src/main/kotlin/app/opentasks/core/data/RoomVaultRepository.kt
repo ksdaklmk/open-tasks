@@ -236,6 +236,7 @@ class RoomVaultRepository(
                 is DomainCommand.PurgeExpiredTrash -> purgeExpiredTrash(command)
                 is DomainCommand.StartTimer -> startTimer(command)
                 DomainCommand.StopTimer -> stopTimer()
+                is DomainCommand.StopTimerIfOwned -> stopTimerIfOwned(command)
                 is DomainCommand.AddTimeEntry -> addTimeEntry(command)
                 is DomainCommand.UpdateTimeEntry -> updateTimeEntry(command)
                 is DomainCommand.DeleteTimeEntry -> deleteTimeEntry(command)
@@ -2188,6 +2189,24 @@ class RoomVaultRepository(
                 RejectionReason.INVALID_STATE,
                 "No timer is running.",
             )
+        val stoppedAt = maxOf(now().toEpochMilli(), active.startedAtEpochMillis)
+        database.timeEntryDao().stop(active.id, stoppedAt)
+        CommandResult.Success("Timer stopped")
+    }
+
+    // The owner check and the stop share this transaction, so a timer started
+    // on another task between them cannot be stopped by an automated caller.
+    private suspend fun stopTimerIfOwned(
+        command: DomainCommand.StopTimerIfOwned,
+    ): CommandResult = database.withTransaction {
+        val active = database.timeEntryDao().getActive()
+            ?: return@withTransaction CommandResult.Success("No timer is running")
+        if (active.taskId != command.taskId.value) {
+            return@withTransaction CommandResult.Rejected(
+                RejectionReason.TIMER_OWNERSHIP_CHANGED,
+                "Another task owns the running timer.",
+            )
+        }
         val stoppedAt = maxOf(now().toEpochMilli(), active.startedAtEpochMillis)
         database.timeEntryDao().stop(active.id, stoppedAt)
         CommandResult.Success("Timer stopped")

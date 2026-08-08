@@ -26,6 +26,8 @@ import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.focus.FocusAlarms
+import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
 import dagger.Lazy
@@ -420,11 +422,23 @@ class ReminderSystemEventReceiver : BroadcastReceiver() {
     @Inject
     lateinit var scheduler: ReminderScheduler
 
+    @Inject
+    lateinit var focusSessionStore: FocusSessionStore
+
+    @Inject
+    lateinit var focusAlarms: FocusAlarms
+
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in SUPPORTED_ACTIONS) return
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
+                // Ahead of the lazy repository lookup on purpose: the focus
+                // session is device-local, so a boot with no active vault
+                // runtime must not lose its alarm along with the reminders it
+                // genuinely cannot reconcile. A phase end already in the past
+                // simply fires the boundary immediately, which reconciles it.
+                focusSessionStore.load()?.let(focusAlarms::schedule) ?: focusAlarms.cancel()
                 scheduler.reconcile(vaultRepository.get().currentWorkspace())
             } catch (_: IllegalStateException) {
                 // No active vault runtime: nothing can be reconciled yet.

@@ -2286,6 +2286,56 @@ class RoomVaultRepositoryInstrumentedTest {
         )
     }
 
+    @Test
+    fun stopTimerIfOwnedStopsTheMatchingTimer() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { now })
+        repository!!.execute(DomainCommand.StopTimer)
+        val task = repository!!.currentWorkspace().tasks.first { it.deletedAt == null }
+        assertTrue(
+            repository!!.execute(
+                DomainCommand.StartTimer(task.id, Instant.parse("2026-07-29T09:30:00Z")),
+            ) is CommandResult.Success,
+        )
+
+        val stopped = repository!!.execute(DomainCommand.StopTimerIfOwned(task.id))
+
+        assertTrue(stopped is CommandResult.Success)
+        assertEquals(null, database!!.timeEntryDao().getActive())
+    }
+
+    @Test
+    fun stopTimerIfOwnedRejectsAnotherOwnerWithoutMutation() = runBlocking {
+        val now = Instant.parse("2026-07-29T10:00:00Z")
+        openRepository(now = { now })
+        repository!!.execute(DomainCommand.StopTimer)
+        val tasks = repository!!.currentWorkspace().tasks.filter { it.deletedAt == null }
+        val owner = tasks.first()
+        val other = tasks.last { it.id != owner.id }
+        assertTrue(
+            repository!!.execute(
+                DomainCommand.StartTimer(owner.id, Instant.parse("2026-07-29T09:30:00Z")),
+            ) is CommandResult.Success,
+        )
+        val activeBefore = checkNotNull(database!!.timeEntryDao().getActive())
+        val stateBefore = database!!.backupStateDao().require("vault-primary")
+
+        val rejected = repository!!.execute(DomainCommand.StopTimerIfOwned(other.id))
+
+        assertEquals(
+            RejectionReason.TIMER_OWNERSHIP_CHANGED,
+            (rejected as CommandResult.Rejected).reason,
+        )
+        val stateAfter = database!!.backupStateDao().require("vault-primary")
+        assertEquals(activeBefore, database!!.timeEntryDao().getActive())
+        assertEquals(stateBefore.currentGeneration, stateAfter.currentGeneration)
+        assertTrue(
+            database!!.backupJournalDao()
+                .after("vault-primary", stateBefore.currentGeneration, 10)
+                .isEmpty(),
+        )
+    }
+
     private suspend fun journalRows(generation: Long) =
         database!!.backupJournalDao().between("vault-primary", generation, generation)
 

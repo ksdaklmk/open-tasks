@@ -22,6 +22,10 @@ import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.focus.FocusCoordinator
+import app.opentasks.focus.FocusPreset
+import app.opentasks.focus.FocusSession
+import app.opentasks.focus.FocusSessionStore
 import app.opentasks.reminders.ReminderScheduler
 import app.opentasks.feature.more.InsightsPresentation
 import app.opentasks.feature.more.InsightsProjectOption
@@ -78,6 +82,8 @@ class WorkspaceViewModel @Inject constructor(
     private val repository: VaultRepository,
     private val reminderScheduler: ReminderScheduler,
     private val insightsEngine: InsightsEngine,
+    private val focusSessionStore: FocusSessionStore,
+    private val focusCoordinator: FocusCoordinator,
     insightsTimeProvider: InsightsTimeProvider,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -103,6 +109,8 @@ class WorkspaceViewModel @Inject constructor(
     val selectedTaskId: StateFlow<String?> = selectionState.selectedTaskId
 
     val selectedProjectId: StateFlow<String?> = selectionState.selectedProjectId
+
+    val focusSession: StateFlow<FocusSession?> = focusSessionStore.session
 
     val pendingBlockedCompletion: StateFlow<PendingBlockedCompletion?> = pendingBlocked.asStateFlow()
     val dependencyFeedback: StateFlow<DependencyFeedback?> =
@@ -257,6 +265,43 @@ class WorkspaceViewModel @Inject constructor(
         execute(DomainCommand.StopTimer)
     }
 
+    /**
+     * Starts a focus cycle on [taskId], but only once its timer is genuinely
+     * running: a rejected start leaves no session and no alarm behind, so
+     * nothing later reconciles a cycle that never began.
+     */
+    fun startFocus(taskId: TaskId, preset: FocusPreset) {
+        execute(DomainCommand.StartTimer(taskId)) { result ->
+            if (result is CommandResult.Success) focusCoordinator.start(taskId.value, preset)
+        }
+    }
+
+    /**
+     * Ends the focus cycle. The timer is only stopped when the session's own
+     * task still owns it -- a timer someone moved to another task keeps
+     * running, and the repository re-checks that ownership inside the command
+     * itself.
+     */
+    fun stopFocus() {
+        val session = focusSessionStore.session.value ?: return
+        focusCoordinator.stop()
+        if (snapshot.value.home.activeTimer?.taskId?.value == session.taskId) {
+            execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
+        }
+    }
+
+    /**
+     * Brings a session that ran while this process was away back onto its
+     * current phase, through the same ownership decision the boundary alarm
+     * uses. A dead process never retroactively edits elapsed time: the timer
+     * is only started or stopped as of now.
+     */
+    fun reconcileFocus() {
+        viewModelScope.launch {
+            focusCoordinator.reconcile { repository }
+        }
+    }
+
     fun completeTask(task: Task) {
         if (task.isCompleted) {
             execute(DomainCommand.ReopenTask(task.id))
@@ -358,13 +403,21 @@ class WorkspaceViewModel @Inject constructor(
         pendingBlocked.value = null
     }
 
-    fun execute(command: DomainCommand) {
+    /**
+     * [onResult] runs after the ordinary snackbar event has been published, so
+     * a caller that needs to know how a command landed -- starting a focus
+     * cycle, say -- adds a reaction without changing what anyone sees, and
+     * every existing caller keeps its single-argument form.
+     */
+    fun execute(command: DomainCommand, onResult: (CommandResult) -> Unit = {}) {
         viewModelScope.launch {
-            when (val result = repository.execute(command)) {
+            val result = repository.execute(command)
+            when (result) {
                 is CommandResult.Success -> send(result)
                 is CommandResult.Rejected ->
                     eventChannel.send(WorkspaceEvent.Message(result.message))
             }
+            onResult(result)
         }
     }
 

@@ -2,6 +2,10 @@
     <string name="task_editing_state_description">Editing %1$s</string>
     <string name="task_add_to_calendar">Add to calendar</string>
 
+    <string name="task_focus_start">Start focus cycle</string>
+    <string name="task_focus_preset_twenty_five_five">25 minutes focus, 5 minutes break</string>
+    <string name="task_focus_preset_fifty_ten">50 minutes focus, 10 minutes break</string>
+
     <string name="task_attachments_heading">Attachments</string>
     <plurals name="task_attachment_count">
         <item quantity="one">%1$d attachment</item>
