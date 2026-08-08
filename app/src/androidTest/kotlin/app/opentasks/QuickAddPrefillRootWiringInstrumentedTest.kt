@@ -30,12 +30,18 @@ import org.junit.Test
  * task brief it is only compiled now (`:app:compileDebugAndroidTestKotlin`)
  * and runs starting at Task 13.
  *
- * Pins two invariants a code review found broken in the first cut of the
- * share/text-selection intake:
+ * Pins invariants two rounds of code review found broken in early cuts of
+ * the share/text-selection intake:
+ *  - a share/selection intent arriving while the sheet is closed must still
+ *    open it with that text (the first mount under a signal value happens
+ *    on the pass *after* the capturing effect has run, so it cannot read
+ *    the by-then-cleared prefill parameter directly -- it needs the
+ *    effect-captured fallback);
  *  - a share/selection intent arriving while the sheet is already open must
- *    replace the sheet's title with the new text, not the stale one (the
- *    `key(quickAddSignal)` remount must see the *current* prefill, not one
- *    captured through an effect-updated intermediate that lags behind);
+ *    replace the title with the new text, not a stale one (that remount
+ *    happens synchronously, in the same pass as the new signal, ahead of
+ *    its effect -- it needs the still-populated prefill parameter, not the
+ *    one-share-behind fallback);
  *  - a blank share/selection intent must never overwrite an already-pending
  *    prefill (the guard around the assignment, not just the signal bump).
  */
@@ -124,10 +130,13 @@ class QuickAddPrefillRootWiringInstrumentedTest {
 
 /**
  * Replica of the Quick Add prefill wiring in `OpenTasksApp`: a
- * `LaunchedEffect(quickAddSignal)` that only opens the sheet and consumes
- * the pending prefill, and a `key(quickAddSignal)`-scoped [QuickAddSheet]
- * whose `initialTitle` reads [quickAddPrefillText] directly at mount time,
- * ahead of the effect that clears it.
+ * `LaunchedEffect(quickAddSignal)` that captures [quickAddPrefillText] into
+ * `quickAddSheetTitle` *before* consuming it, and a
+ * `key(quickAddSignal)`-scoped [QuickAddSheet] whose `initialTitle` prefers
+ * [quickAddPrefillText] (still populated when a second share remounts the
+ * sheet synchronously, ahead of the new signal's effect) and falls back to
+ * `quickAddSheetTitle` (what the *first* mount under a signal value reads,
+ * once the effect has already run and cleared the parameter).
  */
 @Composable
 private fun QuickAddPrefillReplica(
@@ -136,8 +145,10 @@ private fun QuickAddPrefillReplica(
     onQuickAddConsumed: () -> Unit,
 ) {
     var showQuickAdd by remember { mutableStateOf(false) }
+    var quickAddSheetTitle by remember { mutableStateOf("") }
     LaunchedEffect(quickAddSignal) {
         if (quickAddSignal > 0) {
+            quickAddSheetTitle = quickAddPrefillText.orEmpty()
             showQuickAdd = true
             onQuickAddConsumed()
         }
@@ -145,9 +156,15 @@ private fun QuickAddPrefillReplica(
     if (showQuickAdd) {
         key(quickAddSignal) {
             QuickAddSheet(
-                onDismiss = { showQuickAdd = false },
-                onAdd = { _, _ -> showQuickAdd = false },
-                initialTitle = quickAddPrefillText.orEmpty(),
+                onDismiss = {
+                    showQuickAdd = false
+                    quickAddSheetTitle = ""
+                },
+                onAdd = { _, _ ->
+                    showQuickAdd = false
+                    quickAddSheetTitle = ""
+                },
+                initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
             )
         }
     }
