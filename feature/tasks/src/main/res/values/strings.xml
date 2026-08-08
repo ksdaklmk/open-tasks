@@ -1,4 +1,15 @@
 <resources>
+    <string name="bulk_selected_count">%1$d selected</string>
+    <string name="bulk_clear_action">Clear selection</string>
+    <string name="bulk_complete_action">Complete selected</string>
+    <string name="bulk_reschedule_action">Reschedule selected</string>
+    <string name="bulk_move_action">Move selected</string>
+    <string name="bulk_tag_action">Tag selected</string>
+    <string name="bulk_delete_action">Move selected to the Bin</string>
+    <string name="bulk_move_inbox">Inbox</string>
+    <string name="bulk_reschedule_confirm">Set date</string>
+    <string name="bulk_reschedule_cancel">Cancel</string>
+
     <string name="task_editing_state_description">Editing %1$s</string>
     <string name="task_add_to_calendar">Add to calendar</string>
 

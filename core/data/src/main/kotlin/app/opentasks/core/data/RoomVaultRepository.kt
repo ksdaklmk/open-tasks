@@ -160,25 +160,32 @@ class RoomVaultRepository(
     override suspend fun execute(command: DomainCommand): CommandResult {
         ready.await()
         return writeMutex.withLock {
-            database.withTransaction {
-                val mutationDao = database.backupMutationDao()
-                val before = mutationDao.snapshots()
-                val session = RoomBackupJournalSession(
-                    vaultId = VAULT_ID,
-                    stateDao = database.backupStateDao(),
-                    journalDao = database.backupJournalDao(),
-                    mutationDao = mutationDao,
-                    mutationCodec = BackupMutationCodec,
-                    operationId = { UUID.randomUUID().toString() },
-                    sourceDeviceId = deviceId.value,
-                    appendBoundary = backupJournalAppendBoundary,
-                )
-                val result = dispatch(command)
-                session.appendChanges(
-                    before = before,
-                    after = mutationDao.snapshots(),
-                )
-                result
+            try {
+                database.withTransaction {
+                    val mutationDao = database.backupMutationDao()
+                    val before = mutationDao.snapshots()
+                    val session = RoomBackupJournalSession(
+                        vaultId = VAULT_ID,
+                        stateDao = database.backupStateDao(),
+                        journalDao = database.backupJournalDao(),
+                        mutationDao = mutationDao,
+                        mutationCodec = BackupMutationCodec,
+                        operationId = { UUID.randomUUID().toString() },
+                        sourceDeviceId = deviceId.value,
+                        appendBoundary = backupJournalAppendBoundary,
+                    )
+                    val result = dispatch(command)
+                    session.appendChanges(
+                        before = before,
+                        after = mutationDao.snapshots(),
+                    )
+                    result
+                }
+            } catch (rejected: BatchUndoRejected) {
+                // Thrown by [undoBatch] so the aborted transaction rolls every
+                // partially applied inverse back; the caller still receives an
+                // ordinary rejection rather than an exception.
+                rejected.result
             }
         }
     }
@@ -229,6 +236,12 @@ class RoomVaultRepository(
                 is DomainCommand.ChangeTaskStatus -> changeTaskStatus(command)
                 is DomainCommand.RestoreTaskStatus -> restoreTaskStatus(command)
                 is DomainCommand.CompleteTask -> completeTask(command)
+                is DomainCommand.CompleteTasks -> completeTasks(command)
+                is DomainCommand.RescheduleTasks -> rescheduleTasks(command)
+                is DomainCommand.MoveTasksToProject -> moveTasksToProject(command)
+                is DomainCommand.SetTasksTag -> setTasksTag(command)
+                is DomainCommand.DeleteTasks -> deleteTasks(command)
+                is DomainCommand.UndoBatch -> undoBatch(command)
                 is DomainCommand.ReopenTask -> reopenTask(command.taskId)
                 is DomainCommand.DeleteTask -> deleteTask(command)
                 is DomainCommand.RestoreTask -> restoreTask(command)
@@ -1134,6 +1147,391 @@ class RoomVaultRepository(
             result
         }
     }
+
+    private suspend fun completeTasks(command: DomainCommand.CompleteTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val resolved = ids.mapNotNull { currentTask(it) }
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        // Full preflight before the first write: the single-task validators,
+        // in their order, over the whole resolved set. Writes happen only
+        // afterwards, inside the outer execute transaction, so a rejection
+        // leaves records and journal untouched.
+        class CompletionPlan(
+            val task: Task,
+            val updated: Task,
+            val generated: Task?,
+            val generatedReminder: Reminder?,
+        )
+        val plans = mutableListOf<CompletionPlan>()
+        val plannedGeneratedIds = hashSetOf<TaskId>()
+        for (task in resolved) {
+            val completedStatus = database.workspaceDao()
+                .getWorkflowStatuses(task.projectId?.value)
+                .firstOrNull {
+                    it.semanticStatus == SemanticStatus.COMPLETED.name &&
+                        it.archivedAtEpochMillis == null
+                }
+                ?.toModel()
+                ?: return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "This workspace has no active completion status.",
+                )
+            if (task.isBlocked && !command.acknowledgeBlocked) {
+                return CommandResult.Rejected(
+                    RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
+                    "This task still has unfinished dependencies.",
+                )
+            }
+            if (task.statusId == completedStatus.id) continue
+            val updated = task.copy(
+                statusId = completedStatus.id,
+                semanticStatus = completedStatus.semanticStatus,
+                completedAt = command.completedAt,
+                revision = nextRevision(task, command.completedAt),
+            )
+            val generatedCandidate = if (task.semanticStatus != SemanticStatus.COMPLETED) {
+                val workflow = database.workspaceDao()
+                    .getWorkflowStatuses(task.projectId?.value)
+                    .filter { it.archivedAtEpochMillis == null }
+                val nextStatus = workflow.firstOrNull {
+                    it.semanticStatus == SemanticStatus.PLANNED.name
+                }?.toModel() ?: workflow.firstOrNull {
+                    it.semanticStatus == SemanticStatus.BACKLOG.name
+                }?.toModel()
+                nextStatus?.let {
+                    RecurringTaskPlanner.next(
+                        current = task,
+                        nextStatusId = it.id,
+                        nextSemanticStatus = it.semanticStatus,
+                        revision = Revision(
+                            deviceId = deviceId,
+                            wallTimeMillis = updated.revision.wallTimeMillis,
+                            logicalCounter = 0,
+                        ),
+                    )
+                }
+            } else {
+                null
+            }
+            val generated = generatedCandidate?.takeIf {
+                it.id !in plannedGeneratedIds &&
+                    database.taskDao().getById(it.id.value) == null
+            }
+            generated?.let { plannedGeneratedIds += it.id }
+            val generatedReminder = generated?.let { next ->
+                nextOccurrenceReminder(
+                    currentTask = task,
+                    nextTask = next,
+                    reminder = database.workspaceDao()
+                        .getReminderForTask(task.id.value)
+                        ?.toModel(),
+                )
+            }
+            plans += CompletionPlan(task, updated, generated, generatedReminder)
+        }
+
+        plans.forEach { plan ->
+            database.taskDao().upsert(plan.updated.toEntity())
+            plan.generated?.let { generated ->
+                database.taskDao().upsert(generated.toEntity())
+                database.workspaceDao().insertTaskTags(generated.tagEntities())
+                database.workspaceDao().insertChecklistItems(generated.checklistEntities())
+            }
+            plan.generatedReminder?.let { reminder ->
+                database.workspaceDao().upsertReminder(reminder.toEntity())
+            }
+            recordActivity(
+                taskId = plan.task.id,
+                projectId = plan.task.projectId,
+                kind = ActivityKind.COMPLETED,
+                body = "Completed",
+                at = command.completedAt,
+            )
+        }
+        val inverses = plans.map<CompletionPlan, DomainCommand> { plan ->
+            DomainCommand.RestoreTaskStatus(
+                taskId = plan.task.id,
+                statusId = plan.task.statusId,
+                completedAt = plan.task.completedAt,
+                generatedOccurrenceId = plan.generated?.id,
+            )
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(plans.size)} completed",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private suspend fun rescheduleTasks(command: DomainCommand.RescheduleTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val resolved = ids.mapNotNull { currentTask(it) }
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val due = command.due
+        for (task in resolved) {
+            when {
+                task.recurrence != null && due == null && task.start == null ->
+                    return CommandResult.Rejected(
+                        RejectionReason.INVALID_STATE,
+                        "Add a due date before repeating this task.",
+                    )
+                task.recurrence?.endDate?.let { endDate ->
+                    due?.let {
+                        endDate.isBefore(
+                            it.instant.atZone(ZoneId.of(it.zoneId)).toLocalDate(),
+                        )
+                    }
+                } == true ->
+                    return CommandResult.Rejected(
+                        RejectionReason.INVALID_STATE,
+                        "The repeat end date cannot be before the due date.",
+                    )
+            }
+        }
+
+        val changing = resolved.filter { it.due != due }
+        val inverses = changing.map<Task, DomainCommand> { task ->
+            task.toUpdateCommand(
+                database.workspaceDao().getReminderForTask(task.id.value)?.toModel(),
+            )
+        }
+        changing.forEach { task ->
+            database.taskDao().upsert(
+                task.copy(due = due, revision = nextRevision(task)).toEntity(),
+            )
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(changing.size)} rescheduled",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private suspend fun moveTasksToProject(
+        command: DomainCommand.MoveTasksToProject,
+    ): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val resolved = ids.mapNotNull { currentTask(it) }
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val destination = command.projectId?.let { projectId ->
+            database.workspaceDao().getProjectById(projectId.value)
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "That project no longer exists.",
+                )
+        }
+        class MovePlan(val task: Task, val status: WorkflowStatus, val reminder: Reminder?)
+        val plans = mutableListOf<MovePlan>()
+        for (task in resolved) {
+            if (task.projectId == command.projectId) continue
+            if (destination?.archivedAtEpochMillis != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Restore that project before assigning new tasks to it.",
+                )
+            }
+            val mapped = database.workspaceDao()
+                .getWorkflowStatuses(command.projectId?.value)
+                .firstOrNull {
+                    it.semanticStatus == task.semanticStatus.name &&
+                        it.archivedAtEpochMillis == null
+                }
+                ?.toModel()
+                ?: return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
+                )
+            plans += MovePlan(
+                task = task,
+                status = mapped,
+                reminder = database.workspaceDao()
+                    .getReminderForTask(task.id.value)
+                    ?.toModel(),
+            )
+        }
+
+        val destinationName = destination?.name ?: "Inbox"
+        val changedAt = now()
+        plans.forEach { plan ->
+            val task = plan.task
+            database.taskDao().upsert(
+                task.copy(
+                    projectId = command.projectId,
+                    statusId = plan.status.id,
+                    semanticStatus = plan.status.semanticStatus,
+                    milestoneId = null,
+                    revision = nextRevision(task),
+                ).toEntity(),
+            )
+            recordActivity(
+                taskId = task.id,
+                projectId = command.projectId,
+                kind = ActivityKind.PROJECT_MOVED,
+                body = "${database.workspaceDao().getProjectById(task.projectId?.value.orEmpty())?.name ?: "Inbox"} → " +
+                    destinationName,
+                at = changedAt,
+            )
+            if (task.milestoneId != null) {
+                recordActivity(
+                    taskId = task.id,
+                    projectId = command.projectId,
+                    kind = ActivityKind.MILESTONE_CHANGED,
+                    body = "Milestone: None",
+                    at = changedAt,
+                )
+            }
+        }
+        val inverses = plans.map<MovePlan, DomainCommand> { plan ->
+            plan.task.toUpdateCommand(plan.reminder)
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(plans.size)} moved",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private suspend fun setTasksTag(command: DomainCommand.SetTasksTag): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val resolved = ids.mapNotNull { currentTask(it) }
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        if (database.workspaceDao().getTagById(command.tagId.value) == null) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Tag no longer exists.")
+        }
+        val changing = resolved.filter { (command.tagId in it.tagIds) != command.present }
+        if (command.present && changing.any { it.tagIds.size >= MAX_TASK_TAGS }) {
+            return CommandResult.Rejected(
+                RejectionReason.TAG_LIMIT_REACHED,
+                "A task can contain up to $MAX_TASK_TAGS tags.",
+            )
+        }
+
+        changing.forEach { task ->
+            val updated = task.copy(
+                tagIds = if (command.present) {
+                    task.tagIds + command.tagId
+                } else {
+                    task.tagIds - command.tagId
+                },
+                revision = nextRevision(task),
+            )
+            database.taskDao().upsert(updated.toEntity())
+            database.workspaceDao().upsertTaskTag(
+                TaskTagEntity(
+                    taskId = task.id.value,
+                    tagId = command.tagId.value,
+                    present = command.present,
+                    revisionWallMillis = updated.revision.wallTimeMillis,
+                    revisionLogical = updated.revision.logicalCounter,
+                    revisionDeviceId = updated.revision.deviceId.value,
+                ),
+            )
+        }
+        val inverses = changing.map<Task, DomainCommand> { task ->
+            DomainCommand.SetTaskTag(task.id, command.tagId, !command.present)
+        }
+        return CommandResult.Success(
+            message = if (command.present) {
+                "Tag added to ${bulkTasksLabel(changing.size)}"
+            } else {
+                "Tag removed from ${bulkTasksLabel(changing.size)}"
+            },
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private suspend fun deleteTasks(command: DomainCommand.DeleteTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val resolved = ids.mapNotNull { currentTask(it) }
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val deleting = resolved.filter { it.deletedAt == null }
+        val deletingIds = deleting.mapTo(hashSetOf(), Task::id)
+        deleting.forEach { task ->
+            database.taskDao().upsert(
+                task.copy(
+                    deletedAt = command.deletedAt,
+                    revision = nextRevision(task, command.deletedAt),
+                ).toEntity(),
+            )
+        }
+        if (deleting.isNotEmpty()) {
+            database.timeEntryDao().getActive()
+                ?.takeIf { active -> TaskId(active.taskId) in deletingIds }
+                ?.let { active ->
+                    database.timeEntryDao().stop(
+                        active.id,
+                        maxOf(command.deletedAt.toEpochMilli(), active.startedAtEpochMillis),
+                    )
+                }
+        }
+        deleting.forEach { task ->
+            recordActivity(
+                taskId = task.id,
+                projectId = task.projectId,
+                kind = ActivityKind.BINNED,
+                body = "Moved to Bin",
+                at = command.deletedAt,
+            )
+        }
+        val inverses = deleting.map<Task, DomainCommand> { task ->
+            DomainCommand.RestoreTask(task.id)
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(deleting.size)} moved to the Bin",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    /**
+     * Replays a repository-produced batch undo in its stored order inside the
+     * outer execute transaction. A rejected inverse aborts that transaction
+     * through [BatchUndoRejected], so Room rolls every earlier inverse back
+     * and the caller receives the rejection with no record or journal change
+     * — the same all-or-nothing rule the composites enforce by preflight,
+     * applied by rollback here because the stored command set is open-ended.
+     * Sub-results carry no further undo.
+     */
+    private suspend fun undoBatch(command: DomainCommand.UndoBatch): CommandResult {
+        command.commands.forEach { inverse ->
+            val result = dispatch(inverse)
+            if (result is CommandResult.Rejected) throw BatchUndoRejected(result)
+        }
+        return CommandResult.Success("Undone")
+    }
+
+    private class BatchUndoRejected(val result: CommandResult.Rejected) : RuntimeException()
+
+    private fun rejectBulkSelection(ids: List<TaskId>): CommandResult.Rejected? = when {
+        ids.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_BULK_SELECTION,
+            "Select at least one task.",
+        )
+        ids.size > MAX_BULK_TASKS -> CommandResult.Rejected(
+            RejectionReason.BULK_SELECTION_TOO_LARGE,
+            "Bulk actions are limited to $MAX_BULK_TASKS tasks.",
+        )
+        else -> null
+    }
+
+    private fun bulkTasksNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "Those tasks no longer exist.",
+    )
+
+    private fun bulkTasksLabel(count: Int): String =
+        if (count == 1) "1 task" else "$count tasks"
 
     private suspend fun changeTaskStatus(
         command: DomainCommand.ChangeTaskStatus,
@@ -3436,6 +3834,7 @@ class RoomVaultRepository(
         const val MAX_TAG_NAME_LENGTH = 64
         const val MAX_TASK_TAGS = 50
         const val MAX_TASK_DEPENDENCIES = 100
+        const val MAX_BULK_TASKS = 200
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000

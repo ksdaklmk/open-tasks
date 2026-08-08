@@ -238,6 +238,14 @@ fun TasksScreen(
     onOpenAttachmentSetup: () -> Unit = {},
     onAddToCalendar: (() -> Unit)? = null,
     onStartFocus: ((FocusPresetOption) -> Unit)? = null,
+    selectedBulkIds: Set<TaskId> = emptySet(),
+    onToggleBulkSelection: (TaskId) -> Unit = {},
+    onClearBulkSelection: () -> Unit = {},
+    onBulkComplete: () -> Unit = {},
+    onBulkReschedule: (LocalDate) -> Unit = {},
+    onBulkMoveToProject: (ProjectId?) -> Unit = {},
+    onBulkSetTag: (TagId, Boolean) -> Unit = { _, _ -> },
+    onBulkDelete: () -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
@@ -329,11 +337,22 @@ fun TasksScreen(
             TaskListPane(
                 tasks = visibleTasks,
                 projectNames = projectNames,
+                activeProjectIds = activeProjectIds,
+                tags = tags,
                 selectedTaskId = selectedTaskId,
+                selectedBulkIds = selectedBulkIds,
+                selectedBulkTasks = tasks.filter { it.id in selectedBulkIds },
                 filter = filter,
                 onFilterChange = { filter = it },
                 onSelectTask = onSelectTask,
                 onCompleteTask = onCompleteTask,
+                onToggleBulkSelection = onToggleBulkSelection,
+                onClearBulkSelection = onClearBulkSelection,
+                onBulkComplete = onBulkComplete,
+                onBulkReschedule = onBulkReschedule,
+                onBulkMoveToProject = onBulkMoveToProject,
+                onBulkSetTag = onBulkSetTag,
+                onBulkDelete = onBulkDelete,
                 modifier = if (showDetailPane) {
                     Modifier
                         .weight(listPaneFraction)
@@ -433,55 +452,83 @@ fun TasksScreen(
 private fun TaskListPane(
     tasks: List<Task>,
     projectNames: Map<ProjectId, String>,
+    activeProjectIds: Set<ProjectId>,
+    tags: List<Tag>,
     selectedTaskId: TaskId?,
+    selectedBulkIds: Set<TaskId>,
+    selectedBulkTasks: List<Task>,
     filter: TaskFilter,
     onFilterChange: (TaskFilter) -> Unit,
     onSelectTask: (TaskId) -> Unit,
     onCompleteTask: (Task) -> Unit,
+    onToggleBulkSelection: (TaskId) -> Unit,
+    onClearBulkSelection: () -> Unit,
+    onBulkComplete: () -> Unit,
+    onBulkReschedule: (LocalDate) -> Unit,
+    onBulkMoveToProject: (ProjectId?) -> Unit,
+    onBulkSetTag: (TagId, Boolean) -> Unit,
+    onBulkDelete: () -> Unit,
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
+    val selectionMode = selectedBulkIds.isNotEmpty()
 
     Column(modifier = modifier.fillMaxHeight()) {
-        Column(modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
-            Text(
-                "Tasks",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.semantics { heading() },
+        if (selectionMode) {
+            BulkSelectionBar(
+                selectedCount = selectedBulkIds.size,
+                selectedTasks = selectedBulkTasks,
+                projectNames = projectNames,
+                activeProjectIds = activeProjectIds,
+                tags = tags,
+                onClear = onClearBulkSelection,
+                onComplete = onBulkComplete,
+                onReschedule = onBulkReschedule,
+                onMoveToProject = onBulkMoveToProject,
+                onSetTag = onBulkSetTag,
+                onDelete = onBulkDelete,
             )
-            Text(
-                "${tasks.count { !it.isCompleted }} open • ${tasks.count(Task::isBlocked)} blocked",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(16.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TaskFilter.entries.forEach { candidate ->
-                    FilterChip(
-                        selected = filter == candidate,
-                        onClick = { onFilterChange(candidate) },
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("task-filter-${candidate.name.lowercase(Locale.ROOT)}"),
-                        label = { Text(candidate.label) },
-                        leadingIcon = if (candidate == TaskFilter.INBOX) {
-                            {
-                                Icon(
-                                    Icons.Rounded.Inbox,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                    )
+        } else {
+            Column(modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
+                Text(
+                    "Tasks",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    "${tasks.count { !it.isCompleted }} open • ${tasks.count(Task::isBlocked)} blocked",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TaskFilter.entries.forEach { candidate ->
+                        FilterChip(
+                            selected = filter == candidate,
+                            onClick = { onFilterChange(candidate) },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("task-filter-${candidate.name.lowercase(Locale.ROOT)}"),
+                            label = { Text(candidate.label) },
+                            leadingIcon = if (candidate == TaskFilter.INBOX) {
+                                {
+                                    Icon(
+                                        Icons.Rounded.Inbox,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
                 }
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
         }
 
         if (tasks.isEmpty()) {
@@ -501,18 +548,216 @@ private fun TaskListPane(
                 ),
             ) {
                 items(tasks, key = { it.id.value }) { task ->
-                    TaskRow(
-                        task = task,
-                        projectName = projectNames[task.projectId] ?: "Inbox",
-                        selected = selectedTaskId == task.id,
-                        onSelect = { onSelectTask(task.id) },
-                        onComplete = { onCompleteTask(task) },
-                        modifier = Modifier.semantics {
-                            selected = selectedTaskId == task.id
+                    if (selectionMode) {
+                        val checked = task.id in selectedBulkIds
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.semantics { selected = checked },
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { onToggleBulkSelection(task.id) },
+                                modifier = Modifier.testTag("bulk-check-${task.id.value}"),
+                            )
+                            TaskRow(
+                                task = task,
+                                projectName = projectNames[task.projectId] ?: "Inbox",
+                                selected = checked,
+                                onSelect = { onToggleBulkSelection(task.id) },
+                                onComplete = { onCompleteTask(task) },
+                                onLongPress = { onToggleBulkSelection(task.id) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    } else {
+                        TaskRow(
+                            task = task,
+                            projectName = projectNames[task.projectId] ?: "Inbox",
+                            selected = selectedTaskId == task.id,
+                            onSelect = { onSelectTask(task.id) },
+                            onComplete = { onCompleteTask(task) },
+                            onLongPress = { onToggleBulkSelection(task.id) },
+                            modifier = Modifier.semantics {
+                                selected = selectedTaskId == task.id
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BulkSelectionBar(
+    selectedCount: Int,
+    selectedTasks: List<Task>,
+    projectNames: Map<ProjectId, String>,
+    activeProjectIds: Set<ProjectId>,
+    tags: List<Tag>,
+    onClear: () -> Unit,
+    onComplete: () -> Unit,
+    onReschedule: (LocalDate) -> Unit,
+    onMoveToProject: (ProjectId?) -> Unit,
+    onSetTag: (TagId, Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showMoveMenu by remember { mutableStateOf(false) }
+    var showTagMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = onClear,
+            modifier = Modifier.testTag("bulk-clear"),
+        ) {
+            Icon(
+                Icons.Rounded.Clear,
+                contentDescription = stringResource(R.string.bulk_clear_action),
+            )
+        }
+        Text(
+            text = stringResource(R.string.bulk_selected_count, selectedCount),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = onComplete,
+            modifier = Modifier.testTag("bulk-complete"),
+        ) {
+            Icon(
+                Icons.Rounded.Check,
+                contentDescription = stringResource(R.string.bulk_complete_action),
+            )
+        }
+        IconButton(
+            onClick = { showDatePicker = true },
+            modifier = Modifier.testTag("bulk-reschedule"),
+        ) {
+            Icon(
+                Icons.Rounded.Schedule,
+                contentDescription = stringResource(R.string.bulk_reschedule_action),
+            )
+        }
+        Box {
+            IconButton(
+                onClick = { showMoveMenu = true },
+                modifier = Modifier.testTag("bulk-move"),
+            ) {
+                Icon(
+                    Icons.Rounded.FolderOpen,
+                    contentDescription = stringResource(R.string.bulk_move_action),
+                )
+            }
+            DropdownMenu(
+                expanded = showMoveMenu,
+                onDismissRequest = { showMoveMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.bulk_move_inbox)) },
+                    leadingIcon = {
+                        Icon(Icons.Rounded.Inbox, contentDescription = null)
+                    },
+                    onClick = {
+                        showMoveMenu = false
+                        onMoveToProject(null)
+                    },
+                    modifier = Modifier.testTag("bulk-move-inbox"),
+                )
+                projectNames
+                    .filterKeys { it in activeProjectIds }
+                    .toList()
+                    .sortedBy { (_, name) -> name.lowercase(Locale.ROOT) }
+                    .forEach { (projectId, name) ->
+                        DropdownMenuItem(
+                            text = { Text(name) },
+                            onClick = {
+                                showMoveMenu = false
+                                onMoveToProject(projectId)
+                            },
+                            modifier = Modifier.testTag("bulk-move-${projectId.value}"),
+                        )
+                    }
+            }
+        }
+        Box {
+            IconButton(
+                onClick = { showTagMenu = true },
+                modifier = Modifier.testTag("bulk-tag"),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Label,
+                    contentDescription = stringResource(R.string.bulk_tag_action),
+                )
+            }
+            DropdownMenu(
+                expanded = showTagMenu,
+                onDismissRequest = { showTagMenu = false },
+            ) {
+                tags.forEach { tag ->
+                    val everySelectedHasTag = selectedTasks.isNotEmpty() &&
+                        selectedTasks.all { tag.id in it.tagIds }
+                    DropdownMenuItem(
+                        text = { Text(tag.name) },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = everySelectedHasTag,
+                                onCheckedChange = null,
+                            )
                         },
+                        onClick = {
+                            showTagMenu = false
+                            onSetTag(tag.id, !everySelectedHasTag)
+                        },
+                        modifier = Modifier.testTag("bulk-tag-${tag.id.value}"),
                     )
                 }
             }
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.testTag("bulk-delete"),
+        ) {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = stringResource(R.string.bulk_delete_action),
+            )
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selected ->
+                            onReschedule(
+                                Instant.ofEpochMilli(selected)
+                                    .atZone(ZoneOffset.UTC)
+                                    .toLocalDate(),
+                            )
+                        }
+                        showDatePicker = false
+                    },
+                ) {
+                    Text(stringResource(R.string.bulk_reschedule_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text(stringResource(R.string.bulk_reschedule_cancel))
+                }
+            },
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }

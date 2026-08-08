@@ -208,6 +208,12 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.ChangeTaskStatus -> changeTaskStatus(command)
             is DomainCommand.RestoreTaskStatus -> restoreTaskStatus(command)
             is DomainCommand.CompleteTask -> completeTask(command)
+            is DomainCommand.CompleteTasks -> completeTasks(command)
+            is DomainCommand.RescheduleTasks -> rescheduleTasks(command)
+            is DomainCommand.MoveTasksToProject -> moveTasksToProject(command)
+            is DomainCommand.SetTasksTag -> setTasksTag(command)
+            is DomainCommand.DeleteTasks -> deleteTasks(command)
+            is DomainCommand.UndoBatch -> undoBatch(command)
             is DomainCommand.ReopenTask -> reopenTask(command.taskId)
             is DomainCommand.DeleteTask -> deleteTask(command)
             is DomainCommand.RestoreTask -> restoreTask(command)
@@ -1055,6 +1061,382 @@ class InMemoryVaultRepository internal constructor(
             result
         }
     }
+
+    private fun completeTasks(command: DomainCommand.CompleteTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val resolved = ids.mapNotNull(tasksById::get)
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        // Full preflight before the first write: the single-task validators,
+        // in their order, over the whole resolved set.
+        class CompletionPlan(val task: Task, val status: WorkflowStatus)
+        val plans = mutableListOf<CompletionPlan>()
+        for (task in resolved) {
+            val completedStatus = current.workflowStatuses.firstOrNull {
+                it.projectId == task.projectId &&
+                    it.semanticStatus == SemanticStatus.COMPLETED &&
+                    it.archivedAt == null
+            } ?: return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This workspace has no active completion status.",
+            )
+            if (task.isBlocked && !command.acknowledgeBlocked) {
+                return CommandResult.Rejected(
+                    RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
+                    "This task still has unfinished dependencies.",
+                )
+            }
+            if (task.statusId == completedStatus.id) continue
+            plans += CompletionPlan(task, completedStatus)
+        }
+
+        val existingIds = current.tasks.mapTo(hashSetOf(), Task::id)
+        val updatedById = linkedMapOf<TaskId, Task>()
+        val generatedTasks = mutableListOf<Task>()
+        val generatedReminders = mutableListOf<Reminder>()
+        var activityEntries = current.activityEntries
+        val inverses = mutableListOf<DomainCommand>()
+        for (plan in plans) {
+            val task = plan.task
+            val updated = task.copy(
+                statusId = plan.status.id,
+                semanticStatus = plan.status.semanticStatus,
+                completedAt = command.completedAt,
+                revision = nextRevision(task, command.completedAt),
+            )
+            val generated = if (task.semanticStatus != SemanticStatus.COMPLETED) {
+                val nextStatus = current.workflowStatuses.firstOrNull {
+                    it.projectId == task.projectId &&
+                        it.archivedAt == null &&
+                        it.semanticStatus == SemanticStatus.PLANNED
+                } ?: current.workflowStatuses.firstOrNull {
+                    it.projectId == task.projectId &&
+                        it.archivedAt == null &&
+                        it.semanticStatus == SemanticStatus.BACKLOG
+                }
+                nextStatus?.let {
+                    RecurringTaskPlanner.next(
+                        current = task,
+                        nextStatusId = it.id,
+                        nextSemanticStatus = it.semanticStatus,
+                        revision = Revision(
+                            deviceId = DeviceId("local-device"),
+                            wallTimeMillis = updated.revision.wallTimeMillis,
+                            logicalCounter = 0,
+                        ),
+                    )
+                }?.takeUnless { next -> next.id in existingIds }
+            } else {
+                null
+            }
+            generated?.let { next ->
+                existingIds += next.id
+                generatedTasks += next
+                nextOccurrenceReminder(task, next, current.reminders)
+                    ?.let(generatedReminders::add)
+            }
+            updatedById[task.id] = updated
+            activityEntries = activityEntries.appendedActivity(
+                taskId = task.id,
+                projectId = task.projectId,
+                kind = ActivityKind.COMPLETED,
+                body = "Completed",
+                at = command.completedAt,
+            )
+            inverses += DomainCommand.RestoreTaskStatus(
+                taskId = task.id,
+                statusId = task.statusId,
+                completedAt = task.completedAt,
+                generatedOccurrenceId = generated?.id,
+            )
+        }
+        if (plans.isNotEmpty()) {
+            publish(
+                tasks = current.tasks.map { updatedById[it.id] ?: it } + generatedTasks,
+                reminders = current.reminders + generatedReminders,
+                activityEntries = activityEntries,
+            )
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(plans.size)} completed",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private fun rescheduleTasks(command: DomainCommand.RescheduleTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val resolved = ids.mapNotNull(tasksById::get)
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val due = command.due
+        for (task in resolved) {
+            when {
+                task.recurrence != null && due == null && task.start == null ->
+                    return CommandResult.Rejected(
+                        RejectionReason.INVALID_STATE,
+                        "Add a due date before repeating this task.",
+                    )
+                task.recurrence?.endDate?.let { endDate ->
+                    due?.let {
+                        endDate.isBefore(
+                            it.instant.atZone(ZoneId.of(it.zoneId)).toLocalDate(),
+                        )
+                    }
+                } == true ->
+                    return CommandResult.Rejected(
+                        RejectionReason.INVALID_STATE,
+                        "The repeat end date cannot be before the due date.",
+                    )
+            }
+        }
+
+        val changing = resolved.filter { it.due != due }
+        val updatedById = linkedMapOf<TaskId, Task>()
+        val inverses = mutableListOf<DomainCommand>()
+        changing.forEach { task ->
+            updatedById[task.id] = task.copy(due = due, revision = nextRevision(task))
+            inverses += task.toUpdateCommand(
+                current.reminders.firstOrNull { it.taskId == task.id },
+            )
+        }
+        if (changing.isNotEmpty()) {
+            publish(tasks = current.tasks.map { updatedById[it.id] ?: it })
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(changing.size)} rescheduled",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private fun moveTasksToProject(command: DomainCommand.MoveTasksToProject): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val resolved = ids.mapNotNull(tasksById::get)
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val destination = command.projectId?.let { projectId ->
+            current.projects.firstOrNull { it.id == projectId }
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "That project no longer exists.",
+                )
+        }
+        class MovePlan(val task: Task, val status: WorkflowStatus)
+        val plans = mutableListOf<MovePlan>()
+        for (task in resolved) {
+            if (task.projectId == command.projectId) continue
+            if (destination?.archivedAt != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Restore that project before assigning new tasks to it.",
+                )
+            }
+            val mapped = current.workflowStatuses.firstOrNull {
+                it.projectId == command.projectId &&
+                    it.semanticStatus == task.semanticStatus &&
+                    it.archivedAt == null
+            } ?: return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
+            )
+            plans += MovePlan(task, mapped)
+        }
+
+        val destinationName = destination?.name ?: "Inbox"
+        val changedAt = now()
+        val updatedById = linkedMapOf<TaskId, Task>()
+        var activityEntries = current.activityEntries
+        val inverses = mutableListOf<DomainCommand>()
+        for (plan in plans) {
+            val task = plan.task
+            updatedById[task.id] = task.copy(
+                projectId = command.projectId,
+                statusId = plan.status.id,
+                semanticStatus = plan.status.semanticStatus,
+                milestoneId = null,
+                revision = nextRevision(task),
+            )
+            activityEntries = activityEntries.appendedActivity(
+                taskId = task.id,
+                projectId = command.projectId,
+                kind = ActivityKind.PROJECT_MOVED,
+                body = "${current.projects.firstOrNull { it.id == task.projectId }?.name ?: "Inbox"} → " +
+                    destinationName,
+                at = changedAt,
+            )
+            if (task.milestoneId != null) {
+                activityEntries = activityEntries.appendedActivity(
+                    taskId = task.id,
+                    projectId = command.projectId,
+                    kind = ActivityKind.MILESTONE_CHANGED,
+                    body = "Milestone: None",
+                    at = changedAt,
+                )
+            }
+            inverses += task.toUpdateCommand(
+                current.reminders.firstOrNull { it.taskId == task.id },
+            )
+        }
+        if (plans.isNotEmpty()) {
+            publish(
+                tasks = current.tasks.map { updatedById[it.id] ?: it },
+                activityEntries = activityEntries,
+            )
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(plans.size)} moved",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private fun setTasksTag(command: DomainCommand.SetTasksTag): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val resolved = ids.mapNotNull(tasksById::get)
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        if (current.tags.none { it.id == command.tagId }) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Tag no longer exists.")
+        }
+        val changing = resolved.filter { (command.tagId in it.tagIds) != command.present }
+        if (command.present && changing.any { it.tagIds.size >= MAX_TASK_TAGS }) {
+            return CommandResult.Rejected(
+                RejectionReason.TAG_LIMIT_REACHED,
+                "A task can contain up to $MAX_TASK_TAGS tags.",
+            )
+        }
+
+        val updatedById = linkedMapOf<TaskId, Task>()
+        val inverses = mutableListOf<DomainCommand>()
+        changing.forEach { task ->
+            updatedById[task.id] = task.copy(
+                tagIds = if (command.present) {
+                    task.tagIds + command.tagId
+                } else {
+                    task.tagIds - command.tagId
+                },
+                revision = nextRevision(task),
+            )
+            inverses += DomainCommand.SetTaskTag(task.id, command.tagId, !command.present)
+        }
+        if (changing.isNotEmpty()) {
+            publish(tasks = current.tasks.map { updatedById[it.id] ?: it })
+        }
+        return CommandResult.Success(
+            message = if (command.present) {
+                "Tag added to ${bulkTasksLabel(changing.size)}"
+            } else {
+                "Tag removed from ${bulkTasksLabel(changing.size)}"
+            },
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    private fun deleteTasks(command: DomainCommand.DeleteTasks): CommandResult {
+        val ids = command.taskIds.distinct()
+        rejectBulkSelection(ids)?.let { return it }
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val resolved = ids.mapNotNull(tasksById::get)
+        if (resolved.isEmpty()) return bulkTasksNotFound()
+
+        val deleting = resolved.filter { it.deletedAt == null }
+        val deletingIds = deleting.mapTo(hashSetOf(), Task::id)
+        val updatedById = linkedMapOf<TaskId, Task>()
+        var activityEntries = current.activityEntries
+        val inverses = mutableListOf<DomainCommand>()
+        deleting.forEach { task ->
+            updatedById[task.id] = task.copy(
+                deletedAt = command.deletedAt,
+                revision = nextRevision(task, command.deletedAt),
+            )
+            activityEntries = activityEntries.appendedActivity(
+                taskId = task.id,
+                projectId = task.projectId,
+                kind = ActivityKind.BINNED,
+                body = "Moved to Bin",
+                at = command.deletedAt,
+            )
+            inverses += DomainCommand.RestoreTask(task.id)
+        }
+        if (deleting.isNotEmpty()) {
+            publish(
+                tasks = current.tasks.map { updatedById[it.id] ?: it },
+                timeEntries = current.timeEntries.map { entry ->
+                    if (entry.taskId in deletingIds && entry.stoppedAt == null) {
+                        entry.copy(stoppedAt = maxOf(command.deletedAt, entry.startedAt))
+                    } else {
+                        entry
+                    }
+                },
+                activityEntries = activityEntries,
+                at = command.deletedAt,
+            )
+        }
+        return CommandResult.Success(
+            message = "${bulkTasksLabel(deleting.size)} moved to the Bin",
+            undo = DomainCommand.UndoBatch(inverses.asReversed())
+                .takeIf { inverses.isNotEmpty() },
+        )
+    }
+
+    /**
+     * Replays a repository-produced batch undo in its stored order.
+     *
+     * All-or-nothing: a rejected inverse restores the captured pre-batch
+     * state and returns that rejection, so a partially applied undo can
+     * never become durable — no journal entry is appended because the
+     * restored state produces no diff. Sub-results carry no further undo.
+     */
+    private fun undoBatch(command: DomainCommand.UndoBatch): CommandResult {
+        val before = mutableWorkspace.value
+        val beforeTombstones = tombstones
+        val beforeTaskTags = taskTags
+        command.commands.forEach { inverse ->
+            val result = dispatch(inverse)
+            if (result is CommandResult.Rejected) {
+                mutableWorkspace.value = before
+                tombstones = beforeTombstones
+                taskTags = beforeTaskTags
+                return result
+            }
+        }
+        return CommandResult.Success("Undone")
+    }
+
+    private fun rejectBulkSelection(ids: List<TaskId>): CommandResult.Rejected? = when {
+        ids.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.EMPTY_BULK_SELECTION,
+            "Select at least one task.",
+        )
+        ids.size > MAX_BULK_TASKS -> CommandResult.Rejected(
+            RejectionReason.BULK_SELECTION_TOO_LARGE,
+            "Bulk actions are limited to $MAX_BULK_TASKS tasks.",
+        )
+        else -> null
+    }
+
+    private fun bulkTasksNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "Those tasks no longer exist.",
+    )
+
+    private fun bulkTasksLabel(count: Int): String =
+        if (count == 1) "1 task" else "$count tasks"
 
     private fun changeTaskStatus(
         command: DomainCommand.ChangeTaskStatus,
@@ -2821,6 +3203,24 @@ class InMemoryVaultRepository internal constructor(
         at: Instant,
     ) {
         val current = mutableWorkspace.value
+        mutableWorkspace.value = current.copy(
+            activityEntries = current.activityEntries.appendedActivity(
+                taskId = taskId,
+                projectId = projectId,
+                kind = kind,
+                body = body,
+                at = at,
+            ),
+        )
+    }
+
+    private fun List<ActivityEntry>.appendedActivity(
+        taskId: TaskId?,
+        projectId: ProjectId?,
+        kind: ActivityKind,
+        body: String,
+        at: Instant,
+    ): List<ActivityEntry> {
         val entry = ActivityEntry(
             id = UUID.randomUUID().toString(),
             taskId = taskId,
@@ -2829,7 +3229,7 @@ class InMemoryVaultRepository internal constructor(
             body = body.take(MAX_ACTIVITY_BODY_LENGTH),
             createdAt = at,
         )
-        val entries = current.activityEntries + entry
+        val entries = this + entry
         val ownerEntries = entries.filter {
             if (taskId != null) it.taskId == taskId else it.taskId == null && it.projectId == projectId
         }
@@ -2837,11 +3237,9 @@ class InMemoryVaultRepository internal constructor(
             .sortedWith(compareBy<ActivityEntry>(ActivityEntry::createdAt).thenBy(ActivityEntry::id))
             .take((ownerEntries.size - MAX_ACTIVITY_ENTRIES_PER_OWNER).coerceAtLeast(0))
             .mapTo(hashSetOf(), ActivityEntry::id)
-        mutableWorkspace.value = current.copy(
-            activityEntries = entries
-                .filterNot { it.id in idsToRemove }
-                .sortedWith(compareBy<ActivityEntry>(ActivityEntry::createdAt).thenBy(ActivityEntry::id)),
-        )
+        return entries
+            .filterNot { it.id in idsToRemove }
+            .sortedWith(compareBy<ActivityEntry>(ActivityEntry::createdAt).thenBy(ActivityEntry::id))
     }
 
     private fun Task.toUpdateCommand(
@@ -2907,6 +3305,7 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_TAG_NAME_LENGTH = 64
         const val MAX_TASK_TAGS = 50
         const val MAX_TASK_DEPENDENCIES = 100
+        const val MAX_BULK_TASKS = 200
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000

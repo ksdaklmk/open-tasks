@@ -125,6 +125,7 @@ import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.ZonedMoment
 import app.opentasks.feature.home.HomeScreen
 import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
@@ -150,6 +151,7 @@ import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -209,6 +211,12 @@ private data class CalendarPreviewState(
 
 internal const val UNDO_SNACKBAR_TIMEOUT_MILLIS = 8_000L
 
+/**
+ * Task 2's date-only convention: a bare date resolves to 17:00 local time.
+ * Shared by every `:app` mapping that turns a picked date into a due moment.
+ */
+internal val DATE_ONLY_DUE_TIME: LocalTime = LocalTime.of(17, 0)
+
 internal fun shouldShowNavigationLabels(fontScale: Float): Boolean = fontScale < 1.5f
 
 internal fun snackbarPresentation(hasUndo: Boolean): SnackbarPresentation =
@@ -254,6 +262,9 @@ fun OpenTasksApp(
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
+        val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
+        val pendingBlockedBulk by
+            viewModel.pendingBlockedBulkCompletion.collectAsStateWithLifecycle()
         val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
         val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
         val focusSession by viewModel.focusSession.collectAsStateWithLifecycle()
@@ -903,6 +914,47 @@ fun OpenTasksApp(
                                     onCompleteTask = viewModel::completeTask,
                                     onChangeTaskStatus = viewModel::changeTaskStatus,
                                     onDeleteTask = viewModel::deleteTask,
+                                    selectedBulkIds = bulkSelection,
+                                    onToggleBulkSelection = viewModel::toggleBulkSelection,
+                                    onClearBulkSelection = viewModel::clearBulkSelection,
+                                    onBulkComplete = viewModel::completeBulkSelection,
+                                    onBulkReschedule = { date ->
+                                        val zone = ZoneId.systemDefault()
+                                        viewModel.executeBulk(
+                                            DomainCommand.RescheduleTasks(
+                                                taskIds = bulkSelection.toList(),
+                                                due = ZonedMoment(
+                                                    instant = date
+                                                        .atTime(DATE_ONLY_DUE_TIME)
+                                                        .atZone(zone)
+                                                        .toInstant(),
+                                                    zoneId = zone.id,
+                                                ),
+                                            ),
+                                        )
+                                    },
+                                    onBulkMoveToProject = { projectId ->
+                                        viewModel.executeBulk(
+                                            DomainCommand.MoveTasksToProject(
+                                                taskIds = bulkSelection.toList(),
+                                                projectId = projectId,
+                                            ),
+                                        )
+                                    },
+                                    onBulkSetTag = { tagId, present ->
+                                        viewModel.executeBulk(
+                                            DomainCommand.SetTasksTag(
+                                                taskIds = bulkSelection.toList(),
+                                                tagId = tagId,
+                                                present = present,
+                                            ),
+                                        )
+                                    },
+                                    onBulkDelete = {
+                                        viewModel.executeBulk(
+                                            DomainCommand.DeleteTasks(bulkSelection.toList()),
+                                        )
+                                    },
                                     activeTimerTaskId = snapshot.home.activeTimer?.taskId,
                                     onToggleTimer = viewModel::toggleTimer,
                                     onUpdateTask = { taskId, edit ->
@@ -1431,6 +1483,25 @@ fun OpenTasksApp(
                 dismissButton = {
                     TextButton(onClick = viewModel::dismissBlockedCompletion) {
                         Text("Keep open")
+                    }
+                },
+            )
+        }
+
+        if (pendingBlockedBulk) {
+            AlertDialog(
+                onDismissRequest = viewModel::dismissBlockedBulkCompletion,
+                icon = { Icon(Icons.Rounded.CheckCircle, contentDescription = null) },
+                title = { Text(stringResource(R.string.bulk_blocked_title)) },
+                text = { Text(stringResource(R.string.bulk_blocked_body)) },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmBlockedBulkCompletion) {
+                        Text(stringResource(R.string.bulk_blocked_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissBlockedBulkCompletion) {
+                        Text(stringResource(R.string.bulk_blocked_dismiss))
                     }
                 },
             )

@@ -2,6 +2,7 @@ package app.opentasks.core.designsystem
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.customActions
@@ -90,16 +92,24 @@ fun TaskRow(
     onSelect: () -> Unit,
     onComplete: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
 ) {
     val completionLabel = if (task.isCompleted) "Reopen ${task.title}" else "Complete ${task.title}"
+    val selectLabel = stringResource(R.string.task_select_action, task.title)
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .semantics {
-                customActions = listOf(
+                customActions = listOfNotNull(
                     CustomAccessibilityAction(completionLabel) {
                         onComplete()
                         true
+                    },
+                    onLongPress?.let { longPress ->
+                        CustomAccessibilityAction(selectLabel) {
+                            longPress()
+                            true
+                        }
                     },
                 )
             },
@@ -109,16 +119,26 @@ fun TaskRow(
         },
         shape = MaterialTheme.shapes.medium,
     ) {
+        val clickModifier = if (onLongPress != null) {
+            Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "Open ${task.title}",
+                onLongClick = onLongPress,
+                onClick = onSelect,
+            )
+        } else {
+            Modifier.clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "Open ${task.title}",
+                onClick = onSelect,
+            )
+        }
         Row(
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    role = Role.Button,
-                    onClickLabel = "Open ${task.title}",
-                    onClick = onSelect,
-                )
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = clickModifier.padding(horizontal = 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(

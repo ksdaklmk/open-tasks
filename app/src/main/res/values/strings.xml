@@ -1,5 +1,9 @@
 <resources>
     <string name="app_name">Open Tasks</string>
+    <string name="bulk_blocked_title">Complete blocked tasks?</string>
+    <string name="bulk_blocked_body">Some selected tasks are still waiting on other work. Completing them keeps those links for review.</string>
+    <string name="bulk_blocked_confirm">Complete anyway</string>
+    <string name="bulk_blocked_dismiss">Keep open</string>
     <string name="quick_add">Quick add</string>
     <string name="quick_add_shortcut">Capture a task</string>
     <string name="quick_add_date_suggestion">Due %1$s</string>

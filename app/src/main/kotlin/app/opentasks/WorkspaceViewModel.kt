@@ -88,7 +88,9 @@ class WorkspaceViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val selectionState = WorkspaceSelectionState(savedStateHandle)
+    private val bulkSelectionState = WorkspaceBulkSelectionState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
+    private val pendingBlockedBulk = MutableStateFlow(false)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
     private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
@@ -109,6 +111,10 @@ class WorkspaceViewModel @Inject constructor(
     val selectedTaskId: StateFlow<String?> = selectionState.selectedTaskId
 
     val selectedProjectId: StateFlow<String?> = selectionState.selectedProjectId
+
+    val bulkSelection: StateFlow<Set<TaskId>> = bulkSelectionState.selection
+
+    val pendingBlockedBulkCompletion: StateFlow<Boolean> = pendingBlockedBulk.asStateFlow()
 
     val focusSession: StateFlow<FocusSession?> = focusSessionStore.session
 
@@ -399,6 +405,60 @@ class WorkspaceViewModel @Inject constructor(
                     eventChannel.send(WorkspaceEvent.Message(result.message))
             }
         }
+    }
+
+    fun toggleBulkSelection(taskId: TaskId) {
+        bulkSelectionState.toggle(taskId)
+    }
+
+    fun clearBulkSelection() {
+        bulkSelectionState.clear()
+    }
+
+    /**
+     * Executes a bulk command through the ordinary snackbar/Undo event path.
+     * Success clears the selection after that event is published; any
+     * rejection keeps the selection so the person can adjust and retry.
+     */
+    fun executeBulk(command: DomainCommand) {
+        execute(command) { result ->
+            if (result is CommandResult.Success) clearBulkSelection()
+        }
+    }
+
+    fun completeBulkSelection() {
+        val ids = bulkSelection.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            when (val result = repository.execute(DomainCommand.CompleteTasks(ids))) {
+                is CommandResult.Success -> {
+                    send(result)
+                    clearBulkSelection()
+                }
+                is CommandResult.Rejected -> {
+                    if (result.reason == RejectionReason.BLOCKED_TASK_WARNING_REQUIRED) {
+                        pendingBlockedBulk.value = true
+                    } else {
+                        eventChannel.send(WorkspaceEvent.Message(result.message))
+                    }
+                }
+            }
+        }
+    }
+
+    fun confirmBlockedBulkCompletion() {
+        if (!pendingBlockedBulk.value) return
+        pendingBlockedBulk.value = false
+        executeBulk(
+            DomainCommand.CompleteTasks(
+                taskIds = bulkSelection.value.toList(),
+                acknowledgeBlocked = true,
+            ),
+        )
+    }
+
+    fun dismissBlockedBulkCompletion() {
+        pendingBlockedBulk.value = false
     }
 
     fun confirmBlockedCompletion() {
@@ -786,6 +846,46 @@ internal class WorkspaceSelectionState(
     internal companion object {
         const val SELECTED_TASK_ID = "selectedTaskId"
         const val SELECTED_PROJECT_ID = "selectedProjectId"
+    }
+}
+
+/**
+ * Bulk multi-select state. The exposed value is a set of domain ids, but the
+ * [SavedStateHandle] stores a plain `List<String>` under [BULK_SELECTION] so
+ * the selection survives process death, mirroring [WorkspaceSelectionState].
+ */
+internal class WorkspaceBulkSelectionState(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    private val mutableSelection = MutableStateFlow(restoredSelection())
+
+    val selection: StateFlow<Set<TaskId>> = mutableSelection.asStateFlow()
+
+    fun toggle(taskId: TaskId) {
+        val current = mutableSelection.value
+        replace(if (taskId in current) current - taskId else current + taskId)
+    }
+
+    fun clear() {
+        replace(emptySet())
+    }
+
+    private fun replace(value: Set<TaskId>) {
+        mutableSelection.value = value
+        savedStateHandle[BULK_SELECTION] = value
+            .map(TaskId::value)
+            .toCollection(ArrayList())
+    }
+
+    private fun restoredSelection(): Set<TaskId> =
+        (savedStateHandle.get<Any?>(BULK_SELECTION) as? List<*>)
+            .orEmpty()
+            .mapNotNull { value -> (value as? String)?.takeIf(String::isNotBlank) }
+            .distinct()
+            .mapTo(linkedSetOf(), ::TaskId)
+
+    internal companion object {
+        const val BULK_SELECTION = "bulkSelection"
     }
 }
 

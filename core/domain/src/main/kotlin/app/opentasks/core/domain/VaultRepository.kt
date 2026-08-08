@@ -240,6 +240,38 @@ sealed interface DomainCommand {
         val completedAt: Instant = Instant.now(),
     ) : DomainCommand
 
+    data class CompleteTasks(
+        val taskIds: List<TaskId>,
+        val acknowledgeBlocked: Boolean = false,
+        val completedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    data class RescheduleTasks(
+        val taskIds: List<TaskId>,
+        val due: ZonedMoment?,          // null clears the due moment
+    ) : DomainCommand
+
+    data class MoveTasksToProject(
+        val taskIds: List<TaskId>,
+        val projectId: ProjectId?,      // null moves to Inbox
+    ) : DomainCommand
+
+    data class SetTasksTag(
+        val taskIds: List<TaskId>,
+        val tagId: TagId,
+        val present: Boolean,
+    ) : DomainCommand
+
+    data class DeleteTasks(
+        val taskIds: List<TaskId>,
+        val deletedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
+    /** Repository-produced batch undo. Commands are stored in reverse
+     *  application order and replayed in list order inside one transaction.
+     *  Never constructed by UI code. */
+    data class UndoBatch(val commands: List<DomainCommand>) : DomainCommand
+
     data class ReopenTask(val taskId: TaskId) : DomainCommand
 
     data class RestoreTask(val taskId: TaskId) : DomainCommand
@@ -446,6 +478,8 @@ enum class RejectionReason {
     SAVED_VIEW_NAME_INVALID,
     SAVED_VIEW_QUERY_TOO_LONG,
     SAVED_VIEW_PAYLOAD_TOO_LARGE,
+    EMPTY_BULK_SELECTION,
+    BULK_SELECTION_TOO_LARGE,
 }
 
 interface VaultRepository {
