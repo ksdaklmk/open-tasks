@@ -1247,10 +1247,11 @@ fun OpenTasksApp(
         if (showQuickAdd) {
             QuickAddSheet(
                 onDismiss = { showQuickAdd = false },
-                onAdd = { title ->
-                    viewModel.addTask(title)
+                onAdd = { title, due ->
+                    viewModel.addTask(title, due)
                     showQuickAdd = false
                 },
+                initialTitle = "",
             )
         }
 

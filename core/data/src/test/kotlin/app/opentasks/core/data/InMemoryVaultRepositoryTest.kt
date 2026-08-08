@@ -109,6 +109,23 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun createTaskPersistsProvidedDue() = runBlocking {
+        val due = ZonedMoment(
+            instant = Instant.parse("2026-08-10T09:00:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
+
+        assertTrue(
+            repository.execute(
+                DomainCommand.CreateTask("Due task", due = due),
+            ) is CommandResult.Success,
+        )
+
+        val created = repository.observeWorkspace().value.tasks.first { it.title == "Due task" }
+        assertEquals(due, created.due)
+    }
+
+    @Test
     fun undoRestoresAnElapsedReminderButUserCommandsCannotCreateOne() = runBlocking {
         val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
         val elapsedReminder = Reminder(

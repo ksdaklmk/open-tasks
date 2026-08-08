@@ -72,7 +72,7 @@ class ProcessRestorationInstrumentedTest {
         val restorationTester = StateRestorationTester(composeRule)
         restorationTester.setContent {
             OpenTasksTheme {
-                QuickAddSheet(onDismiss = {}, onAdd = {})
+                QuickAddSheet(onDismiss = {}, onAdd = { _, _ -> })
             }
         }
 

@@ -154,6 +154,30 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun createTaskPersistsProvidedDue() = runBlocking {
+        openRepository()
+        val due = ZonedMoment(
+            Instant.parse("2026-08-10T09:00:00Z"),
+            "Asia/Bangkok",
+        )
+
+        assertTrue(
+            repository!!.execute(
+                DomainCommand.CreateTask(PERSISTED_DUE_TITLE, due = due),
+            ) is CommandResult.Success,
+        )
+
+        val created = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace()
+                .map { snapshot -> snapshot.tasks.firstOrNull { it.title == PERSISTED_DUE_TITLE } }
+                .filterNotNull()
+                .first()
+        }
+
+        assertEquals(due, created.due)
+    }
+
+    @Test
     fun activeTimerSurvivesEncryptedDatabaseAndProcessRestart() = runBlocking {
         val startedAt = Instant.parse("2026-07-27T03:00:00Z")
         val beforeRestart = Instant.parse("2026-07-27T03:30:00Z")
@@ -2310,5 +2334,6 @@ class RoomVaultRepositoryInstrumentedTest {
         const val LIFECYCLE_PROJECT_NAME = "Lifecycle persistence"
         const val LIFECYCLE_PROJECT_SUMMARY = "archived project details survive restart"
         const val LIFECYCLE_TASK_TITLE = "Retain this archived project task"
+        const val PERSISTED_DUE_TITLE = "create-task-persists-due"
     }
 }

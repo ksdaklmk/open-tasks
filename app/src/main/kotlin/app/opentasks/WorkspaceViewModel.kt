@@ -21,6 +21,7 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.ZonedMoment
 import app.opentasks.reminders.ReminderScheduler
 import app.opentasks.feature.more.InsightsPresentation
 import app.opentasks.feature.more.InsightsProjectOption
@@ -173,8 +174,8 @@ class WorkspaceViewModel @Inject constructor(
         workspaceInsightsState.setForegrounded(foregrounded)
     }
 
-    fun addTask(title: String) {
-        execute(DomainCommand.CreateTask(title))
+    fun addTask(title: String, due: ZonedMoment? = null) {
+        execute(DomainCommand.CreateTask(title, due = due))
     }
 
     fun addProject(name: String, summary: String) {

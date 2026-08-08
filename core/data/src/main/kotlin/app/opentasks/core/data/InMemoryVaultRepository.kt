@@ -999,6 +999,7 @@ class InMemoryVaultRepository internal constructor(
             semanticStatus = initialStatus.semanticStatus,
             title = title,
             priority = command.priority,
+            due = command.due,
             revision = Revision(DeviceId("local-device"), now().toEpochMilli(), 0),
         )
         val current = mutableWorkspace.value

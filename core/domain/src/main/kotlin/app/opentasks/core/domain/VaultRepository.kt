@@ -149,6 +149,7 @@ sealed interface DomainCommand {
         val title: String,
         val projectId: ProjectId? = null,
         val priority: Priority = Priority.NONE,
+        val due: ZonedMoment? = null,
     ) : DomainCommand
 
     data class RenameTask(

@@ -206,7 +206,7 @@ class ShortcutRootEscapeInstrumentedTest {
                         .focusable(),
                 ) {
                     if (showQuickAdd) {
-                        QuickAddSheet(onDismiss = { showQuickAdd = false }, onAdd = {})
+                        QuickAddSheet(onDismiss = { showQuickAdd = false }, onAdd = { _, _ -> })
                     }
                 }
             }

@@ -1078,6 +1078,7 @@ class RoomVaultRepository(
             semanticStatus = initialStatus.semanticStatus,
             title = title,
             priority = command.priority,
+            due = command.due,
             revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
         )
         persistTask(task, "create")

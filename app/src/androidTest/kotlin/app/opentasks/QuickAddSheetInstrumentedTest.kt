@@ -49,7 +49,7 @@ class QuickAddSheetInstrumentedTest {
                 OpenTasksTheme {
                     QuickAddSheet(
                         onDismiss = {},
-                        onAdd = submittedTitle::set,
+                        onAdd = { title, _ -> submittedTitle.set(title) },
                     )
                 }
             }
