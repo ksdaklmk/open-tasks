@@ -69,7 +69,7 @@ fun ReviewScreen(
         .firstOrNull { it.id !in reviewedTaskIds }
     val project = queue.projects.firstOrNull { it.id !in reviewedProjectIds }
     var confirmBlocked by remember { mutableStateOf<Task?>(null) }
-    BackHandler(enabled = !actionPending, onBack = onBack)
+    BackHandler { if (!actionPending) onBack() }
 
     Column(
         modifier = modifier

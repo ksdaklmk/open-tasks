@@ -1,7 +1,12 @@
 package app.opentasks.feature.more
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.OnBackPressedDispatcherOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -9,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ReviewQueue
@@ -29,8 +35,10 @@ class ReviewScreenInstrumentedTest {
         val first = task("first", "First")
         val second = task("second", "Second")
         composeRule.setContent {
-            var queue by mutableStateOf(ReviewQueue(emptyList(), emptyList(), listOf(first, second), emptyList()))
-            var reviewed by mutableStateOf(emptySet<TaskId>())
+            var queue by remember {
+                mutableStateOf(ReviewQueue(emptyList(), emptyList(), listOf(first, second), emptyList()))
+            }
+            var reviewed by remember { mutableStateOf(emptySet<TaskId>()) }
             OpenTasksTheme {
                 ReviewScreen(
                     queue = queue,
@@ -89,7 +97,7 @@ class ReviewScreenInstrumentedTest {
         val task = task("only", "Only")
         var finishCount = 0
         composeRule.setContent {
-            var reviewed by mutableStateOf(emptySet<TaskId>())
+            var reviewed by remember { mutableStateOf(emptySet<TaskId>()) }
             OpenTasksTheme {
                 ReviewScreen(
                     queue = ReviewQueue(emptyList(), emptyList(), listOf(task), emptyList()),
@@ -111,6 +119,44 @@ class ReviewScreenInstrumentedTest {
         composeRule.onNodeWithTag("review-keep").performClick()
         composeRule.onNodeWithTag("review-finish").performClick()
         assertEquals(1, finishCount)
+    }
+
+    @Test
+    fun pendingActionConsumesSystemBackWithoutCallingBackOrHost() {
+        var fallbackCount = 0
+        val dispatcher = OnBackPressedDispatcher { fallbackCount++ }
+        var reviewBackCount = 0
+        composeRule.setContent {
+            val lifecycleOwner = LocalLifecycleOwner.current
+            val dispatcherOwner = remember(lifecycleOwner) {
+                object : OnBackPressedDispatcherOwner {
+                    override val lifecycle = lifecycleOwner.lifecycle
+                    override val onBackPressedDispatcher = dispatcher
+                }
+            }
+            CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides dispatcherOwner) {
+                OpenTasksTheme {
+                    ReviewScreen(
+                        queue = ReviewQueue(emptyList(), emptyList(), emptyList(), emptyList()),
+                        projectNames = emptyMap(),
+                        reviewedTaskIds = emptySet(),
+                        reviewedProjectIds = emptySet(),
+                        actionPending = true,
+                        onBack = { reviewBackCount++ },
+                        onCompleteTask = { _, _ -> },
+                        onRescheduleTask = { _, _ -> },
+                        onKeepTask = {},
+                        onBinTask = {},
+                        onKeepProject = {},
+                        onArchiveProject = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.runOnUiThread(dispatcher::onBackPressed)
+        assertEquals(0, reviewBackCount)
+        assertEquals(0, fallbackCount)
     }
 
     private fun task(id: String, title: String): Task =
