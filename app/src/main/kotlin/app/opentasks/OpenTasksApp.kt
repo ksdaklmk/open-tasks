@@ -280,10 +280,6 @@ fun OpenTasksApp(
         val showNavigationLabels =
             shouldShowNavigationLabels(LocalDensity.current.fontScale)
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
-        // Populated from `quickAddPrefillText` when a share or text-selection
-        // intent drives `quickAddSignal`; empty for every other Quick Add
-        // entry point (FAB, shortcut, keyboard shortcut).
-        var quickAddSheetTitle by rememberSaveable { mutableStateOf("") }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
         var showShortcutHelp by rememberSaveable { mutableStateOf(false) }
         // Not `rememberSaveable`: a `CalendarEventDraft` isn't a bundle-able
@@ -555,7 +551,6 @@ fun OpenTasksApp(
         LaunchedEffect(quickAddSignal) {
             if (quickAddSignal > 0) {
                 showQuickAdd = true
-                quickAddSheetTitle = quickAddPrefillText.orEmpty()
                 onQuickAddConsumed()
             }
         }
@@ -1259,19 +1254,24 @@ fun OpenTasksApp(
             // Keyed on `quickAddSignal` so a second share or text-selection
             // intent arriving while the sheet is already visible restarts
             // its `rememberSaveable` title/due state, even when the shared
-            // text is identical to what is already showing.
+            // text is identical to what is already showing. `initialTitle`
+            // is read directly from `quickAddPrefillText` here rather than
+            // through an effect-updated intermediate: this `key` block's
+            // first composition under a new `quickAddSignal` value happens
+            // while MainActivity's copy is still populated -- consumption
+            // via `onQuickAddConsumed` happens afterwards, in the effects
+            // phase -- so the freshly mounted sheet always seeds from the
+            // current share, and the later recomposition with the cleared
+            // copy cannot change the already-initialized `rememberSaveable`
+            // title state.
             key(quickAddSignal) {
                 QuickAddSheet(
-                    onDismiss = {
-                        showQuickAdd = false
-                        quickAddSheetTitle = ""
-                    },
+                    onDismiss = { showQuickAdd = false },
                     onAdd = { title, due ->
                         viewModel.addTask(title, due)
                         showQuickAdd = false
-                        quickAddSheetTitle = ""
                     },
-                    initialTitle = quickAddSheetTitle,
+                    initialTitle = quickAddPrefillText.orEmpty(),
                 )
             }
         }

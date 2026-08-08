@@ -297,14 +297,19 @@ class MainActivity : ComponentActivity() {
         when (intent?.action) {
             QUICK_ADD_ACTION -> quickAddSignal++
             Intent.ACTION_SEND -> {
-                quickAddPrefillText =
-                    quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
-                if (quickAddPrefillText != null) quickAddSignal++
+                val prefill = quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
+                if (prefill != null) {
+                    quickAddPrefillText = prefill
+                    quickAddSignal++
+                }
             }
             Intent.ACTION_PROCESS_TEXT -> {
-                quickAddPrefillText =
+                val prefill =
                     quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT))
-                if (quickAddPrefillText != null) quickAddSignal++
+                if (prefill != null) {
+                    quickAddPrefillText = prefill
+                    quickAddSignal++
+                }
             }
             ReminderIntents.ACTION_OPEN_TASK -> {
                 openTaskId = intent.getStringExtra(ReminderIntents.EXTRA_TASK_ID)
