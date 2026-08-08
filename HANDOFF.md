@@ -24,10 +24,21 @@
   validated both: verify, API 36 (all six modules), and release green;
   all three report artifacts uploaded under v7; API 37.0 red on F6
   only. PRs #9 and #11 are closed; no open PRs or issues remain.
-- Next decision (user-owned, needs a brainstorming session): the
-  product direction after Stage 5 — release preparation (signing
-  config, Play Console) versus a new feature stage. Nothing is
-  in-flight; the repo is clean and green.
+- Release 1.0.0, 8 August 2026: the user chose release preparation
+  (signed sideload only) as the post-Stage-5 direction. The
+  release-readiness stage is executed per
+  `docs/superpowers/specs/2026-08-08-release-readiness-design.md` and
+  its plan: guarded local signing (release signs iff untracked
+  `keystore.properties` exists; CI stays unsigned and unchanged),
+  version 1.0.0/versionCode 1, `scripts/verify-release-apk.sh`
+  (fail-closed, five checks), and `RELEASING.md` (process plus smoke
+  checklist). The signed APK passed all automated checks and a 7/7
+  user-executed smoke run on the disposable read-only AVD — the R8
+  build's first runtime proof. The keystore is held and backed up by
+  the user outside the repo. The qualification record is
+  `docs/qualification/release-1.0.0-sideload.md`; the released commit
+  is tagged `v1.0.0`. Play Console, AAB, and CI signing remain out of
+  scope by ruling.
 - Session status: **Stage 5 is complete and qualified: all 13 tasks of
   the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
   family and collection command; retired-set GC closure; silent
