@@ -8,9 +8,8 @@
   post-F6 shape — `verify`, compact API 36, and `release` green, only
   expanded API 37.0 red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — IN PROGRESS and PAUSED after Task 1 by user
-     instruction (8 August 2026); do not start Task 2 without the
-     user's go.** Authority spec:
+  1. **Stage 6 execution — IN PROGRESS; subagent-driven from Task 2 by
+     user ruling (8 August 2026).** Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
      (audited revisions of both committed in `fc4aad8`, the recorded
@@ -20,12 +19,11 @@
      reviewed — see the Stage 6 Task 1 checkpoint below. Tasks 2–13
      remain; no task before Task 13 runs a device suite; implementers
      must not spawn subagents (standing fork-swarm ruling).
-     **Open user decision:** whether Tasks 2–12 switch from inline
-     `superpowers:executing-plans` to subagent-driven execution (the
-     executor recommended switching, with the no-subagent clause in
-     every implementer brief and Task 13 kept controller-owned); the
-     plan's execution notes must be amended before Task 2 if the user
-     approves the switch.
+     User ruling (8 August 2026): Tasks 2–12 execute via
+     `superpowers:subagent-driven-development` — fresh implementer per
+     task, independent task review per boundary, the no-subagent/no-fork
+     clause in every implementer dispatch, and Task 13 controller-owned;
+     the plan header records the ruling.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -259,13 +257,10 @@ recorded in the ignored execution ledger before any implementation.
   recorded as deferred in the ledger (binary-vs-UTF-16 name-ordering
   parity nuance, defaulted `formatVersion` shape-conformance
   observation, unscoped DAO surface as specified).
-- Resume instructions: on the user's go, execute Task 2 (natural-language
-  dates in Quick Add) from the plan — unless the user approves the
-  recorded open decision to switch Tasks 2–12 to subagent-driven
-  execution, in which case amend the plan's execution notes first
-  (docs-only commit), then dispatch Task 2 with the no-subagent clause.
-  The three protected workspace items (uncommitted Stage 3 plan
-  amendment, `.kotlin/`, `artifacts/`) remain untouched.
+- Resume instruction discharged: the user approved the subagent-driven
+  switch and resumed execution at Task 2 on 8 August 2026 (see the
+  amended plan header). The three protected workspace items (uncommitted
+  Stage 3 plan amendment, `.kotlin/`, `artifacts/`) remain untouched.
 
 ## CI test-fix final checkpoint — 7 August 2026
 

@@ -1,10 +1,13 @@
 # Stage 6 Daily-Flow Features Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:executing-plans to implement this plan inline, task-by-task.
-> The standing no-implementer-forks ruling overrides the generic
-> subagent-driven recommendation. Steps use checkbox (`- [ ]`) syntax for
-> tracking.
+> superpowers:subagent-driven-development to execute this plan — user
+> ruling, 8 August 2026, superseding the earlier inline pin (Task 1 was
+> executed and reviewed inline before the switch). One fresh implementer
+> subagent per task with an independent review per boundary; implementer
+> dispatches must never spawn subagents or forks of their own (standing
+> fork-swarm ruling); Task 13 stays controller-owned because it drives
+> the device gate. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cut daily-use friction: share-sheet/selection/tile capture with
 natural-language dates, an interactive Today widget, preset focus cycles,
