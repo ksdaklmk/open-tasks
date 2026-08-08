@@ -3,6 +3,7 @@ package app.opentasks.widget
 import android.annotation.SuppressLint
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle as ComposeTextStyle
@@ -23,6 +24,9 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -31,8 +35,12 @@ import androidx.glance.background
 import androidx.glance.color.ColorProvider
 import androidx.glance.currentState
 import androidx.glance.layout.Column
+import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
+import androidx.glance.semantics.contentDescription
+import androidx.glance.semantics.semantics
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
@@ -40,8 +48,11 @@ import androidx.glance.unit.ColorProvider as GlanceColorProvider
 import app.opentasks.MainActivity
 import app.opentasks.R
 import app.opentasks.core.designsystem.OpenTasksColors
+import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.reminders.ReminderIntents
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -58,9 +69,16 @@ private val OverdueCountKey = intPreferencesKey("today_overdue_count")
 private val TitlesPermittedKey = booleanPreferencesKey("today_titles_permitted")
 private val FocusTitleKeys =
     List(3) { index -> stringPreferencesKey("today_focus_title_$index") }
+private val FocusIdKeys =
+    List(3) { index -> stringPreferencesKey("today_focus_id_$index") }
+private val FocusCompletableKeys =
+    List(3) { index -> booleanPreferencesKey("today_focus_completable_$index") }
 
 /** Matches the extra `MainActivity.handleIntent` reads to open Quick Add. */
 private val QuickAddKey = ActionParameters.Key<Boolean>("open_quick_add")
+
+/** Carries the tapped row's task id into [CompleteFocusTaskAction]. */
+private val TaskIdKey = ActionParameters.Key<String>("today_focus_task_id")
 
 private val WidgetBackground =
     ColorProvider(day = OpenTasksColors.LightSurface, night = OpenTasksColors.DarkSurface)
@@ -137,6 +155,15 @@ class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     }
 }
 
+/** Reconstructs the focus rows this composable can act on from Glance state. */
+private fun Preferences.readFocusEntries(): List<FocusEntry> =
+    FocusTitleKeys.indices.mapNotNull { index ->
+        val title = this[FocusTitleKeys[index]] ?: return@mapNotNull null
+        val taskId = this[FocusIdKeys[index]] ?: return@mapNotNull null
+        val completable = this[FocusCompletableKeys[index]] ?: false
+        FocusEntry(taskId = taskId, title = title, completable = completable)
+    }
+
 @Composable
 private fun TodayWidgetContent() {
     val prefs = currentState<Preferences>()
@@ -144,7 +171,7 @@ private fun TodayWidgetContent() {
     val openToday = prefs[OpenTodayCountKey] ?: 0
     val overdue = prefs[OverdueCountKey] ?: 0
     val titlesPermitted = prefs[TitlesPermittedKey] ?: false
-    val titles = if (titlesPermitted) FocusTitleKeys.mapNotNull { prefs[it] } else emptyList()
+    val entries = if (titlesPermitted) prefs.readFocusEntries() else emptyList()
 
     Column(
         modifier = GlanceModifier
@@ -159,13 +186,8 @@ private fun TodayWidgetContent() {
             style = glanceTextStyle(MaterialTypography.titleMedium, WidgetInk),
         )
         if (titlesPermitted) {
-            titles.forEach { title ->
-                Text(
-                    text = title,
-                    maxLines = 1,
-                    style = glanceTextStyle(MaterialTypography.bodyMedium, WidgetMutedInk),
-                    modifier = GlanceModifier.padding(top = 4.dp),
-                )
+            entries.forEach { entry ->
+                FocusRow(entry, context)
             }
         } else {
             Text(
@@ -185,6 +207,74 @@ private fun TodayWidgetContent() {
                     ),
                 ),
         )
+    }
+}
+
+/**
+ * One focus-task row: the title tap-opens [entry]'s task through the
+ * existing reminder open-task contract (`ReminderIntents.ACTION_OPEN_TASK`
+ * + `EXTRA_TASK_ID`, the same extra `MainActivity` already reads -- no new
+ * extra, no new `MainActivity` branch), and, only when [entry] is
+ * [FocusEntry.completable], a trailing complete glyph runs
+ * [CompleteFocusTaskAction]. That callback never writes Glance state itself
+ * -- it only asks [TodayWidgetPublisher.completeActiveTask] to re-verify and
+ * act, so nothing here can race the stop-time title clear.
+ */
+@Composable
+private fun FocusRow(entry: FocusEntry, context: Context) {
+    Row(
+        modifier = GlanceModifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+    ) {
+        Text(
+            text = entry.title,
+            maxLines = 1,
+            style = glanceTextStyle(MaterialTypography.bodyMedium, WidgetMutedInk),
+            modifier = GlanceModifier
+                .defaultWeight()
+                .clickable(
+                    actionStartActivity(
+                        Intent(context, MainActivity::class.java)
+                            .setAction(ReminderIntents.ACTION_OPEN_TASK)
+                            .putExtra(ReminderIntents.EXTRA_TASK_ID, entry.taskId),
+                    ),
+                ),
+        )
+        if (entry.completable) {
+            Text(
+                text = context.getString(R.string.today_widget_complete_glyph),
+                style = glanceTextStyle(MaterialTypography.labelLarge, WidgetAccent),
+                modifier = GlanceModifier
+                    .padding(start = 8.dp)
+                    .semantics {
+                        contentDescription =
+                            context.getString(R.string.today_widget_complete_task_description)
+                    }
+                    .clickable(
+                        actionRunCallback<CompleteFocusTaskAction>(
+                            actionParametersOf(TaskIdKey to entry.taskId),
+                        ),
+                    ),
+            )
+        }
+    }
+}
+
+/**
+ * Runs when the widget's complete glyph is tapped. Writes nothing itself --
+ * every Glance state write happens inside [TodayWidgetPublisher], reached
+ * only through [TodayWidgetPublisher.completeActiveTask], so a tap can never
+ * bypass that publisher's [StopGatedWriter] gate.
+ */
+class CompleteFocusTaskAction : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters,
+    ) {
+        val taskId = parameters[TaskIdKey] ?: return
+        TodayWidgetPublisher.completeActiveTask(taskId)
     }
 }
 
@@ -306,6 +396,37 @@ class TodayWidgetPublisher(
         republish()
     }
 
+    /**
+     * Re-verifies [taskId] against a freshly read workspace before acting,
+     * so a stale, concealed, missing, blocked, or no-longer-today tap from
+     * the widget surface can never complete a task: [titlesPermitted] must
+     * currently be `true` and [taskId] must still appear in the recomputed
+     * projection's [TodayWidgetProjection.focusEntries] as a completable
+     * row. Only then is [DomainCommand.CompleteTask] executed; a repository
+     * rejection is not distinguished from "not authorised" -- either way
+     * this only republishes the latest truth through the same gated write
+     * [republish] uses, so nothing here can land after [stop]'s clear.
+     */
+    fun completeTask(taskId: String) {
+        scope.launch {
+            val snapshot = repository.observeWorkspace().value
+            val projection = computeTodayProjection(
+                snapshot = snapshot,
+                today = LocalDate.now(zone),
+                zone = zone,
+                now = Instant.now(),
+                titlesPermitted = titlesPermitted,
+            )
+            val authorized = titlesPermitted &&
+                projection.focusEntries.any { it.taskId == taskId && it.completable }
+            if (authorized) {
+                repository.execute(DomainCommand.CompleteTask(TaskId(taskId)))
+            }
+            val latest = repository.observeWorkspace().value
+            writer.write { writeProjection(latest) }
+        }
+    }
+
     private suspend fun writeProjection(snapshot: WorkspaceSnapshot) {
         val projection = computeTodayProjection(
             snapshot = snapshot,
@@ -321,7 +442,7 @@ class TodayWidgetPublisher(
                 state[OpenTodayCountKey] = projection.openTodayCount
                 state[OverdueCountKey] = projection.overdueCount
                 state[TitlesPermittedKey] = titlesPermitted
-                writeFocusTitles(state, projection.focusTitles)
+                writeFocusTitles(state, projection.focusEntries)
             }
         }
         TodayWidget().updateAll(context)
@@ -339,10 +460,18 @@ class TodayWidgetPublisher(
         TodayWidget().updateAll(context)
     }
 
-    private fun writeFocusTitles(state: MutablePreferences, titles: List<String>) {
+    private fun writeFocusTitles(state: MutablePreferences, entries: List<FocusEntry>) {
         FocusTitleKeys.forEachIndexed { index, key ->
-            val title = titles.getOrNull(index)
-            if (title != null) state[key] = title else state.remove(key)
+            val entry = entries.getOrNull(index)
+            if (entry != null) state[key] = entry.title else state.remove(key)
+        }
+        FocusIdKeys.forEachIndexed { index, key ->
+            val entry = entries.getOrNull(index)
+            if (entry != null) state[key] = entry.taskId else state.remove(key)
+        }
+        FocusCompletableKeys.forEachIndexed { index, key ->
+            val entry = entries.getOrNull(index)
+            if (entry != null) state[key] = entry.completable else state.remove(key)
         }
     }
 
@@ -361,6 +490,18 @@ class TodayWidgetPublisher(
         fun republishActive() {
             val publisher = synchronized(activeLock) { active }
             publisher?.republish()
+        }
+
+        /**
+         * Asks whichever publisher is active, if any, to [completeTask] for
+         * [taskId] -- the sole entry point [CompleteFocusTaskAction] uses, so
+         * a tap can only ever reach the currently active slot's own instance
+         * (and its own [StopGatedWriter] gate), never a replaced or closed
+         * one. A no-op when no publisher is active.
+         */
+        fun completeActiveTask(taskId: String) {
+            val publisher = synchronized(activeLock) { active }
+            publisher?.completeTask(taskId)
         }
     }
 }

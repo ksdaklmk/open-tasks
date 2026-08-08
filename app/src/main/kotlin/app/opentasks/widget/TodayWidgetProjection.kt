@@ -7,17 +7,30 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
+ * One focus-task row: its identity for tap-through and completion, its
+ * title, and whether it is currently safe to complete from the widget
+ * surface. [completable] is `false` exactly when the task is blocked
+ * (`Task.isBlocked`), mirroring the reminder notification's own
+ * complete-action gating.
+ */
+data class FocusEntry(
+    val taskId: String,
+    val title: String,
+    val completable: Boolean,
+)
+
+/**
  * The Today widget's minimal view of the workspace: how many open tasks
- * land on today, how many are overdue, and up to three focus-task titles.
+ * land on today, how many are overdue, and up to three focus-task rows.
  *
- * [focusTitles] is capped at three entries and is empty whenever titles are
+ * [focusEntries] is capped at three entries and is empty whenever titles are
  * not permitted, even if today has open tasks -- the counts stay intact
  * either way.
  */
 data class TodayWidgetProjection(
     val openTodayCount: Int,
     val overdueCount: Int,
-    val focusTitles: List<String>,
+    val focusEntries: List<FocusEntry>,
 )
 
 private const val MAX_FOCUS_TITLES = 3
@@ -35,9 +48,10 @@ private const val MAX_FOCUS_TITLES = 3
  * still count for today. [zone] is therefore not read by this function's own
  * overdue check; it remains only because the brief's original signature
  * carried it, and every "today" computation elsewhere in the product is
- * zone-relative. Focus titles are today's open tasks ordered by due date
+ * zone-relative. Focus entries are today's open tasks ordered by due date
  * (undated tasks sort last) then by descending priority, capped at
  * [MAX_FOCUS_TITLES], and withheld entirely when [titlesPermitted] is false.
+ * Each entry's [FocusEntry.completable] is `!task.isBlocked`.
  */
 fun computeTodayProjection(
     snapshot: WorkspaceSnapshot,
@@ -57,14 +71,20 @@ fun computeTodayProjection(
         task.due?.instant?.isBefore(now) == true
     }
 
-    val focusTitles = if (titlesPermitted) {
+    val focusEntries = if (titlesPermitted) {
         todayTasks
             .sortedWith(
                 compareBy<Task> { it.due?.instant ?: Instant.MAX }
                     .thenByDescending { it.priority.ordinal },
             )
             .take(MAX_FOCUS_TITLES)
-            .map(Task::title)
+            .map { task ->
+                FocusEntry(
+                    taskId = task.id.value,
+                    title = task.title,
+                    completable = !task.isBlocked,
+                )
+            }
     } else {
         emptyList()
     }
@@ -72,6 +92,6 @@ fun computeTodayProjection(
     return TodayWidgetProjection(
         openTodayCount = todayTasks.size,
         overdueCount = overdueCount,
-        focusTitles = focusTitles,
+        focusEntries = focusEntries,
     )
 }

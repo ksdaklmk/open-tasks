@@ -13,6 +13,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,7 +66,7 @@ class TodayWidgetProjectionTest {
         )
 
         assertEquals(1, projection.openTodayCount)
-        assertEquals(listOf("Starting today"), projection.focusTitles)
+        assertEquals(listOf("Starting today"), projection.focusEntries.map { it.title })
     }
 
     @Test
@@ -81,7 +82,7 @@ class TodayWidgetProjectionTest {
         )
 
         assertEquals(1, projection.openTodayCount)
-        assertEquals(listOf("Due today"), projection.focusTitles)
+        assertEquals(listOf("Due today"), projection.focusEntries.map { it.title })
     }
 
     @Test
@@ -109,7 +110,7 @@ class TodayWidgetProjectionTest {
 
         assertEquals(0, projection.openTodayCount)
         assertEquals(0, projection.overdueCount)
-        assertTrue(projection.focusTitles.isEmpty())
+        assertTrue(projection.focusEntries.isEmpty())
     }
 
     @Test
@@ -178,7 +179,10 @@ class TodayWidgetProjectionTest {
         )
 
         assertEquals(4, projection.openTodayCount)
-        assertEquals(listOf("Early high", "Early low", "Midday"), projection.focusTitles)
+        assertEquals(
+            listOf("Early high", "Early low", "Midday"),
+            projection.focusEntries.map { it.title },
+        )
     }
 
     @Test
@@ -194,7 +198,29 @@ class TodayWidgetProjectionTest {
         )
 
         assertEquals(1, projection.openTodayCount)
-        assertTrue(projection.focusTitles.isEmpty())
+        assertTrue(projection.focusEntries.isEmpty())
+    }
+
+    @Test
+    fun focusEntriesCarryIdsAndBlockedTasksAreNotCompletable() {
+        val snapshot = OpenTasksFixtures.snapshot
+        val blocked = snapshot.tasks.first { it.isBlocked }.copy(
+            start = null,
+            due = ZonedMoment(
+                Instant.parse("2026-07-26T10:00:00Z"),
+                "Asia/Bangkok",
+            ),
+        )
+        val projection = computeTodayProjection(
+            snapshot = snapshot.copy(tasks = listOf(blocked)),
+            today = LocalDate.of(2026, 7, 26),
+            zone = ZoneId.of("Asia/Bangkok"),
+            now = Instant.parse("2026-07-26T03:00:00Z"),
+            titlesPermitted = true,
+        )
+        val blockedEntry = projection.focusEntries.single()
+        assertEquals(blocked.id.value, blockedEntry.taskId)
+        assertFalse(blockedEntry.completable)
     }
 
     @Test
@@ -218,6 +244,6 @@ class TodayWidgetProjectionTest {
         )
 
         assertEquals(0, projection.openTodayCount)
-        assertTrue(projection.focusTitles.isEmpty())
+        assertTrue(projection.focusEntries.isEmpty())
     }
 }

@@ -30,6 +30,8 @@
     <string name="today_widget_description">Today\'s open and overdue task counts, with quick add.</string>
     <string name="today_widget_counts">%1$d open today · %2$d overdue</string>
     <string name="today_widget_titles_hidden">Tasks are hidden</string>
+    <string name="today_widget_complete_glyph">✓</string>
+    <string name="today_widget_complete_task_description">Complete task</string>
 
     <string name="app_lock_title">Open Tasks is locked</string>
     <string name="app_lock_unlock_action">Unlock Open Tasks</string>
