@@ -103,6 +103,15 @@ class FocusTimerOwnershipTest {
         assertFalse(
             focusSessionStillCurrent(decidedFrom.copy(taskId = "task-2"), decidedFrom),
         )
+        // Same task, same phase, a different boundary: still a different
+        // session. Pins that the whole value participates, so narrowing this
+        // to a task-identifier comparison cannot quietly reopen the race.
+        assertFalse(
+            focusSessionStillCurrent(
+                decidedFrom.copy(phaseEndsAt = decidedFrom.phaseEndsAt.plusSeconds(60)),
+                decidedFrom,
+            ),
+        )
     }
 
     @Test
