@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
     lateinit var appLockController: AppLockController
 
     private var quickAddSignal by mutableIntStateOf(0)
+    private var quickAddPrefillText by mutableStateOf<String?>(null)
     private var openTaskSignal by mutableIntStateOf(0)
     private var openTaskId by mutableStateOf<String?>(null)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
@@ -108,6 +109,8 @@ class MainActivity : ComponentActivity() {
                             activity = this,
                             appLockSettings = appLockSettings,
                             quickAddSignal = signal,
+                            quickAddPrefillText = quickAddPrefillText,
+                            onQuickAddConsumed = { quickAddPrefillText = null },
                             openTaskSignal = openTaskSignal,
                             openTaskId = openTaskId,
                             onOpenRecovery = { activeRecovery = true },
@@ -293,6 +296,16 @@ class MainActivity : ComponentActivity() {
         }
         when (intent?.action) {
             QUICK_ADD_ACTION -> quickAddSignal++
+            Intent.ACTION_SEND -> {
+                quickAddPrefillText =
+                    quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
+                if (quickAddPrefillText != null) quickAddSignal++
+            }
+            Intent.ACTION_PROCESS_TEXT -> {
+                quickAddPrefillText =
+                    quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT))
+                if (quickAddPrefillText != null) quickAddSignal++
+            }
             ReminderIntents.ACTION_OPEN_TASK -> {
                 openTaskId = intent.getStringExtra(ReminderIntents.EXTRA_TASK_ID)
                 if (openTaskId != null) openTaskSignal++

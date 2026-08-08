@@ -62,6 +62,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -212,6 +213,8 @@ fun OpenTasksApp(
     activity: Activity,
     appLockSettings: AppLockSettings,
     quickAddSignal: Int,
+    quickAddPrefillText: String? = null,
+    onQuickAddConsumed: () -> Unit = {},
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
     onOpenRecovery: () -> Unit = {},
@@ -277,6 +280,10 @@ fun OpenTasksApp(
         val showNavigationLabels =
             shouldShowNavigationLabels(LocalDensity.current.fontScale)
         var showQuickAdd by rememberSaveable { mutableStateOf(false) }
+        // Populated from `quickAddPrefillText` when a share or text-selection
+        // intent drives `quickAddSignal`; empty for every other Quick Add
+        // entry point (FAB, shortcut, keyboard shortcut).
+        var quickAddSheetTitle by rememberSaveable { mutableStateOf("") }
         var showNewProject by rememberSaveable { mutableStateOf(false) }
         var showShortcutHelp by rememberSaveable { mutableStateOf(false) }
         // Not `rememberSaveable`: a `CalendarEventDraft` isn't a bundle-able
@@ -546,7 +553,11 @@ fun OpenTasksApp(
         }
 
         LaunchedEffect(quickAddSignal) {
-            if (quickAddSignal > 0) showQuickAdd = true
+            if (quickAddSignal > 0) {
+                showQuickAdd = true
+                quickAddSheetTitle = quickAddPrefillText.orEmpty()
+                onQuickAddConsumed()
+            }
         }
 
         LaunchedEffect(openTaskSignal) {
@@ -1245,14 +1256,24 @@ fun OpenTasksApp(
         }
 
         if (showQuickAdd) {
-            QuickAddSheet(
-                onDismiss = { showQuickAdd = false },
-                onAdd = { title, due ->
-                    viewModel.addTask(title, due)
-                    showQuickAdd = false
-                },
-                initialTitle = "",
-            )
+            // Keyed on `quickAddSignal` so a second share or text-selection
+            // intent arriving while the sheet is already visible restarts
+            // its `rememberSaveable` title/due state, even when the shared
+            // text is identical to what is already showing.
+            key(quickAddSignal) {
+                QuickAddSheet(
+                    onDismiss = {
+                        showQuickAdd = false
+                        quickAddSheetTitle = ""
+                    },
+                    onAdd = { title, due ->
+                        viewModel.addTask(title, due)
+                        showQuickAdd = false
+                        quickAddSheetTitle = ""
+                    },
+                    initialTitle = quickAddSheetTitle,
+                )
+            }
         }
 
         if (showNewProject) {
