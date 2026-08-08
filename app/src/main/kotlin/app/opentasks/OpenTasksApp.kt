@@ -113,6 +113,7 @@ import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
@@ -129,6 +130,7 @@ import app.opentasks.core.model.ZonedMoment
 import app.opentasks.feature.home.HomeScreen
 import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
+import app.opentasks.feature.more.ReviewScreen
 import app.opentasks.feature.projects.NewProjectSheet
 import app.opentasks.feature.projects.ProjectEdit
 import app.opentasks.feature.projects.ProjectsScreen
@@ -177,6 +179,9 @@ data object ScheduleRoute : WorkspaceRoute
 
 @Serializable
 data object MoreRoute : WorkspaceRoute
+
+@Serializable
+data object ReviewRoute : WorkspaceRoute
 
 private data class NavigationDestination(
     val route: WorkspaceRoute,
@@ -263,6 +268,9 @@ fun OpenTasksApp(
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
         val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
+        val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
+        val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
+        val reviewActionPending by viewModel.reviewActionPending.collectAsStateWithLifecycle()
         val pendingBlockedBulk by
             viewModel.pendingBlockedBulkCompletion.collectAsStateWithLifecycle()
         val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
@@ -1241,6 +1249,10 @@ fun OpenTasksApp(
                                         viewModel::setInsightsIncludeConflictedTime,
                                     onInsightsPresentationChange =
                                         viewModel::setInsightsPresentation,
+                                    onOpenReview = {
+                                        viewModel.startReview()
+                                        navigate(ReviewRoute)
+                                    },
                                     today = snapshot.home.today,
                                     onRestoreProject = { projectId ->
                                         viewModel.execute(
@@ -1344,6 +1356,64 @@ fun OpenTasksApp(
                                     screenshotBlockingEnabled = screenshotBlocking,
                                     onScreenshotBlockingChange = { value ->
                                         appLockSettings.screenshotBlocking = value
+                                    },
+                                )
+                            }
+                            entry<ReviewRoute> {
+                                ReviewScreen(
+                                    queue = buildReviewQueue(snapshot, Instant.now()),
+                                    projectNames = projectNames,
+                                    reviewedTaskIds = reviewedTaskIds,
+                                    reviewedProjectIds = reviewedProjectIds,
+                                    actionPending = reviewActionPending,
+                                    onBack = {
+                                        viewModel.finishReview()
+                                        navigate(MoreRoute)
+                                    },
+                                    onCompleteTask = { taskId, acknowledgeBlocked ->
+                                        viewModel.executeReview(
+                                            DomainCommand.CompleteTask(taskId, acknowledgeBlocked),
+                                            taskId = taskId,
+                                        )
+                                    },
+                                    onRescheduleTask = { taskId, date ->
+                                        val zone = ZoneId.systemDefault()
+                                        viewModel.executeReview(
+                                            DomainCommand.RescheduleTasks(
+                                                listOf(taskId),
+                                                ZonedMoment(
+                                                    date.atTime(DATE_ONLY_DUE_TIME)
+                                                        .atZone(zone)
+                                                        .toInstant(),
+                                                    zone.id,
+                                                ),
+                                            ),
+                                            taskId = taskId,
+                                        )
+                                    },
+                                    onKeepTask = { taskId ->
+                                        viewModel.executeReview(
+                                            DomainCommand.MarkReviewed(taskId = taskId),
+                                            taskId = taskId,
+                                        )
+                                    },
+                                    onBinTask = { taskId ->
+                                        viewModel.executeReview(
+                                            DomainCommand.DeleteTask(taskId),
+                                            taskId = taskId,
+                                        )
+                                    },
+                                    onKeepProject = { projectId ->
+                                        viewModel.executeReview(
+                                            DomainCommand.MarkReviewed(projectId = projectId),
+                                            projectId = projectId,
+                                        )
+                                    },
+                                    onArchiveProject = { projectId ->
+                                        viewModel.executeReview(
+                                            DomainCommand.ArchiveProject(projectId),
+                                            projectId = projectId,
+                                        )
                                     },
                                 )
                             }

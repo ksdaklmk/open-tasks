@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -106,6 +107,7 @@ fun MoreScreen(
     onInsightsTagFilter: (TagId, Boolean) -> Unit = { _, _ -> },
     onInsightsIncludeConflictedTimeChange: (Boolean) -> Unit = {},
     onInsightsPresentationChange: (InsightsPresentation) -> Unit = {},
+    onOpenReview: () -> Unit = {},
     onRestoreProject: (ProjectId) -> Unit,
     onRestoreTask: (TaskId) -> Unit,
     onPermanentlyDeleteTask: (TaskId) -> Unit,
@@ -342,6 +344,13 @@ fun MoreScreen(
                 supportingText = stringResource(R.string.insights_open),
                 onClick = { destination = MoreDestination.INSIGHTS },
                 modifier = Modifier.testTag("open-insights"),
+            )
+            DestinationRow(
+                icon = Icons.Rounded.Checklist,
+                title = stringResource(R.string.review_title),
+                supportingText = stringResource(R.string.review_open),
+                onClick = onOpenReview,
+                modifier = Modifier.testTag("open-review"),
             )
             DestinationRow(
                 icon = Icons.Rounded.Description,

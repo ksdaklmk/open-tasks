@@ -189,6 +189,7 @@ class RoomVaultRepository(
                 is DomainCommand.UpdateProject -> updateProject(command)
                 is DomainCommand.RestoreProject -> restoreProject(command)
                 is DomainCommand.ArchiveProject -> archiveProject(command)
+                is DomainCommand.MarkReviewed -> markReviewed(command)
                 is DomainCommand.RestoreArchivedProject -> restoreArchivedProject(command)
                 is DomainCommand.CreateWorkflowStatus -> createWorkflowStatus(command)
                 is DomainCommand.RenameWorkflowStatus -> renameWorkflowStatus(command)
@@ -1021,6 +1022,27 @@ class RoomVaultRepository(
             message = "Project archived",
             undo = DomainCommand.RestoreArchivedProject(project.id),
         )
+    }
+
+    private suspend fun markReviewed(command: DomainCommand.MarkReviewed): CommandResult {
+        val taskId = command.taskId
+        val projectId = command.projectId
+        if ((taskId == null) == (projectId == null)) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Review target no longer exists.")
+        }
+        if (taskId != null) {
+            val task = currentTask(taskId)
+                ?.takeIf { it.deletedAt == null }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            recordActivity(task.id, task.projectId, ActivityKind.REVIEWED, "Reviewed", command.reviewedAt)
+        } else {
+            val project = database.workspaceDao().getProjectById(projectId!!.value)
+                ?.toModel()
+                ?.takeIf { it.archivedAt == null }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Project no longer exists.")
+            recordActivity(null, project.id, ActivityKind.REVIEWED, "Reviewed", command.reviewedAt)
+        }
+        return CommandResult.Success("Marked as reviewed")
     }
 
     private suspend fun restoreArchivedProject(

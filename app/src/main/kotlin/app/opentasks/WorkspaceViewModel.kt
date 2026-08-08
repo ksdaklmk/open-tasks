@@ -89,6 +89,7 @@ class WorkspaceViewModel @Inject constructor(
 ) : ViewModel() {
     private val selectionState = WorkspaceSelectionState(savedStateHandle)
     private val bulkSelectionState = WorkspaceBulkSelectionState(savedStateHandle)
+    private val reviewProgressState = WorkspaceReviewProgressState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val pendingBlockedBulk = MutableStateFlow(false)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
@@ -113,6 +114,12 @@ class WorkspaceViewModel @Inject constructor(
     val selectedProjectId: StateFlow<String?> = selectionState.selectedProjectId
 
     val bulkSelection: StateFlow<Set<TaskId>> = bulkSelectionState.selection
+
+    val reviewedTaskIds: StateFlow<Set<TaskId>> = reviewProgressState.reviewedTaskIds
+
+    val reviewedProjectIds: StateFlow<Set<ProjectId>> = reviewProgressState.reviewedProjectIds
+
+    val reviewActionPending: StateFlow<Boolean> = reviewProgressState.actionPending
 
     val pendingBlockedBulkCompletion: StateFlow<Boolean> = pendingBlockedBulk.asStateFlow()
 
@@ -500,6 +507,23 @@ class WorkspaceViewModel @Inject constructor(
         }
     }
 
+    fun startReview() {
+        reviewProgressState.startReview()
+    }
+
+    fun finishReview() {
+        reviewProgressState.finishReview()
+    }
+
+    fun executeReview(command: DomainCommand, taskId: TaskId? = null, projectId: ProjectId? = null) {
+        if (reviewProgressState.actionPending.value) return
+        reviewProgressState.setActionPending(true)
+        execute(command) { result ->
+            if (result is CommandResult.Success) reviewProgressState.markReviewed(taskId, projectId)
+            reviewProgressState.setActionPending(false)
+        }
+    }
+
     fun search(query: SearchQuery) {
         viewModelScope.launch {
             mutableSearchResults.value = if (query.text.isBlank()) {
@@ -846,6 +870,65 @@ internal class WorkspaceSelectionState(
     internal companion object {
         const val SELECTED_TASK_ID = "selectedTaskId"
         const val SELECTED_PROJECT_ID = "selectedProjectId"
+    }
+}
+
+internal class WorkspaceReviewProgressState(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    private val mutableReviewedTaskIds = MutableStateFlow(restoredTaskIds())
+    private val mutableReviewedProjectIds = MutableStateFlow(restoredProjectIds())
+    private val mutableActionPending = MutableStateFlow(false)
+
+    val reviewedTaskIds: StateFlow<Set<TaskId>> = mutableReviewedTaskIds.asStateFlow()
+    val reviewedProjectIds: StateFlow<Set<ProjectId>> = mutableReviewedProjectIds.asStateFlow()
+    val actionPending: StateFlow<Boolean> = mutableActionPending.asStateFlow()
+
+    fun markReviewed(taskId: TaskId?, projectId: ProjectId?) {
+        if (taskId != null) replaceTasks(mutableReviewedTaskIds.value + taskId)
+        if (projectId != null) replaceProjects(mutableReviewedProjectIds.value + projectId)
+    }
+
+    fun setActionPending(value: Boolean) {
+        mutableActionPending.value = value
+    }
+
+    fun startReview() = clear()
+
+    fun finishReview() = clear()
+
+    private fun clear() {
+        replaceTasks(emptySet())
+        replaceProjects(emptySet())
+        mutableActionPending.value = false
+    }
+
+    private fun replaceTasks(ids: Set<TaskId>) {
+        mutableReviewedTaskIds.value = ids
+        savedStateHandle[REVIEWED_TASK_IDS] = ids.map(TaskId::value).toCollection(ArrayList())
+    }
+
+    private fun replaceProjects(ids: Set<ProjectId>) {
+        mutableReviewedProjectIds.value = ids
+        savedStateHandle[REVIEWED_PROJECT_IDS] = ids.map(ProjectId::value).toCollection(ArrayList())
+    }
+
+    private fun restoredTaskIds(): Set<TaskId> =
+        restored(REVIEWED_TASK_IDS).mapTo(linkedSetOf(), ::TaskId)
+
+    private fun restoredProjectIds(): Set<ProjectId> =
+        restored(REVIEWED_PROJECT_IDS).mapTo(linkedSetOf(), ::ProjectId)
+
+    private fun restored(key: String): List<String> =
+        (savedStateHandle.get<Any?>(key) as? List<*>)
+            .orEmpty()
+            .mapNotNull { it as? String }
+            .filter(String::isNotBlank)
+            .distinct()
+
+    internal companion object {
+        const val REVIEWED_TASK_IDS = "reviewedTaskIds"
+        const val REVIEWED_PROJECT_IDS = "reviewedProjectIds"
     }
 }
 

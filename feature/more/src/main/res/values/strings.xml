@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="review_title">Weekly review</string>
+    <string name="review_open">Review open work</string>
+    <string name="review_back">Back</string>
+    <string name="review_overdue">Overdue</string>
+    <string name="review_stale">Needs attention</string>
+    <string name="review_unscheduled">Unscheduled</string>
+    <string name="review_projects">Projects</string>
+    <string name="review_inbox">Inbox</string>
+    <string name="review_due">Due %1$s</string>
+    <string name="review_no_due">No due date</string>
+    <string name="review_complete">Complete</string>
+    <string name="review_reschedule">Reschedule</string>
+    <string name="review_keep">Keep</string>
+    <string name="review_bin">Move to Bin</string>
+    <string name="review_archive">Archive</string>
+    <string name="review_project_summary">%1$d of %2$d tasks complete</string>
+    <string name="review_done">Review complete</string>
+    <string name="review_finish">Finish</string>
+    <string name="review_blocked_title">Complete blocked task?</string>
+    <string name="review_blocked_message">This task is blocked by unfinished work.</string>
+    <string name="review_cancel">Cancel</string>
     <string name="insights_title">Insights</string>
     <string name="insights_back">Back</string>
     <string name="insights_last_days">Last %1$d days</string>

@@ -227,6 +227,7 @@ enum class ActivityKind {
     RESTORED,
     ATTACHMENT_ADDED,
     ATTACHMENT_REMOVED,
+    REVIEWED,
 }
 
 data class ActivityEntry(

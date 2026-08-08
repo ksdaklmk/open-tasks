@@ -179,6 +179,7 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.UpdateProject -> updateProject(command)
             is DomainCommand.RestoreProject -> restoreProject(command)
             is DomainCommand.ArchiveProject -> archiveProject(command)
+            is DomainCommand.MarkReviewed -> markReviewed(command)
             is DomainCommand.RestoreArchivedProject -> restoreArchivedProject(command)
             is DomainCommand.CreateWorkflowStatus -> createWorkflowStatus(command)
             is DomainCommand.RenameWorkflowStatus -> renameWorkflowStatus(command)
@@ -955,6 +956,24 @@ class InMemoryVaultRepository internal constructor(
             message = "Project archived",
             undo = DomainCommand.RestoreArchivedProject(project.id),
         )
+    }
+
+    private fun markReviewed(command: DomainCommand.MarkReviewed): CommandResult {
+        val current = mutableWorkspace.value
+        if ((command.taskId == null) == (command.projectId == null)) {
+            return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Review target no longer exists.")
+        }
+        if (command.taskId != null) {
+            val task = current.tasks.firstOrNull { it.id == command.taskId && it.deletedAt == null }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            recordActivity(task.id, task.projectId, ActivityKind.REVIEWED, "Reviewed", command.reviewedAt)
+        } else {
+            val project = current.projects.firstOrNull {
+                it.id == command.projectId && it.archivedAt == null
+            } ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Project no longer exists.")
+            recordActivity(null, project.id, ActivityKind.REVIEWED, "Reviewed", command.reviewedAt)
+        }
+        return CommandResult.Success("Marked as reviewed")
     }
 
     private fun restoreArchivedProject(

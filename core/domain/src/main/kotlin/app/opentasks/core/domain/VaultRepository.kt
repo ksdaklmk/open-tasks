@@ -63,6 +63,12 @@ sealed interface DomainCommand {
         val archivedAt: Instant = Instant.now(),
     ) : DomainCommand
 
+    data class MarkReviewed(
+        val taskId: TaskId? = null,
+        val projectId: ProjectId? = null,
+        val reviewedAt: Instant = Instant.now(),
+    ) : DomainCommand
+
     data class RestoreArchivedProject(
         val projectId: ProjectId,
     ) : DomainCommand
