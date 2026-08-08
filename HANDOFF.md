@@ -1,16 +1,17 @@
 # Open Tasks Handoff
 
 - Last updated: 8 August 2026
-- Branch: `main` at `8c08570` (local tracks `origin/main`; pushed).
-  **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
-  is in flight except two docs-only CI runs (`31232428124`,
-  `31232527780`); the completed run at `c74a435` confirmed the expected
-  post-F6 shape — `verify`, compact API 36, and `release` green, only
-  expanded API 37.0 red. No open PRs or issues.
+- Branch: `main` at `50d0a7b` plus this checkpoint docs commit. Local is
+  ahead of `origin/main` (`8c08570`) by the entire Stage 6 range, not
+  yet pushed (matching Tasks 1–7 practice; a push triggers a CI run).
+  **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
+  completed run at `c74a435` confirmed the expected post-F6 shape —
+  `verify`, compact API 36, and `release` green, only expanded API 37.0
+  red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — Tasks 1–7 COMPLETE and independently
-     reviewed; PAUSED before Task 8 by user instruction (8 August 2026,
-     usage limit); do not start Task 8 without the user's go.**
+  1. **Stage 6 execution — Tasks 1–8 COMPLETE and independently
+     reviewed; PAUSED before Task 9 by user instruction (8 August
+     2026); do not start Task 9 without the user's go.**
      Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
@@ -18,7 +19,7 @@
      implementation-base SHA). Execution ledger with full per-task
      review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 Tasks 1–7 checkpoint below for state, the one open
+     See the Stage 6 Tasks 1–8 checkpoint below for state, the one open
      user decision, and exact resume instructions. Execution mode (user
      ruling, recorded in the plan header): Tasks 2–12 via
      `superpowers:subagent-driven-development` — fresh implementer per
@@ -221,12 +222,12 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 6 Tasks 1–7 checkpoint — 8 August 2026 (PAUSED before Task 8)
+## Stage 6 Tasks 1–8 checkpoint — 8 August 2026 (PAUSED before Task 9)
 
 Execution ran from base `fc4aad8` directly on `main`. Task 1 was
-executed inline; Tasks 2–7 ran subagent-driven per the user ruling
+executed inline; Tasks 2–8 ran subagent-driven per the user ruling
 recorded in the plan header, each with an independent task review and
-scoped re-reviews of every fix round. All seven boundaries closed with
+scoped re-reviews of every fix round. All eight boundaries closed with
 zero open Critical/Important findings. The full CI gate
 (`testDebugUnitTest lintDebug :app:assembleDebug`) passed at every
 commit below; no device suite has run (Task 13). Deferred minors and
@@ -287,6 +288,26 @@ per-round review evidence live in the ignored execution ledger.
   handling at 20; `WorkspaceViewModel.search` takes `SearchQuery`.
   Six pinned instrumented tests plus a state-leak regression test
   (execute at Task 13).
+- Task 8 (`74d2bf8`, fix `50d0a7b`): bulk multi-select and composite
+  commands — `CompleteTasks`/`RescheduleTasks`/`MoveTasksToProject`/
+  `SetTasksTag`/`DeleteTasks` plus repository-produced `UndoBatch` in
+  both engines; pinned normalise → resolve → full-preflight → apply
+  pipeline (all validation before the first write; a Rejected leaves
+  records, relations, revisions, activity, and journal untouched);
+  `MAX_BULK_TASKS = 200` and both new rejection reasons in both
+  companions. Batch undo preflights every stored inverse per shape
+  (no throw-as-control-flow), and InMemory applies it on a scratch
+  engine with exactly one publish, matching Room's transaction
+  isolation (fix round 1, re-review-verified). `TaskRow` long-press
+  plus a custom accessibility select action; selection bar
+  (count/clear/complete/reschedule via DatePicker at the Task 2 17:00
+  convention/move/tag/bin), checkbox rows, row tap toggles instead of
+  opening; `SavedStateHandle` stores `List<String>` under
+  "bulkSelection"; blocked completion confirms then retries with
+  `acknowledgeBlocked = true`, and only success clears the selection.
+  InMemoryBulkCommandTest 10/10 and WorkspaceBulkSelectionStateTest
+  green; two instrumented suites compile-verified (execute at
+  Task 13); CI gate green at both commits.
 
 **Open user decision (Task 6, parked; code is plan-correct as
 committed):** the plan's pinned `FOCUS + no timer → START` rule makes a
@@ -296,25 +317,22 @@ ends the cycle. The task reviewer reports this consequence as a product
 defect (Important, plan-mandated). Ruling needed: keep the pinned rule,
 or add a new pinned rule so a manual stop ends the focus cycle.
 
-**Task 8 was NOT started.** Its implementer was dispatched and then
-stopped at the user's request (usage limit) while still writing failing
-tests, before any commit; its two partial untracked test files were
-removed. The working tree at pause holds only the three protected
+**Task 9 was NOT started** (user instruction, 8 August 2026: once
+Task 8 is finished and verified, update the handoff and related docs,
+then pause). The working tree at pause holds only the three protected
 pre-existing items (uncommitted Stage 3 plan amendment, `.kotlin/`,
 `artifacts/`).
 
-**Resume instructions:** on the user's go, re-dispatch Task 8 from the
-extracted brief
-`.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/task-8-brief.md`
-with BASE `ed51354` (fresh implementer, most capable tier recommended —
-five composite commands + `UndoBatch` across both engines; no
-task-8-report.md exists, nothing to carry over), then continue Tasks
-9–12 subagent-driven per the plan and ledger discipline (brief → TDD →
-CI gate → commit → task review → fix rounds → scoped re-reviews →
-ledger), Task 12 with its mandatory mid-task tap-to-move review
-boundary, then the whole-branch final review, then controller-owned
-Task 13. Resolve the parked Task 6 decision with the user before or at
-the final review. The Stage 5 checkpoint history below is unchanged.
+**Resume instructions:** on the user's go, extract the Task 9 brief
+with the SDD skill's `scripts/task-brief` and dispatch a fresh
+implementer subagent-driven per the plan and ledger discipline (brief →
+TDD → CI gate → commit → task review → fix rounds → scoped re-reviews →
+ledger), then continue Tasks 10–12 the same way, Task 12 with its
+mandatory mid-task tap-to-move review boundary, then the whole-branch
+final review, then controller-owned Task 13. Every implementer dispatch
+keeps the no-subagent/no-fork clause. Resolve the parked Task 6
+decision with the user before or at the final review. The Stage 5
+checkpoint history below is unchanged.
 
 ## Superseded: Stage 6 Task 1 checkpoint — 8 August 2026
 
