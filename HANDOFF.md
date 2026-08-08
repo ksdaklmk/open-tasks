@@ -1,8 +1,7 @@
 # Open Tasks Handoff
 
 - Last updated: 8 August 2026
-- Branch: `main` at `3ce7252` (local tracks `origin/main`; commits
-  `4d1dc1a` and `3ce7252` are local-only pending push).
+- Branch: `main` at `b56e78a` (local tracks `origin/main`; pushed).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
   is in flight except two docs-only CI runs (`31232428124`,
   `31232527780`); the completed run at `c74a435` confirmed the expected
