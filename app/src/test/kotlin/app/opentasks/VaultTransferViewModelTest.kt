@@ -10,18 +10,23 @@ import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.OtVaultCodec
+import app.opentasks.core.data.export.ProjectMarkdownWriter
 import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.domain.BackupCaptureSource
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.HomeSnapshot
+import app.opentasks.core.model.Project
+import app.opentasks.core.model.ProjectHealth
+import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.WorkspaceId
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
 import java.io.File
@@ -131,6 +136,36 @@ class VaultTransferViewModelTest {
         assertTrue(viewModel.csvExportInProgress.value)
     }
 
+    @Test
+    fun markdownExportDoesNothingWhileAnotherTransferOwnsTheLock() {
+        val viewModel = viewModel()
+        viewModel.beginCsvExport(setOf(CsvExportTable.TASKS))
+
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+
+        assertTrue(!viewModel.markdownExportInProgress.value)
+        assertTrue(viewModel.markdownCreateDocumentRequests.tryReceive().getOrNull() == null)
+    }
+
+    @Test
+    fun cancellingMarkdownDocumentSelectionReleasesTheLockWithoutAnOutcome() {
+        val viewModel = viewModel()
+
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(viewModel.markdownExportInProgress.value)
+        assertEquals(
+            "open_tasks_studio_refresh.md",
+            viewModel.markdownCreateDocumentRequests.tryReceive().getOrNull(),
+        )
+
+        viewModel.onMarkdownDocumentSelected(uri = null)
+
+        assertNull(viewModel.markdownExportOutcome.value)
+        assertTrue(!viewModel.markdownExportInProgress.value)
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(viewModel.markdownExportInProgress.value)
+    }
+
     private fun waitUntil(timeoutMillis: Long = 5_000, predicate: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         while (System.nanoTime() < deadline) {
@@ -171,6 +206,7 @@ class VaultTransferViewModelTest {
             importer = importer,
             vaultRepository = vaultRepository,
             csvWriter = WorkspaceCsvWriter(ZoneId.of("UTC")),
+            markdownWriter = ProjectMarkdownWriter(),
         )
     }
 
@@ -187,7 +223,18 @@ class VaultTransferViewModelTest {
                     overdueCount = 0,
                 ),
                 tasks = emptyList(),
-                projects = emptyList(),
+                projects = listOf(
+                    Project(
+                        id = ProjectId("project-1"),
+                        workspaceId = WorkspaceId("workspace-1"),
+                        name = "Studio refresh",
+                        summary = "",
+                        status = ProjectHealth.ON_TRACK,
+                        dueDate = null,
+                        completedTasks = 0,
+                        totalTasks = 0,
+                    ),
+                ),
                 workflowStatuses = emptyList(),
                 milestones = emptyList(),
                 tags = emptyList(),

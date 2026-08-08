@@ -265,6 +265,13 @@
     <string name="csv_export_disclosure_body">CSV files are not encrypted. Once exported, titles, descriptions, notes, dates, and time information become readable outside Open Tasks by anyone who opens the file.</string>
     <string name="csv_export_disclosure_confirm">Export CSV</string>
 
+    <string name="markdown_export_heading">Markdown export</string>
+    <string name="markdown_export_explanation">Export one project\'s milestones and tasks as a plain Markdown file.</string>
+    <string name="markdown_export_action">Export Markdown</string>
+    <string name="markdown_export_in_progress">Exporting Markdown…</string>
+    <string name="markdown_export_completed">Markdown file exported.</string>
+    <string name="markdown_export_sheet_title">Choose a project to export</string>
+
     <string name="privacy_lock_title">Privacy &amp; lock</string>
     <string name="privacy_lock_back">Back to More</string>
     <string name="privacy_lock_summary_on">App lock is on</string>

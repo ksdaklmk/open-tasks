@@ -66,6 +66,8 @@ import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.BackupPackageInfo
 import app.opentasks.core.model.BackupUnavailableReason
 import app.opentasks.core.model.RecoveryPassphraseValidation
+import app.opentasks.core.model.Project
+import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RestoredPackageCondition
@@ -124,6 +126,12 @@ sealed interface CsvExportOutcome {
     data class Failed(val reason: String) : CsvExportOutcome
 }
 
+sealed interface MarkdownExportOutcome {
+    data object Completed : MarkdownExportOutcome
+
+    data class Failed(val reason: String) : MarkdownExportOutcome
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRecoveryScreen(
@@ -146,6 +154,9 @@ fun BackupRecoveryScreen(
     vaultImportOutcome: VaultImportOutcome? = null,
     csvExportInProgress: Boolean = false,
     csvExportOutcome: CsvExportOutcome? = null,
+    projects: List<Project> = emptyList(),
+    markdownExportInProgress: Boolean = false,
+    markdownExportOutcome: MarkdownExportOutcome? = null,
     validatePassphrase: (
         passphrase: String,
         confirmation: String,
@@ -170,6 +181,8 @@ fun BackupRecoveryScreen(
     onDismissVaultImport: () -> Unit = {},
     onExportCsv: (Set<CsvExportTable>) -> Unit = {},
     onDismissCsvExportOutcome: () -> Unit = {},
+    onExportMarkdown: (ProjectId) -> Unit = {},
+    onDismissMarkdownExportOutcome: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -179,6 +192,7 @@ fun BackupRecoveryScreen(
     var showVaultImportSheet by remember { mutableStateOf(false) }
     var showCsvTableSheet by remember { mutableStateOf(false) }
     var csvDisclosureTables by remember { mutableStateOf<Set<CsvExportTable>?>(null) }
+    var showMarkdownProjectSheet by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -341,6 +355,19 @@ fun BackupRecoveryScreen(
                     onExportClick = { showCsvTableSheet = true },
                     onDismissOutcome = onDismissCsvExportOutcome,
                 )
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                Text(
+                    stringResource(R.string.markdown_export_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Spacer(Modifier.height(12.dp))
+                MarkdownExportContent(
+                    inProgress = markdownExportInProgress,
+                    outcome = markdownExportOutcome,
+                    onExportClick = { showMarkdownProjectSheet = true },
+                    onDismissOutcome = onDismissMarkdownExportOutcome,
+                )
             }
         }
     }
@@ -380,6 +407,16 @@ fun BackupRecoveryScreen(
             onContinue = { tables ->
                 showCsvTableSheet = false
                 csvDisclosureTables = tables
+            },
+        )
+    }
+    if (showMarkdownProjectSheet) {
+        MarkdownProjectSelectionSheet(
+            projects = projects.filter { it.archivedAt == null },
+            onDismiss = { showMarkdownProjectSheet = false },
+            onExport = { projectId ->
+                showMarkdownProjectSheet = false
+                onExportMarkdown(projectId)
             },
         )
     }
@@ -573,6 +610,91 @@ private fun CsvExportContent(
             dismissTestTag = "csv-export-dismiss",
             onDismiss = onDismissOutcome,
         )
+    }
+}
+
+@Composable
+private fun MarkdownExportContent(
+    inProgress: Boolean,
+    outcome: MarkdownExportOutcome?,
+    onExportClick: () -> Unit,
+    onDismissOutcome: () -> Unit,
+) {
+    Text(
+        stringResource(R.string.markdown_export_explanation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(12.dp))
+    BackupAction(R.string.markdown_export_action, "markdown-export", onExportClick)
+    if (inProgress) TransferProgress(R.string.markdown_export_in_progress)
+    if (outcome != null) {
+        TransferOutcome(
+            message = when (outcome) {
+                MarkdownExportOutcome.Completed -> stringResource(R.string.markdown_export_completed)
+                is MarkdownExportOutcome.Failed -> outcome.reason
+            },
+            testTag = "markdown-export-outcome",
+            dismissTestTag = "markdown-export-dismiss",
+            onDismiss = onDismissOutcome,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MarkdownProjectSelectionSheet(
+    projects: List<Project>,
+    onDismiss: () -> Unit,
+    onExport: (ProjectId) -> Unit,
+) {
+    var selected by remember { mutableStateOf<ProjectId?>(null) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("markdown-export-project-sheet"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
+            Text(
+                stringResource(R.string.markdown_export_sheet_title),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(12.dp))
+            projects.forEach { project ->
+                TextButton(
+                    onClick = { selected = project.id },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("markdown-export-project-${project.id.value}"),
+                ) {
+                    Text(project.name, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.backup_cancel_action))
+                }
+                Button(
+                    onClick = { selected?.let(onExport) },
+                    enabled = selected != null,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.markdown_export_action))
+                }
+            }
+        }
     }
 }
 

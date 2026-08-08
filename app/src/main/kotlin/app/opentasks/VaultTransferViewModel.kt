@@ -13,16 +13,20 @@ import app.opentasks.backup.OtVaultExporter
 import app.opentasks.backup.OtVaultImportPreview
 import app.opentasks.backup.OtVaultImporter
 import app.opentasks.core.data.export.CsvTable
+import app.opentasks.core.data.export.ProjectMarkdownWriter
 import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.domain.VaultRepository
+import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
+import app.opentasks.feature.more.MarkdownExportOutcome
 import app.opentasks.feature.more.VaultExportOutcome
 import app.opentasks.feature.more.VaultImportOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.OutputStreamWriter
+import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +66,7 @@ class VaultTransferViewModel @Inject constructor(
     private val importer: OtVaultImporter,
     private val vaultRepository: VaultRepository,
     private val csvWriter: WorkspaceCsvWriter,
+    private val markdownWriter: ProjectMarkdownWriter,
 ) : ViewModel() {
     private val context: Context = context
     private val operation = Mutex()
@@ -76,6 +81,8 @@ class VaultTransferViewModel @Inject constructor(
     private val mutableImportOutcome = MutableStateFlow<VaultImportOutcome?>(null)
     private val mutableCsvExportInProgress = MutableStateFlow(false)
     private val mutableCsvExportOutcome = MutableStateFlow<CsvExportOutcome?>(null)
+    private val mutableMarkdownExportInProgress = MutableStateFlow(false)
+    private val mutableMarkdownExportOutcome = MutableStateFlow<MarkdownExportOutcome?>(null)
 
     val exportInProgress: StateFlow<Boolean> = mutableExportInProgress.asStateFlow()
     val exportOutcome: StateFlow<VaultExportOutcome?> = mutableExportOutcome.asStateFlow()
@@ -83,6 +90,9 @@ class VaultTransferViewModel @Inject constructor(
     val importOutcome: StateFlow<VaultImportOutcome?> = mutableImportOutcome.asStateFlow()
     val csvExportInProgress: StateFlow<Boolean> = mutableCsvExportInProgress.asStateFlow()
     val csvExportOutcome: StateFlow<CsvExportOutcome?> = mutableCsvExportOutcome.asStateFlow()
+    val markdownExportInProgress: StateFlow<Boolean> = mutableMarkdownExportInProgress.asStateFlow()
+    val markdownExportOutcome: StateFlow<MarkdownExportOutcome?> =
+        mutableMarkdownExportOutcome.asStateFlow()
 
     /** A confirmed passphrase is ready; the caller launches the SAF create-document picker. */
     val createDocumentRequests = Channel<Unit>(Channel.BUFFERED)
@@ -92,6 +102,9 @@ class VaultTransferViewModel @Inject constructor(
 
     /** The next table to export; the caller launches a `text/csv` create-document picker for it. */
     val csvCreateDocumentRequests = Channel<CsvTable>(Channel.BUFFERED)
+
+    /** The suggested filename for the selected project's Markdown document. */
+    val markdownCreateDocumentRequests = Channel<String>(Channel.BUFFERED)
 
     /** Tables still to be asked for after the one currently in flight. */
     private val pendingCsvTables = ArrayDeque<CsvTable>()
@@ -103,6 +116,8 @@ class VaultTransferViewModel @Inject constructor(
      * each document's picker happens to return.
      */
     private var csvSnapshot: WorkspaceSnapshot? = null
+    private var markdownSnapshot: WorkspaceSnapshot? = null
+    private var markdownProjectId: ProjectId? = null
 
     /** Holds a validated passphrase and asks the caller to pick a destination for it. */
     fun beginExport(passphrase: String) = beginTransfer(passphrase, createDocumentRequests)
@@ -340,6 +355,71 @@ class VaultTransferViewModel @Inject constructor(
         mutableCsvExportOutcome.value = null
     }
 
+    /** Captures one project and asks SAF for its Markdown document. */
+    fun beginMarkdownExport(projectId: ProjectId) {
+        if (!operation.tryLock()) return
+        val snapshot = vaultRepository.observeWorkspace().value
+        val project = snapshot.projects.firstOrNull { it.id == projectId }
+        if (project == null) {
+            operation.unlock()
+            return
+        }
+        markdownSnapshot = snapshot
+        markdownProjectId = projectId
+        mutableMarkdownExportInProgress.value = true
+        if (!markdownCreateDocumentRequests.trySend(markdownFileName(project.name)).isSuccess) {
+            markdownSnapshot = null
+            markdownProjectId = null
+            operation.unlock()
+            mutableMarkdownExportInProgress.value = false
+            mutableMarkdownExportOutcome.value = MarkdownExportOutcome.Failed(MARKDOWN_EXPORT_FAILED_REASON)
+        }
+    }
+
+    /** The SAF picker returned [uri], or null when the person cancelled it. */
+    fun onMarkdownDocumentSelected(uri: Uri?) {
+        val snapshot = markdownSnapshot ?: return
+        val projectId = markdownProjectId ?: return
+        markdownSnapshot = null
+        markdownProjectId = null
+        if (uri == null) {
+            operation.unlock()
+            mutableMarkdownExportInProgress.value = false
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val stream = context.contentResolver.openOutputStream(uri)
+                if (stream != null) {
+                    OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
+                        markdownWriter.write(projectId, snapshot, writer)
+                    }
+                    success = true
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                success = false
+            } finally {
+                withContext(NonCancellable) {
+                    if (!success) deletePartialDocument(uri)
+                    operation.unlock()
+                    mutableMarkdownExportInProgress.value = false
+                }
+            }
+            mutableMarkdownExportOutcome.value = if (success) {
+                MarkdownExportOutcome.Completed
+            } else {
+                MarkdownExportOutcome.Failed(MARKDOWN_EXPORT_FAILED_REASON)
+            }
+        }
+    }
+
+    fun dismissMarkdownExportOutcome() {
+        mutableMarkdownExportOutcome.value = null
+    }
+
     /**
      * Asks the caller for the next pending table's document, or aborts the
      * batch if the request itself cannot be sent (a closed channel — never
@@ -372,6 +452,15 @@ class VaultTransferViewModel @Inject constructor(
         CsvExportTable.PROJECTS -> CsvTable.PROJECTS
         CsvExportTable.TIME_ENTRIES -> CsvTable.TIME_ENTRIES
         CsvExportTable.NOTES -> CsvTable.NOTES
+    }
+
+    private fun markdownFileName(projectName: String): String {
+        val projectPart = projectName
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+            .ifEmpty { "project" }
+        return ("open_tasks_" + projectPart).take(80) + ".md"
     }
 
     /**
@@ -436,3 +525,4 @@ class VaultTransferViewModel @Inject constructor(
  * risks leaking one.
  */
 private const val CSV_EXPORT_FAILED_REASON = "The CSV export could not be completed."
+private const val MARKDOWN_EXPORT_FAILED_REASON = "The Markdown export could not be completed."

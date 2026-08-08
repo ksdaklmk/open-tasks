@@ -308,6 +308,15 @@ fun OpenTasksApp(
         ) { uri ->
             vaultTransferViewModel.onCsvDocumentSelected(uri)
         }
+        val markdownExportInProgress by
+            vaultTransferViewModel.markdownExportInProgress.collectAsStateWithLifecycle()
+        val markdownExportOutcome by
+            vaultTransferViewModel.markdownExportOutcome.collectAsStateWithLifecycle()
+        val markdownExportDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/markdown"),
+        ) { uri ->
+            vaultTransferViewModel.onMarkdownDocumentSelected(uri)
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val coroutineScope = rememberCoroutineScope()
         val accessibilityManager = LocalAccessibilityManager.current
@@ -357,6 +366,11 @@ fun OpenTasksApp(
         LaunchedEffect(vaultTransferViewModel, csvExportDocumentLauncher) {
             for (table in vaultTransferViewModel.csvCreateDocumentRequests) {
                 csvExportDocumentLauncher.launch(csvExportFileName(table))
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, markdownExportDocumentLauncher) {
+            for (fileName in vaultTransferViewModel.markdownCreateDocumentRequests) {
+                markdownExportDocumentLauncher.launch(fileName)
             }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -1344,6 +1358,11 @@ fun OpenTasksApp(
                                     onExportCsv = vaultTransferViewModel::beginCsvExport,
                                     onDismissCsvExportOutcome =
                                         vaultTransferViewModel::dismissCsvExportOutcome,
+                                    markdownExportInProgress = markdownExportInProgress,
+                                    markdownExportOutcome = markdownExportOutcome,
+                                    onExportMarkdown = vaultTransferViewModel::beginMarkdownExport,
+                                    onDismissMarkdownExportOutcome =
+                                        vaultTransferViewModel::dismissMarkdownExportOutcome,
                                     lockEnabled = lockEnabled,
                                     lockAvailable = lockAvailable,
                                     onLockEnabledChange = { appLockSettings.lockEnabled = it },
