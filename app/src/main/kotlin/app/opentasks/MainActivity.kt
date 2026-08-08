@@ -291,11 +291,26 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_OPEN_QUICK_ADD, false) == true) {
+            // An explicit quick-add trigger requests an empty sheet: the
+            // non-null "" wins the composition-time `quickAddPrefillText ?:
+            // quickAddSheetTitle` fallback in `OpenTasksApp` over any stale
+            // title left behind by an earlier, already-consumed share, so a
+            // same-pass remount while the sheet is open seeds empty rather
+            // than resurrecting that share's text. Last explicit trigger
+            // wins over a still-pending share too, including one shared
+            // while locked and not yet opened.
+            quickAddPrefillText = ""
             quickAddSignal++
             return
         }
         when (intent?.action) {
-            QUICK_ADD_ACTION -> quickAddSignal++
+            QUICK_ADD_ACTION -> {
+                // See the comment on the `EXTRA_OPEN_QUICK_ADD` branch above
+                // -- the static launcher shortcut is the same kind of
+                // explicit, no-prefill trigger as the widget tap.
+                quickAddPrefillText = ""
+                quickAddSignal++
+            }
             Intent.ACTION_SEND -> {
                 val prefill = quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_TEXT))
                 if (prefill != null) {

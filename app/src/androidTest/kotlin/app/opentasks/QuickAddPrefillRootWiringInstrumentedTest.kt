@@ -11,11 +11,15 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.AnnotatedString
 import app.opentasks.core.designsystem.OpenTasksTheme
 import org.junit.Rule
 import org.junit.Test
@@ -43,7 +47,12 @@ import org.junit.Test
  *    its effect -- it needs the still-populated prefill parameter, not the
  *    one-share-behind fallback);
  *  - a blank share/selection intent must never overwrite an already-pending
- *    prefill (the guard around the assignment, not just the signal bump).
+ *    prefill (the guard around the assignment, not just the signal bump);
+ *  - an explicit, no-prefill quick-add trigger (the Today widget tap or the
+ *    static launcher shortcut) arriving while the sheet is open must clear
+ *    a stale title left over from an earlier, already-consumed share, not
+ *    resurrect it through the `?: quickAddSheetTitle` fallback -- "last
+ *    explicit trigger wins".
  */
 class QuickAddPrefillRootWiringInstrumentedTest {
     @get:Rule
@@ -125,6 +134,52 @@ class QuickAddPrefillRootWiringInstrumentedTest {
         composeRule.onNodeWithText("Real then blank share").performClick()
         composeRule.onNodeWithTag("quick-add-title")
             .assertTextContains("Real share", substring = true)
+    }
+
+    @Test
+    fun explicitTriggerWhileOpenClearsAStaleSharedTitle() {
+        composeRule.setContent {
+            var signal by remember { mutableIntStateOf(0) }
+            var prefillText by remember { mutableStateOf<String?>(null) }
+            OpenTasksTheme {
+                Column {
+                    Button(
+                        onClick = {
+                            prefillText = "Buy milk"
+                            signal++
+                        },
+                    ) { Text("Share") }
+                    Button(
+                        onClick = {
+                            // Mirrors `MainActivity.handleIntent`'s
+                            // `EXTRA_OPEN_QUICK_ADD` / `QUICK_ADD_ACTION`
+                            // arms: an explicit, no-prefill trigger sets the
+                            // sentinel empty string -- never produced by
+                            // `quickAddPrefill()` -- rather than leaving
+                            // `prefillText` untouched.
+                            prefillText = ""
+                            signal++
+                        },
+                    ) { Text("Quick add trigger") }
+                    QuickAddPrefillReplica(
+                        quickAddSignal = signal,
+                        quickAddPrefillText = prefillText,
+                        onQuickAddConsumed = { prefillText = null },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Share").performClick()
+        composeRule.onNodeWithTag("quick-add-title")
+            .assertTextContains("Buy milk", substring = true)
+
+        // The sheet is still open, showing the share's title, when an
+        // explicit no-prefill trigger arrives.
+        composeRule.onNodeWithText("Quick add trigger").performClick()
+        composeRule.onNodeWithTag("quick-add-title").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")),
+        )
     }
 }
 
