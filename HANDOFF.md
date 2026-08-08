@@ -1,7 +1,7 @@
 # Open Tasks Handoff
 
 - Last updated: 8 August 2026
-- Branch: `main` at `b56e78a` (local tracks `origin/main`; pushed).
+- Branch: `main` at `8c08570` (local tracks `origin/main`; pushed).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
   is in flight except two docs-only CI runs (`31232428124`,
   `31232527780`); the completed run at `c74a435` confirmed the expected
@@ -13,13 +13,16 @@
      direction decision is made: Stage 6 "daily-flow features", all
      four brainstormed directions in one stage. Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`
-     (committed `5cc8671`, amended `4d1dc1a`); plan:
+     (committed `5cc8671`, amended `4d1dc1a`, with plan-audit
+     clarifications revised locally on 8 August 2026); plan:
      `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
-     (`3ce7252`), thirteen tasks executed subagent-driven directly on
-     `main` with an independent review per task; implementer
-     dispatches must not spawn subagents (standing fork-swarm ruling,
-     restated in the plan's execution notes). No task before Task 13
-     runs a device suite.
+     (created in `3ce7252`, statically re-audited and revised locally on
+     8 August 2026), thirteen tasks to be executed inline through
+     `superpowers:executing-plans` directly on `main`, with an independent
+     review per task; implementers must not spawn subagents (standing
+     fork-swarm ruling, restated in the plan's execution notes). No Stage 6
+     implementation has started, and no task before Task 13 runs a device
+     suite.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -47,8 +50,8 @@
   backup family already exist end-to-end (entity, codec validation,
   capture attribution, recovery import) with no product plumbing, so
   Task 1 lights them up instead of adding Room v10 — the stage makes
-  **no durable schema change and no fixture change**; the one subtle
-  requirement is moving the `SAVED_VIEW` journal fingerprint from
+  **no durable Room/backup schema change and no backup-fixture change**; the
+  one subtle requirement is moving the `SAVED_VIEW` journal fingerprint from
   identity-only to content-based so renames journal. Four parallel
   read-only research agents mapped the command layer, `:app`
   surfaces, feature UI, and export/import before the plan was written;
@@ -2849,7 +2852,10 @@ including `:app:minifyReleaseWithR8`,
 `:app:optimizeReleaseResources` and `:app:assembleRelease`. The release
 configuration retains `isMinifyEnabled = true` and `isShrinkResources = true`.
 
-## Current programme boundary
+## Historical programme boundary (superseded)
+
+This section records the pre-Stage-6 boundary only. It is not a live resume
+point; the Stage 6 paused checkpoint at the top of this file is authoritative.
 
 Stage 2 and Stage 3 are implemented and verified through their task
 boundaries. Stage 3 create-only Tasks 1–14 close with the Task 14 qualification
@@ -2867,7 +2873,7 @@ Samsung RTL is closed by user ruling; native fold continuity and broader
 two-installation live recovery evidence remain external future work and are
 not implied by Stage 4 or Stage 5 qualification.
 
-## Resume instructions
+## Historical resume instructions (do not use)
 
 1. Read the controller-authorized Ctrl+K follow-up above, then read
    `.superpowers/sdd/2026-08-03-stage-5-platform-features-plan/test-fix-brief.md`
@@ -2880,10 +2886,11 @@ not implied by Stage 4 or Stage 5 qualification.
    authority. If authorisation resumes the work, review the local exception
    before deciding whether to spend bench 2.
 
-## Live backlog: six dependency-ordered stages
+## Historical backlog: six dependency-ordered stages
 
-This is the only active backlog. The 27 July Train 1–6 documents are historical
-evidence or replanning inputs and must not be executed. Completed Train 0,
+This table is retained as historical evidence, not as the active backlog. The
+27 July Train 1–6 documents are historical evidence or replanning inputs and
+must not be executed. Completed Train 0,
 local-workspace, Insights, key-separation, and bounded-frame evidence remains
 recorded above.
 
@@ -2902,7 +2909,7 @@ The dependency chain is strict:
 Stage 1 → Stage 2 → Stage 3 → Stage 4 → Stage 5 → Stage 6
 ```
 
-### Current execution order
+### Historical execution order
 
 1. Remain paused at the controller-approved local exception. Any future
    publication or use of bench 2 needs fresh controller authority.
@@ -3008,10 +3015,10 @@ explicitly planned, verified boundaries.
 - Update architecture, design, threat-model and handoff documents in the same
   change whenever their contracts are affected.
 
-## Recommended next action
+## Historical recommendation (superseded)
 
-Remain paused with the documented local exception. Obtain controller authority
-before committing, pushing, rerunning, or using bench 2.
+Do not use the old local-exception recommendation below as a resume point.
+Follow the Stage 6 paused checkpoint and live backlog at the top of this file.
 
 Keep the protected workspace safe and run future device suites only on a sole
 audited disposable emulator unless a new in-place procedure is explicitly

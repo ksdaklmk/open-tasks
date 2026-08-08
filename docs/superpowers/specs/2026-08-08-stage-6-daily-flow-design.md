@@ -140,8 +140,10 @@ adding a new one:
 
 - A pure, clock-injected `FocusSessionController` state machine:
   focus/break phases, preset cycles 25/5 and 50/10 only. Focus phase
-  runs the existing task timer; break pauses it; phase edges use the
-  existing start/stop timer commands.
+  runs the existing task timer; break pauses it. Starts use the existing
+  task-specific command; stops use an additive owner-checked command so the
+  ownership check and stop are atomic while existing `StopTimer` callers stay
+  unchanged.
 - Boundary alerts reuse the reminder scheduling infrastructure and
   the generic-content notification path (no task text when privacy
   is engaged).
@@ -223,15 +225,21 @@ adding a new one:
   pinned by a round-trip fixture test: export, import, compare
   logical content.
 - Import always creates, never merges. Projects and tags resolve by
-  exact name, else are created. The disclosed formula-neutralisation
-  prefix is stripped on the way in.
+  exact trimmed name, else are created. A case-only collision with the
+  existing case-insensitive uniqueness invariant fails closed before any
+  write. Formula neutralisation uses a reversible odd-apostrophe-run
+  encoding, so both formula-looking text and genuine leading apostrophes
+  survive an own-schema round trip. Within the existing `tags` column,
+  backslash escapes both backslash and the semicolon list separator so every
+  currently valid tag name also round-trips without changing the CSV header.
 - All-or-nothing: the first malformed row aborts with a row-numbered
   error before any write. A preview (task, new-project, and tag
   counts) precedes the commit. The whole import is one composite
   command with one exact Undo.
 - CSV import is deliberately lossy — the CSV carries no checklists,
   notes, attachments, dependencies, or time entries. `.otvault`
-  remains the real transfer format; the import UI copy says so.
+  remains the real transfer format; named zone ids normalise to the
+  exported offset, and the import UI copy says so.
 
 ## Constraints carried forward
 
