@@ -1,7 +1,7 @@
 # Open Tasks Handoff
 
 - Last updated: 8 August 2026
-- Branch: `main` at `dc6f0fb` (local tracks `origin/main`; pushed).
+- Branch: `main` at `90c8857` (local tracks `origin/main`; pushed).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
   is in flight except two docs-only CI runs (`31232428124`,
   `31232527780`); the completed run at `c74a435` confirmed the expected
@@ -18,26 +18,24 @@
      canary image appears; the runner fetches the current canary, so
      it self-restores. Green signal = API 36 + verify + release. No
      action, just observe on natural runs.
-  3. **Optional release-stage polish** (all triaged stay-deferred by
-     the final release review): RELEASING.md step 6 names the commit
-     action without the explicit git commands; `verify-release-apk.sh`
-     cosmetics (check-1 message conflates a missing apksigner with an
-     unsigned APK; dex capture in a shell variable drops NUL bytes —
-     harmless for the ASCII scope scan); unwrapped
-     `props.getProperty()` in the signing config NPEs obscurely on a
-     malformed `keystore.properties`.
-  4. **Ctrl+K CI blind spot** — parked: CI cannot prove the search
+  3. **Ctrl+K CI blind spot** — parked: CI cannot prove the search
      query field takes focus on the headless API 36 runner (no Dialog
      window focus); focus-capable device runs execute the original
      assertion. Revisit only if the runner or assertion strategy
      changes.
-  5. **Samsung RTL** — lapsed by ruling (6 August 2026); any future
-     Samsung real-device work needs a fresh decision.
-  6. **Play Console** — externally pending and out of scope by the
+  4. **Play Console** — externally pending and out of scope by the
      sideload-only ruling; revisit only with backlog item 1.
   Future releases follow `RELEASING.md`'s per-release loop (bump
   `versionCode` by exactly 1, gate, build, verify, smoke on the
   disposable AVD, record, tag).
+- Release-stage polish discharged, 8 August 2026 (`90c8857`):
+  RELEASING.md step 6 lists the explicit git add/commit commands;
+  `verify-release-apk.sh` check 1 distinguishes a missing apksigner
+  from an unsigned APK, and the dex scope scan pipes bytes straight to
+  grep instead of holding NULs in a shell variable (verifier re-run
+  green against the shipped 1.0.0 APK); the signing config names the
+  missing `keystore.properties` key instead of an obscure NPE. The CI
+  gate passed.
 - The CI test-fix task closed on 7 August: the user authorised the
   Ctrl+K API 36 exception (`39d2dc5`), bench 2 (run `31190499051`)
   returned API 36 fully green — 293 pass, 0 failures, 3 skips — with
