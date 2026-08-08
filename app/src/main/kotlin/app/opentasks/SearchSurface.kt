@@ -268,8 +268,14 @@ private fun SavedViewChip(
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
+    // Keyed on identity, not just remembered positionally: an un-keyed
+    // remember here would let an open-menu (or open-rename-dialog) flag
+    // attach to the wrong chip once `savedViews` reorders under this
+    // un-keyed `forEach` -- e.g. after a delete shifts every later chip
+    // one slot earlier. Same idiom as `WorkflowStatusEditorRow`'s
+    // `rememberSaveable(status.id.value)` in ProjectsScreen.kt.
+    var menuExpanded by remember(savedView.id.value) { mutableStateOf(false) }
+    var showRenameDialog by remember(savedView.id.value) { mutableStateOf(false) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         AssistChip(

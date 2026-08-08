@@ -1,5 +1,14 @@
 package app.opentasks
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -197,5 +206,52 @@ class SearchSurfaceSavedViewsInstrumentedTest {
         assertEquals(SearchQuery("custom text query"), savedQuery.get())
         // The 150 ms debounce never advanced: Save did not race it.
         assertNull(debouncedQuery.get())
+    }
+
+    /**
+     * Pins the un-keyed-`remember` regression: with `focusView` first and
+     * its overflow menu left open, an earlier chip disappearing must not
+     * leave that open-menu flag attached to whichever chip now occupies
+     * its old slot. The drop is driven by a plain test-only button rather
+     * than `focusView`'s own delete item, because routing it through that
+     * item's own click handler would also close its own menu as part of
+     * the same click -- masking exactly the leak this test exists to
+     * catch. `savedViews` reordering "underneath" a composed chip this
+     * way is the same shape of update `onDeleteView` drives in
+     * `OpenTasksApp` (a delete anywhere shifts every later chip's slot).
+     */
+    @Test
+    fun droppingAnEarlierChipDoesNotLeakItsOpenMenuOntoItsNeighbour() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                var currentViews by remember {
+                    mutableStateOf(listOf(focusView, overdueView))
+                }
+                Column {
+                    SearchSurface(
+                        results = emptyList(),
+                        onQueryChange = {},
+                        onDismiss = {},
+                        onOpenTask = {},
+                        onOpenProject = {},
+                        savedViews = currentViews,
+                    )
+                    Button(
+                        onClick = { currentViews = currentViews.drop(1) },
+                        modifier = Modifier.testTag("test-drop-first-saved-view"),
+                    ) {
+                        Text("Drop first saved view")
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("saved-view-menu-${focusView.id.value}").performClick()
+        composeRule.onNodeWithTag("saved-view-rename-${focusView.id.value}").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("test-drop-first-saved-view").performClick()
+
+        composeRule.onNodeWithTag("saved-view-chip-${overdueView.id.value}").assertIsDisplayed()
+        composeRule.onNodeWithTag("saved-view-rename-${overdueView.id.value}").assertDoesNotExist()
     }
 }
