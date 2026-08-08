@@ -8,22 +8,23 @@
   post-F6 shape — `verify`, compact API 36, and `release` green, only
   expanded API 37.0 red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — IN PROGRESS; subagent-driven from Task 2 by
-     user ruling (8 August 2026).** Authority spec:
+  1. **Stage 6 execution — Tasks 1–7 COMPLETE and independently
+     reviewed; PAUSED before Task 8 by user instruction (8 August 2026,
+     usage limit); do not start Task 8 without the user's go.**
+     Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
-     (audited revisions of both committed in `fc4aad8`, the recorded
-     Stage 6 implementation-base SHA). Execution ledger:
+     (audited revisions committed in `fc4aad8`, the recorded Stage 6
+     implementation-base SHA). Execution ledger with full per-task
+     review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     Task 1 (saved-view commands) is complete and independently
-     reviewed — see the Stage 6 Task 1 checkpoint below. Tasks 2–13
-     remain; no task before Task 13 runs a device suite; implementers
-     must not spawn subagents (standing fork-swarm ruling).
-     User ruling (8 August 2026): Tasks 2–12 execute via
+     See the Stage 6 Tasks 1–7 checkpoint below for state, the one open
+     user decision, and exact resume instructions. Execution mode (user
+     ruling, recorded in the plan header): Tasks 2–12 via
      `superpowers:subagent-driven-development` — fresh implementer per
-     task, independent task review per boundary, the no-subagent/no-fork
-     clause in every implementer dispatch, and Task 13 controller-owned;
-     the plan header records the ruling.
+     task, independent task review per boundary, no-subagent/no-fork
+     clause in every implementer dispatch, Task 13 controller-owned; no
+     task before Task 13 runs a device suite.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -220,7 +221,102 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 6 Task 1 checkpoint — 8 August 2026 (PAUSED before Task 2)
+## Stage 6 Tasks 1–7 checkpoint — 8 August 2026 (PAUSED before Task 8)
+
+Execution ran from base `fc4aad8` directly on `main`. Task 1 was
+executed inline; Tasks 2–7 ran subagent-driven per the user ruling
+recorded in the plan header, each with an independent task review and
+scoped re-reviews of every fix round. All seven boundaries closed with
+zero open Critical/Important findings. The full CI gate
+(`testDebugUnitTest lintDebug :app:assembleDebug`) passed at every
+commit below; no device suite has run (Task 13). Deferred minors and
+per-round review evidence live in the ignored execution ledger.
+
+- Task 1 (`b3d4a42`, minors `81c28ba`): saved-view commands over the
+  dormant `saved_views` table in both engines; content-based
+  `SAVED_VIEW` journal fingerprint (renames journal in both engines,
+  review-verified); `SavedViewPayloadCodec` (2 MiB, deterministic
+  sorted-id encoding, strict fail-closed decode); bounds 20/64/500 in
+  both companions; exact repository-produced undo. No schema, fixture,
+  or format change.
+- Task 2 (`fac4b70`): pure `NaturalDateParser` in core:domain with the
+  pinned grammar/resolution rules; `CreateTask` gains additive
+  `due: ZonedMoment? = null` seeded identically by both engines, no
+  reminder created; Quick Add suggestion chip with span-strip and
+  clear.
+- Task 3 (`b07ef5c`, fixes `80a9b0a` `c204568` `214e759`): SEND +
+  PROCESS_TEXT intent filters on MainActivity; pure `quickAddPrefill`;
+  prefill rides the existing lock-gated quickAddSignal chain. Three
+  review-driven fixes hardened the seed mechanism: null prefill can no
+  longer discard a pending share; the sheet seeds correctly on every
+  mount path (capture-before-consume + composition-time two-source
+  seed); explicit no-prefill triggers (widget/shortcut) seed empty via
+  the `""` sentinel. Recorded ruling: "last explicit trigger wins" — a
+  share pending behind the lock is overwritten by a later explicit
+  quick-add trigger. Three replica instrumented tests pin the
+  mechanism (execute at Task 13).
+- Task 4 (`0943009`): Quick Settings tile service
+  (`QuickAddTileService`, BIND_QUICK_SETTINGS_TILE-gated, the stage's
+  one new exported component besides Task 3's filters);
+  `QUICK_ADD_ACTION` made internal on MainActivity's companion,
+  value unchanged.
+- Task 5 (`8822a0b`): interactive Today widget — `FocusEntry(taskId,
+  title, completable)`; row tap-through via the existing
+  ACTION_OPEN_TASK contract; complete glyph re-verifies against a
+  fresh workspace read inside the active publisher before dispatching
+  `CompleteTask`, and every write path provably routes through the
+  Stage 5 `StopGatedWriter` gate; all three key families (titles, ids,
+  completable) clear on concealment.
+- Task 6 (`1456d3c`, fixes `d321dac` `94ef78a`): preset focus cycles
+  (25/5, 50/10) — pure `FocusSessionController` with anchored
+  phase-edge reconciliation; `StopTimerIfOwned` +
+  `TIMER_OWNERSHIP_CHANGED` atomic owner-checked stop in both engines
+  (no journal write on rejection, parity review-verified);
+  fail-closed `focusTimerAction` as the single ownership decision
+  point; exact alarms with boot/time-change re-arm ordered before the
+  lazy repository lookup; generic-text notifications only. Two fix
+  rounds serialized the coordinator (mutex + store re-read guard) and
+  closed the eventually-consistent-snapshot races (coalesced
+  reconciles; refused starts resolve against a fresh bounded workspace
+  view, clear only on positive evidence; unconditional owner-checked
+  Stop dispatch, silent on idempotent success).
+- Task 7 (`f008af0`, fix `ed51354`): saved searches UI — chips on the
+  blank-query search Dialog (structure untouched for the shortcut
+  test), whole-SearchQuery debounce dispatch, direct un-debounced
+  save, rename/delete via per-chip menus keyed on chip identity, limit
+  handling at 20; `WorkspaceViewModel.search` takes `SearchQuery`.
+  Six pinned instrumented tests plus a state-leak regression test
+  (execute at Task 13).
+
+**Open user decision (Task 6, parked; code is plan-correct as
+committed):** the plan's pinned `FOCUS + no timer → START` rule makes a
+manual "Stop timer" on the task itself inert during a FOCUS phase — the
+ON_RESUME reconciler restarts the timer; only the focus banner's Stop
+ends the cycle. The task reviewer reports this consequence as a product
+defect (Important, plan-mandated). Ruling needed: keep the pinned rule,
+or add a new pinned rule so a manual stop ends the focus cycle.
+
+**Task 8 was NOT started.** Its implementer was dispatched and then
+stopped at the user's request (usage limit) while still writing failing
+tests, before any commit; its two partial untracked test files were
+removed. The working tree at pause holds only the three protected
+pre-existing items (uncommitted Stage 3 plan amendment, `.kotlin/`,
+`artifacts/`).
+
+**Resume instructions:** on the user's go, re-dispatch Task 8 from the
+extracted brief
+`.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/task-8-brief.md`
+with BASE `ed51354` (fresh implementer, most capable tier recommended —
+five composite commands + `UndoBatch` across both engines; no
+task-8-report.md exists, nothing to carry over), then continue Tasks
+9–12 subagent-driven per the plan and ledger discipline (brief → TDD →
+CI gate → commit → task review → fix rounds → scoped re-reviews →
+ledger), Task 12 with its mandatory mid-task tap-to-move review
+boundary, then the whole-branch final review, then controller-owned
+Task 13. Resolve the parked Task 6 decision with the user before or at
+the final review. The Stage 5 checkpoint history below is unchanged.
+
+## Superseded: Stage 6 Task 1 checkpoint — 8 August 2026
 
 Execution began from base `fc4aad8` (audited plan/spec revisions), inline
 via `superpowers:executing-plans` directly on `main`, with the base SHA
