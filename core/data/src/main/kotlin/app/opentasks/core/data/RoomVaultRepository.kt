@@ -14,6 +14,7 @@ import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
 import app.opentasks.core.data.db.RetiredBlobSetEntity
+import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TagEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskEntity
@@ -61,6 +62,8 @@ import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.Revision
+import app.opentasks.core.model.SavedView
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SemanticStatus
@@ -248,6 +251,11 @@ class RoomVaultRepository(
                     markAttachmentContentCollected(command)
                 is DomainCommand.MarkRetiredBlobSetCollected ->
                     markRetiredBlobSetCollected(command)
+                is DomainCommand.CreateSavedView -> createSavedView(command)
+                is DomainCommand.RenameSavedView -> renameSavedView(command)
+                is DomainCommand.UpdateSavedViewQuery -> updateSavedViewQuery(command)
+                is DomainCommand.DeleteSavedView -> deleteSavedView(command)
+                is DomainCommand.RestoreSavedView -> restoreSavedView(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2575,6 +2583,169 @@ class RoomVaultRepository(
         }
     }
 
+    private suspend fun createSavedView(
+        command: DomainCommand.CreateSavedView,
+    ): CommandResult {
+        val name = command.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        val query = command.query.copy(text = command.query.text.trim())
+        validateSavedViewQueryText(query)?.let { return it }
+        val encoded = encodeSavedViewQuery(query)
+            ?: return savedViewPayloadTooLarge()
+        if (database.workspaceDao().getSavedView(command.savedViewId.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That saved search identifier is already in use.",
+            )
+        }
+        if (database.workspaceDao().savedViewCount() >= MAX_SAVED_VIEWS) {
+            return savedViewLimitReached()
+        }
+        val view = SavedView(
+            id = command.savedViewId,
+            workspaceId = OpenTasksFixtures.workspaceId,
+            name = name,
+            query = query,
+        )
+        database.workspaceDao().upsertSavedView(view.toEntity(encoded))
+        return CommandResult.Success(
+            message = "Saved search created",
+            undo = DomainCommand.DeleteSavedView(view.id),
+        )
+    }
+
+    private suspend fun renameSavedView(
+        command: DomainCommand.RenameSavedView,
+    ): CommandResult {
+        val (entity, existing) = requireReadableSavedView(command.savedViewId)
+            ?: return savedViewNotFound()
+        val name = command.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        if (name != existing.name) {
+            database.workspaceDao().upsertSavedView(entity.copy(name = name))
+        }
+        return CommandResult.Success(
+            message = "Saved search renamed",
+            undo = DomainCommand.RenameSavedView(existing.id, existing.name),
+        )
+    }
+
+    private suspend fun updateSavedViewQuery(
+        command: DomainCommand.UpdateSavedViewQuery,
+    ): CommandResult {
+        val (entity, existing) = requireReadableSavedView(command.savedViewId)
+            ?: return savedViewNotFound()
+        val query = command.query.copy(text = command.query.text.trim())
+        validateSavedViewQueryText(query)?.let { return it }
+        val encoded = encodeSavedViewQuery(query)
+            ?: return savedViewPayloadTooLarge()
+        database.workspaceDao().upsertSavedView(entity.copy(encryptedQuery = encoded))
+        return CommandResult.Success(
+            message = "Saved search updated",
+            undo = DomainCommand.UpdateSavedViewQuery(existing.id, existing.query),
+        )
+    }
+
+    private suspend fun deleteSavedView(
+        command: DomainCommand.DeleteSavedView,
+    ): CommandResult {
+        if (database.workspaceDao().getSavedView(command.savedViewId.value) == null) {
+            return CommandResult.Success("Saved search is already deleted")
+        }
+        val (_, existing) = requireReadableSavedView(command.savedViewId)
+            ?: return savedViewNotFound()
+        database.workspaceDao().deleteSavedView(existing.id.value)
+        return CommandResult.Success(
+            message = "Saved search deleted",
+            undo = DomainCommand.RestoreSavedView(existing),
+        )
+    }
+
+    private suspend fun restoreSavedView(
+        command: DomainCommand.RestoreSavedView,
+    ): CommandResult {
+        if (database.workspaceDao().getSavedView(command.savedView.id.value) != null) {
+            return CommandResult.Success("Saved search restored")
+        }
+        val name = command.savedView.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        if (command.savedView.workspaceId != OpenTasksFixtures.workspaceId) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That saved search belongs to a different workspace.",
+            )
+        }
+        val query = command.savedView.query.copy(
+            text = command.savedView.query.text.trim(),
+        )
+        validateSavedViewQueryText(query)?.let { return it }
+        val encoded = encodeSavedViewQuery(query)
+            ?: return savedViewPayloadTooLarge()
+        if (database.workspaceDao().savedViewCount() >= MAX_SAVED_VIEWS) {
+            return savedViewLimitReached()
+        }
+        val restored = command.savedView.copy(name = name, query = query)
+        database.workspaceDao().upsertSavedView(restored.toEntity(encoded))
+        return CommandResult.Success(
+            message = "Saved search restored",
+            undo = DomainCommand.DeleteSavedView(restored.id),
+        )
+    }
+
+    /**
+     * Resolves a saved view the product can actually see. A physically
+     * present row whose payload fails the strict codec stays invisible to
+     * commands and is preserved untouched, so both engines expose the same
+     * mutable set.
+     */
+    private suspend fun requireReadableSavedView(
+        id: SavedViewId,
+    ): Pair<SavedViewEntity, SavedView>? {
+        val entity = database.workspaceDao().getSavedView(id.value) ?: return null
+        val model = runCatching { entity.toModel() }.getOrNull() ?: return null
+        return entity to model
+    }
+
+    private fun validateSavedViewName(name: String): CommandResult.Rejected? = when {
+        name.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.SAVED_VIEW_NAME_INVALID,
+            "A saved search needs a name.",
+        )
+        name.length > MAX_SAVED_VIEW_NAME_LENGTH -> CommandResult.Rejected(
+            RejectionReason.SAVED_VIEW_NAME_INVALID,
+            "Keep saved search names under $MAX_SAVED_VIEW_NAME_LENGTH characters.",
+        )
+        else -> null
+    }
+
+    private fun validateSavedViewQueryText(query: SearchQuery): CommandResult.Rejected? =
+        if (query.text.length > MAX_SAVED_VIEW_QUERY_LENGTH) {
+            CommandResult.Rejected(
+                RejectionReason.SAVED_VIEW_QUERY_TOO_LONG,
+                "Keep search text under $MAX_SAVED_VIEW_QUERY_LENGTH characters.",
+            )
+        } else {
+            null
+        }
+
+    private fun encodeSavedViewQuery(query: SearchQuery): ByteArray? =
+        runCatching { SavedViewPayloadCodec.encode(query) }.getOrNull()
+
+    private fun savedViewNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "Saved search no longer exists.",
+    )
+
+    private fun savedViewLimitReached(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.SAVED_VIEW_LIMIT_REACHED,
+        "A workspace can contain up to $MAX_SAVED_VIEWS saved searches.",
+    )
+
+    private fun savedViewPayloadTooLarge(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.SAVED_VIEW_PAYLOAD_TOO_LARGE,
+        "This saved search is too large to store safely.",
+    )
+
     private fun validateNoteBody(body: String): CommandResult.Rejected? = when {
         body.isEmpty() -> CommandResult.Rejected(
             RejectionReason.EMPTY_NOTE,
@@ -2970,25 +3141,30 @@ class RoomVaultRepository(
             combine(
                 combine(
                     combine(
-                        workspaceDao.observeTaskTags(),
-                        workspaceDao.observeChecklistItems(),
-                        workspaceDao.observeReminders(),
-                        observeTimeEntriesWithClock(),
-                        workspaceDao.observeNotes(),
-                    ) { taskTags, checklist, reminders, timeEntries, notes ->
-                        RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                        combine(
+                            workspaceDao.observeTaskTags(),
+                            workspaceDao.observeChecklistItems(),
+                            workspaceDao.observeReminders(),
+                            observeTimeEntriesWithClock(),
+                            workspaceDao.observeNotes(),
+                        ) { taskTags, checklist, reminders, timeEntries, notes ->
+                            RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                        },
+                        workspaceDao.observeAttachments(),
+                    ) { rows, attachments ->
+                        rows.copy(attachments = attachments)
                     },
-                    workspaceDao.observeAttachments(),
-                ) { rows, attachments ->
-                    rows.copy(attachments = attachments)
+                    workspaceDao.observeActivityEntries(),
+                ) { rows, activityEntries ->
+                    rows.copy(activityEntries = activityEntries)
                 },
-                workspaceDao.observeActivityEntries(),
-            ) { rows, activityEntries ->
-                rows.copy(activityEntries = activityEntries)
+                workspaceDao.observeRetiredBlobSets(),
+            ) { rows, retiredBlobSets ->
+                rows.copy(retiredBlobSets = retiredBlobSets)
             },
-            workspaceDao.observeRetiredBlobSets(),
-        ) { rows, retiredBlobSets ->
-            rows.copy(retiredBlobSets = retiredBlobSets)
+            workspaceDao.observeSavedViews(),
+        ) { rows, savedViews ->
+            rows.copy(savedViews = savedViews)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
@@ -3098,6 +3274,12 @@ class RoomVaultRepository(
             attachments = relations.attachments.map(AttachmentEntity::toModel),
             activityEntries = relations.activityEntries.mapNotNull(ActivityEntryEntity::toModel),
             retiredBlobSets = relations.retiredBlobSets.map(RetiredBlobSetEntity::toModel),
+            // A malformed legacy or recovered dormant-family payload is
+            // omitted without deleting, rewriting, or logging the raw row;
+            // one bad row must not prevent repository readiness.
+            savedViews = relations.savedViews.mapNotNull { entity ->
+                runCatching { entity.toModel() }.getOrNull()
+            },
         )
     }
 
@@ -3208,6 +3390,7 @@ class RoomVaultRepository(
         val attachments: List<AttachmentEntity> = emptyList(),
         val activityEntries: List<ActivityEntryEntity> = emptyList(),
         val retiredBlobSets: List<RetiredBlobSetEntity> = emptyList(),
+        val savedViews: List<SavedViewEntity> = emptyList(),
     )
 
     private data class TimedTimeEntries(
@@ -3246,6 +3429,9 @@ class RoomVaultRepository(
         const val ATTACHMENT_CHUNK_BYTES = 4L * 1024 * 1024
         const val MAX_ACTIVITY_ENTRIES_PER_OWNER = 500
         const val MAX_ACTIVITY_BODY_LENGTH = 500
+        const val MAX_SAVED_VIEWS = 20
+        const val MAX_SAVED_VIEW_NAME_LENGTH = 64
+        const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L

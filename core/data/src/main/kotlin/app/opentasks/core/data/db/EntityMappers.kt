@@ -18,8 +18,11 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
+import app.opentasks.core.data.SavedViewPayloadCodec
 import app.opentasks.core.model.RetiredBlobSet
 import app.opentasks.core.model.Revision
+import app.opentasks.core.model.SavedView
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
@@ -333,6 +336,25 @@ internal fun Attachment.toEntity(): AttachmentEntity = AttachmentEntity(
     revisionWallMillis = revision.wallTimeMillis,
     revisionLogical = revision.logicalCounter,
     revisionDeviceId = revision.deviceId.value,
+)
+
+/**
+ * Strict: throws when the stored payload is malformed or from an unsupported
+ * format version. Snapshot mapping wraps this dormant-family decode and omits
+ * the row without deleting or rewriting it.
+ */
+internal fun SavedViewEntity.toModel(): SavedView = SavedView(
+    id = SavedViewId(id),
+    workspaceId = WorkspaceId(workspaceId),
+    name = name,
+    query = SavedViewPayloadCodec.decode(encryptedQuery),
+)
+
+internal fun SavedView.toEntity(encodedQuery: ByteArray): SavedViewEntity = SavedViewEntity(
+    id = id.value,
+    workspaceId = workspaceId.value,
+    name = name,
+    encryptedQuery = encodedQuery,
 )
 
 internal fun RetiredBlobSetEntity.toModel(): RetiredBlobSet = RetiredBlobSet(

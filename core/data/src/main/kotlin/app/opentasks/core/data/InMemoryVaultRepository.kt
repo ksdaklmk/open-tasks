@@ -34,6 +34,8 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.RetiredBlobSet
 import app.opentasks.core.model.Revision
+import app.opentasks.core.model.SavedView
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SemanticStatus
@@ -228,6 +230,11 @@ class InMemoryVaultRepository internal constructor(
                 markAttachmentContentCollected(command)
             is DomainCommand.MarkRetiredBlobSetCollected ->
                 markRetiredBlobSetCollected(command)
+            is DomainCommand.CreateSavedView -> createSavedView(command)
+            is DomainCommand.RenameSavedView -> renameSavedView(command)
+            is DomainCommand.UpdateSavedViewQuery -> updateSavedViewQuery(command)
+            is DomainCommand.DeleteSavedView -> deleteSavedView(command)
+            is DomainCommand.RestoreSavedView -> restoreSavedView(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -2320,6 +2327,173 @@ class InMemoryVaultRepository internal constructor(
         return CommandResult.Success("Retired blob set collected")
     }
 
+    private fun createSavedView(
+        command: DomainCommand.CreateSavedView,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val name = command.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        val query = command.query.copy(text = command.query.text.trim())
+        validateSavedViewQueryText(query)?.let { return it }
+        if (!savedViewQueryEncodes(query)) {
+            return savedViewPayloadTooLarge()
+        }
+        if (current.savedViews.any { it.id == command.savedViewId }) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That saved search identifier is already in use.",
+            )
+        }
+        if (current.savedViews.size >= MAX_SAVED_VIEWS) {
+            return savedViewLimitReached()
+        }
+        val view = SavedView(
+            id = command.savedViewId,
+            workspaceId = OpenTasksFixtures.workspaceId,
+            name = name,
+            query = query,
+        )
+        publish(tasks = current.tasks, savedViews = current.savedViews + view)
+        return CommandResult.Success(
+            message = "Saved search created",
+            undo = DomainCommand.DeleteSavedView(view.id),
+        )
+    }
+
+    private fun renameSavedView(
+        command: DomainCommand.RenameSavedView,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val existing = current.savedViews.firstOrNull { it.id == command.savedViewId }
+            ?: return savedViewNotFound()
+        val name = command.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        if (name != existing.name) {
+            publish(
+                tasks = current.tasks,
+                savedViews = current.savedViews.map {
+                    if (it.id == existing.id) it.copy(name = name) else it
+                },
+            )
+        }
+        return CommandResult.Success(
+            message = "Saved search renamed",
+            undo = DomainCommand.RenameSavedView(existing.id, existing.name),
+        )
+    }
+
+    private fun updateSavedViewQuery(
+        command: DomainCommand.UpdateSavedViewQuery,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val existing = current.savedViews.firstOrNull { it.id == command.savedViewId }
+            ?: return savedViewNotFound()
+        val query = command.query.copy(text = command.query.text.trim())
+        validateSavedViewQueryText(query)?.let { return it }
+        if (!savedViewQueryEncodes(query)) {
+            return savedViewPayloadTooLarge()
+        }
+        publish(
+            tasks = current.tasks,
+            savedViews = current.savedViews.map {
+                if (it.id == existing.id) it.copy(query = query) else it
+            },
+        )
+        return CommandResult.Success(
+            message = "Saved search updated",
+            undo = DomainCommand.UpdateSavedViewQuery(existing.id, existing.query),
+        )
+    }
+
+    private fun deleteSavedView(
+        command: DomainCommand.DeleteSavedView,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val existing = current.savedViews.firstOrNull { it.id == command.savedViewId }
+            ?: return CommandResult.Success("Saved search is already deleted")
+        publish(
+            tasks = current.tasks,
+            savedViews = current.savedViews.filterNot { it.id == existing.id },
+        )
+        return CommandResult.Success(
+            message = "Saved search deleted",
+            undo = DomainCommand.RestoreSavedView(existing),
+        )
+    }
+
+    private fun restoreSavedView(
+        command: DomainCommand.RestoreSavedView,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        if (current.savedViews.any { it.id == command.savedView.id }) {
+            return CommandResult.Success("Saved search restored")
+        }
+        val name = command.savedView.name.trim()
+        validateSavedViewName(name)?.let { return it }
+        if (command.savedView.workspaceId != OpenTasksFixtures.workspaceId) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That saved search belongs to a different workspace.",
+            )
+        }
+        val query = command.savedView.query.copy(
+            text = command.savedView.query.text.trim(),
+        )
+        validateSavedViewQueryText(query)?.let { return it }
+        if (!savedViewQueryEncodes(query)) {
+            return savedViewPayloadTooLarge()
+        }
+        if (current.savedViews.size >= MAX_SAVED_VIEWS) {
+            return savedViewLimitReached()
+        }
+        val restored = command.savedView.copy(name = name, query = query)
+        publish(tasks = current.tasks, savedViews = current.savedViews + restored)
+        return CommandResult.Success(
+            message = "Saved search restored",
+            undo = DomainCommand.DeleteSavedView(restored.id),
+        )
+    }
+
+    private fun validateSavedViewName(name: String): CommandResult.Rejected? = when {
+        name.isEmpty() -> CommandResult.Rejected(
+            RejectionReason.SAVED_VIEW_NAME_INVALID,
+            "A saved search needs a name.",
+        )
+        name.length > MAX_SAVED_VIEW_NAME_LENGTH -> CommandResult.Rejected(
+            RejectionReason.SAVED_VIEW_NAME_INVALID,
+            "Keep saved search names under $MAX_SAVED_VIEW_NAME_LENGTH characters.",
+        )
+        else -> null
+    }
+
+    private fun validateSavedViewQueryText(query: SearchQuery): CommandResult.Rejected? =
+        if (query.text.length > MAX_SAVED_VIEW_QUERY_LENGTH) {
+            CommandResult.Rejected(
+                RejectionReason.SAVED_VIEW_QUERY_TOO_LONG,
+                "Keep search text under $MAX_SAVED_VIEW_QUERY_LENGTH characters.",
+            )
+        } else {
+            null
+        }
+
+    private fun savedViewQueryEncodes(query: SearchQuery): Boolean =
+        runCatching { SavedViewPayloadCodec.encode(query) }.isSuccess
+
+    private fun savedViewNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "Saved search no longer exists.",
+    )
+
+    private fun savedViewLimitReached(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.SAVED_VIEW_LIMIT_REACHED,
+        "A workspace can contain up to $MAX_SAVED_VIEWS saved searches.",
+    )
+
+    private fun savedViewPayloadTooLarge(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.SAVED_VIEW_PAYLOAD_TOO_LARGE,
+        "This saved search is too large to store safely.",
+    )
+
     private fun validateTimeEntry(
         taskId: TaskId,
         startedAt: Instant,
@@ -2582,6 +2756,7 @@ class InMemoryVaultRepository internal constructor(
         attachments: List<Attachment> = mutableWorkspace.value.attachments,
         activityEntries: List<ActivityEntry> = mutableWorkspace.value.activityEntries,
         retiredBlobSets: List<RetiredBlobSet> = mutableWorkspace.value.retiredBlobSets,
+        savedViews: List<SavedView> = mutableWorkspace.value.savedViews,
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
@@ -2607,6 +2782,9 @@ class InMemoryVaultRepository internal constructor(
             activityEntries = activityEntries,
             retiredBlobSets = retiredBlobSets.sortedWith(
                 compareBy<RetiredBlobSet> { it.retiredAt }.thenBy { it.blobSetId.value },
+            ),
+            savedViews = savedViews.sortedWith(
+                compareBy<SavedView> { it.name }.thenBy { it.id.value },
             ),
         ).withReconciledTimeState(at = at, entries = timeEntries)
     }
@@ -2717,6 +2895,9 @@ class InMemoryVaultRepository internal constructor(
         const val ATTACHMENT_CHUNK_BYTES = 4L * 1024 * 1024
         const val MAX_ACTIVITY_ENTRIES_PER_OWNER = 500
         const val MAX_ACTIVITY_BODY_LENGTH = 500
+        const val MAX_SAVED_VIEWS = 20
+        const val MAX_SAVED_VIEW_NAME_LENGTH = 64
+        const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
     }
 }

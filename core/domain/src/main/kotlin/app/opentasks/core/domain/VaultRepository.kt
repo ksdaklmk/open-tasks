@@ -15,6 +15,8 @@ import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
+import app.opentasks.core.model.SavedView
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.TagId
@@ -341,6 +343,27 @@ sealed interface DomainCommand {
         val blobSetId: BlobSetId,
         val collectedAt: Instant = Instant.now(),
     ) : DomainCommand
+
+    data class CreateSavedView(
+        val savedViewId: SavedViewId,
+        val name: String,
+        val query: SearchQuery,
+    ) : DomainCommand
+
+    data class RenameSavedView(
+        val savedViewId: SavedViewId,
+        val name: String,
+    ) : DomainCommand
+
+    data class UpdateSavedViewQuery(
+        val savedViewId: SavedViewId,
+        val query: SearchQuery,
+    ) : DomainCommand
+
+    data class DeleteSavedView(val savedViewId: SavedViewId) : DomainCommand
+
+    /** Undo of [DeleteSavedView] only; never constructed by UI code. */
+    data class RestoreSavedView(val savedView: SavedView) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
@@ -405,6 +428,10 @@ enum class RejectionReason {
     ATTACHMENT_NAME_TOO_LONG,
     ATTACHMENT_LIMIT_REACHED,
     INVALID_ATTACHMENT_METADATA,
+    SAVED_VIEW_LIMIT_REACHED,
+    SAVED_VIEW_NAME_INVALID,
+    SAVED_VIEW_QUERY_TOO_LONG,
+    SAVED_VIEW_PAYLOAD_TOO_LARGE,
 }
 
 interface VaultRepository {

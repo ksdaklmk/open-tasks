@@ -412,6 +412,21 @@ interface WorkspaceDao {
 
     @Query("DELETE FROM notes WHERE projectId = :projectId")
     suspend fun deleteNotesForProject(projectId: String)
+
+    @Query("SELECT * FROM saved_views ORDER BY name, id")
+    fun observeSavedViews(): Flow<List<SavedViewEntity>>
+
+    @Query("SELECT * FROM saved_views WHERE id = :id LIMIT 1")
+    suspend fun getSavedView(id: String): SavedViewEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSavedView(value: SavedViewEntity)
+
+    @Query("DELETE FROM saved_views WHERE id = :id")
+    suspend fun deleteSavedView(id: String): Int
+
+    @Query("SELECT COUNT(*) FROM saved_views")
+    suspend fun savedViewCount(): Int
 }
 
 @Dao

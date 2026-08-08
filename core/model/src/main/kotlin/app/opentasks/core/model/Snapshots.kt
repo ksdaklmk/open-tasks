@@ -37,6 +37,7 @@ data class WorkspaceSnapshot(
     val attachments: List<Attachment> = emptyList(),
     val activityEntries: List<ActivityEntry> = emptyList(),
     val retiredBlobSets: List<RetiredBlobSet> = emptyList(),
+    val savedViews: List<SavedView> = emptyList(),
 )
 
 data class TimeEntryConflict(

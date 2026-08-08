@@ -398,8 +398,8 @@ internal interface BackupMutationDao {
     )
     suspend fun templateRevisions(): List<RevisionedIdRow>
 
-    @Query("SELECT id FROM saved_views ORDER BY id")
-    suspend fun savedViewIds(): List<String>
+    @Query("SELECT * FROM saved_views ORDER BY id")
+    suspend fun savedViews(): List<SavedViewEntity>
 
     @Query(
         """
@@ -536,7 +536,9 @@ internal suspend fun BackupMutationDao.snapshots(): List<BackupRecordSnapshot> =
     }
     timeEntries().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
     templateRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TEMPLATE) }
-    savedViewIds().mapTo(this) { identitySnapshot(BackupRecordFamily.SAVED_VIEW, it) }
+    // Content-based like the other unrevisioned families: identity-only
+    // would never journal a saved-view rename or query update.
+    savedViews().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
     noteRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.NOTE) }
     retiredBlobSetRevisions().mapTo(this) {
         it.snapshot(BackupRecordFamily.RETIRED_BLOB_SET)

@@ -96,7 +96,11 @@ value class TemplateId(val value: String) {
 }
 
 @JvmInline
-value class SavedViewId(val value: String)
+value class SavedViewId(val value: String) {
+    companion object {
+        fun new(): SavedViewId = SavedViewId(UUID.randomUUID().toString())
+    }
+}
 
 @JvmInline
 value class DeviceId(val value: String)

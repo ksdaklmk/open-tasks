@@ -1,8 +1,10 @@
 package app.opentasks.core.data.backup
 
+import app.opentasks.core.data.SavedViewPayloadCodec
 import app.opentasks.core.data.TemplatePayloadCodec
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.RetiredBlobSetEntity
+import app.opentasks.core.data.db.SavedViewEntity
 import app.opentasks.core.data.db.TaskDependencyEntity
 import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TemplateEntity
@@ -156,6 +158,14 @@ internal fun WorkspaceSnapshot.toBackupRecords(
                 revisionWallMillis = template.revision.wallTimeMillis,
                 revisionLogical = template.revision.logicalCounter,
                 revisionDeviceId = template.revision.deviceId.value,
+            ).toBackupRecordV1()
+        }
+        savedViews.mapTo(this) { view ->
+            SavedViewEntity(
+                id = view.id.value,
+                workspaceId = view.workspaceId.value,
+                name = view.name,
+                encryptedQuery = SavedViewPayloadCodec.encode(view.query),
             ).toBackupRecordV1()
         }
         notes.mapTo(this) { it.toEntity().toBackupRecordV1() }
