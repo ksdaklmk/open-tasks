@@ -8,21 +8,24 @@
   post-F6 shape — `verify`, compact API 36, and `release` green, only
   expanded API 37.0 red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — planned and PAUSED by user instruction
-     (8 August 2026); do not start without the user's go.** The
-     direction decision is made: Stage 6 "daily-flow features", all
-     four brainstormed directions in one stage. Authority spec:
-     `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`
-     (committed `5cc8671`, amended `4d1dc1a`, with plan-audit
-     clarifications revised locally on 8 August 2026); plan:
-     `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
-     (created in `3ce7252`, statically re-audited and revised locally on
-     8 August 2026), thirteen tasks to be executed inline through
-     `superpowers:executing-plans` directly on `main`, with an independent
-     review per task; implementers must not spawn subagents (standing
-     fork-swarm ruling, restated in the plan's execution notes). No Stage 6
-     implementation has started, and no task before Task 13 runs a device
-     suite.
+  1. **Stage 6 execution — IN PROGRESS and PAUSED after Task 1 by user
+     instruction (8 August 2026); do not start Task 2 without the
+     user's go.** Authority spec:
+     `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
+     plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
+     (audited revisions of both committed in `fc4aad8`, the recorded
+     Stage 6 implementation-base SHA). Execution ledger:
+     `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
+     Task 1 (saved-view commands) is complete and independently
+     reviewed — see the Stage 6 Task 1 checkpoint below. Tasks 2–13
+     remain; no task before Task 13 runs a device suite; implementers
+     must not spawn subagents (standing fork-swarm ruling).
+     **Open user decision:** whether Tasks 2–12 switch from inline
+     `superpowers:executing-plans` to subagent-driven execution (the
+     executor recommended switching, with the no-subagent clause in
+     every implementer brief and Task 13 kept controller-owned); the
+     plan's execution notes must be amended before Task 2 if the user
+     approves the switch.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -218,6 +221,51 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 6 Task 1 checkpoint — 8 August 2026 (PAUSED before Task 2)
+
+Execution began from base `fc4aad8` (audited plan/spec revisions), inline
+via `superpowers:executing-plans` directly on `main`, with the base SHA
+recorded in the ignored execution ledger before any implementation.
+
+- Task 1 (`b3d4a42`, review minors `81c28ba`) lit up the dormant Stage 1
+  `saved_views` table end-to-end with no schema, migration, or fixture
+  change: `CreateSavedView`/`RenameSavedView`/`UpdateSavedViewQuery`/
+  `DeleteSavedView`/`RestoreSavedView` (undo-only) in both engines,
+  bounds 20 views / 64-char name / 500-char query text in both
+  repository companions (the hard limit counts physical DAO rows, so a
+  preserved malformed row consumes a slot), and the internal
+  `SavedViewPayloadCodec` (TemplatePayloadCodec shape, 2 MiB cap,
+  format version 1, sorted filter-id lists for deterministic bytes,
+  strict fail-closed decode). Undo pairs are exact and
+  repository-produced. The `SAVED_VIEW` journal fingerprint moved from
+  identity-only to content-based in `RoomBackupJournalSession`, and
+  `InMemoryBackupJournal.toBackupRecords` gained the savedViews arm, so
+  a rename or query update journals an UPSERT in both engines — the
+  review's mandatory check, verified by execution (in-memory) and by
+  code path plus the compiled pinned instrumented test (Room). A
+  malformed dormant row is omitted from snapshots via `mapNotNull`
+  without delete/rewrite/log, never blocks readiness, and stays
+  invisible to commands (`NOT_FOUND`-style rejections) so both engines
+  expose the same mutable set.
+- Evidence: `:core:data:testDebugUnitTest` 596 tests green (reviewer
+  re-run), including the plan-pinned InMemorySavedViewCommandTest and
+  SavedViewPayloadCodecTest cases; CI gate
+  `testDebugUnitTest lintDebug :app:assembleDebug` green;
+  `scripts/check-schema-drift.sh` clean;
+  `RoomSavedViewCommandInstrumentedTest` compile-verified (executes at
+  Task 13). Independent review verdict: **Approve with minors, 0
+  Critical, 0 Important**; two minors folded in (`81c28ba`), three
+  recorded as deferred in the ledger (binary-vs-UTF-16 name-ordering
+  parity nuance, defaulted `formatVersion` shape-conformance
+  observation, unscoped DAO surface as specified).
+- Resume instructions: on the user's go, execute Task 2 (natural-language
+  dates in Quick Add) from the plan — unless the user approves the
+  recorded open decision to switch Tasks 2–12 to subagent-driven
+  execution, in which case amend the plan's execution notes first
+  (docs-only commit), then dispatch Task 2 with the no-subagent clause.
+  The three protected workspace items (uncommitted Stage 3 plan
+  amendment, `.kotlin/`, `artifacts/`) remain untouched.
 
 ## CI test-fix final checkpoint — 7 August 2026
 
