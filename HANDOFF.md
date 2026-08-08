@@ -1,12 +1,48 @@
 # Open Tasks Handoff
 
-- Last updated: 7 August 2026
-- Branch: `main` (local tracks `origin/main`). The CI test-fix task is
-  CLOSED: the user authorised the Ctrl+K API 36 exception (`39d2dc5`),
-  bench 2 (run `31190499051`) returned API 36 fully green — 293 pass, 0
-  failures, 3 skips (the two standing expected skips plus the new
-  headless-focus assumption) with `verify` and `release` green — and PR
-  #13 was merged to `main` as `1cdab0b` with branch `test-fix` deleted.
+- Last updated: 8 August 2026
+- Branch: `main` at `dc6f0fb` (local tracks `origin/main`; pushed).
+  **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
+  is in flight except two docs-only CI runs (`31232428124`,
+  `31232527780`); the completed run at `c74a435` confirmed the expected
+  post-F6 shape — `verify`, compact API 36, and `release` green, only
+  expanded API 37.0 red. No open PRs or issues.
+- Remaining and planned work, in order (the live backlog):
+  1. **Next product direction** — user decision, needs its own
+     brainstorming session: a Stage 6 feature set, or broader
+     distribution (Play internal testing would reopen Play
+     Console/AAB/data-safety work that is currently out of scope by
+     ruling). Nothing is blocked on code.
+  2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
+     37.0 canary lane stays in the matrix and stays red until a healed
+     canary image appears; the runner fetches the current canary, so
+     it self-restores. Green signal = API 36 + verify + release. No
+     action, just observe on natural runs.
+  3. **Optional release-stage polish** (all triaged stay-deferred by
+     the final release review): RELEASING.md step 6 names the commit
+     action without the explicit git commands; `verify-release-apk.sh`
+     cosmetics (check-1 message conflates a missing apksigner with an
+     unsigned APK; dex capture in a shell variable drops NUL bytes —
+     harmless for the ASCII scope scan); unwrapped
+     `props.getProperty()` in the signing config NPEs obscurely on a
+     malformed `keystore.properties`.
+  4. **Ctrl+K CI blind spot** — parked: CI cannot prove the search
+     query field takes focus on the headless API 36 runner (no Dialog
+     window focus); focus-capable device runs execute the original
+     assertion. Revisit only if the runner or assertion strategy
+     changes.
+  5. **Samsung RTL** — lapsed by ruling (6 August 2026); any future
+     Samsung real-device work needs a fresh decision.
+  6. **Play Console** — externally pending and out of scope by the
+     sideload-only ruling; revisit only with backlog item 1.
+  Future releases follow `RELEASING.md`'s per-release loop (bump
+  `versionCode` by exactly 1, gate, build, verify, smoke on the
+  disposable AVD, record, tag).
+- The CI test-fix task closed on 7 August: the user authorised the
+  Ctrl+K API 36 exception (`39d2dc5`), bench 2 (run `31190499051`)
+  returned API 36 fully green — 293 pass, 0 failures, 3 skips — with
+  `verify` and `release` green, and PR #13 was merged to `main` as
+  `1cdab0b` with branch `test-fix` deleted.
 - Standing residuals: **F6** — the expanded API 37.0 canary image still
   fails before tests run (credential-encrypted storage unavailable); it
   is an image-quality blocker, not a code defect. User ruling, 7 August
@@ -37,8 +73,12 @@
   build's first runtime proof. The keystore is held and backed up by
   the user outside the repo. The qualification record is
   `docs/qualification/release-1.0.0-sideload.md`; the released commit
-  is tagged `v1.0.0`. Play Console, AAB, and CI signing remain out of
-  scope by ruling.
+  is tagged `v1.0.0`. The final whole-branch review returned Ready to
+  tag with zero blocking findings; its six deferred minors were all
+  triaged stay-deferred and survive as backlog item 3 above (the SDD
+  workspace is deleted per process). `RELEASING.md` also carries the
+  device-install instructions (`dc6f0fb`). Play Console, AAB, and CI
+  signing remain out of scope by ruling.
 - Session status: **Stage 5 is complete and qualified: all 13 tasks of
   the plan (Room v9 retired blob-set index; RETIRED_BLOB_SET backup
   family and collection command; retired-set GC closure; silent

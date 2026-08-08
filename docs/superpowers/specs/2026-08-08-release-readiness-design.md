@@ -1,7 +1,9 @@
 # Release readiness (sideload) — design
 
 - Date: 8 August 2026
-- Status: approved for planning
+- Status: executed and closed — released as `v1.0.0` (tag on
+  `57703d2`); qualification record
+  `docs/qualification/release-1.0.0-sideload.md`
 - Predecessor: Stage 5 closure (see `HANDOFF.md`)
 
 ## Goal
