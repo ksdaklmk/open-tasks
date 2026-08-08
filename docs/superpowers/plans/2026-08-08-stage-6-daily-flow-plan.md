@@ -1,0 +1,1806 @@
+# Stage 6 Daily-Flow Features Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Cut daily-use friction: share-sheet/selection/tile capture with
+natural-language dates, an interactive Today widget, preset focus cycles,
+saved searches, bulk multi-select, a guided weekly review, Markdown project
+export, own-schema CSV import, and a Kanban board over existing workflows.
+
+**Architecture:** Room stays the sole live structured-data authority at
+version 9 — no schema change: saved searches light up the dormant Stage 1
+`saved_views` table and its existing `SAVED_VIEW` backup family, so they
+survive recovery and ride `.otvault` with no format or fixture change.
+Every new write path —
+widget completes, bulk composites, saved-search CRUD, CSV import, review
+actions — is a `DomainCommand` through `VaultRepository.execute` with
+repository-produced Undo. All other features are additive product surfaces
+over existing data and commands: no new transport, no provider changes, no
+merge path, no new runtime permissions.
+
+**Tech Stack:** Kotlin 2.3.21, AGP 9 built-in Kotlin, Java 17 on JDK 21,
+Room 2.8.4, SQLCipher 4.15.0, `androidx.glance:glance-appwidget`, Storage
+Access Framework (`CreateDocument`/`OpenDocument`), platform
+`TileService`, Navigation 3, JUnit 4, Compose UI test v2. No new
+catalogue entries.
+
+## Global Constraints
+
+- Authority spec:
+  `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`.
+- Work directly on `main`; no branch, worktree, or pull request.
+- The user-owned untracked `artifacts/` and `.kotlin/` stay untouched, as
+  does the uncommitted historical Stage 3 plan amendment.
+- Never start, install to, instrument, or mutate the protected
+  `Pixel_10_Pro_Fold` AVD. Connected suites run only on a sole disposable
+  ADB target started with `-read-only -no-snapshot-load -no-snapshot-save`.
+- Bounds verbatim from the spec: 20 saved searches per workspace,
+  500-character saved-search payload; bulk batches bounded at 200 ids;
+  staleness is exactly 14 days without activity; focus presets are 25/5
+  and 50/10 only; Stage 4/5 bounds unchanged.
+- Frozen things that must not change: `.otvault` v1 format version, Stage
+  3 ownership/publication codecs and roles, the Stage 4 attachment
+  manifest codec, `drive.appdata`-only scope, create-only immutable
+  objects. Unknown or ambiguous inputs fail closed.
+- Every write is a `DomainCommand` through `VaultRepository.execute`;
+  records and ordered backup-journal entries commit in one transaction;
+  Undo is repository-produced; `InMemoryVaultRepository` stays
+  behaviourally in sync with `RoomVaultRepository`.
+- Room stays at v9. `saved_views` already exists in the exported schema;
+  Task 1 adds no entity, no migration, and no schema export. Any change
+  that would require a version bump is out of scope for this stage.
+- Logs and telemetry never contain task text, saved-search text, shared
+  intent text, account details, Drive IDs, attachment names, or
+  encryption metadata.
+- Feature composables stay stateless, no Hilt in feature/core modules,
+  new UI copy in `res/values/strings.xml` in UK English, OKLCH-only
+  colours, 4 dp spacing scale, Material typography roles.
+- Tests: JUnit 4 `org.junit.Assert.*`, no mocking library, `runBlocking`
+  + `withTimeout(5_000)`, camelCase behaviour names,
+  `androidx.compose.ui.test.junit4.v2.createComposeRule`.
+- The CI gate before any completion claim:
+  `./gradlew testDebugUnitTest lintDebug :app:assembleDebug`. Release
+  assembly runs separately, never combined with `lintDebug`.
+- Commit after every task with a conventional-prefix message ending in
+  `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+
+## Execution notes
+
+- Each task is an independent review boundary: dispatch an independent
+  review after the task commit and fix findings before the next task.
+- Implementer dispatches must not spawn subagents or forks of their own
+  (standing ruling; see the fork-swarm hazard note in the SDD ledger).
+- No task before Task 13 runs a device suite. Instrumented tests are
+  compile-verified with `:<module>:compileDebugAndroidTestKotlin` and
+  execute at the Task 13 connected gate.
+- No `BackupRecordFamily` change: `SAVED_VIEW` already exists with codec
+  validation, capture attribution, and recovery import. Task 1 must move
+  its journal fingerprint from identity-only to the content-fingerprint
+  style (`toBackupRecordV1().contentSnapshot()`, the unrevisioned-family
+  style used by CHECKLIST_ITEM/TAG/REMINDER/TIME_ENTRY) — identity-only
+  would never journal a rename or query update. The reviewer must verify
+  a rename journals an UPSERT in both engines.
+- The Kanban fallback ordering inside Task 12 is mandatory: tap-to-move
+  ships complete before any drag code lands; drag polish beyond
+  drop-target highlight and edge auto-scroll is out of scope.
+- CSV import is deliberately lossy and create-only; `.otvault` remains
+  the transfer format. Import UI copy must say so.
+
+---
+
+### Task 1: Saved-view commands over the dormant `saved_views` table
+
+**Files:**
+
+- Modify: `core/model/src/main/kotlin/app/opentasks/core/model/Snapshots.kt`
+  (add `savedViews` to `WorkspaceSnapshot` after `retiredBlobSets`,
+  line 39)
+- Modify:
+  `core/model/src/main/kotlin/app/opentasks/core/model/Identifiers.kt:98-99`
+  (give `SavedViewId` a `companion object { fun new() }` like `NoteId`)
+- Modify:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt`
+  (new commands + `RejectionReason` constants)
+- Create:
+  `core/data/src/main/kotlin/app/opentasks/core/data/SavedViewPayloadCodec.kt`
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/db/VaultDatabase.kt`
+  (WorkspaceDao members beside the note helpers, `:393-414`)
+- Modify:
+  `core/data/src/main/kotlin/app/opentasks/core/data/db/EntityMappers.kt`
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt`
+- Modify:
+  `core/data/src/main/kotlin/app/opentasks/core/data/InMemoryVaultRepository.kt`
+- Modify:
+  `core/data/src/main/kotlin/app/opentasks/core/data/backup/RoomBackupJournalSession.kt`
+  (SAVED_VIEW fingerprint: identity → content)
+- Modify:
+  `core/data/src/main/kotlin/app/opentasks/core/data/backup/InMemoryBackupJournal.kt`
+  (`toBackupRecords` gains the savedViews arm)
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/SavedViewPayloadCodecTest.kt`
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/InMemorySavedViewCommandTest.kt`
+- Test (instrumented, compile-verified):
+  `core/data/src/androidTest/kotlin/app/opentasks/core/data/RoomSavedViewCommandInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: `SavedView(id, workspaceId, name, query: SearchQuery)`
+  (`Records.kt:315-320`), `SavedViewEntity(id, workspaceId, name,
+  encryptedQuery: ByteArray)` (`Entities.kt:256-263`), `SearchQuery`
+  (`Snapshots.kt:48-54`), `TemplatePayloadCodec` shape
+  (`TemplatePayloadCodec.kt:25-60`), the existing `SAVED_VIEW` arms in
+  `BackupMutationCodec` (`:384-387`), `BackupRecordImporter`,
+  `RecoveryImportDao`, and `BackupCaptureDao`.
+- Produces:
+
+```kotlin
+// VaultRepository.kt — inside sealed interface DomainCommand
+data class CreateSavedView(
+    val savedViewId: SavedViewId,
+    val name: String,
+    val query: SearchQuery,
+) : DomainCommand
+
+data class RenameSavedView(val savedViewId: SavedViewId, val name: String) : DomainCommand
+
+data class UpdateSavedViewQuery(
+    val savedViewId: SavedViewId,
+    val query: SearchQuery,
+) : DomainCommand
+
+data class DeleteSavedView(val savedViewId: SavedViewId) : DomainCommand
+
+data class RestoreSavedView(val savedView: SavedView) : DomainCommand // undo-only
+
+// RejectionReason gains: SAVED_VIEW_LIMIT_REACHED, SAVED_VIEW_NAME_INVALID,
+// SAVED_VIEW_QUERY_TOO_LONG
+
+// WorkspaceSnapshot gains (after retiredBlobSets):
+val savedViews: List<SavedView> = emptyList(),
+
+// SavedViewPayloadCodec (internal object, TemplatePayloadCodec shape):
+fun encode(view: SavedView): ByteArray      // bounded JSON, FORMAT_VERSION = 1
+fun decode(entity: SavedViewEntity): SavedView
+```
+
+Bounds (both repository companions): `MAX_SAVED_VIEWS = 20`,
+`MAX_SAVED_VIEW_NAME_LENGTH = 64`, `MAX_SAVED_VIEW_QUERY_LENGTH = 500`
+(the query `text` length; name/query trimmed, blank rejected).
+Undo pairs: `CreateSavedView` → `DeleteSavedView`; `RenameSavedView` →
+`RenameSavedView` (prior name); `UpdateSavedViewQuery` →
+`UpdateSavedViewQuery` (prior query); `DeleteSavedView` →
+`RestoreSavedView(savedView)`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`InMemorySavedViewCommandTest.kt` (fixture wiring copied from
+`RetiredBlobSetFamilyTest.kt:19-20`):
+
+```kotlin
+class InMemorySavedViewCommandTest {
+
+    private val journal = InMemoryBackupJournal()
+    private val repository = InMemoryVaultRepository(backupJournal = journal)
+
+    @Test
+    fun createRenameAndDeleteRoundTripWithExactUndo() = runBlocking {
+        withTimeout(5_000) {
+            val id = SavedViewId.new()
+            val query = SearchQuery(text = "deep work")
+            val created = repository.execute(
+                DomainCommand.CreateSavedView(id, "Focus", query),
+            ) as CommandResult.Success
+            assertEquals(
+                "Focus",
+                repository.currentWorkspace().savedViews.single().name,
+            )
+
+            val renamed = repository.execute(
+                DomainCommand.RenameSavedView(id, "Deep focus"),
+            ) as CommandResult.Success
+            repository.execute(renamed.undo!!)
+            assertEquals(
+                "Focus",
+                repository.currentWorkspace().savedViews.single().name,
+            )
+
+            repository.execute(created.undo!!)
+            assertTrue(repository.currentWorkspace().savedViews.isEmpty())
+        }
+    }
+
+    @Test
+    fun renameJournalsAnUpsertForTheSavedViewFamily() = runBlocking {
+        withTimeout(5_000) {
+            val id = SavedViewId.new()
+            repository.execute(
+                DomainCommand.CreateSavedView(id, "Focus", SearchQuery("q")),
+            )
+            val before = journal.entries.size
+            repository.execute(DomainCommand.RenameSavedView(id, "Later"))
+            val appended = journal.entries.drop(before)
+            assertTrue(
+                appended.any {
+                    it.objectType == BackupRecordFamily.SAVED_VIEW.name
+                },
+            )
+        }
+    }
+
+    @Test
+    fun twentyFirstSavedViewIsRejectedFailClosed() = runBlocking {
+        withTimeout(5_000) {
+            repeat(20) {
+                repository.execute(
+                    DomainCommand.CreateSavedView(
+                        SavedViewId.new(), "View $it", SearchQuery("q$it"),
+                    ),
+                )
+            }
+            val result = repository.execute(
+                DomainCommand.CreateSavedView(
+                    SavedViewId.new(), "One too many", SearchQuery("q"),
+                ),
+            )
+            assertTrue(result is CommandResult.Rejected)
+            assertEquals(20, repository.currentWorkspace().savedViews.size)
+        }
+    }
+}
+```
+
+Match the real `BackupJournalEntry` field name for the family before
+compiling (see `InMemoryBackupJournal.kt:26-84`); if entries expose the
+family differently, assert through that accessor.
+`SavedViewPayloadCodecTest.kt`: encode→decode round trip preserving all
+`SearchQuery` fields; oversized `text` (501 chars) throws; foreign JSON
+(`ignoreUnknownKeys = false`) throws.
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :core:data:testDebugUnitTest --tests "*SavedView*"`
+Expected: FAIL — `savedViews`/commands unresolved.
+
+- [ ] **Step 3: Implement**
+
+Snapshot field, `SavedViewId.new()`, commands, rejection reasons. Codec
+per `TemplatePayloadCodec` (bounded JSON, `encodeDefaults = true`,
+`explicitNulls = true`, `ignoreUnknownKeys = false`). WorkspaceDao gains
+the four-member pattern (`Entities` order:
+`observeSavedViews(): Flow<List<SavedViewEntity>>` ordered by `name, id`,
+`getSavedView(id)`, `upsertSavedView(value)`,
+`deleteSavedView(id): Int`, plus `savedViewCount(): Int`).
+`EntityMappers` gains `SavedViewEntity.toModel()` via the codec. Room:
+dispatch arms + handlers (validation → upsert → `CommandResult.Success`
+with undo; delete reads the row first for `RestoreSavedView`);
+`observeDatabase()` gains the collection as a new outermost
+`combine` wrapper exactly as retired sets did
+(`RoomVaultRepository.kt:2989-2993`), `RelationRows` gains a defaulted
+field, `buildSnapshot` maps it. In-memory: arms + handlers + a defaulted
+`publish` parameter + `copy` line, sorted by `name` then id to match the
+DAO. Journal: in `RoomBackupJournalSession.snapshots()` replace the
+SAVED_VIEW `identitySnapshot` line with the content-fingerprint style
+(`it.toBackupRecordV1().contentSnapshot()`, as CHECKLIST_ITEM/TAG do),
+adding a full-row `BackupMutationDao` query if only an id query exists;
+`InMemoryBackupJournal.toBackupRecords` gains the savedViews arm
+building `SavedViewEntity` via the codec.
+
+- [ ] **Step 4: Run to verify pass**
+
+Run: `./gradlew :core:data:testDebugUnitTest` — all green (existing
+suites prove no journal/fixture regression; no fixture regenerates
+because no format changed).
+Run: `./gradlew :core:data:compileDebugAndroidTestKotlin` after writing
+`RoomSavedViewCommandInstrumentedTest` (mirror of the in-memory test
+against a Room repository, `InMemoryNoteCommandTest` ↔
+`RoomNoteCommandInstrumentedTest` precedent; executes at Task 13).
+Run: `scripts/check-schema-drift.sh` — clean (no schema change).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/model core/domain core/data
+git commit -m "feat: add saved view commands over the dormant table"
+```
+
+---
+
+### Task 2: Natural-language dates in Quick Add
+
+**Files:**
+
+- Create:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/NaturalDateParser.kt`
+- Modify:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt:146-150`
+  (`CreateTask` gains `val due: ZonedMoment? = null`)
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt:1040`
+  and `core/data/src/main/kotlin/app/opentasks/core/data/InMemoryVaultRepository.kt:963`
+  (`createTask` handlers seed `due`)
+- Modify: `app/src/main/kotlin/app/opentasks/QuickAddSheet.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt:176-178`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt:1247-1255`
+- Modify: `app/src/main/res/values/strings.xml`
+- Test: `core/domain/src/test/kotlin/app/opentasks/core/domain/NaturalDateParserTest.kt`
+
+**Interfaces:**
+
+- Consumes: `ZonedMoment(instant, zoneId)` (`Records.kt:31-36`),
+  `MAX_QUICK_ADD_TITLE_LENGTH = 240` (`QuickAddSheet.kt:117`).
+- Produces:
+
+```kotlin
+// NaturalDateParser.kt
+data class NaturalDateMatch(
+    val startIndex: Int,
+    val endIndex: Int,      // exclusive
+    val due: ZonedMoment,
+)
+
+fun parseNaturalDate(text: String, now: Instant, zone: ZoneId): NaturalDateMatch?
+
+// QuickAddSheet signature becomes:
+fun QuickAddSheet(
+    onDismiss: () -> Unit,
+    onAdd: (String, ZonedMoment?) -> Unit,
+    initialTitle: String = "",
+)
+
+// WorkspaceViewModel
+fun addTask(title: String, due: ZonedMoment? = null) {
+    execute(DomainCommand.CreateTask(title, due = due))
+}
+```
+
+Pinned grammar (case-insensitive, matched at word boundaries, last
+match in the text wins): `today`, `tomorrow`, full and three-letter
+weekday names, `next <weekday>`, `in N days`/`in N weeks`, times as
+`HH:mm`, `H[am|pm]`, `at <time>`; a date token may be followed by a
+time token. Resolution rules, pinned by tests: date-only → 17:00 in
+`zone`; time-only → today at that time if still future, else tomorrow;
+bare weekday → soonest strictly-future occurrence (1..7 days); `next
+<weekday>` → that occurrence plus 7 days; `today` keeps 17:00 even if
+past (the chip is a suggestion, not a validator). Returns null on no
+match. Pure `java.time` arithmetic, no library.
+
+- [ ] **Step 1: Write the failing parser test**
+
+`NaturalDateParserTest.kt` — fixed `now` (a Wednesday):
+
+```kotlin
+class NaturalDateParserTest {
+
+    private val zone = ZoneId.of("Asia/Bangkok")
+    // Wednesday 5 August 2026, 10:00 in Asia/Bangkok
+    private val now = ZonedDateTime.of(2026, 8, 5, 10, 0, 0, 0, zone).toInstant()
+
+    private fun dueOf(match: NaturalDateMatch?): ZonedDateTime =
+        ZonedDateTime.ofInstant(match!!.due.instant, zone)
+
+    @Test
+    fun tomorrowWithTimeResolvesAndReportsTheMatchedSpan() {
+        val match = parseNaturalDate("Pay invoices tomorrow 4pm", now, zone)
+        assertEquals(ZonedDateTime.of(2026, 8, 6, 16, 0, 0, 0, zone), dueOf(match))
+        assertEquals("tomorrow 4pm", "Pay invoices tomorrow 4pm"
+            .substring(match!!.startIndex, match.endIndex))
+    }
+
+    @Test
+    fun dateOnlyDefaultsToFivePm() {
+        val match = parseNaturalDate("call plumber fri", now, zone)
+        assertEquals(ZonedDateTime.of(2026, 8, 7, 17, 0, 0, 0, zone), dueOf(match))
+    }
+
+    @Test
+    fun nextWeekdayAddsSevenDaysToTheSoonestOccurrence() {
+        val match = parseNaturalDate("review next fri", now, zone)
+        assertEquals(ZonedDateTime.of(2026, 8, 14, 17, 0, 0, 0, zone), dueOf(match))
+    }
+
+    @Test
+    fun timeOnlyPastRollsToTomorrow() {
+        val match = parseNaturalDate("standup 9am", now, zone)
+        assertEquals(ZonedDateTime.of(2026, 8, 6, 9, 0, 0, 0, zone), dueOf(match))
+    }
+
+    @Test
+    fun inThreeDaysAndPlainTextWithoutDatesReturnNullWhereExpected {
+        // split into two asserts in the real file: "in 3 days" resolves to
+        // 8 Aug 17:00; "buy milk friday-market" (hyphenated, no boundary)
+        // and "no dates here" return null.
+    }
+}
+```
+
+Write the fifth case as two real `@Test` methods; the comment above is
+plan shorthand, not code to paste.
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :core:domain:testDebugUnitTest --tests "*NaturalDateParser*"`
+Expected: FAIL — unresolved references.
+
+- [ ] **Step 3: Implement parser and wire Quick Add**
+
+Parser: tokenize with regexes over the pinned grammar; resolve with
+`ZonedDateTime` arithmetic; return the last (rightmost) match.
+`CreateTask` gains `due` (additive, default null); both `createTask`
+handlers copy it onto the new task exactly as `UpdateTask` writes due —
+no reminder is created. `QuickAddSheet`: seed
+`rememberSaveable { mutableStateOf(initialTitle) }`; run
+`parseNaturalDate(title, now, zone)` on each change (system clock/zone
+here is fine — this is UI suggestion, not domain logic); when non-null
+show an `AssistChip` under the field (test tag `"quick-add-date-chip"`,
+label via new `quick_add_date_suggestion` string using the UK format
+`d MMM HH:mm`); tapping the chip sets an `appliedDue` state and strips
+the matched span from `title`; a second tap-target (`"quick-add-date-clear"`)
+clears it. Submit passes `(title, appliedDue)`. `OpenTasksApp:1247-1255`
+and the FAB/shortcut call sites pass `initialTitle = ""` and the
+two-argument `onAdd`.
+
+- [ ] **Step 4: Run to verify pass + CI gate**
+
+Run: `./gradlew :core:domain:testDebugUnitTest` then the full gate
+`./gradlew testDebugUnitTest lintDebug :app:assembleDebug`.
+Expected: PASS; `QuickAddSheetInstrumentedTest` still compiles
+(`./gradlew :app:compileDebugAndroidTestKotlin`) — update its call site
+for the new signature.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/domain core/data app
+git commit -m "feat: parse natural-language dates in quick add"
+```
+
+---
+
+### Task 3: Share-sheet and text-selection intake
+
+**Files:**
+
+- Modify: `app/src/main/AndroidManifest.xml:23-37` (two intent filters
+  on `.MainActivity`)
+- Modify: `app/src/main/kotlin/app/opentasks/MainActivity.kt`
+- Create: `app/src/main/kotlin/app/opentasks/QuickAddPrefill.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+- Test: `app/src/test/kotlin/app/opentasks/QuickAddPrefillTest.kt`
+
+**Interfaces:**
+
+- Consumes: `handleIntent` (`MainActivity.kt:289-301`),
+  `quickAddSignal` chain (`MainActivity.kt:58`, `OpenTasksApp.kt:548-550`),
+  `QuickAddSheet(onDismiss, onAdd, initialTitle)` from Task 2,
+  `MAX_QUICK_ADD_TITLE_LENGTH = 240`.
+- Produces:
+
+```kotlin
+// QuickAddPrefill.kt — pure, JVM-testable (no android.* imports)
+fun quickAddPrefill(raw: CharSequence?): String? =
+    raw?.toString()
+        ?.lineSequence()
+        ?.firstOrNull { it.isNotBlank() }
+        ?.trim()
+        ?.take(240)
+        ?.takeIf { it.isNotEmpty() }
+
+// MainActivity gains:
+private var quickAddPrefill by mutableStateOf<String?>(null)
+// OpenTasksApp gains parameter:
+quickAddPrefill: String? = null,
+```
+
+- [ ] **Step 1: Write the failing prefill test**
+
+```kotlin
+class QuickAddPrefillTest {
+
+    @Test
+    fun firstNonBlankLineTrimmedAndBounded() {
+        assertEquals("Buy milk", quickAddPrefill("\n  Buy milk  \nsecond line"))
+        assertEquals(240, quickAddPrefill("x".repeat(500))!!.length)
+        assertNull(quickAddPrefill("   \n \n"))
+        assertNull(quickAddPrefill(null))
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :app:testDebugUnitTest --tests "*QuickAddPrefill*"`
+Expected: FAIL — `quickAddPrefill` not defined.
+
+- [ ] **Step 3: Implement**
+
+Manifest — inside the existing `.MainActivity` element:
+
+```xml
+<intent-filter>
+    <action android:name="android.intent.action.SEND" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <data android:mimeType="text/plain" />
+</intent-filter>
+<intent-filter>
+    <action android:name="android.intent.action.PROCESS_TEXT" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <data android:mimeType="text/plain" />
+</intent-filter>
+```
+
+`handleIntent` gains two arms before the existing `when` falls through:
+`Intent.ACTION_SEND` → `quickAddPrefill(intent.getStringExtra(Intent.EXTRA_TEXT))`,
+`Intent.ACTION_PROCESS_TEXT` →
+`quickAddPrefill(intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT))`;
+a non-null prefill sets `quickAddPrefill` state and increments
+`quickAddSignal` (reuse the existing signal so the lock gate and
+`LaunchedEffect` chain stay untouched; a null prefill does nothing).
+`OpenTasksApp` forwards `quickAddPrefill` into
+`QuickAddSheet(initialTitle = quickAddPrefill ?: "")` and MainActivity
+clears the state when the sheet dismisses (pass a `onQuickAddConsumed`
+lambda alongside the existing signal params, following the
+`openTaskId`/`openTaskSignal` precedent at `MainActivity.kt:106-114`).
+The intent text is never logged; the extras carry only what the user
+explicitly shared.
+
+- [ ] **Step 4: Verify**
+
+Run: `./gradlew :app:testDebugUnitTest --tests "*QuickAddPrefill*"` — PASS.
+Run: `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` — green;
+manifest merges (lint would flag a malformed filter).
+Device proof lands in the Task 13 checklist (share from a real app,
+select-text → "Open Tasks").
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app
+git commit -m "feat: accept shared and selected text into quick add"
+```
+
+---
+
+### Task 4: Quick Settings tile
+
+**Files:**
+
+- Create: `app/src/main/kotlin/app/opentasks/tile/QuickAddTileService.kt`
+- Modify: `app/src/main/AndroidManifest.xml`
+- Modify: `app/src/main/res/values/strings.xml`
+
+**Interfaces:**
+
+- Consumes: `QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"`
+  (`MainActivity.kt:303-308` — make the constant `internal` on the
+  companion so the tile reuses it instead of duplicating the literal),
+  the existing `@drawable/ic_quick_add` and `@string/quick_add`.
+- Produces: nothing later tasks consume.
+
+- [ ] **Step 1: Implement (no JVM-testable logic — the service is
+  declarative glue; device proof is Task 13's checklist)**
+
+```kotlin
+class QuickAddTileService : TileService() {
+
+    override fun onClick() {
+        val intent = Intent(this, MainActivity::class.java)
+            .setAction(MainActivity.QUICK_ADD_ACTION)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivityAndCollapse(
+            PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        )
+    }
+}
+```
+
+(minSdk 36 — only the `PendingIntent` overload of
+`startActivityAndCollapse` exists; the deprecated Intent overload throws
+on UpsideDownCake+.)
+
+Manifest, inside `<application>`:
+
+```xml
+<service
+    android:name=".tile.QuickAddTileService"
+    android:exported="true"
+    android:icon="@drawable/ic_quick_add"
+    android:label="@string/quick_add"
+    android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+    <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+    </intent-filter>
+</service>
+```
+
+The bind permission means only SystemUI can bind — this is the one new
+exported component of the stage besides the Task 3 intent filters, and
+Task 13's release-scope check names it.
+
+- [ ] **Step 2: Verify**
+
+Run: `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` — green
+(lint validates the service declaration and tile metadata).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app
+git commit -m "feat: add quick settings quick add tile"
+```
+
+---
+
+### Task 5: Interactive Today widget
+
+**Files:**
+
+- Modify: `app/src/main/kotlin/app/opentasks/widget/TodayWidgetProjection.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/widget/TodayWidget.kt`
+- Test: `app/src/test/kotlin/app/opentasks/widget/TodayWidgetProjectionTest.kt`
+  (extend)
+
+**Interfaces:**
+
+- Consumes: `computeTodayProjection(snapshot, today, zone, now,
+  titlesPermitted)` (`TodayWidgetProjection.kt:42-48`),
+  `TodayWidgetPublisher` and its `companion object { active }`
+  (`TodayWidget.kt:245-366`), `StopGatedWriter` (`:209-228`),
+  `DomainCommand.CompleteTask(taskId)` (`VaultRepository.kt:234-238`),
+  `Task.isBlocked` (`Records.kt:158-161`), Glance
+  `actionRunCallback`/`ActionCallback`.
+- Produces:
+
+```kotlin
+// TodayWidgetProjection.kt
+data class FocusEntry(
+    val taskId: String,
+    val title: String,
+    val completable: Boolean,   // false when the task is blocked
+)
+
+data class TodayWidgetProjection(
+    val openTodayCount: Int,
+    val overdueCount: Int,
+    val focusEntries: List<FocusEntry>,   // replaces focusTitles
+)
+
+// TodayWidget.kt
+class CompleteFocusTaskAction : ActionCallback   // reads TaskIdKey parameter
+
+// TodayWidgetPublisher companion gains:
+fun completeActiveTask(taskId: String)   // no-op when no active publisher
+```
+
+- [ ] **Step 1: Extend the projection test (failing)**
+
+Add to `TodayWidgetProjectionTest.kt`:
+
+```kotlin
+@Test
+fun focusEntriesCarryIdsAndBlockedTasksAreNotCompletable() {
+    val snapshot = OpenTasksFixtures.snapshot
+    val projection = computeTodayProjection(
+        snapshot = snapshot,
+        today = LocalDate.of(2026, 7, 26),
+        zone = ZoneId.of("Asia/Bangkok"),
+        now = Instant.parse("2026-07-26T03:00:00Z"),
+        titlesPermitted = true,
+    )
+    val blocked = snapshot.tasks.first { it.isBlocked }
+    val blockedEntry = projection.focusEntries.firstOrNull { it.taskId == blocked.id.value }
+    if (blockedEntry != null) assertFalse(blockedEntry.completable)
+    projection.focusEntries.forEach { entry ->
+        assertTrue(snapshot.tasks.any { it.id.value == entry.taskId })
+    }
+}
+```
+
+Adapt the existing tests from `focusTitles` to `focusEntries.map { it.title }`.
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :app:testDebugUnitTest --tests "*TodayWidgetProjection*"`
+Expected: FAIL — `focusEntries` unresolved.
+
+- [ ] **Step 3: Implement**
+
+Projection: same task selection as today, now emitting id + title +
+`completable = !task.isBlocked`. Widget state: keep the three
+`FocusTitleKeys` and add `FocusIdKeys` and `FocusCompletableKeys`
+(same three-slot pattern, `TodayWidget.kt:56-60`); the publisher's
+`writeProjection`/`writeFocusTitles` write them and `clearTitles` clears
+them (ids are workspace identifiers, not text — but clear them anyway:
+concealment stays total). Content: each focus row becomes a `Row` with
+the title (tap-through: `actionStartActivity<MainActivity>` with the
+existing `ReminderIntents.ACTION_OPEN_TASK`-style open — reuse the
+`QuickAddKey` parameter precedent with a new
+`ActionParameters.Key<String>("open_task_id")` read by
+`MainActivity.handleIntent` alongside the existing
+`ReminderIntents.EXTRA_TASK_ID` arm) and, only when
+`titlesPermitted && completable`, a trailing complete glyph wrapped in
+`.clickable(actionRunCallback<CompleteFocusTaskAction>(actionParametersOf(TaskIdKey to entry.id)))`.
+`CompleteFocusTaskAction.onAction` calls
+`TodayWidgetPublisher.completeActiveTask(taskId)`, which executes
+`DomainCommand.CompleteTask(TaskId(taskId))` on the active publisher's
+repository inside its own scope and then republishes — a rejection
+(blocked, missing) just republishes truth. When `titlesPermitted` is
+false nothing action-bearing renders (counts only, whole-widget tap
+opens the app, existing behaviour). Single tap completes; no confirm —
+deliberate glance-surface trade-off, recorded in the spec.
+
+- [ ] **Step 4: Verify**
+
+Run: `./gradlew :app:testDebugUnitTest` then the CI gate. Expected:
+PASS; `StopGatedWriterTest` untouched and green. Device tap +
+locked-state concealment land in Task 13's checklist.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app
+git commit -m "feat: make today widget rows complete and open tasks"
+```
+
+---
+
+### Task 6: Focus cycles
+
+**Files:**
+
+- Create: `app/src/main/kotlin/app/opentasks/focus/FocusSession.kt`
+  (pure model + phase math)
+- Create: `app/src/main/kotlin/app/opentasks/focus/FocusSessionStore.kt`
+- Create: `app/src/main/kotlin/app/opentasks/focus/FocusAlarms.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/reminders/ReminderSystem.kt`
+  (system-event receiver re-arms focus alarms)
+- Modify: `app/src/main/AndroidManifest.xml` (non-exported
+  `FocusAlarmReceiver`)
+- Modify: `app/src/main/kotlin/app/opentasks/di/AppModule.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt` (banner +
+  start entry point)
+- Modify: `feature/tasks/src/main/kotlin/app/opentasks/feature/tasks/TasksScreen.kt`
+  (nullable `onStartFocus` lambda + preset option enum)
+- Modify: `app/src/main/res/values/strings.xml`
+- Test: `app/src/test/kotlin/app/opentasks/focus/FocusSessionTest.kt`
+
+**Interfaces:**
+
+- Consumes: `DomainCommand.StartTimer(taskId)` / `StopTimer`
+  (`VaultRepository.kt:258-263`), the `AppLockSettings` SharedPreferences
+  precedent (`AppLockSettings.kt:25`), the `ReminderScheduler` alarm
+  shape (`ReminderSystem.kt:101-128`: `setExactAndAllowWhileIdle` with
+  `SecurityException` → inexact fallback; PendingIntent uniqueness via
+  `Uri` data, request code 0), `ReminderNotifications.createChannel`
+  precedent (`:162-173`).
+- Produces:
+
+```kotlin
+// FocusSession.kt — pure, no android.* imports
+enum class FocusPreset(val focus: Duration, val rest: Duration) {
+    TWENTY_FIVE_FIVE(Duration.ofMinutes(25), Duration.ofMinutes(5)),
+    FIFTY_TEN(Duration.ofMinutes(50), Duration.ofMinutes(10)),
+}
+
+data class FocusSession(
+    val taskId: String,
+    val preset: FocusPreset,
+    val startedAt: Instant,
+)
+
+enum class FocusPhaseKind { FOCUS, REST }
+
+data class FocusPhase(
+    val kind: FocusPhaseKind,
+    val endsAt: Instant,
+    val cycleIndex: Int,
+)
+
+// The whole state machine is this one pure function — phase is always
+// derived from the wall clock, never accumulated:
+fun FocusSession.phaseAt(now: Instant): FocusPhase
+
+// FocusSessionStore: SharedPreferences("focus_session") — keys
+// "task_id", "preset", "started_at"; load(): FocusSession?, save, clear.
+
+// feature/tasks — module-owned twin (LockDelayOption precedent):
+enum class FocusPresetOption { TWENTY_FIVE_FIVE, FIFTY_TEN }
+// TasksScreen gains: onStartFocus: ((FocusPresetOption) -> Unit)? = null
+```
+
+- [ ] **Step 1: Write the failing phase-math test**
+
+```kotlin
+class FocusSessionTest {
+
+    private val start = Instant.parse("2026-08-08T09:00:00Z")
+    private val session = FocusSession("task-1", FocusPreset.TWENTY_FIVE_FIVE, start)
+
+    @Test
+    fun phasesAlternateAndCycleIndexAdvances() {
+        val focus = session.phaseAt(start.plus(Duration.ofMinutes(10)))
+        assertEquals(FocusPhaseKind.FOCUS, focus.kind)
+        assertEquals(start.plus(Duration.ofMinutes(25)), focus.endsAt)
+        assertEquals(0, focus.cycleIndex)
+
+        val rest = session.phaseAt(start.plus(Duration.ofMinutes(26)))
+        assertEquals(FocusPhaseKind.REST, rest.kind)
+        assertEquals(start.plus(Duration.ofMinutes(30)), rest.endsAt)
+
+        val secondFocus = session.phaseAt(start.plus(Duration.ofMinutes(31)))
+        assertEquals(FocusPhaseKind.FOCUS, secondFocus.kind)
+        assertEquals(1, secondFocus.cycleIndex)
+    }
+
+    @Test
+    fun exactBoundaryBelongsToTheNextPhase() {
+        val atBoundary = session.phaseAt(start.plus(Duration.ofMinutes(25)))
+        assertEquals(FocusPhaseKind.REST, atBoundary.kind)
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :app:testDebugUnitTest --tests "*FocusSession*"`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+`phaseAt`: total cycle = focus + rest; elapsed modulo arithmetic on
+`Duration.between(startedAt, now)` (negative elapsed clamps to cycle 0
+focus). Store: exact `AppLockSettings` shape over
+`getSharedPreferences("focus_session", MODE_PRIVATE)` provided in
+`AppModule`. `FocusAlarms`: schedules one exact alarm for the current
+phase's `endsAt` (`setExactAndAllowWhileIdle`, `SecurityException` →
+`setAndAllowWhileIdle`), PendingIntent to a new non-exported
+`FocusAlarmReceiver` with data `opentasks://focus/boundary`;
+`FocusAlarmReceiver.onReceive` reloads the session, posts a generic
+notification (new channel `"focus_sessions"`, strings
+`focus_phase_ended_focus` = "Focus block finished — take a break" /
+`focus_phase_ended_rest` = "Break over — back to it", no task text
+ever), re-arms for the next boundary, and — only if a vault runtime is
+active — dispatches `StartTimer`/`StopTimer` for the new phase through
+the injected `Lazy<VaultRepository>`, swallowing `IllegalStateException`
+exactly as `ReminderActionReceiver.onReceive` does
+(`ReminderSystem.kt:324-339`). Session start (task detail →
+`onStartFocus`): save session, `StartTimer(taskId)`, arm alarm. Stop
+(banner): clear store, cancel alarm, `StopTimer` if running. App
+foreground reconcile (in the banner's `LaunchedEffect`): derive
+`phaseAt(now)`; if REST and the session task's timer is still running,
+dispatch `StopTimer` now — a dead process does not retro-stop timers;
+this ceiling is deliberate and documented in the spec. Banner: a
+compact `Surface` above the bottom bar when a session exists (phase
+label, remaining time via a 1 s ticker, stop + skip-phase buttons, test
+tags `focus-banner`, `focus-stop`, `focus-skip`). `ReminderSystemEventReceiver`
+gains focus re-arm on its existing boot/time-change actions. TasksScreen:
+`onStartFocus` nullable lambda + a small preset menu on the timer row
+(48 dp targets, `stringResource` copy in the tasks module's existing
+`strings.xml`); `:app` maps `FocusPresetOption` → `FocusPreset`.
+
+- [ ] **Step 4: Verify**
+
+Run: `./gradlew :app:testDebugUnitTest --tests "*Focus*"` → PASS, then
+the CI gate; `:feature:tasks:compileDebugAndroidTestKotlin` still
+compiles. Boundary notification lands in Task 13's device checklist.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app feature/tasks
+git commit -m "feat: add preset focus cycles on the task timer"
+```
+
+---
+
+### Task 7: Saved searches UI
+
+**Files:**
+
+- Modify: `app/src/main/kotlin/app/opentasks/SearchSurface.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt:1270-1291`
+- Modify: `app/src/main/res/values/strings.xml`
+- Test (instrumented, compile-verified):
+  `app/src/androidTest/kotlin/app/opentasks/SearchSurfaceSavedViewsInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: Task 1's commands and `WorkspaceSnapshot.savedViews`;
+  `SearchSurface(results, onQueryChange, onDismiss, onOpenTask,
+  onOpenProject)` (`SearchSurface.kt:50-57`; the surface MUST stay a
+  `Dialog` — `ShortcutRootWiringInstrumentedTest.kt:134` structurally
+  depends on the Dialog window), local query state
+  (`var query by rememberSaveable`, `:58`), `MAX_SEARCH_QUERY_LENGTH = 500`
+  (`:159`).
+- Produces — `SearchSurface` gains defaulted parameters (existing
+  callers stay source-compatible):
+
+```kotlin
+savedViews: List<SavedView> = emptyList(),
+onSaveView: ((String) -> Unit)? = null,        // name for the CURRENT query text
+onApplyView: (SavedView) -> Unit = {},
+onRenameView: (SavedViewId, String) -> Unit = { _, _ -> },
+onDeleteView: (SavedViewId) -> Unit = {},
+```
+
+- [ ] **Step 1: Write the instrumented test (compile-verified now,
+  executes at Task 13)**
+
+`SearchSurfaceSavedViewsInstrumentedTest.kt` — `createComposeRule`
+(`.v2`), `OpenTasksTheme`, fixture `SavedView`s; asserts: chips render
+when the query is blank (tags `saved-view-chip-<id>`), tapping a chip
+sets the field text to the view's query text (assert via
+`onNodeWithTag("workspace-search-query")` text), the save affordance
+(tag `save-search`) appears only when `onSaveView != null` and the
+query is non-blank, and saving through the name dialog (tags
+`save-search-name`, `save-search-confirm`) invokes `onSaveView` with
+the typed name (capture with `AtomicReference`, the
+`ProjectWorkbenchInstrumentedTest` idiom).
+
+- [ ] **Step 2: Verify it fails to compile, then implement**
+
+Run: `./gradlew :app:compileDebugAndroidTestKotlin` — FAIL (unresolved
+params). Implement: when `query.isBlank() && savedViews.isNotEmpty()`,
+a `FlowRow` of `AssistChip`s above the results list, each with a
+long-press-free overflow (a trailing `IconButton` per chip opening a
+`DropdownMenu` with Rename/Delete — 48 dp, content descriptions
+"Rename <name>" / "Delete <name>", the workflow-editor precedent);
+apply sets the local `query` state (the existing 150 ms debounce then
+fires `onQueryChange`). Save: a trailing icon in the search field row
+(enabled when non-blank and `savedViews.size < 20` — pass the bound
+outcome through, don't re-derive: disable with the
+`saved_search_limit` supporting text when the list is full); name
+dialog with `stringResource` copy. Wire in `OpenTasksApp:1270-1291`:
+`savedViews = snapshot.savedViews`, and the four callbacks dispatch
+`viewModel.execute(DomainCommand.CreateSavedView(SavedViewId.new(),
+name, SearchQuery(currentQueryText)))` etc. — the current query text
+must be lifted: add `onQueryChange` state capture in `OpenTasksApp`
+(a `var searchQueryText by remember`) fed by the existing
+`viewModel::search` wrapper, so `onSaveView` closes over the text
+without hoisting `SearchSurface`'s field state.
+
+- [ ] **Step 3: Verify**
+
+Run: `./gradlew :app:compileDebugAndroidTestKotlin` — compiles. Run the
+CI gate — green. Undo of saved-view commands already proven in Task 1.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app
+git commit -m "feat: add saved search chips to the search surface"
+```
+
+---
+
+### Task 8: Bulk multi-select and composite commands
+
+**Files:**
+
+- Modify:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt`
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt`
+- Modify:
+  `core/data/src/main/kotlin/app/opentasks/core/data/InMemoryVaultRepository.kt`
+- Modify:
+  `core/designsystem/src/main/kotlin/app/opentasks/core/designsystem/Components.kt:85-93`
+  (`TaskRow` gains `onLongPress`)
+- Modify: `feature/tasks/src/main/kotlin/app/opentasks/feature/tasks/TasksScreen.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryBulkCommandTest.kt`
+- Test (instrumented, compile-verified):
+  `core/data/src/androidTest/kotlin/app/opentasks/core/data/RoomBulkCommandInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: single-task handlers (`completeTask`
+  `RoomVaultRepository.kt:1089`, `changeTaskStatus` `:1128`,
+  `deleteTask` `:1346`, `updateTaskDetails` `:1485`, `setTaskTag`
+  `:1859`), `RestoreTaskStatus`/`RestoreTask` undo shapes,
+  `SavedStateHandle` in `WorkspaceViewModel` (`:75-82`).
+- Produces:
+
+```kotlin
+// DomainCommand gains:
+data class CompleteTasks(
+    val taskIds: List<TaskId>,
+    val completedAt: Instant = Instant.now(),
+) : DomainCommand
+
+data class RescheduleTasks(
+    val taskIds: List<TaskId>,
+    val due: ZonedMoment?,          // null clears the due moment
+) : DomainCommand
+
+data class MoveTasksToProject(
+    val taskIds: List<TaskId>,
+    val projectId: ProjectId?,      // null moves to Inbox
+) : DomainCommand
+
+data class SetTasksTag(
+    val taskIds: List<TaskId>,
+    val tagId: TagId,
+    val present: Boolean,
+) : DomainCommand
+
+data class DeleteTasks(
+    val taskIds: List<TaskId>,
+    val deletedAt: Instant = Instant.now(),
+) : DomainCommand
+
+/** Repository-produced batch undo: replays the captured inverses in
+ *  order inside one transaction. Never constructed by UI code. */
+data class UndoBatch(val commands: List<DomainCommand>) : DomainCommand
+
+// RejectionReason gains: EMPTY_BULK_SELECTION, BULK_SELECTION_TOO_LARGE
+// Both repository companions gain: MAX_BULK_TASKS = 200
+
+// WorkspaceViewModel gains (SavedStateHandle-backed, key "bulkSelection"):
+val bulkSelection: StateFlow<Set<TaskId>>
+fun toggleBulkSelection(taskId: TaskId)
+fun clearBulkSelection()
+
+// TaskRow gains: onLongPress: (() -> Unit)? = null  (combinedClickable
+// only when non-null, so existing call sites are untouched)
+// TasksScreen gains:
+selectedBulkIds: Set<TaskId> = emptySet(),
+onToggleBulkSelection: (TaskId) -> Unit = {},
+onClearBulkSelection: () -> Unit = {},
+onBulkComplete: () -> Unit = {},
+onBulkReschedule: (LocalDate) -> Unit = {},
+onBulkMoveToProject: (ProjectId?) -> Unit = {},
+onBulkSetTag: (TagId, Boolean) -> Unit = {},
+onBulkDelete: () -> Unit = {},
+```
+
+Semantics, pinned: each composite validates the id list (non-empty,
+≤ 200, duplicates removed) then applies the single-task logic per id
+inside the one `execute` transaction, skipping ids that no longer
+resolve (skipped ids are simply absent from the undo); recurring-task
+completion still spawns occurrences via the existing single-task path.
+The result message reports the applied count ("5 tasks completed");
+`undo` is `UndoBatch` of the exact captured inverses
+(`RestoreTaskStatus`, `RestoreTask`, an `UpdateTask` reconstructed via
+the existing `Task.toUpdateCommand` shape for reschedule/move, or the
+flipped `SetTaskTag` over only the ids that actually changed).
+`RescheduleTasks` writes `due` and bumps `nextRevision` per task,
+touching neither reminders nor recurrence anchors (same as a
+single-task `UpdateTask` due edit). `UndoBatch` executes its commands
+in order in one transaction and returns no further undo.
+
+- [ ] **Step 1: Write the failing repository tests**
+
+`InMemoryBulkCommandTest.kt` — the load-bearing cases:
+
+```kotlin
+@Test
+fun completeTasksAppliesAllAndUndoBatchRestoresEveryStatus() = runBlocking {
+    withTimeout(5_000) {
+        val ids = repository.currentWorkspace().tasks
+            .filterNot { it.isCompleted || it.isBlocked }
+            .take(2).map { it.id }
+        val result = repository.execute(
+            DomainCommand.CompleteTasks(ids),
+        ) as CommandResult.Success
+        assertTrue(
+            repository.currentWorkspace().tasks
+                .filter { it.id in ids }.all { it.isCompleted },
+        )
+        repository.execute(result.undo!!)
+        assertTrue(
+            repository.currentWorkspace().tasks
+                .filter { it.id in ids }.none { it.isCompleted },
+        )
+    }
+}
+
+@Test
+fun missingIdsAreSkippedNotFatal() = runBlocking { /* one real id + one
+    fabricated TaskId completes the real one, message says "1 task" */ }
+
+@Test
+fun twoHundredAndOneIdsAreRejected() = runBlocking { /* Rejected with
+    BULK_SELECTION_TOO_LARGE, nothing mutated */ }
+
+@Test
+fun setTasksTagUndoFlipsOnlyTheIdsThatChanged() = runBlocking { /* one
+    task already tagged + one untagged; undo removes the tag only from
+    the newly tagged task */ }
+```
+
+Write the sketched cases as full tests. Mirror the first and last into
+`RoomBulkCommandInstrumentedTest` (compile-verified; executes at
+Task 13 — journal atomicity for composites is asserted there via the
+Room journal table, one operation id for the whole batch).
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :core:data:testDebugUnitTest --tests "*BulkCommand*"`
+Expected: FAIL — commands unresolved.
+
+- [ ] **Step 3: Implement commands, then UI**
+
+Repository arms + handlers per the semantics block (both engines; the
+in-memory handlers end in one `publish`). UI: `TaskRow` adds
+`combinedClickable` (long-press) only when `onLongPress != null` and
+keeps the custom accessibility action list — add a "Select <title>"
+custom action so selection is reachable without long-press.
+`TasksScreen`: when `selectedBulkIds` is non-empty the list header
+swaps for a selection bar (count, clear (`bulk-clear`), complete
+(`bulk-complete`), reschedule (`bulk-reschedule`, opens a
+`DatePickerDialog` → `LocalDate`), move (`bulk-move`, menu of active
+projects + Inbox), tag (`bulk-tag`, menu of tags with present/absent
+toggle), bin (`bulk-delete`)); rows render a leading `Checkbox` in
+selection mode and row tap toggles instead of opening. `:app` maps
+`onBulkReschedule(date)` to
+`RescheduleTasks(ids, ZonedMoment(date.atTime(17, 0).atZone(zone).toInstant(), zone.id))`
+— 17:00, the Task 2 date-only convention, one shared constant in
+`:app`. Snackbar Undo flows through the existing
+`WorkspaceEvent.Message` path unchanged; `clearBulkSelection()` runs
+after every bulk dispatch.
+
+- [ ] **Step 4: Verify**
+
+`./gradlew :core:data:testDebugUnitTest` green; CI gate green;
+`:feature:tasks:compileDebugAndroidTestKotlin` and
+`:core:data:compileDebugAndroidTestKotlin` compile.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/domain core/data core/designsystem feature/tasks app
+git commit -m "feat: add bulk multi-select with composite commands"
+```
+
+---
+
+### Task 9: Weekly review
+
+**Files:**
+
+- Create: `core/domain/src/main/kotlin/app/opentasks/core/domain/ReviewQueue.kt`
+- Modify:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt`
+  (`MarkReviewed` command)
+- Modify: `core/model/src/main/kotlin/app/opentasks/core/model/Records.kt:217-230`
+  (`ActivityKind` gains `REVIEWED` — stored as a string column, no
+  schema change; verify `BackupMutationCodec`'s ACTIVITY_ENTRY arm
+  validates kind as bounded text, not an enum whitelist, before
+  assuming no codec change)
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt`
+  and `InMemoryVaultRepository.kt` (dispatch arm → `recordActivity`)
+- Create: `feature/more/src/main/kotlin/app/opentasks/feature/more/ReviewScreen.kt`
+- Modify: `feature/more/src/main/kotlin/app/opentasks/feature/more/MoreScreen.kt`
+  (`onOpenReview` row)
+- Modify: `feature/more/src/main/res/values/strings.xml`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+  (`ReviewRoute` + entry)
+- Test: `core/domain/src/test/kotlin/app/opentasks/core/domain/ReviewQueueTest.kt`
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryMarkReviewedTest.kt`
+- Test (instrumented, compile-verified):
+  `feature/more/src/androidTest/kotlin/app/opentasks/feature/more/ReviewScreenInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: `Revision.wallTimeMillis` (`Records.kt:25-29` — note the
+  exact field name), `ActivityEntry.createdAt`, `recordActivity`
+  (private helper in both repositories), `ArchiveProject`,
+  `CompleteTask`, `DeleteTask`, Task 2's `parseNaturalDate` is NOT used
+  here (review reschedule uses a date picker; keep the surface small),
+  Navigation 3 route pattern (`OpenTasksApp.kt:146-162`), the
+  `MoreScreen` deep-link latch precedent (`MoreScreen.kt:100-103`).
+- Produces:
+
+```kotlin
+// ReviewQueue.kt — pure
+data class ReviewQueue(
+    val overdue: List<Task>,
+    val stale: List<Task>,
+    val unscheduled: List<Task>,
+    val projects: List<Project>,
+)
+
+fun buildReviewQueue(
+    snapshot: WorkspaceSnapshot,
+    now: Instant,
+    staleAfter: Duration = Duration.ofDays(14),
+): ReviewQueue
+
+// DomainCommand gains:
+data class MarkReviewed(
+    val taskId: TaskId? = null,
+    val projectId: ProjectId? = null,
+    val reviewedAt: Instant = Instant.now(),
+) : DomainCommand   // XOR owner, Success("Marked as reviewed"), no undo
+
+// ReviewScreen — stateless feature composable:
+fun ReviewScreen(
+    queue: ReviewQueue,
+    projectNames: Map<ProjectId, String>,
+    onBack: () -> Unit,
+    onCompleteTask: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onKeepTask: (TaskId) -> Unit,
+    onBinTask: (TaskId) -> Unit,
+    onKeepProject: (ProjectId) -> Unit,
+    onArchiveProject: (ProjectId) -> Unit,
+    modifier: Modifier = Modifier,
+)
+```
+
+Queue rules, pinned: open = `deletedAt == null && !isCompleted`.
+Overdue = open, `due != null`, `due.instant < now`. Stale = open, not
+overdue, last-touch older than `staleAfter`, where last-touch =
+`max(revision.wallTimeMillis, latest activity entry createdAt for the
+task)`. Unscheduled = open, `start == null && due == null`, not
+already stale (each task appears once: overdue > stale > unscheduled).
+Projects = `archivedAt == null`, ordered by name. `MarkReviewed`
+writes a `REVIEWED` activity entry (body `"Reviewed"`) through
+`recordActivity` — that is what resets staleness; no new persistence.
+
+- [ ] **Step 1: Write the failing queue test**
+
+`ReviewQueueTest.kt` — build snapshots with the `WorkspaceCsvWriterTest`
+in-file-builder idiom; cases: overdue task appears only in overdue even
+if also stale; fresh activity entry rescues a stale-by-revision task;
+unscheduled excludes stale-listed and completed tasks; binned tasks
+appear nowhere; archived projects appear nowhere; boundary — exactly
+14 days old is NOT yet stale (`staleAfter` is exclusive).
+
+- [ ] **Step 2: Run to verify failure, implement queue + command**
+
+Run: `./gradlew :core:domain:testDebugUnitTest --tests "*ReviewQueue*"`
+— FAIL, then implement. `MarkReviewed`: dispatch arms in both
+repositories validating XOR ownership (reject `NOT_FOUND` when neither
+or both set, or the owner is missing/binned) then `recordActivity(...,
+ActivityKind.REVIEWED, "Reviewed", reviewedAt)`;
+`InMemoryMarkReviewedTest` proves the entry lands, staleness resets
+through `buildReviewQueue`, and the 500-entry trim still holds.
+
+- [ ] **Step 3: Build the screen and route**
+
+`ReviewScreen`: sections in queue order, each a `SectionHeader` plus
+one card at a time (current index per section in `rememberSaveable`),
+task cards show title/project/due with four 48 dp actions (tags
+`review-complete`, `review-reschedule` (DatePickerDialog),
+`review-keep`, `review-bin`), project cards show milestone summary
+counts with `review-keep-project` / `review-archive-project`; every
+action advances to the next item; an all-done `EmptyState` closes with
+`onBack`. All copy via `stringResource` in the more module. Route:
+`@Serializable data object ReviewRoute : WorkspaceRoute` beside the
+five existing routes (NOT added to `destinations` — no nav-bar item);
+`entry<ReviewRoute>` builds
+`buildReviewQueue(snapshot, Instant.now())` and maps the lambdas to
+`viewModel.execute(...)` (`CompleteTask`, the Task 8 single-task
+reschedule shape at 17:00, `MarkReviewed`, `DeleteTask`,
+`ArchiveProject`); back → `navigate(MoreRoute)`. `MoreScreen` gains
+`onOpenReview: () -> Unit = {}` and a `DestinationRow` (tag
+`open-review`, icon `Icons.Rounded.Checklist`, strings
+`review_title`/`review_open`).
+
+- [ ] **Step 4: Verify**
+
+`./gradlew :core:domain:testDebugUnitTest :core:data:testDebugUnitTest`
+green; CI gate green; `ReviewScreenInstrumentedTest` (walks one task
+through Keep and asserts `onKeepTask` fired and the next card renders)
+compiles via `:feature:more:compileDebugAndroidTestKotlin`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/model core/domain core/data feature/more app
+git commit -m "feat: add guided weekly review"
+```
+
+---
+
+### Task 10: Markdown project export
+
+**Files:**
+
+- Create:
+  `core/data/src/main/kotlin/app/opentasks/core/data/export/ProjectMarkdownWriter.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/VaultTransferViewModel.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+- Modify:
+  `feature/more/src/main/kotlin/app/opentasks/feature/more/BackupRecoveryScreen.kt`
+- Modify: `feature/more/src/main/res/values/strings.xml`
+- Modify: `app/src/main/kotlin/app/opentasks/di/AppModule.kt`
+- Test:
+  `core/data/src/test/kotlin/app/opentasks/core/data/export/ProjectMarkdownWriterTest.kt`
+
+**Interfaces:**
+
+- Consumes: `WorkspaceCsvWriter`'s shape (`WorkspaceCsvWriter.kt:31-33`
+  — ctor `zone`, `write(..., out: Appendable)`, pure JVM, UK formats,
+  moments rendered in their stored zone), the CSV batch machine in
+  `VaultTransferViewModel` (`operation` mutex `:67`, request `Channel`,
+  `NonCancellable` finally `:302-322`, `deletePartialDocument`
+  `:424-430`), the `CsvExportTable` feature-twin precedent
+  (`BackupRecoveryScreen.kt:108-125`), workflow-status rank ordering
+  (`ORDER BY rank`), `Bin` exclusion (`deletedAt == null`).
+- Produces:
+
+```kotlin
+// ProjectMarkdownWriter.kt — pure JVM, no android.* imports
+class ProjectMarkdownWriter(private val zone: ZoneId) {
+    fun write(projectId: ProjectId, snapshot: WorkspaceSnapshot, out: Appendable)
+}
+
+// VaultTransferViewModel gains:
+val markdownExportInProgress: StateFlow<Boolean>
+val markdownExportOutcome: StateFlow<MarkdownExportOutcome?>   // feature-side type
+val markdownCreateDocumentRequests: Channel<String>            // suggested file name
+fun beginMarkdownExport(projectId: ProjectId)
+fun onMarkdownDocumentSelected(uri: Uri?)
+fun dismissMarkdownExportOutcome()
+
+// BackupRecoveryScreen (feature side):
+sealed interface MarkdownExportOutcome {
+    data object Completed : MarkdownExportOutcome
+    data class Failed(val reason: String) : MarkdownExportOutcome
+}
+```
+
+Document shape, pinned by the test: `# <project name>`; the summary
+paragraph when non-empty; `Due <d MMMM yyyy>` when the project has a
+due date; `## Milestones` with `- [x]/- [ ] <name> — <due>` rows (only
+when milestones exist); then one `## <status name>` section per
+non-archived workflow status of the project in rank order that has
+tasks, each task as `- [x]/- [ ] <title>` (completed ⇒ `[x]`), with
+` — due <d MMMM yyyy HH:mm>` in the moment's stored zone when due is
+set, `#tag` suffixes for tag names, and checklist items nested two
+spaces deeper as `- [x]/- [ ] <text>`. Binned tasks excluded. Trailing
+newline, LF line endings (Markdown, not CSV — no CRLF). No
+neutralisation: Markdown has no formula execution; titles render as
+literal text.
+
+- [ ] **Step 1: Write the failing writer test**
+
+`ProjectMarkdownWriterTest.kt` — `WorkspaceCsvWriterTest` idiom (in-file
+builders, exact whole-document string assertions on a `StringBuilder`):
+a project with two statuses, a completed and an open task, a checklist,
+tags, a milestone; asserts the exact document. Second test: binned task
+absent; third: statuses with no tasks are omitted; fourth: a title
+containing `# heading` markup survives as literal row text (`- [ ] #
+heading` — the writer never sanitises, the test documents it).
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :core:data:testDebugUnitTest --tests "*ProjectMarkdown*"`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement writer + flow**
+
+Writer per the pinned shape (reuse the UK formatters' patterns; keep
+every helper private). ViewModel: mirror the single-document `.otvault`
+export machine, not the multi-table CSV queue — `beginMarkdownExport`
+`tryLock`s the shared `operation` mutex, captures the snapshot
+synchronously, sends the suggested name
+(`"open_tasks_" + project name lowercased, non-alphanumerics → '_',
++ ".md"`); `onMarkdownDocumentSelected` writes via
+`OutputStreamWriter(stream, Charsets.UTF_8).use`, with the exact
+cancellation-rethrow and `NonCancellable`-finally shape of the CSV
+write (`:297-322`), deleting the partial document on any non-success.
+Launcher in `OpenTasksApp`:
+`ActivityResultContracts.CreateDocument("text/markdown")` plus a pump
+`LaunchedEffect`, the `:315-319` pattern. UI: a "Markdown export" row
+in `BackupRecoveryScreen`'s export section (heading string
+`markdown_export_heading`, action `markdown-export` tag) opening a
+project-picker sheet (single-select list of active projects, tag
+`markdown-export-project-<id>`; `BackupRecoveryScreen` gains
+`projects: List<Project> = emptyList()`, threaded from `MoreScreen`'s
+existing `projects` param); outcome row + dismiss mirroring CSV's.
+`AppModule` provides `ProjectMarkdownWriter(ZoneId.systemDefault())`
+beside the CSV provider.
+
+- [ ] **Step 4: Verify**
+
+`./gradlew :core:data:testDebugUnitTest` green; CI gate green;
+`:feature:more:compileDebugAndroidTestKotlin` compiles. The
+`VaultTransferViewModel` unit-test ceiling applies (no `Uri` under the
+stub jar): cover `beginMarkdownExport` when locked (no-op) and the
+null-uri cancel path, the `VaultTransferViewModelTest` precedent.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/data feature/more app
+git commit -m "feat: export a project as markdown"
+```
+
+---
+
+### Task 11: CSV import (own schema, create-only)
+
+**Files:**
+
+- Create:
+  `core/data/src/main/kotlin/app/opentasks/core/data/export/TasksCsvParser.kt`
+- Modify:
+  `core/domain/src/main/kotlin/app/opentasks/core/domain/VaultRepository.kt`
+- Modify: `core/data/src/main/kotlin/app/opentasks/core/data/RoomVaultRepository.kt`
+  and `InMemoryVaultRepository.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/VaultTransferViewModel.kt`
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+- Modify:
+  `feature/more/src/main/kotlin/app/opentasks/feature/more/BackupRecoveryScreen.kt`
+- Modify: `feature/more/src/main/res/values/strings.xml`
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/export/TasksCsvParserTest.kt`
+- Test: `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryImportTasksTest.kt`
+- Test (instrumented, compile-verified):
+  `core/data/src/androidTest/kotlin/app/opentasks/core/data/RoomImportTasksInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: `WorkspaceCsvWriter.TASKS_HEADER` (the 14 columns,
+  `WorkspaceCsvWriter.kt:194-219` — make the header list `internal`
+  rather than copying it), the neutralisation trigger set
+  `= + - @ \t` with apostrophe prefix (`:180-195`),
+  `WorkflowStatus.defaults(projectId)` (`Records.kt:75-90`),
+  `CreateProject`/`CreateAndAssignTag` validation bounds,
+  `ISO_OFFSET_DATE_TIME` moments in stored zones.
+- Produces:
+
+```kotlin
+// ImportedTaskRow and CsvParseResult are declared in
+// core/domain/.../VaultRepository.kt beside ImportTasks — a DomainCommand
+// cannot carry a :core:data type (the dependency points the other way).
+// The parser itself stays in :core:data because it consumes
+// WorkspaceCsvWriter.TASKS_HEADER.
+data class ImportedTaskRow(
+    val title: String,
+    val projectName: String?,
+    val statusName: String?,
+    val priority: Priority,
+    val start: ZonedMoment?,
+    val due: ZonedMoment?,
+    val estimateMinutes: Long?,
+    val tagNames: List<String>,
+    val description: String,
+)
+
+sealed interface CsvParseResult {
+    data class Parsed(val rows: List<ImportedTaskRow>) : CsvParseResult
+    data class Malformed(val rowNumber: Int, val reason: String) : CsvParseResult
+}
+
+fun parseTasksCsv(text: String): CsvParseResult
+
+// DomainCommand gains:
+data class ImportTasks(val rows: List<ImportedTaskRow>) : DomainCommand
+
+/** Undo-only: removes exactly the records the import created. */
+data class RemoveImportedRecords(
+    val taskIds: List<TaskId>,
+    val projectIds: List<ProjectId>,
+    val tagIds: List<TagId>,
+) : DomainCommand
+
+// RejectionReason gains: IMPORT_TOO_LARGE, IMPORT_EMPTY
+// Both repository companions gain: MAX_IMPORT_ROWS = 5_000
+```
+
+Parser rules, all fail-closed with the 1-based data-row number: header
+row must equal `TASKS_HEADER` exactly; RFC 4180 fields (quoted fields,
+`""` escapes; CRLF and bare LF both accepted); the reverse of
+neutralisation strips one leading `'` only when the next character is
+in `= + - @ \t`; `title` non-blank after stripping, ≤ 240; `priority`
+must be a `Priority` name or blank (→ NONE); `start_iso`/`due_iso`
+parse with `ISO_OFFSET_DATE_TIME` into
+`ZonedMoment(instant, offsetId)` or blank; `estimate_minutes`
+non-negative long or blank; `tags` split on `;`, trimmed, blanks
+dropped; `id`, the `*_display` columns, `completed_*`, and `status`
+fallbacks are read but only `status` participates (by exact name);
+row count 1..5_000. `ImportTasks` (both engines, one transaction):
+resolve each `projectName` against active projects by exact name, else
+create the project with its five default statuses; resolve
+`statusName` within the task's project by exact name, else that
+project's BACKLOG default; resolve tags by exact name else create;
+create every task; nothing merges, ids are always fresh. Undo is
+`RemoveImportedRecords` listing exactly the created ids — it hard-
+removes those records (no tombstones: they never reached any backup
+consumer's history semantics as user deletions; journal DELETE entries
+flow from the snapshot diff as with any removal). Imports never touch
+attachments, notes, checklists, dependencies, or time entries — the
+disclosed lossy boundary.
+
+- [ ] **Step 1: Write the failing parser + round-trip tests**
+
+`TasksCsvParserTest.kt`: quoted multi-line description round-trips;
+neutralised `'=SUM(A1)` title comes back as `=SUM(A1)`; wrong header
+→ `Malformed(0, …)`; bad ISO due on data row 3 → `Malformed(3, …)`;
+blank title → malformed. The keystone round-trip test: build a snapshot
+(in-file builders), `WorkspaceCsvWriter(zone).write(TASKS, snapshot, out)`,
+`parseTasksCsv(out.toString())`, assert titles, project names, ISO
+moments (instant + offset), priorities, estimates, and tags all match
+the source snapshot's non-binned tasks in order.
+`InMemoryImportTasksTest.kt`: import into the fixture workspace creates
+tasks + a new project with five default statuses + new tags; re-import
+of the same rows duplicates (create-only, documented); undo removes
+exactly the created records and nothing pre-existing; 5_001 rows
+rejected untouched.
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `./gradlew :core:data:testDebugUnitTest --tests "*CsvParser*" --tests "*ImportTasks*"`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement parser, commands, then flow**
+
+Parser: a small state-machine field reader (quote handling first, no
+regex for the record grammar). Commands per the semantics block.
+ViewModel: `beginCsvImport()` → `OpenDocument` request (pump pattern;
+MIME `arrayOf("text/csv", "text/comma-separated-values", "text/plain")`
+— pickers tag CSVs inconsistently); on document: read bounded bytes
+(refuse > 5 MiB before parsing), parse, surface
+`CsvImportOutcome.Preview(taskCount, newProjectCount, newTagCount)`
+(computed against the current snapshot); `confirmCsvImport()` executes
+`ImportTasks` and surfaces `Completed(taskCount)` with the undo routed
+through the normal snackbar event so import is one-tap reversible;
+failures surface `Failed(rowNumber, reason)` copy. The whole flow holds
+the shared `operation` mutex from selection through confirm/dismiss.
+UI: import row + preview dialog + outcome in `BackupRecoveryScreen`
+(tags `csv-import`, `csv-import-preview`, `csv-import-confirm`,
+`csv-import-cancel`, `csv-import-outcome`); copy states create-only,
+what CSV does not carry, and that `.otvault` is the full-fidelity
+transfer (strings `csv_import_*`).
+
+- [ ] **Step 4: Verify**
+
+`./gradlew :core:data:testDebugUnitTest` green (round-trip is the
+contract pin); CI gate green; instrumented mirrors compile.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/domain core/data feature/more app
+git commit -m "feat: import tasks from own-schema csv"
+```
+
+---
+
+### Task 12: Kanban board
+
+**Files:**
+
+- Create: `feature/projects/src/main/kotlin/app/opentasks/feature/projects/BoardView.kt`
+- Modify: `feature/projects/src/main/kotlin/app/opentasks/feature/projects/ProjectsScreen.kt`
+- Create: `feature/projects/src/main/res/values/strings.xml` (module's
+  first — the directory does not exist yet)
+- Modify: `feature/projects/build.gradle.kts` (add
+  `testImplementation(libs.junit)` if absent)
+- Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`
+  (`onChangeTaskStatus` threading into `ProjectsScreen`)
+- Test: `feature/projects/src/test/kotlin/app/opentasks/feature/projects/BoardColumnsTest.kt`
+- Test (instrumented, compile-verified):
+  `feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/BoardViewInstrumentedTest.kt`
+
+**Interfaces:**
+
+- Consumes: `ProjectsScreen`/`ProjectWorkbench` signatures
+  (`ProjectsScreen.kt:123-153`, `:352-378`), workflow chip strip to
+  replace (`:609-645`), rank ordering (`sortedBy(WorkflowStatus::rank)`),
+  `DomainCommand.ChangeTaskStatus` wiring precedent
+  (`OpenTasksApp.kt:846`), the 48 dp IconButton + testTag +
+  full-sentence contentDescription precedent
+  (`ProjectsScreen.kt:1443-1466`).
+- Produces:
+
+```kotlin
+// BoardView.kt — pure helpers + composable
+data class BoardColumn(
+    val status: WorkflowStatus,
+    val tasks: List<Task>,      // open tasks in this status, priority desc then title
+)
+
+fun boardColumns(
+    project: Project,
+    statuses: List<WorkflowStatus>,
+    tasks: List<Task>,
+): List<BoardColumn>            // non-archived statuses of the project, rank order
+
+fun moveTargets(columns: List<BoardColumn>, current: WorkflowStatusId): List<WorkflowStatus>
+
+@Composable
+fun BoardView(
+    columns: List<BoardColumn>,
+    onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
+    onOpenTask: (TaskId) -> Unit,
+    modifier: Modifier = Modifier,
+)
+
+// ProjectsScreen gains:
+onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit = { _, _ -> },
+```
+
+- [ ] **Step 1: Write the failing pure-logic test**
+
+`BoardColumnsTest.kt` (plain JVM): archived statuses excluded; other
+projects' statuses and tasks excluded; binned and completed-but-open
+semantics — completed tasks DO appear in their (Done) column, binned
+never; ordering inside a column is priority desc then
+case-insensitive title (the unscheduled-tray comparator,
+`ScheduleScreen.kt:279-282`); `moveTargets` returns every column's
+status except the current one, in board order.
+
+- [ ] **Step 2: Run to verify failure, implement helpers**
+
+Run: `./gradlew :feature:projects:testDebugUnitTest` — FAIL, then make
+the two pure functions pass.
+
+- [ ] **Step 3: Build tap-to-move first (the complete interaction)**
+
+`BoardView`: horizontal `Row` in a `horizontalScroll`, one 280 dp
+column per `BoardColumn` (`Surface` + header with status name and
+count + `LazyColumn` of cards, column tag `board-column-<statusId>`).
+Card: title + priority glyph + due, tap opens
+(`onOpenTask`), trailing 48 dp `IconButton` (tag
+`board-move-<taskId>`, description "Move <title> to another stage")
+opening a `DropdownMenu` of `moveTargets` (item tag
+`board-move-<taskId>-to-<statusId>`); the same moves are exposed as
+`CustomAccessibilityAction`s on the card ("Move <title> to <status>").
+Workbench: a list/board `SegmentedButton` toggle (tags
+`workbench-view-list` / `workbench-view-board`) in `rememberSaveable`
+keyed on the project id, board replacing the chip strip + task list
+section. Thread `onChangeTaskStatus` from `OpenTasksApp`
+(`viewModel.execute(DomainCommand.ChangeTaskStatus(taskId, statusId))`
+— completion warnings surface through the existing rejected-command
+snackbar). All new copy in the module's new `strings.xml`. Commit this
+step on its own: the board is shippable here.
+
+```bash
+git add feature/projects app
+git commit -m "feat: add tap-to-move kanban board to the workbench"
+```
+
+- [ ] **Step 4: Layer drag on top**
+
+Pointer input on cards: `detectDragGesturesAfterLongPress`; drag state
+(dragged task id, accumulated offset, source column) hoisted in
+`BoardView`; column drop targets via `onGloballyPositioned` bounds; the
+hovered column renders a highlight (`surfaceVariant` border); release
+over a different column → `onMoveTask`; edge auto-scroll nudges the
+horizontal scroll state when the drag point nears either edge. Drag
+never removes the menu path; a failed hit-test just snaps back. No
+haptics/springs (deferred by spec).
+`BoardViewInstrumentedTest`: tap-to-move via the menu asserts
+`onMoveTask(taskId, targetStatus)`; a drag via
+`performTouchInput { longClick(); moveBy(...); up() }` across column
+bounds asserts the same callback (compile-verified; executes at
+Task 13).
+
+- [ ] **Step 5: Verify + commit**
+
+`./gradlew :feature:projects:testDebugUnitTest` green; CI gate green;
+`:feature:projects:compileDebugAndroidTestKotlin` compiles.
+
+```bash
+git add feature/projects
+git commit -m "feat: add drag between board columns"
+```
+
+---
+
+### Task 13: Qualification and exit gates
+
+**Files:**
+
+- Modify: `docs/architecture.md`, `DESIGN.md`, `PRODUCT.md`,
+  `docs/threat-model.md`, `CLAUDE.md`, `HANDOFF.md`
+- Create: `docs/qualification/stage6-daily-flow.md`
+
+**Steps:**
+
+- [ ] **Step 1: Full connected gate on the sole disposable**
+
+Boot the disposable AVD (`-read-only -no-snapshot-load
+-no-snapshot-save`, sole ADB target; never the protected
+`Pixel_10_Pro_Fold`), then:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest :core:data:connectedDebugAndroidTest \
+  :feature:tasks:connectedDebugAndroidTest :feature:projects:connectedDebugAndroidTest \
+  :feature:schedule:connectedDebugAndroidTest :feature:more:connectedDebugAndroidTest
+```
+
+Expected: PASS including the new Room parity suites (saved views, bulk,
+import), `SearchSurfaceSavedViewsInstrumentedTest`,
+`ReviewScreenInstrumentedTest`, `BoardViewInstrumentedTest`, and the
+existing Stage 4/5 pair of expected skips. Record exact counts. Shut
+the disposable down; confirm empty ADB audits.
+
+- [ ] **Step 2: Repository, release, schema, fixture, hygiene gates**
+
+```bash
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --rerun-tasks
+./gradlew :app:assembleRelease --rerun-tasks
+scripts/check-schema-drift.sh
+node scripts/generate-stage2-backup-v1-fixtures.mjs && git diff --exit-code core/data/src/test/resources
+node scripts/generate-stage5-otvault-v1-fixtures.mjs && git diff --exit-code core/data/src/test/resources
+bash scripts/verify-actions-workflow.sh
+git diff --check
+```
+
+Expected: all pass at schema v9 with byte-identical fixtures (the stage
+made no format change). Release inspection: `auth/drive.appdata` sole
+scope; new exported surface is exactly the bind-permission
+`QuickAddTileService` and the two `MainActivity` intent filters; the
+`FocusAlarmReceiver` is not exported; no debug activity.
+
+- [ ] **Step 3: Privacy scans**
+
+Grep the stage's diff range for `Log.`/`println`/`Timber` (expect
+zero), for shared-text or query-text reaching any log or intent extra
+beyond the user's own share, and verify: focus notifications carry
+only the two generic strings; widget state files carry no ids or
+titles after lock engages (extend the Task 10 Stage 5 instrumented
+assertion to the new id keys); CSV import buffers are not retained
+after parse; Markdown/CSV partial documents delete on failure (unit
+suites).
+
+- [ ] **Step 4: Device checklist (by hand on the disposable)**
+
+Share text from a browser → prefilled Quick Add; select text →
+"Open Tasks" → prefilled Quick Add; add the QS tile → tap → Quick Add
+after unlock; widget: tap-complete a focus row, verify counts update
+and the completed task reopens from the app; enable app lock → widget
+conceals and taps route to unlock; start a 25/5 focus session →
+boundary notification fires with generic text; save a search, restart
+the process, apply it; `.otvault` export → import → saved views
+survive; bulk-select 3 tasks → complete → Undo restores all; run the
+weekly review across all four sections; Markdown-export a project and
+open the file; CSV-export tasks, re-import the file, confirm the
+preview counts and the created duplicates, then Undo; Kanban: drag a
+card between columns, and move one with TalkBack enabled via the
+accessibility action.
+
+- [ ] **Step 5: Contract documents + closure**
+
+`docs/architecture.md` (saved views live, composite commands,
+`REVIEWED` activity kind, import boundary); `docs/threat-model.md`
+(share-intent text handling, tile surface, CSV import parsing bounds,
+Markdown plaintext note); `DESIGN.md` (board, review, selection bar,
+focus banner, widget actions); `PRODUCT.md` (Stage 6 boundary);
+`CLAUDE.md` (new bounds: 20 saved views, 200 bulk, 5_000 import rows,
+14-day staleness, focus presets; the saved-view content-fingerprint
+rule); `HANDOFF.md` (Stage 6 closure checkpoint). Write
+`docs/qualification/stage6-daily-flow.md` with every gate result and
+exact counts, no private identifiers.
+
+```bash
+git add -A
+git commit -m "docs: verify stage 6 daily-flow features"
+```
+
+---
+
+## Spec coverage map
+
+| Spec section | Tasks |
+|---|---|
+| Recorded scope rulings | Global constraints, 11, 12, 13 |
+| Saved-search commands (dormant `saved_views`) | 1 |
+| Natural-language dates in Quick Add | 2 |
+| Share-sheet and text-selection intake | 3 |
+| Quick Settings tile | 4 |
+| Interactive Today widget | 5 |
+| Focus cycles | 6 |
+| Saved searches UI | 7 |
+| Bulk multi-select | 8 |
+| Weekly review | 9 |
+| Markdown project export | 10 |
+| CSV import | 11 |
+| Kanban board | 12 |
+| Data and formats (no schema change, fixtures untouched) | 1, 13 |
+| Privacy and security | 3, 4, 5, 6, 13 |
+| Error handling | 10, 11, 5 |
+| Testing and qualification | every task's gates, 13 |
+| Main risk pre-mitigated (fallback-first board) | 12 |
+| External and deferred work | 13 (recorded, unchanged) |
