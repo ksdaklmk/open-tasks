@@ -34,10 +34,12 @@ android {
             create("release") {
                 val props = Properties()
                 keystorePropertiesFile.inputStream().use(props::load)
-                storeFile = file(props.getProperty("storeFile"))
-                storePassword = props.getProperty("storePassword")
-                keyAlias = props.getProperty("keyAlias")
-                keyPassword = props.getProperty("keyPassword")
+                fun required(name: String): String = props.getProperty(name)
+                    ?: error("keystore.properties is missing '$name'")
+                storeFile = file(required("storeFile"))
+                storePassword = required("storePassword")
+                keyAlias = required("keyAlias")
+                keyPassword = required("keyPassword")
             }
         }
     }

@@ -11,8 +11,9 @@ bt="$sdk/build-tools/$(ls "$sdk/build-tools" | sort -V | tail -1)" || fail "fail
 [ -f "$apk" ] || fail "APK not found at $apk"
 
 # 1. Signed with a modern scheme.
+[ -x "$bt/apksigner" ] || fail "apksigner not found under $bt"
 "$bt/apksigner" verify "$apk" >/dev/null 2>&1 \
-  || fail "apksigner verify (unsigned or bad signature)"
+  || fail "apksigner verify failed (unsigned or bad signature)"
 
 # 2. Version matches app/build.gradle.kts.
 badging="$("$bt/aapt2" dump badging "$apk")" || fail "aapt2 badging dump failed"
@@ -27,8 +28,10 @@ echo "$manifest" | grep -q "DriveCreateOnlyQualificationActivity" \
   && fail "debug qualification activity present in release manifest"
 
 # 4. drive.appdata is the sole Drive scope string in the dex.
-dex_content="$(unzip -p "$apk" "classes*.dex")" || fail "unzip dex extraction failed"
-drive_scopes="$(echo "$dex_content" | grep -ao "auth/drive[.a-z]*" | sort -u)" || true
+unzip -p "$apk" "classes*.dex" >/dev/null || fail "unzip dex extraction failed"
+# Second extraction feeds grep directly so no NUL bytes pass through a
+# shell variable; an empty result still fails closed on the check below.
+drive_scopes="$(unzip -p "$apk" "classes*.dex" | grep -ao "auth/drive[.a-z]*" | sort -u)" || true
 if echo "$drive_scopes" | grep -v "^auth/drive\.appdata$" | grep -q .; then
   fail "unexpected Drive scope string in release dex"
 fi

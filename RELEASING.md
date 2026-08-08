@@ -47,6 +47,9 @@ and no CI signing; CI builds the release unsigned.
    results in `docs/qualification/release-<versionName>-sideload.md`.
 6. Commit the version bump and qualification record, then tag:
 
+       git add app/build.gradle.kts \
+         docs/qualification/release-<versionName>-sideload.md
+       git commit -m "docs: qualify release <versionName> for signed sideload"
        git tag -a v<versionName> -m "Release <versionName>" && git push origin main v<versionName>
 
 7. Install on the real device:
