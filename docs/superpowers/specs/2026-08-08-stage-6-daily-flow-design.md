@@ -15,7 +15,8 @@ natural-language dates), action from glance surfaces (interactive
 widget, focus cycles), in-app power (saved searches, bulk
 multi-select, Kanban board), a guided weekly review, and plaintext
 interop (Markdown export, own-schema CSV import). No new cloud
-surface, no sync, no schema change beyond one additive Room bump.
+surface, no sync, and — after the planning-time discovery below — no
+durable schema change at all.
 
 ## Recorded scope rulings
 
@@ -38,7 +39,7 @@ surface, no sync, no schema change beyond one additive Room bump.
 
 Foundation first, biggest UI risk last, qualification closes:
 
-1. Saved-search records (Room v10 foundation)
+1. Saved-search commands over the dormant `saved_views` table
 2. Natural-language dates in Quick Add
 3. Share-sheet and text-selection intake
 4. Quick Settings tile
@@ -54,28 +55,38 @@ Foundation first, biggest UI risk last, qualification closes:
 
 ## Foundations
 
-### Saved-search records (Room v10)
+### Saved-search commands (dormant `saved_views` table)
 
 Saved searches are workspace content (query text is user content), so
-they live in encrypted Room, not SharedPreferences. Task 1 adds:
+they live in encrypted Room, not SharedPreferences.
 
-- Room v10 with exported `core/data/schemas/10.json` and a
-  non-destructive additive migration plus preservation test.
-- A `saved_searches` table: id, name, query text, versioned filter
-  payload, timestamps. Bounds, fail-closed: 20 saved searches per
-  workspace, 500-character payload.
+Planning-time discovery (8 August 2026, amending the approved draft's
+Room v10 plan): Stage 1 already shipped the storage end-to-end,
+dormant — `SavedView(id, workspaceId, name, query: SearchQuery)` in
+`core/model`, the `saved_views` table (`SavedViewEntity` with an
+`encryptedQuery` payload column), and the `SAVED_VIEW` backup family
+with mutation-codec validation, journal identity, capture
+attribution, and recovery import. Nothing in product code reads or
+writes it. Task 1 therefore lights up the existing table instead of
+adding a new one:
+
+- No Room version bump, no migration, no exported schema change, no
+  backup-family enum change, and no fixture regeneration.
+- A `SavedViewPayloadCodec` (the `TemplatePayloadCodec` shape:
+  bounded JSON, format version 1) encodes `SearchQuery` into
+  `encryptedQuery`; at-rest encryption remains SQLCipher's.
 - Granular `DomainCommand`s (create, rename, update query, delete)
   executed through `VaultRepository.execute`, each returning exact
-  repository-produced Undo, with `InMemoryVaultRepository` parity via
-  shared tests.
-- A `SAVED_SEARCH` backup-journal family following the
-  `RETIRED_BLOB_SET` precedent end-to-end: strict mutation-codec
-  validation, journal emission in both engines, recovery import,
-  capture-DAO attribution, staged-vault verification, deterministic
-  fixture regeneration. No `.otvault` format version change; the
-  frozen v1 fixture generator regenerates byte-identically.
-- The recovery gate needs no hand edit: `VAULT_DATABASE_VERSION = 10`
-  flows through the shared constant introduced by the schema fix.
+  repository-produced Undo, with `InMemoryVaultRepository` parity.
+  Bounds, fail-closed: 20 saved views per workspace, 500-character
+  query text.
+- `WorkspaceSnapshot` gains `savedViews`; both repositories map it;
+  the in-memory journal's snapshot-to-records mapping gains the
+  collection so journal parity holds.
+- The `SAVED_VIEW` journal fingerprint moves from identity-only to
+  the content-fingerprint style used by the other unrevisioned
+  families (checklist, tag, reminder, time entry) — otherwise a
+  rename or query update would never journal. A test pins this.
 
 ## Capture
 
@@ -143,8 +154,10 @@ they live in encrypted Room, not SharedPreferences. Task 1 adds:
 
 ### Saved searches UI (task 7)
 
-- In the search surface: save the current query and filter state
-  under a name; saved searches render as chips; apply, rename, and
+- In the search surface: save the current query under a name (the
+  surface carries no separate filter UI today; the stored
+  `SearchQuery` payload already accommodates its filter fields for
+  when it does); saved searches render as chips; apply, rename, and
   delete use the task 1 commands. Bounds enforced fail-closed with
   clear copy when full.
 
@@ -181,9 +194,12 @@ they live in encrypted Room, not SharedPreferences. Task 1 adds:
   (open, due moment passed), stale (open, no activity in 14 days),
   unscheduled (open, no due or start date), then project health
   (each active project with milestone summary).
-- Task cards offer Complete, Reschedule (NL-date-capable), Keep, and
-  Bin. Keep writes a "Reviewed" entry via the existing activity
-  command — that is what resets staleness; no new persistence. It
+- Task cards offer Complete, Reschedule (date picker — the NL parser
+  lives in `:core:domain`, which feature modules cannot depend on, and
+  a picker keeps the review surface small), Keep, and Bin. Keep writes
+  a "Reviewed" activity entry — implemented as a new `MarkReviewed`
+  command, since activity entries have no user-facing command today —
+  and that is what resets staleness; no new persistence. It
   consumes activity-bound budget (500 entries per task), which is
   acceptable and disclosed here.
 - Project cards offer Keep (activity entry on the project) and
