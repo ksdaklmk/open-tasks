@@ -1,18 +1,26 @@
 # Open Tasks Handoff
 
 - Last updated: 8 August 2026
-- Branch: `main` at `90c8857` (local tracks `origin/main`; pushed).
+- Branch: `main` at `3ce7252` (local tracks `origin/main`; commits
+  `4d1dc1a` and `3ce7252` are local-only pending push).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. Nothing
   is in flight except two docs-only CI runs (`31232428124`,
   `31232527780`); the completed run at `c74a435` confirmed the expected
   post-F6 shape — `verify`, compact API 36, and `release` green, only
   expanded API 37.0 red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Next product direction** — user decision, needs its own
-     brainstorming session: a Stage 6 feature set, or broader
-     distribution (Play internal testing would reopen Play
-     Console/AAB/data-safety work that is currently out of scope by
-     ruling). Nothing is blocked on code.
+  1. **Stage 6 execution — planned and PAUSED by user instruction
+     (8 August 2026); do not start without the user's go.** The
+     direction decision is made: Stage 6 "daily-flow features", all
+     four brainstormed directions in one stage. Authority spec:
+     `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`
+     (committed `5cc8671`, amended `4d1dc1a`); plan:
+     `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
+     (`3ce7252`), thirteen tasks executed subagent-driven directly on
+     `main` with an independent review per task; implementer
+     dispatches must not spawn subagents (standing fork-swarm ruling,
+     restated in the plan's execution notes). No task before Task 13
+     runs a device suite.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -28,6 +36,26 @@
   Future releases follow `RELEASING.md`'s per-release loop (bump
   `versionCode` by exactly 1, gate, build, verify, smoke on the
   disposable AVD, record, tag).
+- Stage 6 planning, 8 August 2026: the user chose the Stage 6 feature
+  set as the post-release direction and selected all four brainstormed
+  directions (capture, glance/focus, organize, review, interop) as one
+  Stage 5-sized stage. Recorded rulings: own-schema CSV import only;
+  Kanban drag-and-drop plus a complete tap-to-move fallback built
+  first; the weekly review walks overdue, stale, unscheduled, and
+  project health; focus cycles are the 25/5 and 50/10 presets only.
+  Planning-time discovery (verified in code, amending the approved
+  draft): the dormant Stage 1 `saved_views` table and its `SAVED_VIEW`
+  backup family already exist end-to-end (entity, codec validation,
+  capture attribution, recovery import) with no product plumbing, so
+  Task 1 lights them up instead of adding Room v10 — the stage makes
+  **no durable schema change and no fixture change**; the one subtle
+  requirement is moving the `SAVED_VIEW` journal fingerprint from
+  identity-only to content-based so renames journal. Four parallel
+  read-only research agents mapped the command layer, `:app`
+  surfaces, feature UI, and export/import before the plan was written;
+  the plan pins exact signatures and `file:line` seams from those
+  maps. The user instructed: finish the plan, update the handoff, and
+  pause — **execution has not started**.
 - Release-stage polish discharged, 8 August 2026 (`90c8857`):
   RELEASING.md step 6 lists the explicit git add/commit commands;
   `verify-release-apk.sh` check 1 distinguishes a missing apksigner
