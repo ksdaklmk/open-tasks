@@ -2649,10 +2649,9 @@ class RoomVaultRepository(
     private suspend fun deleteSavedView(
         command: DomainCommand.DeleteSavedView,
     ): CommandResult {
-        if (database.workspaceDao().getSavedView(command.savedViewId.value) == null) {
-            return CommandResult.Success("Saved search is already deleted")
-        }
-        val (_, existing) = requireReadableSavedView(command.savedViewId)
+        val entity = database.workspaceDao().getSavedView(command.savedViewId.value)
+            ?: return CommandResult.Success("Saved search is already deleted")
+        val existing = runCatching { entity.toModel() }.getOrNull()
             ?: return savedViewNotFound()
         database.workspaceDao().deleteSavedView(existing.id.value)
         return CommandResult.Success(

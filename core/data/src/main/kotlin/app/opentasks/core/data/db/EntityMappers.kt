@@ -1,5 +1,6 @@
 package app.opentasks.core.data.db
 
+import app.opentasks.core.data.SavedViewPayloadCodec
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.ActivityEntry
@@ -18,7 +19,6 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
-import app.opentasks.core.data.SavedViewPayloadCodec
 import app.opentasks.core.model.RetiredBlobSet
 import app.opentasks.core.model.Revision
 import app.opentasks.core.model.SavedView
