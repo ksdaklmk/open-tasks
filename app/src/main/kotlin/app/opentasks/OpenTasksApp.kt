@@ -117,6 +117,7 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -1380,6 +1381,18 @@ fun OpenTasksApp(
                     viewModel.clearSearch()
                     viewModel.selectProject(projectId)
                     navigate(ProjectsRoute)
+                },
+                savedViews = snapshot.savedViews,
+                onSaveView = { name, query ->
+                    viewModel.execute(
+                        DomainCommand.CreateSavedView(SavedViewId.new(), name, query),
+                    )
+                },
+                onRenameView = { id, name ->
+                    viewModel.execute(DomainCommand.RenameSavedView(id, name))
+                },
+                onDeleteView = { id ->
+                    viewModel.execute(DomainCommand.DeleteSavedView(id))
                 },
             )
         }

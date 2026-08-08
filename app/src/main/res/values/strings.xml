@@ -65,4 +65,18 @@
     <string name="calendar_insert_action">Insert</string>
     <string name="calendar_cancel_action">Cancel</string>
     <string name="calendar_no_provider">No app on this device can accept a calendar event.</string>
+
+    <string name="saved_search_save_description">Save this search</string>
+    <string name="saved_search_limit">You\'ve reached the limit of 20 saved searches.</string>
+    <string name="saved_search_name_label">Name</string>
+    <string name="saved_search_save_title">Save search</string>
+    <string name="saved_search_save_confirm">Save</string>
+    <string name="saved_search_rename_title">Rename search</string>
+    <string name="saved_search_rename_confirm">Rename</string>
+    <string name="saved_search_cancel_action">Cancel</string>
+    <string name="saved_search_chip_menu_description">More options for %1$s</string>
+    <string name="saved_search_rename_action">Rename</string>
+    <string name="saved_search_rename_description">Rename %1$s</string>
+    <string name="saved_search_delete_action">Delete</string>
+    <string name="saved_search_delete_description">Delete %1$s</string>
 </resources>

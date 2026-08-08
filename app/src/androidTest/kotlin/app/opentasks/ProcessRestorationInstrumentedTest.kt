@@ -21,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.SearchQuery
 import app.opentasks.lock.AppLockSettings
 import org.junit.Rule
 import org.junit.Test
@@ -88,7 +89,7 @@ class ProcessRestorationInstrumentedTest {
     @Test
     fun searchQueryRestoresAndReissuesTheQueryAfterSavedInstanceStateRecreation() {
         val restorationTester = StateRestorationTester(composeRule)
-        val latestQuery = AtomicReference("")
+        val latestQuery = AtomicReference(SearchQuery(""))
         restorationTester.setContent {
             OpenTasksTheme {
                 SearchSurface(
@@ -106,7 +107,7 @@ class ProcessRestorationInstrumentedTest {
 
         restorationTester.emulateSavedInstanceStateRestore()
         composeRule.waitUntil(timeoutMillis = 2_000) {
-            latestQuery.get() == "restored search"
+            latestQuery.get().text == "restored search"
         }
 
         composeRule.onNodeWithTag("workspace-search-query")
