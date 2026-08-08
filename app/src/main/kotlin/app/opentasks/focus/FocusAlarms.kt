@@ -27,6 +27,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -169,6 +171,21 @@ class FocusNotifier @Inject constructor(
  * delivered while no vault runtime is active; resolving it throws
  * [IllegalStateException] there, which callers treat as "the phase advanced,
  * the timer was left alone".
+ *
+ * This is a process singleton reachable from several threads at once -- a
+ * delivered boundary on `Dispatchers.IO`, a foregrounding on the view-model
+ * scope, a person pressing Stop -- and every entry point below both reads the
+ * store and may go on to dispatch a timer command across a suspension. Two
+ * guards keep that safe, and neither adds any decision of its own:
+ *
+ *  - [gate] serialises whole operations, so two advances cannot each conclude
+ *    "start the timer" from the same empty-timer reading and then have the
+ *    loser's rejection tear down a perfectly live cycle.
+ *  - [focusSessionStillCurrent] is re-checked against the store immediately
+ *    before any dispatch, so a conclusion drawn before a Stop or a replacement
+ *    landed is abandoned rather than applied. Without it, a Stop pressed inside
+ *    an in-flight advance could be followed by that advance starting the very
+ *    timer the person just asked to end.
  */
 @Singleton
 class FocusCoordinator @Inject constructor(
@@ -177,26 +194,36 @@ class FocusCoordinator @Inject constructor(
     private val controller: FocusSessionController,
     private val notifier: FocusNotifier,
 ) {
+    private val gate = Mutex()
+
     /** Persists a fresh cycle and arms its first boundary. */
-    fun start(taskId: String, preset: FocusPreset) {
+    suspend fun start(taskId: String, preset: FocusPreset) = gate.withLock {
         val session = controller.start(taskId, preset)
         store.save(session)
         alarms.schedule(session)
     }
 
-    /** Ends the cycle. The vault's timer is the caller's own decision. */
-    fun stop() {
+    /**
+     * Ends the cycle and returns the session that was running, or `null` when
+     * none was. Reading and clearing share the lock, so the caller's own
+     * follow-up decision about the vault's timer is made against a session no
+     * concurrent advance can still be acting on.
+     */
+    suspend fun stop(): FocusSession? = gate.withLock {
+        val stopped = store.load()
         clearFocus()
+        stopped
     }
 
-    suspend fun onBoundary(repository: () -> VaultRepository) {
+    suspend fun onBoundary(repository: () -> VaultRepository) = gate.withLock {
         advance(repository, alert = true)
     }
 
-    suspend fun reconcile(repository: () -> VaultRepository) {
+    suspend fun reconcile(repository: () -> VaultRepository) = gate.withLock {
         advance(repository, alert = false)
     }
 
+    // Callers hold `gate` for the whole operation, dispatch included.
     private suspend fun advance(repository: () -> VaultRepository, alert: Boolean) {
         val stored = store.load()
         if (stored == null) {
@@ -232,20 +259,31 @@ class FocusCoordinator @Inject constructor(
         when (action) {
             FocusTimerAction.NONE -> Unit
             FocusTimerAction.CLEAR_SESSION -> clearFocus()
-            FocusTimerAction.START -> requireSuccess(
-                repository.execute(DomainCommand.StartTimer(TaskId(session.taskId))),
-            )
-            FocusTimerAction.STOP -> requireSuccess(
-                repository.execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId))),
-            )
+            FocusTimerAction.START -> dispatchIfStillCurrent(session) {
+                repository.execute(DomainCommand.StartTimer(TaskId(session.taskId)))
+            }
+            FocusTimerAction.STOP -> dispatchIfStillCurrent(session) {
+                repository.execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
+            }
         }
     }
 
-    // A refused timer command means the world no longer matches the session:
-    // it is abandoned rather than retried, and the timer stays as the
-    // repository left it.
-    private fun requireSuccess(result: CommandResult) {
-        if (result !is CommandResult.Success) clearFocus()
+    /**
+     * Applies a decision only while the session it was drawn from is still the
+     * persisted one.
+     *
+     * An aborted dispatch clears nothing: the session that superseded this one
+     * is live and owns its own alarm. A dispatch that genuinely runs and is
+     * refused does clear, because the refusal means the world no longer matches
+     * the session -- the cycle is abandoned rather than retried, and the timer
+     * stays exactly as the repository left it.
+     */
+    private suspend fun dispatchIfStillCurrent(
+        session: FocusSession,
+        dispatch: suspend () -> CommandResult,
+    ) {
+        if (!focusSessionStillCurrent(store.load(), session)) return
+        if (dispatch() !is CommandResult.Success) clearFocus()
     }
 
     private fun clearFocus() {

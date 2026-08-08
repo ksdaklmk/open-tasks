@@ -272,7 +272,11 @@ class WorkspaceViewModel @Inject constructor(
      */
     fun startFocus(taskId: TaskId, preset: FocusPreset) {
         execute(DomainCommand.StartTimer(taskId)) { result ->
-            if (result is CommandResult.Success) focusCoordinator.start(taskId.value, preset)
+            if (result !is CommandResult.Success) return@execute
+            // Launched rather than run inline: saving the session takes the
+            // coordinator's lock, so it must be able to wait for a boundary
+            // that is already mid-flight.
+            viewModelScope.launch { focusCoordinator.start(taskId.value, preset) }
         }
     }
 
@@ -281,12 +285,16 @@ class WorkspaceViewModel @Inject constructor(
      * task still owns it -- a timer someone moved to another task keeps
      * running, and the repository re-checks that ownership inside the command
      * itself.
+     *
+     * The coordinator hands back the session it cleared, so the session read
+     * and its removal cannot straddle a concurrent boundary.
      */
     fun stopFocus() {
-        val session = focusSessionStore.session.value ?: return
-        focusCoordinator.stop()
-        if (snapshot.value.home.activeTimer?.taskId?.value == session.taskId) {
-            execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
+        viewModelScope.launch {
+            val session = focusCoordinator.stop() ?: return@launch
+            if (snapshot.value.home.activeTimer?.taskId?.value == session.taskId) {
+                execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
+            }
         }
     }
 

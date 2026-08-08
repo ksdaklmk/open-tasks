@@ -1,6 +1,8 @@
 package app.opentasks.focus
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
@@ -81,6 +83,26 @@ class FocusTimerOwnershipTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun aClearedOrReplacedSessionInvalidatesADecisionInFlight() {
+        val decidedFrom = session(FocusPhaseKind.FOCUS)
+
+        assertTrue(focusSessionStillCurrent(decidedFrom, decidedFrom))
+        // Stopped while the decision was being made.
+        assertFalse(focusSessionStillCurrent(null, decidedFrom))
+        // Advanced to its next phase by a boundary that landed first.
+        assertFalse(
+            focusSessionStillCurrent(
+                decidedFrom.copy(phase = FocusPhaseKind.REST),
+                decidedFrom,
+            ),
+        )
+        // Replaced by a cycle on another task.
+        assertFalse(
+            focusSessionStillCurrent(decidedFrom.copy(taskId = "task-2"), decidedFrom),
+        )
     }
 
     @Test

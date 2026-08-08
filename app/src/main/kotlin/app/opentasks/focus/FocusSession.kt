@@ -122,3 +122,19 @@ internal fun focusTimerAction(
             if (activeTimerTaskId == null) FocusTimerAction.NONE else FocusTimerAction.STOP
     }
 }
+
+/**
+ * Whether a decision computed from [decidedFrom] may still be acted on, given
+ * what the store holds now ([persisted]).
+ *
+ * Deciding what to do needs the workspace, and reading the workspace suspends,
+ * so the world can move underneath a decision that is already made. Whole-value
+ * equality is deliberate rather than a task-identifier comparison: a session
+ * that was stopped, replaced, re-preset, or advanced to its next phase while the
+ * decision was in flight all invalidate it equally, and the caller must abort
+ * instead of applying a conclusion drawn from a session that no longer exists.
+ */
+internal fun focusSessionStillCurrent(
+    persisted: FocusSession?,
+    decidedFrom: FocusSession,
+): Boolean = persisted == decidedFrom
