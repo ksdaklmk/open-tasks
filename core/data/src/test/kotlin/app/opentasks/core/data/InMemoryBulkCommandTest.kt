@@ -7,6 +7,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.ZonedMoment
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -201,6 +202,38 @@ class InMemoryBulkCommandTest {
             repository.execute(result.undo!!)
             val restored = repository.currentWorkspace().tasks.associateBy { it.id }
             ids.forEach { id -> assertTrue(restored.getValue(id).deletedAt == null) }
+        }
+    }
+
+    @Test
+    fun undoBatchPreflightRejectsUnreplayableInverseWithoutMutation() = runBlocking {
+        withTimeout(5_000) {
+            val task = repository.currentWorkspace().tasks
+                .first { !it.isCompleted && !it.isBlocked && it.projectId != null }
+            val result = repository.execute(
+                DomainCommand.CompleteTasks(listOf(task.id)),
+            ) as CommandResult.Success
+            // Retire the previous status so the stored inverse cannot replay.
+            repository.execute(
+                DomainCommand.CreateWorkflowStatus(
+                    statusId = WorkflowStatusId("bulk-replacement-status"),
+                    projectId = checkNotNull(task.projectId),
+                    name = "Replacement",
+                    semanticStatus = task.semanticStatus,
+                ),
+            )
+            repository.execute(DomainCommand.RemoveWorkflowStatus(task.statusId))
+            val before = repository.currentWorkspace()
+            val journalSizeBefore = journal.entries.size
+
+            val undone = repository.execute(result.undo!!) as CommandResult.Rejected
+
+            assertEquals(RejectionReason.NOT_FOUND, undone.reason)
+            assertEquals(before, repository.currentWorkspace())
+            assertEquals(journalSizeBefore, journal.entries.size)
+            assertTrue(
+                repository.currentWorkspace().tasks.single { it.id == task.id }.isCompleted,
+            )
         }
     }
 

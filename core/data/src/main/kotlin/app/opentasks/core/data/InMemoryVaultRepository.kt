@@ -71,10 +71,12 @@ class InMemoryVaultRepository internal constructor(
     initial: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
     private val now: () -> Instant = Instant::now,
     private val backupJournal: InMemoryBackupJournal = InMemoryBackupJournal(),
+    sourceDeviceId: DeviceId? = null,
 ) : VaultRepository {
     private val writeMutex = Mutex()
-    private val sourceDeviceId =
-        initial.tasks.firstOrNull()?.revision?.deviceId ?: DeviceId("in-memory")
+    private val sourceDeviceId = sourceDeviceId
+        ?: initial.tasks.firstOrNull()?.revision?.deviceId
+        ?: DeviceId("in-memory")
     private var tombstones = emptyList<TombstoneEntity>()
     private var taskTags = initial.tasks
         .flatMap { task ->
@@ -1397,26 +1399,100 @@ class InMemoryVaultRepository internal constructor(
     /**
      * Replays a repository-produced batch undo in its stored order.
      *
-     * All-or-nothing: a rejected inverse restores the captured pre-batch
-     * state and returns that rejection, so a partially applied undo can
-     * never become durable — no journal entry is appended because the
-     * restored state produces no diff. Sub-results carry no further undo.
+     * Every inverse is preflighted against current state before the first
+     * write, so a rejected inverse returns that rejection with nothing
+     * changed. The apply then replays the stored order against a scratch
+     * engine seeded with the live state and publishes its final snapshot
+     * once, so observers never see a partial undo — the batch analogue of
+     * the composites' single publish. After a full preflight an apply-time
+     * rejection is an internal invariant failure thrown across the execute
+     * boundary, which restores the pre-batch state; sub-results carry no
+     * further undo.
      */
     private fun undoBatch(command: DomainCommand.UndoBatch): CommandResult {
-        val before = mutableWorkspace.value
-        val beforeTombstones = tombstones
-        val beforeTaskTags = taskTags
+        if (command.commands.isEmpty()) return CommandResult.Success("Undone")
         command.commands.forEach { inverse ->
-            val result = dispatch(inverse)
-            if (result is CommandResult.Rejected) {
-                mutableWorkspace.value = before
-                tombstones = beforeTombstones
-                taskTags = beforeTaskTags
-                return result
+            rejectUndoCommand(inverse)?.let { return it }
+        }
+        val scratch = InMemoryVaultRepository(
+            initial = mutableWorkspace.value,
+            now = now,
+            sourceDeviceId = sourceDeviceId,
+        )
+        // Tombstones are read-modify-write inside restore handlers, so the
+        // scratch engine starts from the live list; task-tag relations are
+        // reconciled once by the outer execute after this handler returns.
+        scratch.tombstones = tombstones
+        command.commands.forEach { inverse ->
+            val result = scratch.dispatch(inverse)
+            check(result !is CommandResult.Rejected) {
+                "UndoBatch inverse rejected after preflight"
             }
         }
+        mutableWorkspace.value = scratch.mutableWorkspace.value
+        tombstones = scratch.tombstones
         return CommandResult.Success("Undone")
     }
+
+    /**
+     * Preflights one stored inverse against current state without writing,
+     * mirroring the rejection paths of the corresponding handler. The
+     * repository only ever stores [DomainCommand.RestoreTaskStatus],
+     * [DomainCommand.RestoreTask], [DomainCommand.UpdateTask], and
+     * [DomainCommand.SetTaskTag]; any other shape fails closed.
+     */
+    private fun rejectUndoCommand(inverse: DomainCommand): CommandResult.Rejected? =
+        when (inverse) {
+            is DomainCommand.RestoreTaskStatus -> {
+                val current = mutableWorkspace.value
+                when {
+                    current.tasks.none { it.id == inverse.taskId } ->
+                        CommandResult.Rejected(
+                            RejectionReason.NOT_FOUND,
+                            "Task no longer exists.",
+                        )
+                    current.workflowStatuses.none { it.id == inverse.statusId } ->
+                        CommandResult.Rejected(
+                            RejectionReason.NOT_FOUND,
+                            "The previous workflow status no longer exists.",
+                        )
+                    else -> null
+                }
+            }
+            is DomainCommand.RestoreTask ->
+                if (mutableWorkspace.value.tasks.none { it.id == inverse.taskId }) {
+                    CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+                } else {
+                    null
+                }
+            is DomainCommand.SetTaskTag -> {
+                val current = mutableWorkspace.value
+                val task = current.tasks.firstOrNull { it.id == inverse.taskId }
+                when {
+                    task == null -> CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Task no longer exists.",
+                    )
+                    current.tags.none { it.id == inverse.tagId } -> CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Tag no longer exists.",
+                    )
+                    inverse.present &&
+                        inverse.tagId !in task.tagIds &&
+                        task.tagIds.size >= MAX_TASK_TAGS -> CommandResult.Rejected(
+                        RejectionReason.TAG_LIMIT_REACHED,
+                        "A task can contain up to $MAX_TASK_TAGS tags.",
+                    )
+                    else -> null
+                }
+            }
+            is DomainCommand.UpdateTask ->
+                (validateTaskUpdate(inverse) as? TaskUpdateValidation.Invalid)?.rejection
+            else -> CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This undo step cannot be replayed.",
+            )
+        }
 
     private fun rejectBulkSelection(ids: List<TaskId>): CommandResult.Rejected? = when {
         ids.isEmpty() -> CommandResult.Rejected(
@@ -1800,10 +1876,36 @@ class InMemoryVaultRepository internal constructor(
         }
     }
 
-    private fun updateTaskDetails(command: DomainCommand.UpdateTask): CommandResult {
+    private sealed interface TaskUpdateValidation {
+        data class Invalid(val rejection: CommandResult.Rejected) : TaskUpdateValidation
+
+        data class Valid(
+            val task: Task,
+            val existingReminder: Reminder?,
+            val requestedReminder: Reminder?,
+            val requestedMilestone: Milestone?,
+            val recurrenceMetadata: RecurrenceSeriesMetadata?,
+            val targetStatus: WorkflowStatus,
+        ) : TaskUpdateValidation
+    }
+
+    private fun invalidTaskUpdate(
+        reason: RejectionReason,
+        message: String,
+    ): TaskUpdateValidation.Invalid =
+        TaskUpdateValidation.Invalid(CommandResult.Rejected(reason, message))
+
+    /**
+     * Resolves and validates one [DomainCommand.UpdateTask] against current
+     * state without writing. Shared by [updateTaskDetails] and the
+     * [DomainCommand.UndoBatch] preflight so both paths reject identically.
+     */
+    private fun validateTaskUpdate(
+        command: DomainCommand.UpdateTask,
+    ): TaskUpdateValidation {
         val current = mutableWorkspace.value
         val task = current.tasks.firstOrNull { it.id == command.taskId }
-            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            ?: return invalidTaskUpdate(RejectionReason.NOT_FOUND, "Task no longer exists.")
         val existingReminder = current.reminders.firstOrNull { it.taskId == task.id }
         val requestedReminder = command.reminder?.copy(
             id = Reminder.primaryId(task.id),
@@ -1818,46 +1920,46 @@ class InMemoryVaultRepository internal constructor(
         val recurrence = command.recurrence
         val title = command.title.trim()
         when {
-            title.isEmpty() -> return CommandResult.Rejected(
+            title.isEmpty() -> return invalidTaskUpdate(
                 RejectionReason.EMPTY_TITLE,
                 "A task needs a title.",
             )
-            title.length > MAX_TASK_TITLE_LENGTH -> return CommandResult.Rejected(
+            title.length > MAX_TASK_TITLE_LENGTH -> return invalidTaskUpdate(
                 RejectionReason.TITLE_TOO_LONG,
                 "Keep the task title under $MAX_TASK_TITLE_LENGTH characters.",
             )
             command.description.length > MAX_TASK_DESCRIPTION_LENGTH ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.DESCRIPTION_TOO_LONG,
                     "Keep the description under $MAX_TASK_DESCRIPTION_LENGTH characters.",
                 )
             command.projectId != null && requestedProject == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.NOT_FOUND,
                     "That project no longer exists.",
                 )
             requestedProject?.archivedAt != null && task.projectId != requestedProject.id ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Restore that project before assigning new tasks to it.",
                 )
             command.milestoneId != null && requestedMilestone == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.NOT_FOUND,
                     "That milestone no longer exists.",
                 )
             requestedMilestone != null && requestedMilestone.projectId != command.projectId ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Choose a milestone from the task's project.",
                 )
             recurrence != null && command.due == null && task.start == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Add a due date before repeating this task.",
                 )
             recurrence?.count != null && recurrence.endDate != null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Choose either an occurrence count or an end date.",
                 )
@@ -1870,24 +1972,24 @@ class InMemoryVaultRepository internal constructor(
                     )
                 }
             } == true ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "The repeat end date cannot be before the due date.",
                 )
             command.estimate?.isNegative == true || command.estimate?.isZero == true ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Estimate must be greater than zero.",
                 )
             requestedReminder != null && command.due == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Add a due date before setting a reminder.",
                 )
             requestedReminder != existingReminder &&
                 !command.restorePastReminder &&
                 requestedReminder?.triggerAt?.instant?.isAfter(now()) == false ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.REMINDER_IN_PAST,
                     "Choose a reminder time in the future.",
                 )
@@ -1911,10 +2013,33 @@ class InMemoryVaultRepository internal constructor(
                     it.archivedAt == null
             }
             else -> current.workflowStatuses.firstOrNull { it.id == task.statusId }
-        } ?: return CommandResult.Rejected(
+        } ?: return invalidTaskUpdate(
             RejectionReason.INVALID_STATE,
             "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
         )
+        return TaskUpdateValidation.Valid(
+            task = task,
+            existingReminder = existingReminder,
+            requestedReminder = requestedReminder,
+            requestedMilestone = requestedMilestone,
+            recurrenceMetadata = recurrenceMetadata,
+            targetStatus = targetStatus,
+        )
+    }
+
+    private fun updateTaskDetails(command: DomainCommand.UpdateTask): CommandResult {
+        val plan = when (val validation = validateTaskUpdate(command)) {
+            is TaskUpdateValidation.Invalid -> return validation.rejection
+            is TaskUpdateValidation.Valid -> validation
+        }
+        val current = mutableWorkspace.value
+        val task = plan.task
+        val existingReminder = plan.existingReminder
+        val requestedReminder = plan.requestedReminder
+        val requestedMilestone = plan.requestedMilestone
+        val recurrenceMetadata = plan.recurrenceMetadata
+        val targetStatus = plan.targetStatus
+        val title = command.title.trim()
         if (
             task.title == title &&
             task.description == command.description &&
@@ -1940,7 +2065,7 @@ class InMemoryVaultRepository internal constructor(
             semanticStatus = targetStatus.semanticStatus,
             priority = command.priority,
             due = command.due,
-            recurrence = recurrence,
+            recurrence = command.recurrence,
             recurrenceSeriesId = recurrenceMetadata?.seriesId,
             recurrenceAnchor = recurrenceMetadata?.anchor,
             recurrenceOccurrenceIndex = recurrenceMetadata?.occurrenceIndex,

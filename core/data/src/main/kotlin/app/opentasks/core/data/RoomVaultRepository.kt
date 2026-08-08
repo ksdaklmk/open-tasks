@@ -160,32 +160,25 @@ class RoomVaultRepository(
     override suspend fun execute(command: DomainCommand): CommandResult {
         ready.await()
         return writeMutex.withLock {
-            try {
-                database.withTransaction {
-                    val mutationDao = database.backupMutationDao()
-                    val before = mutationDao.snapshots()
-                    val session = RoomBackupJournalSession(
-                        vaultId = VAULT_ID,
-                        stateDao = database.backupStateDao(),
-                        journalDao = database.backupJournalDao(),
-                        mutationDao = mutationDao,
-                        mutationCodec = BackupMutationCodec,
-                        operationId = { UUID.randomUUID().toString() },
-                        sourceDeviceId = deviceId.value,
-                        appendBoundary = backupJournalAppendBoundary,
-                    )
-                    val result = dispatch(command)
-                    session.appendChanges(
-                        before = before,
-                        after = mutationDao.snapshots(),
-                    )
-                    result
-                }
-            } catch (rejected: BatchUndoRejected) {
-                // Thrown by [undoBatch] so the aborted transaction rolls every
-                // partially applied inverse back; the caller still receives an
-                // ordinary rejection rather than an exception.
-                rejected.result
+            database.withTransaction {
+                val mutationDao = database.backupMutationDao()
+                val before = mutationDao.snapshots()
+                val session = RoomBackupJournalSession(
+                    vaultId = VAULT_ID,
+                    stateDao = database.backupStateDao(),
+                    journalDao = database.backupJournalDao(),
+                    mutationDao = mutationDao,
+                    mutationCodec = BackupMutationCodec,
+                    operationId = { UUID.randomUUID().toString() },
+                    sourceDeviceId = deviceId.value,
+                    appendBoundary = backupJournalAppendBoundary,
+                )
+                val result = dispatch(command)
+                session.appendChanges(
+                    before = before,
+                    after = mutationDao.snapshots(),
+                )
+                result
             }
         }
     }
@@ -1496,22 +1489,80 @@ class RoomVaultRepository(
 
     /**
      * Replays a repository-produced batch undo in its stored order inside the
-     * outer execute transaction. A rejected inverse aborts that transaction
-     * through [BatchUndoRejected], so Room rolls every earlier inverse back
-     * and the caller receives the rejection with no record or journal change
-     * — the same all-or-nothing rule the composites enforce by preflight,
-     * applied by rollback here because the stored command set is open-ended.
-     * Sub-results carry no further undo.
+     * outer execute transaction. Every inverse is preflighted against current
+     * state before the first write, so a rejected inverse returns that
+     * rejection with no record or journal change — the same all-or-nothing
+     * rule the composites follow. After a full preflight an apply-time
+     * rejection is an internal invariant failure thrown across the
+     * transaction boundary, which rolls the whole batch back; sub-results
+     * carry no further undo.
      */
     private suspend fun undoBatch(command: DomainCommand.UndoBatch): CommandResult {
         command.commands.forEach { inverse ->
+            rejectUndoCommand(inverse)?.let { return it }
+        }
+        command.commands.forEach { inverse ->
             val result = dispatch(inverse)
-            if (result is CommandResult.Rejected) throw BatchUndoRejected(result)
+            check(result !is CommandResult.Rejected) {
+                "UndoBatch inverse rejected after preflight"
+            }
         }
         return CommandResult.Success("Undone")
     }
 
-    private class BatchUndoRejected(val result: CommandResult.Rejected) : RuntimeException()
+    /**
+     * Preflights one stored inverse against current state without writing,
+     * mirroring the rejection paths of the corresponding handler. The
+     * repository only ever stores [DomainCommand.RestoreTaskStatus],
+     * [DomainCommand.RestoreTask], [DomainCommand.UpdateTask], and
+     * [DomainCommand.SetTaskTag]; any other shape fails closed.
+     */
+    private suspend fun rejectUndoCommand(inverse: DomainCommand): CommandResult.Rejected? =
+        when (inverse) {
+            is DomainCommand.RestoreTaskStatus -> when {
+                database.taskDao().getById(inverse.taskId.value) == null ->
+                    CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+                database.workspaceDao().getWorkflowStatus(inverse.statusId.value) == null ->
+                    CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "The previous workflow status no longer exists.",
+                    )
+                else -> null
+            }
+            is DomainCommand.RestoreTask ->
+                if (database.taskDao().getById(inverse.taskId.value) == null) {
+                    CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+                } else {
+                    null
+                }
+            is DomainCommand.SetTaskTag -> {
+                val task = currentTask(inverse.taskId)
+                when {
+                    task == null -> CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Task no longer exists.",
+                    )
+                    database.workspaceDao().getTagById(inverse.tagId.value) == null ->
+                        CommandResult.Rejected(
+                            RejectionReason.NOT_FOUND,
+                            "Tag no longer exists.",
+                        )
+                    inverse.present &&
+                        inverse.tagId !in task.tagIds &&
+                        task.tagIds.size >= MAX_TASK_TAGS -> CommandResult.Rejected(
+                        RejectionReason.TAG_LIMIT_REACHED,
+                        "A task can contain up to $MAX_TASK_TAGS tags.",
+                    )
+                    else -> null
+                }
+            }
+            is DomainCommand.UpdateTask ->
+                (validateTaskUpdate(inverse) as? TaskUpdateValidation.Invalid)?.rejection
+            else -> CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "This undo step cannot be replayed.",
+            )
+        }
 
     private fun rejectBulkSelection(ids: List<TaskId>): CommandResult.Rejected? = when {
         ids.isEmpty() -> CommandResult.Rejected(
@@ -1890,9 +1941,36 @@ class RoomVaultRepository(
         )
     }
 
-    private suspend fun updateTaskDetails(command: DomainCommand.UpdateTask): CommandResult {
+    private sealed interface TaskUpdateValidation {
+        data class Invalid(val rejection: CommandResult.Rejected) : TaskUpdateValidation
+
+        data class Valid(
+            val task: Task,
+            val existingReminder: Reminder?,
+            val requestedReminder: Reminder?,
+            val requestedProject: ProjectEntity?,
+            val requestedMilestone: MilestoneEntity?,
+            val recurrenceMetadata: RecurrenceSeriesMetadata?,
+            val targetStatus: WorkflowStatus,
+        ) : TaskUpdateValidation
+    }
+
+    private fun invalidTaskUpdate(
+        reason: RejectionReason,
+        message: String,
+    ): TaskUpdateValidation.Invalid =
+        TaskUpdateValidation.Invalid(CommandResult.Rejected(reason, message))
+
+    /**
+     * Resolves and validates one [DomainCommand.UpdateTask] against current
+     * state without writing. Shared by [updateTaskDetails] and the
+     * [DomainCommand.UndoBatch] preflight so both paths reject identically.
+     */
+    private suspend fun validateTaskUpdate(
+        command: DomainCommand.UpdateTask,
+    ): TaskUpdateValidation {
         val task = currentTask(command.taskId)
-            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+            ?: return invalidTaskUpdate(RejectionReason.NOT_FOUND, "Task no longer exists.")
         val existingReminder = database.workspaceDao()
             .getReminderForTask(task.id.value)
             ?.toModel()
@@ -1909,48 +1987,48 @@ class RoomVaultRepository(
         val recurrence = command.recurrence
         val title = command.title.trim()
         when {
-            title.isEmpty() -> return CommandResult.Rejected(
+            title.isEmpty() -> return invalidTaskUpdate(
                 RejectionReason.EMPTY_TITLE,
                 "A task needs a title.",
             )
-            title.length > MAX_TASK_TITLE_LENGTH -> return CommandResult.Rejected(
+            title.length > MAX_TASK_TITLE_LENGTH -> return invalidTaskUpdate(
                 RejectionReason.TITLE_TOO_LONG,
                 "Keep the task title under $MAX_TASK_TITLE_LENGTH characters.",
             )
             command.description.length > MAX_TASK_DESCRIPTION_LENGTH ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.DESCRIPTION_TOO_LONG,
                     "Keep the description under $MAX_TASK_DESCRIPTION_LENGTH characters.",
                 )
             command.projectId != null && requestedProject == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.NOT_FOUND,
                     "That project no longer exists.",
                 )
             requestedProject?.archivedAtEpochMillis != null &&
                 task.projectId?.value != requestedProject.id ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Restore that project before assigning new tasks to it.",
                 )
             command.milestoneId != null && requestedMilestone == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.NOT_FOUND,
                     "That milestone no longer exists.",
                 )
             requestedMilestone != null &&
                 requestedMilestone.projectId != command.projectId?.value ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Choose a milestone from the task's project.",
                 )
             recurrence != null && command.due == null && task.start == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Add a due date before repeating this task.",
                 )
             recurrence?.count != null && recurrence.endDate != null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Choose either an occurrence count or an end date.",
                 )
@@ -1961,24 +2039,24 @@ class RoomVaultRepository(
                     )
                 }
             } == true ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "The repeat end date cannot be before the due date.",
                 )
             command.estimate?.isNegative == true || command.estimate?.isZero == true ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Estimate must be greater than zero.",
                 )
             requestedReminder != null && command.due == null ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Add a due date before setting a reminder.",
                 )
             requestedReminder != existingReminder &&
                 !command.restorePastReminder &&
                 requestedReminder?.triggerAt?.instant?.isAfter(now()) == false ->
-                return CommandResult.Rejected(
+                return invalidTaskUpdate(
                     RejectionReason.REMINDER_IN_PAST,
                     "Choose a reminder time in the future.",
                 )
@@ -2006,10 +2084,34 @@ class RoomVaultRepository(
                     }
                     ?.toModel()
             else -> database.workspaceDao().getWorkflowStatus(task.statusId.value)?.toModel()
-        } ?: return CommandResult.Rejected(
+        } ?: return invalidTaskUpdate(
             RejectionReason.INVALID_STATE,
             "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
         )
+        return TaskUpdateValidation.Valid(
+            task = task,
+            existingReminder = existingReminder,
+            requestedReminder = requestedReminder,
+            requestedProject = requestedProject,
+            requestedMilestone = requestedMilestone,
+            recurrenceMetadata = recurrenceMetadata,
+            targetStatus = targetStatus,
+        )
+    }
+
+    private suspend fun updateTaskDetails(command: DomainCommand.UpdateTask): CommandResult {
+        val plan = when (val validation = validateTaskUpdate(command)) {
+            is TaskUpdateValidation.Invalid -> return validation.rejection
+            is TaskUpdateValidation.Valid -> validation
+        }
+        val task = plan.task
+        val existingReminder = plan.existingReminder
+        val requestedReminder = plan.requestedReminder
+        val requestedProject = plan.requestedProject
+        val requestedMilestone = plan.requestedMilestone
+        val recurrenceMetadata = plan.recurrenceMetadata
+        val targetStatus = plan.targetStatus
+        val title = command.title.trim()
         if (
             task.title == title &&
             task.description == command.description &&
@@ -2035,7 +2137,7 @@ class RoomVaultRepository(
             semanticStatus = targetStatus.semanticStatus,
             priority = command.priority,
             due = command.due,
-            recurrence = recurrence,
+            recurrence = command.recurrence,
             recurrenceSeriesId = recurrenceMetadata?.seriesId,
             recurrenceAnchor = recurrenceMetadata?.anchor,
             recurrenceOccurrenceIndex = recurrenceMetadata?.occurrenceIndex,
