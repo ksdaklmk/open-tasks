@@ -1,8 +1,8 @@
 # Open Tasks Handoff
 
 - Last updated: 9 August 2026
-- Branch: `main` at `4b33866` plus this checkpoint docs commit. Local is
-  ahead of `origin/main` (`8c08570`) by 33 commits, not
+- Branch: `main` at `4fba6e2` plus this checkpoint docs commit. Local is
+  ahead of `origin/main` (`8c08570`) by 36 commits, not
   yet pushed (matching the established Stage 6 practice; a push triggers
   a CI run).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
@@ -11,25 +11,28 @@
   red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
   1. **Stage 6 execution — Tasks 1–12 COMPLETE and independently
-     reviewed; the whole-stage review, the open Task 6 product decision,
-     and controller-owned Task 13 remain.**
+     reviewed; Task 13 (approved Ember launcher icon) is PLANNED and PAUSED
+     before implementation; the whole-stage review, the open Task 6 product
+     decision, and controller-owned Task 14 remain.**
      Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
+     launcher-icon authority:
+     `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`;
      plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
      (audited revisions committed in `fc4aad8`, the recorded Stage 6
      implementation-base SHA). Execution ledger with full per-task
      review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 Tasks 9–12 checkpoint below for current state, the
-     one open user decision, and exact resume
-     instructions. Execution mode (user
+     See the Stage 6 Tasks 9–12 closure + Task 13 plan checkpoint below for
+     current state, the one open user decision, and exact resume instructions.
+     Execution mode (user
      ruling, recorded in the plan header): Tasks 2–11 and Task 12 phase 1 via
      `superpowers:subagent-driven-development` — fresh implementer per
      task; Task 12 phase 2 completed inline on the fresh go; independent
      task review per boundary, no-subagent/no-fork clause in every
-     implementer dispatch, Task 13 controller-owned; no task before Task 13
-     runs a device suite. The whole-stage review and controller-owned Task 13
-     have not started.
+     implementer dispatch, Task 14 controller-owned; no task before Task 14
+     runs a device suite. Task 13, the whole-stage review, and controller-owned
+     Task 14 have not started.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -226,12 +229,12 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 6 Tasks 9–12 checkpoint — 9 August 2026
+## Stage 6 Tasks 9–12 closure + Task 13 plan checkpoint — 9 August 2026
 
 Execution resumed from checkpoint `89cff2c` with the Stage 6 plan, ignored
 SDD ledger, direct-to-`main` rule, and independent-review-per-boundary
 discipline. Tasks 9–12 are complete and review-clean. No device suite has run;
-Task 13 still owns all connected testing.
+Task 14 still owns all connected testing.
 
 - Task 9 (`f354deb`, fix `3c0b3f6`) added the guided weekly review: pure
   overdue > stale > unscheduled queueing with the exclusive 14-day boundary,
@@ -272,7 +275,16 @@ Task 13 still owns all connected testing.
   review returned Ready with no Critical, Important, or Minor findings.
   The drag instrumentation compiles and covers a root-bounds drop plus a
   callback replacement during an active gesture. On-device nested scrolling,
-  drag, popup, and TalkBack behaviour remain correctly deferred to Task 13.
+  drag, popup, and TalkBack behaviour remain correctly deferred to Task 14.
+- The user supplied and approved the Ember launcher icon package at
+  `/Users/kk/Downloads/deliverables-1a-ember/`. All 18 files were inspected.
+  The approved design (`8cf75fe`) and amended fourteen-task Stage 6 plan
+  (`4fba6e2`) make the icon standalone Task 13 and renumber qualification to
+  Task 14. Task 13 changes only the three differing adaptive resources
+  (foreground vector, monochrome vector, and background colour); the existing
+  adaptive definitions already match. Legacy PNG fallbacks are excluded at
+  minSdk 36, and the 512 px listing image stays with the parked Play Console
+  work. No app resource was changed and Task 13 has not started.
 
 Every checkpoint above passed its focused tests, named Android-test compile
 targets, `git diff --check`, and the full
@@ -286,11 +298,18 @@ START` rule restarts a manually stopped task timer while the focus phase is
 active. Keep the pinned rule, or make a manual task-timer stop end the focus
 cycle. Resolve this before or at the whole-stage final review.
 
-**Next:** run the whole-stage final review over the recorded
-`fc4aad8..HEAD` range, resolve its findings and the Task 6 decision, and only
-then execute controller-owned Task 13. No device suite before Task 13.
+**PAUSED by user instruction before Task 13 implementation.** On a fresh go,
+execute Task 13 exactly from the amended plan and icon design: replace only
+the three named adaptive resources, run its non-device gates, commit, and
+complete the independent task review. Then run the whole-stage final review
+over the recorded `fc4aad8..HEAD` range, resolve its findings and the Task 6
+decision, and only then execute controller-owned Task 14. No device suite
+before Task 14.
 
 ## Superseded: Stage 6 Tasks 1–8 checkpoint — 8 August 2026
+
+Historical references to Stage 6 Task 13 in the superseded checkpoints below
+mean qualification, which the 9 August Ember amendment renumbered to Task 14.
 
 Execution ran from base `fc4aad8` directly on `main`. Task 1 was
 executed inline; Tasks 2–8 ran subagent-driven per the user ruling
