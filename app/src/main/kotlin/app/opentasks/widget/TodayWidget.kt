@@ -56,6 +56,7 @@ import app.opentasks.reminders.ReminderIntents
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -317,6 +318,52 @@ internal class StopGatedWriter {
     }
 }
 
+/** Invalidates captured widget actions without delaying the invalidating caller. */
+internal class WidgetActionGate {
+    private val generation = AtomicLong()
+    private val dispatchGate = Mutex()
+
+    fun capture(): Long = generation.get()
+
+    fun invalidate() {
+        generation.incrementAndGet()
+    }
+
+    suspend fun dispatch(
+        capturedGeneration: Long,
+        isAuthorized: () -> Boolean,
+        action: suspend () -> Unit,
+    ) {
+        dispatchGate.withLock {
+            if (isAuthorized() && capturedGeneration == generation.get()) action()
+        }
+    }
+}
+
+internal suspend fun WidgetActionGate.dispatchCompletion(
+    capturedGeneration: Long,
+    snapshot: WorkspaceSnapshot,
+    taskId: String,
+    today: LocalDate,
+    zone: ZoneId,
+    now: Instant,
+    isAuthorized: () -> Boolean,
+    execute: suspend (DomainCommand) -> Unit,
+) {
+    val completable = computeTodayProjection(
+        snapshot = snapshot,
+        today = today,
+        zone = zone,
+        now = now,
+        titlesPermitted = true,
+    ).focusEntries.any { it.taskId == taskId && it.completable }
+    if (completable) {
+        dispatch(capturedGeneration, isAuthorized) {
+            execute(DomainCommand.CompleteTask(TaskId(taskId)))
+        }
+    }
+}
+
 /**
  * Publishes [TodayWidgetProjection] into Glance state for every placed
  * [TodayWidget].
@@ -335,10 +382,12 @@ internal class StopGatedWriter {
 class TodayWidgetPublisher(
     private val context: Context,
     private val repository: VaultRepository,
+    private val actionAuthorized: () -> Boolean,
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val writer = StopGatedWriter()
+    private val actionGate = WidgetActionGate()
     private var collection: Job? = null
 
     // Read from the internal snapshot collection and written from whatever
@@ -367,7 +416,10 @@ class TodayWidgetPublisher(
 
     /** Stops collection and clears titles -- but not counts -- from Glance state. */
     fun stop() {
-        synchronized(activeLock) { if (active === this) active = null }
+        synchronized(activeLock) {
+            actionGate.invalidate()
+            if (active === this) active = null
+        }
         collection?.cancel()
         collection = null
         scope.launch { writer.stop { clearTitles() } }
@@ -391,6 +443,7 @@ class TodayWidgetPublisher(
      * next unrelated workspace change.
      */
     fun setTitlesPermitted(titlesPermitted: Boolean) {
+        if (!titlesPermitted) actionGate.invalidate()
         if (this.titlesPermitted == titlesPermitted) return
         this.titlesPermitted = titlesPermitted
         republish()
@@ -399,29 +452,32 @@ class TodayWidgetPublisher(
     /**
      * Re-verifies [taskId] against a freshly read workspace before acting,
      * so a stale, concealed, missing, blocked, or no-longer-today tap from
-     * the widget surface can never complete a task: [titlesPermitted] must
-     * currently be `true` and [taskId] must still appear in the recomputed
-     * projection's [TodayWidgetProjection.focusEntries] as a completable
-     * row. Only then is [DomainCommand.CompleteTask] executed; a repository
-     * rejection is not distinguished from "not authorised" -- either way
-     * this only republishes the latest truth through the same gated write
-     * [republish] uses, so nothing here can land after [stop]'s clear.
+     * the widget surface can never complete a task. The captured action
+     * generation must still be current, the live [actionAuthorized]
+     * predicate must permit the action, and [taskId] must still appear in
+     * the recomputed projection as a completable row. A repository rejection
+     * is not distinguished from "not authorised"; either way the latest
+     * truth is republished through [writer].
      */
-    fun completeTask(taskId: String) {
+    private fun captureCompletion(taskId: String): (() -> Unit)? {
+        if (!actionAuthorized()) return null
+        val capturedGeneration = actionGate.capture()
+        return { completeTask(taskId, capturedGeneration) }
+    }
+
+    private fun completeTask(taskId: String, capturedGeneration: Long) {
         scope.launch {
             val snapshot = repository.observeWorkspace().value
-            val projection = computeTodayProjection(
+            actionGate.dispatchCompletion(
+                capturedGeneration = capturedGeneration,
                 snapshot = snapshot,
+                taskId = taskId,
                 today = LocalDate.now(zone),
                 zone = zone,
                 now = Instant.now(),
-                titlesPermitted = titlesPermitted,
+                isAuthorized = actionAuthorized,
+                execute = repository::execute,
             )
-            val authorized = titlesPermitted &&
-                projection.focusEntries.any { it.taskId == taskId && it.completable }
-            if (authorized) {
-                repository.execute(DomainCommand.CompleteTask(TaskId(taskId)))
-            }
             val latest = repository.observeWorkspace().value
             writer.write { writeProjection(latest) }
         }
@@ -500,8 +556,8 @@ class TodayWidgetPublisher(
          * one. A no-op when no publisher is active.
          */
         fun completeActiveTask(taskId: String) {
-            val publisher = synchronized(activeLock) { active }
-            publisher?.completeTask(taskId)
+            val action = synchronized(activeLock) { active?.captureCompletion(taskId) }
+            action?.invoke()
         }
     }
 }

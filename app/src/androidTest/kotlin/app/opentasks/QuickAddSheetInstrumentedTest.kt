@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.hasClickAction
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
@@ -93,5 +96,44 @@ class QuickAddSheetInstrumentedTest {
 
         assertTrue(imeVisible.get())
         assertEquals("Reachable task", submittedTitle.get())
+    }
+
+    @Test
+    fun clearSuggestionIsFortyEightDpAndKeepsTheUnchangedTitle() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                QuickAddSheet(onDismiss = {}, onAdd = { _, _ -> })
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title").performTextInput("Plan tomorrow")
+        composeRule.onNodeWithTag("quick-add-date-clear", useUnmergedTree = true)
+            .assertWidthIsAtLeast(48.dp)
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+
+        composeRule.onNodeWithTag("quick-add-date-chip").assertDoesNotExist()
+        composeRule.onNodeWithTag("quick-add-title")
+            .assertTextContains("Plan tomorrow", substring = true)
+    }
+
+    @Test
+    fun clearingAnAppliedSuggestionSubmitsWithoutADueDate() {
+        val submittedDue = AtomicReference<app.opentasks.core.model.ZonedMoment?>()
+        composeRule.setContent {
+            OpenTasksTheme {
+                QuickAddSheet(
+                    onDismiss = {},
+                    onAdd = { _, due -> submittedDue.set(due) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement("Plan tomorrow")
+        composeRule.onNodeWithTag("quick-add-date-chip").performClick()
+        composeRule.onNodeWithTag("quick-add-date-clear").performClick()
+        composeRule.onNode(hasText("Add task") and hasClickAction()).performClick()
+
+        assertEquals(null, submittedDue.get())
     }
 }

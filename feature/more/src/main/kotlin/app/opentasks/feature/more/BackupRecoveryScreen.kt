@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +41,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -55,6 +57,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -802,14 +805,22 @@ private fun MarkdownProjectSelectionSheet(
             )
             Spacer(Modifier.height(12.dp))
             projects.forEach { project ->
-                TextButton(
-                    onClick = { selected = project.id },
+                val isSelected = selected == project.id
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.RadioButton,
+                            onClick = { selected = project.id },
+                        )
                         .testTag("markdown-export-project-${project.id.value}"),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(project.name, modifier = Modifier.fillMaxWidth())
+                    RadioButton(selected = isSelected, onClick = null)
+                    Spacer(Modifier.width(12.dp))
+                    Text(project.name, style = MaterialTheme.typography.bodyLarge)
                 }
             }
             Spacer(Modifier.height(16.dp))

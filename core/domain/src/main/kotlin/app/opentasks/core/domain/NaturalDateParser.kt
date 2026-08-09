@@ -8,6 +8,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.Locale
 
 data class NaturalDateMatch(
     val startIndex: Int,
@@ -76,8 +77,8 @@ private operator fun MatchResult.get(name: String): String? =
 
 private fun resolve(matchResult: MatchResult, now: Instant, zone: ZoneId): ZonedMoment? = try {
     val nowZoned = ZonedDateTime.ofInstant(now, zone)
-    val dateToken = matchResult["date"]?.lowercase()
-    val timeToken = (matchResult["time"] ?: matchResult["time2"])?.lowercase()
+    val dateToken = matchResult["date"]?.lowercase(Locale.ROOT)
+    val timeToken = (matchResult["time"] ?: matchResult["time2"])?.lowercase(Locale.ROOT)
 
     when {
         dateToken != null -> {
@@ -136,6 +137,7 @@ private fun soonestFutureOffset(target: DayOfWeek, from: DayOfWeek): Long {
 private fun parseTime(text: String): LocalTime? {
     TIME_AMPM_REGEX.matchEntire(text)?.let { match ->
         val hour = match.groupValues[1].toLongOrNull()?.toInt() ?: return null
+        if (hour !in 1..12) return null
         val isPm = match.groupValues[2] == "pm"
         val adjustedHour = when {
             !isPm && hour == 12 -> 0

@@ -6,6 +6,7 @@ import org.junit.Test
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.Locale
 
 class NaturalDateParserTest {
 
@@ -46,6 +47,52 @@ class NaturalDateParserTest {
     fun relativeDaysResolveAtFivePm() {
         val match = parseNaturalDate("send report in 3 days", now, zone)
         assertEquals(ZonedDateTime.of(2026, 8, 8, 17, 0, 0, 0, zone), dueOf(match))
+    }
+
+    @Test
+    fun uppercaseGrammarIsIndependentOfTheDefaultLocale() {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            assertEquals(
+                ZonedDateTime.of(2026, 8, 7, 17, 0, 0, 0, zone),
+                dueOf(parseNaturalDate("PLAN FRIDAY", now, zone)),
+            )
+            assertEquals(
+                ZonedDateTime.of(2026, 8, 19, 17, 0, 0, 0, zone),
+                dueOf(parseNaturalDate("REPORT IN 2 WEEKS", now, zone)),
+            )
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun twelveHourTimesRejectHoursOutsideOneThroughTwelve() {
+        listOf("0am", "0pm", "13am", "13pm").forEach { time ->
+            assertNull(time, parseNaturalDate("meet $time", now, zone))
+        }
+    }
+
+    @Test
+    fun pinnedGrammarCasesResolveDeterministically() {
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 7, 17, 0, 0, 0, zone),
+            dueOf(parseNaturalDate("tomorrow then friday", now, zone)),
+        )
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 5, 11, 0, 0, 0, zone),
+            dueOf(parseNaturalDate("call at 11am", now, zone)),
+        )
+        val afterFive = ZonedDateTime.of(2026, 8, 5, 18, 0, 0, 0, zone).toInstant()
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 5, 17, 0, 0, 0, zone),
+            dueOf(parseNaturalDate("finish today", afterFive, zone)),
+        )
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 19, 17, 0, 0, 0, zone),
+            dueOf(parseNaturalDate("report in 2 weeks", now, zone)),
+        )
     }
 
     @Test

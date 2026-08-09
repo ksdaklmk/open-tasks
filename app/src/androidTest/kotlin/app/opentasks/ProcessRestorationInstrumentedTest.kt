@@ -22,7 +22,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.ZonedMoment
 import app.opentasks.lock.AppLockSettings
+import java.time.LocalDate
+import java.time.ZoneId
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
@@ -84,6 +88,35 @@ class ProcessRestorationInstrumentedTest {
 
         composeRule.onNodeWithTag("quick-add-title")
             .assertTextContains("Restored quick-add draft", substring = true)
+    }
+
+    @Test
+    fun quickAddAppliedDueRestoresAfterSavedInstanceStateRecreation() {
+        val zone = ZoneId.systemDefault()
+        val expectedDue = ZonedMoment(
+            instant = LocalDate.now(zone).plusDays(1).atTime(16, 0).atZone(zone).toInstant(),
+            zoneId = zone.id,
+        )
+        val submitted = AtomicReference<Pair<String, ZonedMoment?>>()
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            OpenTasksTheme {
+                QuickAddSheet(
+                    onDismiss = {},
+                    onAdd = { title, due -> submitted.set(title to due) },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title")
+            .performTextReplacement("Restored due tomorrow 4pm")
+        composeRule.onNodeWithTag("quick-add-date-chip").performClick()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithText("Add task").performClick()
+
+        assertEquals("Restored due", submitted.get().first)
+        assertEquals(expectedDue, submitted.get().second)
     }
 
     @Test

@@ -359,11 +359,12 @@ object AppModule {
         // finishes -- which is also why this needs no new member on
         // `ActiveVaultSession` and no change to its production caller
         // `ActiveVaultServices`.
+        fun titlesPermitted() = !(appLockSettings.titlePrivacy || appLockController.locked.value)
         val todayWidgetPublisher = TodayWidgetPublisher(
             context = context,
             repository = runtime.repository,
+            actionAuthorized = ::titlesPermitted,
         )
-        fun titlesPermitted() = !(appLockSettings.titlePrivacy || appLockController.locked.value)
         todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
         // Neither source alone is enough: a lock/unlock must republish even
         // between title-privacy changes, and a title-privacy change must

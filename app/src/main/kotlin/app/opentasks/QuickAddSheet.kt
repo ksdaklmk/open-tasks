@@ -1,6 +1,5 @@
 package app.opentasks
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -18,6 +19,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -31,15 +33,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.domain.parseNaturalDate
 import app.opentasks.core.model.ZonedMoment
@@ -56,13 +57,22 @@ fun QuickAddSheet(
     initialTitle: String = "",
 ) {
     var title by rememberSaveable { mutableStateOf(initialTitle) }
-    var appliedDue by remember { mutableStateOf<ZonedMoment?>(null) }
+    var appliedDueEpochMillis by rememberSaveable { mutableStateOf<Long?>(null) }
+    var appliedDueZoneId by rememberSaveable { mutableStateOf<String?>(null) }
+    var suppressedSuggestionTitle by rememberSaveable { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val suggestion = remember(title) {
-        parseNaturalDate(title, Instant.now(), ZoneId.systemDefault())
+    val appliedDue = appliedDueEpochMillis?.let { epochMillis ->
+        appliedDueZoneId?.let { zoneId -> ZonedMoment(Instant.ofEpochMilli(epochMillis), zoneId) }
+    }
+    val suggestion = remember(title, suppressedSuggestionTitle) {
+        if (title == suppressedSuggestionTitle) {
+            null
+        } else {
+            parseNaturalDate(title, Instant.now(), ZoneId.systemDefault())
+        }
     }
     val suggestedDue = suggestion?.due ?: appliedDue
 
@@ -111,41 +121,51 @@ fun QuickAddSheet(
             )
             if (suggestedDue != null) {
                 Spacer(Modifier.height(12.dp))
-                AssistChip(
-                    onClick = {
-                        val matched = suggestion
-                        if (matched != null) {
-                            appliedDue = matched.due
-                            title = (
-                                title.substring(0, matched.startIndex) +
-                                    title.substring(matched.endIndex)
-                                )
-                                .replace(Regex("""\s+"""), " ")
-                                .trim()
-                        }
-                    },
-                    label = {
-                        Text(
-                            stringResource(
-                                R.string.quick_add_date_suggestion,
-                                DATE_SUGGESTION_FORMATTER.format(
-                                    suggestedDue.instant.atZone(suggestedDue.zone()),
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(
+                        onClick = {
+                            val matched = suggestion
+                            if (matched != null) {
+                                appliedDueEpochMillis = matched.due.instant.toEpochMilli()
+                                appliedDueZoneId = matched.due.zoneId
+                                title = (
+                                    title.substring(0, matched.startIndex) +
+                                        title.substring(matched.endIndex)
+                                    )
+                                    .replace(Regex("""\s+"""), " ")
+                                    .trim()
+                            }
+                        },
+                        label = {
+                            Text(
+                                stringResource(
+                                    R.string.quick_add_date_suggestion,
+                                    DATE_SUGGESTION_FORMATTER.format(
+                                        suggestedDue.instant.atZone(suggestedDue.zone()),
+                                    ),
                                 ),
-                            ),
-                        )
-                    },
-                    modifier = Modifier.testTag("quick-add-date-chip"),
-                    trailingIcon = {
+                            )
+                        },
+                        modifier = Modifier.testTag("quick-add-date-chip"),
+                    )
+                    IconButton(
+                        onClick = {
+                            if (suggestion != null) {
+                                suppressedSuggestionTitle = title
+                            } else {
+                                appliedDueEpochMillis = null
+                                appliedDueZoneId = null
+                            }
+                        },
+                        modifier = Modifier.testTag("quick-add-date-clear"),
+                    ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
                             contentDescription =
                                 stringResource(R.string.quick_add_date_suggestion_clear),
-                            modifier = Modifier
-                                .testTag("quick-add-date-clear")
-                                .clickable { appliedDue = null },
                         )
-                    },
-                )
+                    }
+                }
             }
             Spacer(Modifier.height(16.dp))
             Row(

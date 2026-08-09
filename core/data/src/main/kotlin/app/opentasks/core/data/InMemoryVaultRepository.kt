@@ -352,40 +352,36 @@ class InMemoryVaultRepository internal constructor(
                 "The imported tasks would exceed backup limits.",
             )
         }
-        publishProjects(
-            projects = current.projects + plan.projects.map { it.project },
-            workflowStatuses = current.workflowStatuses + plan.projects.flatMap { it.statuses },
-        )
+        val activityEntries = (
+            plan.projects.map { it.activity } +
+                plan.tasks.map { it.activity }
+            ).fold(current.activityEntries) { entries, activity ->
+                entries.appendedActivity(
+                    id = activity.id,
+                    taskId = activity.taskId,
+                    projectId = activity.projectId,
+                    kind = activity.kind,
+                    body = activity.body,
+                    at = activity.createdAt,
+                )
+            }
         publish(
             tasks = current.tasks + plan.tasks.map { it.task },
+            projects = current.projects + plan.projects.map { it.project },
+            workflowStatuses = current.workflowStatuses + plan.projects.flatMap { it.statuses },
             tags = current.tags + plan.tags,
+            activityEntries = activityEntries,
             at = at,
         )
         val projectReceipts = plan.projects.map { planned ->
-            val activityId = recordActivity(
-                taskId = null,
-                projectId = planned.project.id,
-                kind = ActivityKind.RECORD_CREATED,
-                body = "Created",
-                at = at,
-                id = planned.activity.id,
-            )
-            ImportedProjectReceipt(planned.project, planned.statuses, activityId)
+            ImportedProjectReceipt(planned.project, planned.statuses, planned.activity.id)
         }
         val taskReceipts = plan.tasks.map { planned ->
-            val activityId = recordActivity(
-                taskId = planned.task.id,
-                projectId = planned.task.projectId,
-                kind = ActivityKind.RECORD_CREATED,
-                body = "Created",
-                at = at,
-                id = planned.activity.id,
-            )
             ImportedTaskReceipt(
                 taskId = planned.task.id,
                 expectedRevision = planned.task.revision,
                 expectedTagIds = planned.task.tagIds,
-                activityEntryId = activityId,
+                activityEntryId = planned.activity.id,
             )
         }
         val count = plan.tasks.size

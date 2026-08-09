@@ -11,6 +11,7 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -19,6 +20,11 @@ import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasTextExactly
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -39,6 +45,8 @@ import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.BackupGeneration
 import app.opentasks.core.model.BackupPackageInfo
 import app.opentasks.core.model.BackupUnavailableReason
+import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecoveryPassphraseValidation
 import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupStatus
@@ -762,6 +770,48 @@ class BackupRecoveryScreenInstrumentedTest {
             "Connect an encrypted Google Drive backup before adding attachments.",
         ).assertExists()
         composeRule.onNodeWithTag("attachments-delete-content").assertDoesNotExist()
+    }
+
+    @Test
+    fun markdownProjectSelectionMovesAndExportsTheSelectedProject() {
+        val exported = AtomicReference<ProjectId>()
+        val first = OpenTasksFixtures.studioProject
+        val second = OpenTasksFixtures.taxProject
+        composeRule.setContent {
+            OpenTasksTheme {
+                BackupRecoveryScreen(
+                    status = AndroidBackupStatus.NotPrepared,
+                    projects = listOf(first, second),
+                    validatePassphrase = { _, _ -> RecoveryPassphraseValidation.Valid },
+                    onPrepare = {},
+                    onRetry = {},
+                    onOpenSystemSettings = {},
+                    onExportMarkdown = exported::set,
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("markdown-export").performScrollTo().performClick()
+        val firstRow = composeRule.onNodeWithTag("markdown-export-project-${first.id.value}")
+        val secondRow = composeRule.onNodeWithTag("markdown-export-project-${second.id.value}")
+        firstRow
+            .assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton),
+            )
+            .assertIsNotSelected()
+            .performClick()
+            .assertIsSelected()
+        secondRow.assertIsNotSelected().performClick().assertIsSelected()
+        firstRow.assertIsNotSelected()
+
+        composeRule.onNode(
+            hasTextExactly("Export Markdown") and
+                hasClickAction() and
+                hasAnyAncestor(hasTestTag("markdown-export-project-sheet")),
+        ).performClick()
+
+        assertEquals(second.id, exported.get())
     }
 
     @androidx.compose.runtime.Composable

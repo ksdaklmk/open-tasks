@@ -71,6 +71,54 @@ class InMemoryImportTasksTest {
     }
 
     @Test
+    fun forwardImportPublishesOneCompleteSnapshot() = runBlocking {
+        withTimeout(10_000) {
+            val repository = InMemoryVaultRepository(now = fixedNow)
+            val observed = mutableListOf<app.opentasks.core.model.WorkspaceSnapshot>()
+            val observer = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                repository.observeWorkspace().drop(1).collect(observed::add)
+            }
+
+            val result = repository.execute(
+                DomainCommand.ImportTasks(
+                    listOf(
+                        row(1, "First atomic", project = "Atomic project", tags = listOf("Atomic tag")),
+                        row(2, "Second atomic", project = "Atomic project", tags = listOf("Atomic tag")),
+                    ),
+                ),
+            ) as CommandResult.Success
+            observer.cancel()
+
+            assertEquals(1, observed.size)
+            val final = observed.single()
+            val receipt = (result.undo as DomainCommand.RemoveImportedRecords).receipt
+            val project = receipt.projects.single()
+            assertTrue(final.projects.any { it.id == project.project.id })
+            assertEquals(
+                project.statuses.toSet(),
+                final.workflowStatuses.filter { it.projectId == project.project.id }.toSet(),
+            )
+            assertEquals(
+                receipt.tasks.map { it.taskId }.toSet(),
+                final.tasks.filter { it.projectId == project.project.id }.map { it.id }.toSet(),
+            )
+            assertEquals(
+                receipt.tasks.map { it.activityEntryId }.toSet() + project.activityEntryId,
+                final.activityEntries
+                    .filter { it.projectId == project.project.id }
+                    .map { it.id }
+                    .toSet(),
+            )
+            val tag = receipt.tags.single().tag
+            assertTrue(final.tags.any { it.id == tag.id })
+            assertTrue(
+                final.tasks.filter { it.id in receipt.tasks.map { task -> task.taskId } }
+                    .all { tag.id in it.tagIds },
+            )
+        }
+    }
+
+    @Test
     fun exportedTaskWithExactStatusImportsIntoFreshProjectDefaults() = runBlocking {
         withTimeout(10_000) {
             val sourceProject = Project(
