@@ -1,8 +1,8 @@
 # Open Tasks Handoff
 
 - Last updated: 9 August 2026
-- Branch: `main` at `4fba6e2` plus this checkpoint docs commit. Local is
-  ahead of `origin/main` (`8c08570`) by 36 commits, not
+- Branch: `main` at `ade3634` plus this checkpoint docs commit. Local is
+  ahead of `origin/main` (`8c08570`) by 38 commits, not
   yet pushed (matching the established Stage 6 practice; a push triggers
   a CI run).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
@@ -10,10 +10,10 @@
   `verify`, compact API 36, and `release` green, only expanded API 37.0
   red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — Tasks 1–12 COMPLETE and independently
-     reviewed; Task 13 (approved Ember launcher icon) is PLANNED and PAUSED
-     before implementation; the whole-stage review, the open Task 6 product
-     decision, and controller-owned Task 14 remain.**
+  1. **Stage 6 execution — Tasks 1–13 COMPLETE and independently
+     reviewed. The whole-stage review is PAUSED during synthesis after its
+     full range read; its fix wave, the open Task 6 product decision, and
+     controller-owned Task 14 remain.**
      Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      launcher-icon authority:
@@ -23,16 +23,18 @@
      implementation-base SHA). Execution ledger with full per-task
      review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 Tasks 9–12 closure + Task 13 plan checkpoint below for
-     current state, the one open user decision, and exact resume instructions.
+     See the Stage 6 Task 13 closure + whole-stage review pause checkpoint
+     below for the confirmed findings, the one open user decision, and exact
+     resume instructions.
      Execution mode (user
      ruling, recorded in the plan header): Tasks 2–11 and Task 12 phase 1 via
      `superpowers:subagent-driven-development` — fresh implementer per
      task; Task 12 phase 2 completed inline on the fresh go; independent
      task review per boundary, no-subagent/no-fork clause in every
      implementer dispatch, Task 14 controller-owned; no task before Task 14
-     runs a device suite. Task 13, the whole-stage review, and controller-owned
-     Task 14 have not started.
+     runs a device suite. Task 13 is complete; the whole-stage review read the
+     complete `fc4aad8..ade3634` package but was interrupted before its final
+     verdict; controller-owned Task 14 has not started.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -48,7 +50,7 @@
   Future releases follow `RELEASING.md`'s per-release loop (bump
   `versionCode` by exactly 1, gate, build, verify, smoke on the
   disposable AVD, record, tag).
-- Stage 6 planning, 8 August 2026: the user chose the Stage 6 feature
+- Stage 6 planning history, 8 August 2026: the user chose the Stage 6 feature
   set as the post-release direction and selected all four brainstormed
   directions (capture, glance/focus, organize, review, interop) as one
   Stage 5-sized stage. Recorded rulings: own-schema CSV import only;
@@ -67,7 +69,7 @@
   surfaces, feature UI, and export/import before the plan was written;
   the plan pins exact signatures and `file:line` seams from those
   maps. The user instructed: finish the plan, update the handoff, and
-  pause — **execution has not started**.
+  pause — execution had not started at that planning checkpoint.
 - Release-stage polish discharged, 8 August 2026 (`90c8857`):
   RELEASING.md step 6 lists the explicit git add/commit commands;
   `verify-release-apk.sh` check 1 distinguishes a missing apksigner
@@ -170,7 +172,11 @@
   slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `6bfafa8` (`fix: wipe
+- Current product source implementation point: `ade3634` (`feat: apply ember
+  launcher icon`), the independently reviewed Stage 6 Task 13 tip. Stage 6
+  starts from the recorded `fc4aad8` implementation base; its complete task,
+  review, and fix history is in the ignored execution ledger named above.
+  The prior Stage 5 implementation point is `6bfafa8` (`fix: wipe
   export passphrase when the output stream cannot be opened`), Task
   13's Part 1 fix, on top of the Task 13 six-module connected-gate fix
   range `f0a8550..d53a9f9` (`334fcae` seed-fixture and `VaultId`
@@ -229,7 +235,60 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 6 Tasks 9–12 closure + Task 13 plan checkpoint — 9 August 2026
+## Stage 6 Task 13 closure + whole-stage review pause — 9 August 2026
+
+Task 13 is complete at `ade3634` and independently review-clean. It replaces
+only the approved adaptive launcher foreground, monochrome layer, and Ember
+background colour. All five delivery/adaptive byte comparisons passed; the
+manifest and unchanged adaptive definitions retain their stable wiring. The
+resource/debug build and full `testDebugUnitTest lintDebug
+:app:assembleDebug` gate passed (550 tasks), and `git diff --check` was clean.
+No emulator, ADB mutation, install, or connected suite ran.
+
+The whole-stage reviewer received the exact recorded
+`fc4aad8..ade3634` package (36 commits, 18,315 lines), read it completely, and
+began synthesis. The user then requested this safe stopping point. The review
+has no final readiness verdict, no fix wave has started, and Task 14 remains
+untouched. The ignored durable pause report is
+`.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/final-review-pause-handoff.md`.
+
+Confirmed review findings to carry into the single final-fix wave:
+
+- Important: forward `ImportTasks` in `InMemoryVaultRepository` publishes
+  intermediate project/status, task/tag, and activity snapshots instead of
+  one observable commit like Room. Build one final snapshot and add a
+  forward-import emission test.
+- Important: `NaturalDateParser` uses locale-sensitive `lowercase()` and its
+  12-hour parser accepts `13am`/`0pm`. Use `Locale.ROOT`, enforce `1..12`, and
+  add locale and invalid-time tests.
+- Important: Today-widget completion authorizes through asynchronously cached
+  title-permission/runtime state, leaving lock/privacy and stop races. Replace
+  it with live authorization plus an invalidatable action generation/gate and
+  test both races.
+- Important candidate: the Markdown project picker changes only local state;
+  its rows expose no selected appearance or semantics. Finalize the verdict,
+  then use selectable/radio semantics and a Compose test if upheld.
+- Final fix/defer verdicts remain open for Quick Add's sub-48 dp nested date
+  clear target and non-saveable applied due-date state.
+
+The Task 6 policy decision is still open. Current code is authority-compliant
+and timer-ownership-safe: during FOCUS, manually stopping the task timer is
+reversed by ON_RESUME reconciliation (`FOCUS + no timer -> START`), creating a
+new time entry. Keeping that behavior needs no code change but must be recorded
+and device-tested in Task 14. Making manual Stop end the focus cycle requires
+a spec/plan amendment, coordinated `FocusCoordinator` stop, and concurrency/
+reconciliation tests before Task 14.
+
+**PAUSED by user instruction.** On a fresh go, read the pause report and
+ledger, finalize the Markdown/Quick Add verdicts, and issue the complete
+whole-stage review report. Then dispatch exactly one consolidated final-fix
+wave, run its one scoped re-review, resolve the Task 6 policy decision with the
+user, and only then execute controller-owned Task 14. Do not run any device
+suite before Task 14. The working tree at this checkpoint otherwise retains
+only the protected pre-existing Stage 3 plan amendment, `.kotlin/`, and
+`artifacts/`.
+
+## Superseded: Stage 6 Tasks 9–12 + Task 13 plan checkpoint — 9 August 2026
 
 Execution resumed from checkpoint `89cff2c` with the Stage 6 plan, ignored
 SDD ledger, direct-to-`main` rule, and independent-review-per-boundary
