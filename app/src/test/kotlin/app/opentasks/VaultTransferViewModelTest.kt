@@ -11,10 +11,13 @@ import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.OtVaultCodec
 import app.opentasks.core.data.export.ProjectMarkdownWriter
+import app.opentasks.core.data.export.CsvParseResult
 import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.domain.BackupCaptureSource
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.ImportedTaskRow
+import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Project
@@ -29,6 +32,7 @@ import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.WorkspaceId
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
+import app.opentasks.feature.more.CsvImportOutcome
 import java.io.File
 import java.nio.file.Files
 import java.time.LocalDate
@@ -56,7 +60,7 @@ import org.junit.Test
  * fail, which aborts the batch with `Failed` before any coroutine, `Uri`, or
  * [android.content.ContentResolver] is ever involved. The remaining two --
  * full success and partial-success-then-cancelled -- are not reachable: both
- * require [VaultTransferViewModel.onCsvDocumentSelected] to be called with a
+ * require [VaultTransferViewModel.onCsvExportDocumentSelected] to be called with a
  * *non-null* `Uri` that a write actually succeeds against, and this module
  * has no way to produce a non-null `Uri` at all: `Uri.parse` and every other
  * public factory throw `RuntimeException: ... not mocked` under the stub
@@ -82,7 +86,7 @@ class VaultTransferViewModelTest {
         viewModel.beginCsvExport(setOf(CsvExportTable.TASKS))
         assertTrue(viewModel.csvExportInProgress.value)
 
-        viewModel.onCsvDocumentSelected(uri = null)
+        viewModel.onCsvExportDocumentSelected(uri = null)
 
         assertNull(viewModel.csvExportOutcome.value)
         assertTrue(waitUntil { !viewModel.csvExportInProgress.value })
@@ -100,7 +104,7 @@ class VaultTransferViewModelTest {
         viewModel.beginCsvExport(setOf(CsvExportTable.TASKS, CsvExportTable.PROJECTS))
         assertTrue(viewModel.csvExportInProgress.value)
 
-        viewModel.onCsvDocumentSelected(uri = null)
+        viewModel.onCsvExportDocumentSelected(uri = null)
 
         assertNull(viewModel.csvExportOutcome.value)
         assertTrue(waitUntil { !viewModel.csvExportInProgress.value })
@@ -166,6 +170,112 @@ class VaultTransferViewModelTest {
         assertTrue(viewModel.markdownExportInProgress.value)
     }
 
+    @Test
+    fun nullCsvImportDocumentReturnsToIdleAndUnlocks() {
+        val viewModel = viewModel()
+
+        viewModel.beginCsvImport()
+        assertTrue(viewModel.csvImportInProgress.value)
+        assertEquals(Unit, viewModel.csvOpenDocumentRequests.tryReceive().getOrNull())
+
+        viewModel.onCsvDocumentSelected(uri = null)
+
+        assertTrue(!viewModel.csvImportInProgress.value)
+        viewModel.beginCsvImport()
+        assertEquals(Unit, viewModel.csvOpenDocumentRequests.tryReceive().getOrNull())
+    }
+
+    @Test
+    fun cancelCsvImportClearsPreviewAndUnlocks() {
+        val viewModel = viewModel()
+        viewModel.beginCsvImport()
+        viewModel.handleCsvParseResult(CsvParseResult.Parsed(listOf(importRow())))
+        assertEquals(CsvImportOutcome.Preview(1, 0, 0), viewModel.csvImportOutcome.value)
+
+        viewModel.cancelCsvImport()
+
+        assertNull(viewModel.csvImportOutcome.value)
+        assertTrue(!viewModel.csvImportInProgress.value)
+        viewModel.confirmCsvImport()
+        assertNull(viewModel.csvImportCommitRequests.tryReceive().getOrNull())
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(viewModel.markdownExportInProgress.value)
+    }
+
+    @Test
+    fun confirmCsvImportEmitsOneBoundedRequestWithoutRelocking() {
+        val viewModel = viewModel()
+        val rows = listOf(importRow())
+        viewModel.beginCsvImport()
+        viewModel.handleCsvParseResult(CsvParseResult.Parsed(rows))
+
+        viewModel.confirmCsvImport()
+        viewModel.confirmCsvImport()
+
+        assertEquals(rows, viewModel.csvImportCommitRequests.tryReceive().getOrNull())
+        assertNull(viewModel.csvImportCommitRequests.tryReceive().getOrNull())
+        assertNull(viewModel.csvImportOutcome.value)
+        assertTrue(viewModel.csvImportInProgress.value)
+        viewModel.cancelCsvImport()
+        assertTrue(viewModel.csvImportInProgress.value)
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(!viewModel.markdownExportInProgress.value)
+    }
+
+    @Test
+    fun csvImportCommandSuccessClearsRowsAndUnlocksExactlyOnce() {
+        val viewModel = viewModel()
+        viewModel.beginCsvImport()
+        viewModel.handleCsvParseResult(CsvParseResult.Parsed(listOf(importRow())))
+        viewModel.confirmCsvImport()
+        viewModel.csvImportCommitRequests.tryReceive()
+
+        viewModel.onCsvImportCommandResult(CommandResult.Success("Imported"))
+        viewModel.onCsvImportCommandResult(CommandResult.Success("Duplicate callback"))
+
+        assertEquals(CsvImportOutcome.Completed(1), viewModel.csvImportOutcome.value)
+        assertTrue(!viewModel.csvImportInProgress.value)
+        viewModel.confirmCsvImport()
+        assertNull(viewModel.csvImportCommitRequests.tryReceive().getOrNull())
+        viewModel.beginCsvImport()
+        assertEquals(Unit, viewModel.csvOpenDocumentRequests.tryReceive().getOrNull())
+    }
+
+    @Test
+    fun csvImportCommandRejectionClearsRowsAndUnlocksExactlyOnce() {
+        val viewModel = viewModel()
+        viewModel.beginCsvImport()
+        viewModel.handleCsvParseResult(CsvParseResult.Parsed(listOf(importRow())))
+        viewModel.confirmCsvImport()
+        viewModel.csvImportCommitRequests.tryReceive()
+
+        viewModel.onCsvImportCommandResult(
+            CommandResult.Rejected(RejectionReason.IMPORT_STATUS_CONFLICT, "Row changed"),
+        )
+
+        assertEquals(CsvImportOutcome.Failed(null, "Row changed"), viewModel.csvImportOutcome.value)
+        assertTrue(!viewModel.csvImportInProgress.value)
+        viewModel.confirmCsvImport()
+        assertNull(viewModel.csvImportCommitRequests.tryReceive().getOrNull())
+        viewModel.beginCsvImport()
+        assertEquals(Unit, viewModel.csvOpenDocumentRequests.tryReceive().getOrNull())
+    }
+
+    @Test
+    fun closedCsvImportCommitChannelFailsAndUnlocks() {
+        val viewModel = viewModel()
+        viewModel.beginCsvImport()
+        viewModel.handleCsvParseResult(CsvParseResult.Parsed(listOf(importRow())))
+        viewModel.csvImportCommitRequests.close()
+
+        viewModel.confirmCsvImport()
+
+        assertTrue(viewModel.csvImportOutcome.value is CsvImportOutcome.Failed)
+        assertTrue(!viewModel.csvImportInProgress.value)
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(viewModel.markdownExportInProgress.value)
+    }
+
     private fun waitUntil(timeoutMillis: Long = 5_000, predicate: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         while (System.nanoTime() < deadline) {
@@ -210,6 +320,20 @@ class VaultTransferViewModelTest {
         )
     }
 
+    private fun importRow() = ImportedTaskRow(
+        sourceRowNumber = 1,
+        title = "Imported",
+        projectName = null,
+        statusName = null,
+        priority = app.opentasks.core.model.Priority.NONE,
+        start = null,
+        due = null,
+        completedAt = null,
+        estimateMinutes = null,
+        tagNames = emptyList(),
+        description = "",
+    )
+
     /** A minimal [VaultRepository] exposing only an empty, valid snapshot. */
     private class FakeVaultRepository : VaultRepository {
         private val snapshot = MutableStateFlow(
@@ -235,7 +359,7 @@ class VaultTransferViewModelTest {
                         totalTasks = 0,
                     ),
                 ),
-                workflowStatuses = emptyList(),
+                workflowStatuses = app.opentasks.core.model.WorkflowStatus.defaults(null),
                 milestones = emptyList(),
                 tags = emptyList(),
             ),

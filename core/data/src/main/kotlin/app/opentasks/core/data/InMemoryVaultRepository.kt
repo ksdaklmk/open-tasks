@@ -1,7 +1,13 @@
 package app.opentasks.core.data
 
 import app.opentasks.core.data.backup.InMemoryBackupJournal
+import app.opentasks.core.data.backup.BackupSnapshotCodec
+import app.opentasks.core.data.backup.BackupSnapshotPayloadV1
 import app.opentasks.core.data.backup.toBackupRecords
+import app.opentasks.core.data.backup.toBackupRecordV1
+import app.opentasks.core.data.db.MemberEntity
+import app.opentasks.core.data.db.VaultEntity
+import app.opentasks.core.data.db.WorkspaceEntity
 import app.opentasks.core.data.db.TaskTagEntity
 import app.opentasks.core.data.db.TombstoneEntity
 import app.opentasks.core.domain.CommandResult
@@ -16,6 +22,13 @@ import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.data.export.TasksImportPlan
+import app.opentasks.core.data.export.TasksImportPlanResult
+import app.opentasks.core.data.export.buildTasksImportPlan
+import app.opentasks.core.domain.ImportReceipt
+import app.opentasks.core.domain.ImportedProjectReceipt
+import app.opentasks.core.domain.ImportedTagReceipt
+import app.opentasks.core.domain.ImportedTaskReceipt
 import app.opentasks.core.model.ActiveTimerSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityEntry
@@ -176,6 +189,8 @@ class InMemoryVaultRepository internal constructor(
     private fun dispatch(command: DomainCommand): CommandResult =
         when (command) {
             is DomainCommand.CreateProject -> createProject(command)
+            is DomainCommand.ImportTasks -> importTasks(command)
+            is DomainCommand.RemoveImportedRecords -> removeImportedRecords(command)
             is DomainCommand.UpdateProject -> updateProject(command)
             is DomainCommand.RestoreProject -> restoreProject(command)
             is DomainCommand.ArchiveProject -> archiveProject(command)
@@ -306,6 +321,244 @@ class InMemoryVaultRepository internal constructor(
             .map { project -> SearchResult.ProjectResult(project, "Project") }
 
         return (taskResults + projectResults).take(50).toList()
+    }
+
+    private fun importTasks(command: DomainCommand.ImportTasks): CommandResult {
+        val current = mutableWorkspace.value
+        val at = now()
+        val revision = Revision(sourceDeviceId, at.toEpochMilli(), 0)
+        val plan = when (
+            val result = buildTasksImportPlan(
+                rows = command.rows,
+                snapshot = current,
+                workspaceId = OpenTasksFixtures.workspaceId,
+                revision = revision,
+                at = at,
+                freshId = { UUID.randomUUID().toString() },
+            )
+        ) {
+            is TasksImportPlanResult.Invalid -> return result.rejection
+            is TasksImportPlanResult.Ready -> result.plan
+        }
+        if (plan.hasIdentityCollision(current)) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "The import could not allocate unique record identifiers.",
+            )
+        }
+        if (!preflightImportBackup(plan)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_BACKUP_LIMIT_EXCEEDED,
+                "The imported tasks would exceed backup limits.",
+            )
+        }
+        publishProjects(
+            projects = current.projects + plan.projects.map { it.project },
+            workflowStatuses = current.workflowStatuses + plan.projects.flatMap { it.statuses },
+        )
+        publish(
+            tasks = current.tasks + plan.tasks.map { it.task },
+            tags = current.tags + plan.tags,
+            at = at,
+        )
+        val projectReceipts = plan.projects.map { planned ->
+            val activityId = recordActivity(
+                taskId = null,
+                projectId = planned.project.id,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = at,
+                id = planned.activity.id,
+            )
+            ImportedProjectReceipt(planned.project, planned.statuses, activityId)
+        }
+        val taskReceipts = plan.tasks.map { planned ->
+            val activityId = recordActivity(
+                taskId = planned.task.id,
+                projectId = planned.task.projectId,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = at,
+                id = planned.activity.id,
+            )
+            ImportedTaskReceipt(
+                taskId = planned.task.id,
+                expectedRevision = planned.task.revision,
+                expectedTagIds = planned.task.tagIds,
+                activityEntryId = activityId,
+            )
+        }
+        val count = plan.tasks.size
+        return CommandResult.Success(
+            message = "$count ${if (count == 1) "task" else "tasks"} imported",
+            undo = DomainCommand.RemoveImportedRecords(
+                ImportReceipt(
+                    tasks = taskReceipts,
+                    projects = projectReceipts,
+                    tags = plan.tags.map(::ImportedTagReceipt),
+                ),
+            ),
+        )
+    }
+
+    private fun preflightImportBackup(plan: TasksImportPlan): Boolean {
+        val current = mutableWorkspace.value
+        val projected = current.copy(
+            tasks = current.tasks + plan.tasks.map { it.task },
+            projects = current.projects + plan.projects.map { it.project },
+            workflowStatuses = current.workflowStatuses + plan.projects.flatMap { it.statuses },
+            tags = current.tags + plan.tags,
+            activityEntries = current.activityEntries +
+                plan.projects.map { it.activity } + plan.tasks.map { it.activity },
+        )
+        val plannedTaskTags = plan.tasks.flatMap { planned ->
+            planned.task.tagIds.map { tagId ->
+                TaskTagEntity(
+                    taskId = planned.task.id.value,
+                    tagId = tagId.value,
+                    present = true,
+                    revisionWallMillis = planned.task.revision.wallTimeMillis,
+                    revisionLogical = planned.task.revision.logicalCounter,
+                    revisionDeviceId = planned.task.revision.deviceId.value,
+                )
+            }
+        }
+        val records = buildList {
+            add(
+                VaultEntity(
+                    id = "vault-primary",
+                    storageMode = "LOCAL",
+                    createdAtEpochMillis = 0,
+                    schemaVersion = app.opentasks.core.data.db.VAULT_DATABASE_VERSION,
+                    cryptoVersion = 1,
+                    minimumReaderVersion = 1,
+                ).toBackupRecordV1(),
+            )
+            add(MemberEntity("member-owner", "You").toBackupRecordV1())
+            add(
+                WorkspaceEntity(
+                    id = OpenTasksFixtures.workspaceId.value,
+                    vaultId = "vault-primary",
+                    ownerId = "member-owner",
+                    name = "Open Tasks",
+                ).toBackupRecordV1(),
+            )
+            addAll(projected.toBackupRecords(tombstones, taskTags + plannedTaskTags))
+        }
+        var plaintext: ByteArray? = null
+        return try {
+            plaintext = BackupSnapshotCodec.encode(
+                BackupSnapshotPayloadV1(
+                    vaultId = "vault-primary",
+                    coveredGeneration = backupJournal.currentGeneration,
+                    records = records,
+                ),
+            )
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        } finally {
+            plaintext?.fill(0)
+        }
+    }
+
+    private fun TasksImportPlan.hasIdentityCollision(current: WorkspaceSnapshot): Boolean {
+        val projectIds = planIds(projects.map { it.project.id.value })
+        val statusIds = planIds(projects.flatMap { project -> project.statuses.map { it.id.value } })
+        val taskIds = planIds(tasks.map { it.task.id.value })
+        val tagIds = planIds(tags.map { it.id.value })
+        val activityIds = planIds(
+            projects.map { it.activity.id } + tasks.map { it.activity.id },
+        )
+        return projectIds == null || projectIds.any { id -> current.projects.any { it.id.value == id } } ||
+            statusIds == null || statusIds.any { id -> current.workflowStatuses.any { it.id.value == id } } ||
+            taskIds == null || taskIds.any { id -> current.tasks.any { it.id.value == id } } ||
+            tagIds == null || tagIds.any { id -> current.tags.any { it.id.value == id } } ||
+            activityIds == null || activityIds.any { id -> current.activityEntries.any { it.id == id } }
+    }
+
+    private fun planIds(ids: List<String>): Set<String>? = ids.toSet().takeIf { it.size == ids.size }
+
+    private fun removeImportedRecords(
+        command: DomainCommand.RemoveImportedRecords,
+    ): CommandResult {
+        val receipt = command.receipt
+        val current = mutableWorkspace.value
+        if (!canRemoveImportedRecords(receipt, current)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_UNDO_CONFLICT,
+                "Imported records changed and could not be removed.",
+            )
+        }
+        val taskIds = receipt.tasks.mapTo(hashSetOf()) { it.taskId }
+        val projectIds = receipt.projects.mapTo(hashSetOf()) { it.project.id }
+        val statusIds = receipt.projects.flatMapTo(hashSetOf()) { project ->
+            project.statuses.map { it.id }
+        }
+        val tagIds = receipt.tags.mapTo(hashSetOf()) { it.tag.id }
+        val activityIds = receipt.tasks.mapTo(hashSetOf()) { it.activityEntryId }.also { ids ->
+            receipt.projects.mapTo(ids) { it.activityEntryId }
+        }
+        val taskIdValues = taskIds.mapTo(hashSetOf(), TaskId::value)
+        taskTags = taskTags.filterNot { it.taskId in taskIdValues }
+        publishProjects(
+            projects = current.projects.filterNot { it.id in projectIds },
+            workflowStatuses = current.workflowStatuses.filterNot { it.id in statusIds },
+        )
+        publish(
+            tasks = current.tasks.filterNot { it.id in taskIds },
+            tags = current.tags.filterNot { it.id in tagIds },
+            activityEntries = current.activityEntries.filterNot { it.id in activityIds },
+        )
+        val count = receipt.tasks.size
+        return CommandResult.Success("Import removed ($count ${if (count == 1) "task" else "tasks"})")
+    }
+
+    private fun canRemoveImportedRecords(
+        receipt: ImportReceipt,
+        current: WorkspaceSnapshot,
+    ): Boolean {
+        val taskIds = receipt.tasks.mapTo(hashSetOf()) { it.taskId }
+        val projectIds = receipt.projects.mapTo(hashSetOf()) { it.project.id }
+        val statusIds = receipt.projects.flatMapTo(hashSetOf()) { it.statuses.map(WorkflowStatus::id) }
+        val tagIds = receipt.tags.mapTo(hashSetOf()) { it.tag.id }
+        if (receipt.tasks.any { expected ->
+            val task = current.tasks.firstOrNull { it.id == expected.taskId } ?: return false
+            task.revision != expected.expectedRevision || task.tagIds != expected.expectedTagIds ||
+                task.checklist.isNotEmpty() || task.dependencyIds.isNotEmpty() ||
+                current.tasks.any { it.parentTaskId == task.id || task.id in it.dependencyIds } ||
+                current.reminders.any { it.taskId == task.id } ||
+                current.attachments.any { it.taskId == task.id } ||
+                current.notes.any { it.taskId == task.id } ||
+                current.timeEntries.any { it.taskId == task.id } ||
+                current.activityEntries.filter { it.taskId == task.id }.map { it.id } !=
+                listOf(expected.activityEntryId)
+        }) return false
+        if (receipt.projects.any { expected ->
+            current.projects.firstOrNull { it.id == expected.project.id } != expected.project ||
+                current.workflowStatuses.filter { it.projectId == expected.project.id } != expected.statuses ||
+                current.activityEntries.filter {
+                    it.taskId == null && it.projectId == expected.project.id
+                }.map { it.id } != listOf(expected.activityEntryId)
+        }) return false
+        if (receipt.tags.any { expected ->
+            current.tags.firstOrNull { it.id == expected.tag.id } != expected.tag
+        }) return false
+        if (current.tasks.any { task ->
+            task.id !in taskIds && (
+                task.projectId in projectIds || task.statusId in statusIds ||
+                    task.tagIds.any(tagIds::contains)
+                )
+        }) return false
+        val taskIdValues = taskIds.mapTo(hashSetOf(), TaskId::value)
+        val tagIdValues = tagIds.mapTo(hashSetOf(), TagId::value)
+        if (taskTags.any { it.taskId !in taskIdValues && it.tagId in tagIdValues }) return false
+        if (current.milestones.any { it.projectId in projectIds }) return false
+        if (current.notes.any { it.projectId in projectIds }) return false
+        if (current.savedViews.any { view ->
+            view.query.projectIds.any(projectIds::contains) || view.query.tagIds.any(tagIds::contains)
+        }) return false
+        return true
     }
 
     private fun createProject(command: DomainCommand.CreateProject): CommandResult {
@@ -3345,10 +3598,12 @@ class InMemoryVaultRepository internal constructor(
         kind: ActivityKind,
         body: String,
         at: Instant,
-    ) {
+        id: String = UUID.randomUUID().toString(),
+    ): String {
         val current = mutableWorkspace.value
         mutableWorkspace.value = current.copy(
             activityEntries = current.activityEntries.appendedActivity(
+                id = id,
                 taskId = taskId,
                 projectId = projectId,
                 kind = kind,
@@ -3356,9 +3611,11 @@ class InMemoryVaultRepository internal constructor(
                 at = at,
             ),
         )
+        return id
     }
 
     private fun List<ActivityEntry>.appendedActivity(
+        id: String = UUID.randomUUID().toString(),
         taskId: TaskId?,
         projectId: ProjectId?,
         kind: ActivityKind,
@@ -3366,7 +3623,7 @@ class InMemoryVaultRepository internal constructor(
         at: Instant,
     ): List<ActivityEntry> {
         val entry = ActivityEntry(
-            id = UUID.randomUUID().toString(),
+            id = id,
             taskId = taskId,
             projectId = projectId,
             kind = kind,
@@ -3450,6 +3707,7 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_TASK_TAGS = 50
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_BULK_TASKS = 200
+        const val MAX_IMPORT_ROWS = 5_000
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000

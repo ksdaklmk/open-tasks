@@ -3,9 +3,15 @@ package app.opentasks.core.data
 import androidx.room.withTransaction
 import app.opentasks.core.data.backup.BackupJournalAppendBoundary
 import app.opentasks.core.data.backup.BackupMutationCodec
+import app.opentasks.core.data.backup.BackupRecordFamily
+import app.opentasks.core.data.backup.BackupRecordV1
+import app.opentasks.core.data.backup.BackupSnapshotCodec
+import app.opentasks.core.data.backup.BackupSnapshotPayloadV1
 import app.opentasks.core.data.backup.RoomBackupJournalSession
+import app.opentasks.core.data.backup.allRecords
 import app.opentasks.core.data.backup.defaultBackupState
 import app.opentasks.core.data.backup.snapshots
+import app.opentasks.core.data.backup.toBackupRecordV1
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
@@ -45,6 +51,13 @@ import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.data.export.TasksImportPlan
+import app.opentasks.core.data.export.TasksImportPlanResult
+import app.opentasks.core.data.export.buildTasksImportPlan
+import app.opentasks.core.domain.ImportReceipt
+import app.opentasks.core.domain.ImportedProjectReceipt
+import app.opentasks.core.domain.ImportedTagReceipt
+import app.opentasks.core.domain.ImportedTaskReceipt
 import app.opentasks.core.model.ActiveTimerSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityKind
@@ -186,6 +199,8 @@ class RoomVaultRepository(
     private suspend fun dispatch(command: DomainCommand): CommandResult =
         when (command) {
                 is DomainCommand.CreateProject -> createProject(command)
+                is DomainCommand.ImportTasks -> importTasks(command)
+                is DomainCommand.RemoveImportedRecords -> removeImportedRecords(command)
                 is DomainCommand.UpdateProject -> updateProject(command)
                 is DomainCommand.RestoreProject -> restoreProject(command)
                 is DomainCommand.ArchiveProject -> archiveProject(command)
@@ -322,6 +337,224 @@ class RoomVaultRepository(
             .map { project -> SearchResult.ProjectResult(project, "Project") }
 
         return (taskResults + projectResults).take(MAX_SEARCH_RESULTS).toList()
+    }
+
+    private suspend fun importTasks(command: DomainCommand.ImportTasks): CommandResult {
+        val captureDao = database.backupCaptureDao()
+        val current = mutableWorkspace.value.copy(
+            projects = captureDao.projects(VAULT_ID.value).map(ProjectEntity::toModel),
+            workflowStatuses = captureDao.workflowStatuses(VAULT_ID.value)
+                .map(WorkflowStatusEntity::toModel),
+            tags = captureDao.tags(VAULT_ID.value).map(TagEntity::toModel),
+        )
+        val at = now()
+        val revision = Revision(deviceId, at.toEpochMilli(), 0)
+        val plan = when (
+            val result = buildTasksImportPlan(
+                rows = command.rows,
+                snapshot = current,
+                workspaceId = OpenTasksFixtures.workspaceId,
+                revision = revision,
+                at = at,
+                freshId = { UUID.randomUUID().toString() },
+            )
+        ) {
+            is TasksImportPlanResult.Invalid -> return result.rejection
+            is TasksImportPlanResult.Ready -> result.plan
+        }
+        val currentRecords = captureDao.allRecords(VAULT_ID.value)
+        if (plan.hasIdentityCollision(currentRecords)) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "The import could not allocate unique record identifiers.",
+            )
+        }
+        if (!preflightImportBackup(plan, revision, currentRecords)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_BACKUP_LIMIT_EXCEEDED,
+                "The imported tasks would exceed backup limits.",
+            )
+        }
+        val workspaceDao = database.workspaceDao()
+        plan.projects.forEach { planned ->
+            workspaceDao.upsertProject(planned.project.toEntity(revision))
+            planned.statuses.forEach { workspaceDao.upsertWorkflowStatus(it.toEntity(revision)) }
+        }
+        plan.tags.forEach { workspaceDao.upsertTag(it.toEntity()) }
+        plan.tasks.forEach { planned ->
+            database.taskDao().upsert(planned.task.toEntity())
+            planned.task.tagEntities().forEach { workspaceDao.upsertTaskTag(it) }
+        }
+        val projectReceipts = plan.projects.map { planned ->
+            val activityId = recordActivity(
+                taskId = null,
+                projectId = planned.project.id,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = at,
+                id = planned.activity.id,
+            )
+            ImportedProjectReceipt(planned.project, planned.statuses, activityId)
+        }
+        val taskReceipts = plan.tasks.map { planned ->
+            val activityId = recordActivity(
+                taskId = planned.task.id,
+                projectId = planned.task.projectId,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = at,
+                id = planned.activity.id,
+            )
+            ImportedTaskReceipt(
+                taskId = planned.task.id,
+                expectedRevision = planned.task.revision,
+                expectedTagIds = planned.task.tagIds,
+                activityEntryId = activityId,
+            )
+        }
+        val count = plan.tasks.size
+        return CommandResult.Success(
+            message = "$count ${if (count == 1) "task" else "tasks"} imported",
+            undo = DomainCommand.RemoveImportedRecords(
+                ImportReceipt(
+                    tasks = taskReceipts,
+                    projects = projectReceipts,
+                    tags = plan.tags.map(::ImportedTagReceipt),
+                ),
+            ),
+        )
+    }
+
+    private fun TasksImportPlan.hasIdentityCollision(records: List<BackupRecordV1>): Boolean {
+        fun collides(family: BackupRecordFamily, ids: List<String>): Boolean =
+            ids.toSet().size != ids.size || ids.any { id ->
+                records.any { it.family == family && it.identity == listOf(id) }
+            }
+        return collides(BackupRecordFamily.PROJECT, projects.map { it.project.id.value }) ||
+            collides(
+                BackupRecordFamily.WORKFLOW_STATUS,
+                projects.flatMap { it.statuses }.map { it.id.value },
+            ) ||
+            collides(BackupRecordFamily.TASK, tasks.map { it.task.id.value }) ||
+            collides(BackupRecordFamily.TAG, tags.map { it.id.value }) ||
+            collides(
+                BackupRecordFamily.ACTIVITY_ENTRY,
+                projects.map { it.activity.id } + tasks.map { it.activity.id },
+            )
+    }
+
+    private suspend fun preflightImportBackup(
+        plan: TasksImportPlan,
+        revision: Revision,
+        currentRecords: List<BackupRecordV1>,
+    ): Boolean {
+        val records = buildList {
+            addAll(currentRecords)
+            plan.projects.forEach { planned ->
+                add(planned.project.toEntity(revision).toBackupRecordV1())
+                planned.statuses.mapTo(this) { it.toEntity(revision).toBackupRecordV1() }
+                add(planned.activity.toEntity().toBackupRecordV1())
+            }
+            plan.tags.mapTo(this) { it.toEntity().toBackupRecordV1() }
+            plan.tasks.forEach { planned ->
+                add(planned.task.toEntity().toBackupRecordV1())
+                planned.task.tagEntities().mapTo(this) { it.toBackupRecordV1() }
+                add(planned.activity.toEntity().toBackupRecordV1())
+            }
+        }
+        var plaintext: ByteArray? = null
+        return try {
+            plaintext = BackupSnapshotCodec.encode(
+                BackupSnapshotPayloadV1(
+                    vaultId = VAULT_ID.value,
+                    coveredGeneration = database.backupStateDao().require(VAULT_ID.value)
+                        .currentGeneration,
+                    records = records,
+                ),
+            )
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        } finally {
+            plaintext?.fill(0)
+        }
+    }
+
+    private suspend fun removeImportedRecords(
+        command: DomainCommand.RemoveImportedRecords,
+    ): CommandResult {
+        val receipt = command.receipt
+        if (!canRemoveImportedRecords(receipt)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_UNDO_CONFLICT,
+                "Imported records changed and could not be removed.",
+            )
+        }
+        val workspaceDao = database.workspaceDao()
+        receipt.tasks.forEach { imported ->
+            workspaceDao.deleteTagsForTask(imported.taskId.value)
+            workspaceDao.deleteActivityEntry(imported.activityEntryId)
+            database.taskDao().deleteById(imported.taskId.value)
+        }
+        receipt.projects.forEach { imported ->
+            workspaceDao.deleteActivityEntry(imported.activityEntryId)
+            imported.statuses.forEach { workspaceDao.deleteWorkflowStatus(it.id.value) }
+            workspaceDao.deleteProject(imported.project.id.value)
+        }
+        receipt.tags.forEach { workspaceDao.deleteTag(it.tag.id.value) }
+        val count = receipt.tasks.size
+        return CommandResult.Success("Import removed ($count ${if (count == 1) "task" else "tasks"})")
+    }
+
+    private suspend fun canRemoveImportedRecords(receipt: ImportReceipt): Boolean {
+        val workspaceDao = database.workspaceDao()
+        val receiptTaskIds = receipt.tasks.map { it.taskId.value }
+        for (expected in receipt.tasks) {
+            val task = currentTask(expected.taskId) ?: return false
+            if (
+                task.revision != expected.expectedRevision ||
+                task.tagIds != expected.expectedTagIds ||
+                workspaceDao.getActivityEntriesForTask(task.id.value).map { it.id } !=
+                listOf(expected.activityEntryId) ||
+                database.taskDao().importUndoChildCount(task.id.value) != 0
+            ) return false
+        }
+        for (expected in receipt.projects) {
+            if (workspaceDao.getProjectById(expected.project.id.value)?.toModel() != expected.project) {
+                return false
+            }
+            val statuses = workspaceDao.getWorkflowStatuses(expected.project.id.value)
+                .map(WorkflowStatusEntity::toModel)
+            if (statuses != expected.statuses) return false
+            if (
+                workspaceDao.getActivityEntriesForProject(expected.project.id.value).map { it.id } !=
+                listOf(expected.activityEntryId)
+            ) return false
+            if (
+                workspaceDao.importUndoExternalProjectReferenceCount(
+                    projectId = expected.project.id.value,
+                    statusIds = expected.statuses.map { it.id.value },
+                    receiptTaskIds = receiptTaskIds,
+                ) != 0
+            ) return false
+        }
+        for (expected in receipt.tags) {
+            if (workspaceDao.getTagById(expected.tag.id.value)?.toModel() != expected.tag) return false
+            if (
+                workspaceDao.importUndoExternalTagReferenceCount(
+                    expected.tag.id.value,
+                    receiptTaskIds,
+                ) != 0
+            ) return false
+        }
+        val createdProjectIds = receipt.projects.mapTo(hashSetOf()) { it.project.id }
+        val createdTagIds = receipt.tags.mapTo(hashSetOf()) { it.tag.id }
+        val savedViews = database.backupCaptureDao().savedViews(VAULT_ID.value)
+            .mapNotNull { runCatching { it.toModel() }.getOrNull() }
+        return savedViews.none { view ->
+            view.query.projectIds.any(createdProjectIds::contains) ||
+                view.query.tagIds.any(createdTagIds::contains)
+        }
     }
 
     private suspend fun createProject(
@@ -2626,11 +2859,12 @@ class RoomVaultRepository(
         kind: ActivityKind,
         body: String,
         at: Instant,
-    ) {
+        id: String = UUID.randomUUID().toString(),
+    ): String {
         val workspaceDao = database.workspaceDao()
         workspaceDao.upsertActivityEntry(
             ActivityEntryEntity(
-                id = UUID.randomUUID().toString(),
+                id = id,
                 taskId = taskId?.value,
                 projectId = projectId?.value,
                 kind = kind.name,
@@ -2643,6 +2877,7 @@ class RoomVaultRepository(
         if (excess > 0) {
             workspaceDao.deleteOldestActivityEntries(taskId?.value, projectId?.value, excess)
         }
+        return id
     }
 
     private suspend fun persistProject(
@@ -3959,6 +4194,7 @@ class RoomVaultRepository(
         const val MAX_TASK_TAGS = 50
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_BULK_TASKS = 200
+        const val MAX_IMPORT_ROWS = 5_000
         const val MAX_TIME_ENTRY_NOTE_LENGTH = 500
         const val MAX_TIME_ENTRIES_PER_TASK = 10_000
         const val MAX_NOTE_BODY_LENGTH = 10_000

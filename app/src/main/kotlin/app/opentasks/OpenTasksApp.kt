@@ -306,6 +306,15 @@ fun OpenTasksApp(
         val csvExportDocumentLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("text/csv"),
         ) { uri ->
+            vaultTransferViewModel.onCsvExportDocumentSelected(uri)
+        }
+        val csvImportInProgress by
+            vaultTransferViewModel.csvImportInProgress.collectAsStateWithLifecycle()
+        val csvImportOutcome by
+            vaultTransferViewModel.csvImportOutcome.collectAsStateWithLifecycle()
+        val csvImportDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
             vaultTransferViewModel.onCsvDocumentSelected(uri)
         }
         val markdownExportInProgress by
@@ -366,6 +375,21 @@ fun OpenTasksApp(
         LaunchedEffect(vaultTransferViewModel, csvExportDocumentLauncher) {
             for (table in vaultTransferViewModel.csvCreateDocumentRequests) {
                 csvExportDocumentLauncher.launch(csvExportFileName(table))
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, csvImportDocumentLauncher) {
+            for (ignored in vaultTransferViewModel.csvOpenDocumentRequests) {
+                csvImportDocumentLauncher.launch(
+                    arrayOf("text/csv", "text/comma-separated-values", "text/plain"),
+                )
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, viewModel) {
+            for (rows in vaultTransferViewModel.csvImportCommitRequests) {
+                viewModel.execute(
+                    DomainCommand.ImportTasks(rows),
+                    vaultTransferViewModel::onCsvImportCommandResult,
+                )
             }
         }
         LaunchedEffect(vaultTransferViewModel, markdownExportDocumentLauncher) {
@@ -1358,6 +1382,15 @@ fun OpenTasksApp(
                                     onExportCsv = vaultTransferViewModel::beginCsvExport,
                                     onDismissCsvExportOutcome =
                                         vaultTransferViewModel::dismissCsvExportOutcome,
+                                    csvImportInProgress = csvImportInProgress,
+                                    csvImportOutcome = csvImportOutcome,
+                                    onImportCsv = vaultTransferViewModel::beginCsvImport,
+                                    onConfirmCsvImport =
+                                        vaultTransferViewModel::confirmCsvImport,
+                                    onCancelCsvImport =
+                                        vaultTransferViewModel::cancelCsvImport,
+                                    onDismissCsvImportOutcome =
+                                        vaultTransferViewModel::dismissCsvImportOutcome,
                                     markdownExportInProgress = markdownExportInProgress,
                                     markdownExportOutcome = markdownExportOutcome,
                                     onExportMarkdown = vaultTransferViewModel::beginMarkdownExport,

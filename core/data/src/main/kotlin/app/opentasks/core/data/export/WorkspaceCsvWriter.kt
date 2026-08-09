@@ -21,12 +21,11 @@ enum class CsvTable { TASKS, PROJECTS, TIME_ENTRIES, NOTES }
  * Renders one [CsvTable] of a [WorkspaceSnapshot] as RFC 4180 CSV text.
  *
  * Pure Kotlin — no Android import anywhere in this file — so its behaviour is
- * proven entirely on the JVM. Every field is formula-injection neutralised
- * (a leading `=`, `+`, `-`, `@`, or tab gets a `'` prefix) and RFC 4180 quoted
- * before it reaches [out]; the writer holds nothing beyond the one row it is
- * currently building. It is a plaintext writer only, never touching
- * encryption or Android storage — the caller streams [out] to wherever it is
- * going and owns any retention decision.
+ * proven entirely on the JVM. Every field is reversibly formula-injection
+ * neutralised and RFC 4180 quoted before it reaches [out]; the writer holds
+ * nothing beyond the one row it is currently building. It is a plaintext
+ * writer only, never touching encryption or Android storage — the caller
+ * streams [out] to wherever it is going and owns any retention decision.
  */
 class WorkspaceCsvWriter(private val zone: ZoneId) {
 
@@ -147,7 +146,9 @@ class WorkspaceCsvWriter(private val zone: ZoneId) {
             .orEmpty()
 
     private fun tagNames(snapshot: WorkspaceSnapshot, tagIds: Set<TagId>): String =
-        snapshot.tags.filter { it.id in tagIds }.joinToString(";") { it.name }
+        snapshot.tags.filter { it.id in tagIds }.joinToString(";") { tag ->
+            tag.name.replace("\\", "\\\\").replace(";", "\\;")
+        }
 
     private fun displayOfMoment(moment: ZonedMoment?): String =
         moment?.let { UK_DATE_TIME_FORMAT.format(it.instant.atZone(it.zone())) }.orEmpty()
@@ -178,11 +179,10 @@ class WorkspaceCsvWriter(private val zone: ZoneId) {
     }
 
     private fun csvField(raw: String): String {
-        val neutralised = if (raw.isNotEmpty() && raw[0] in FORMULA_PREFIXES) {
-            "'$raw"
-        } else {
-            raw
-        }
+        val apostrophes = raw.indexOfFirst { it != '\'' }.let { if (it < 0) raw.length else it }
+        val neutralised = if (apostrophes < raw.length && raw[apostrophes] in FORMULA_PREFIXES) {
+            "'".repeat(apostrophes * 2 + 1) + raw.drop(apostrophes)
+        } else raw
         val needsQuoting = neutralised.any { it == ',' || it == '"' || it == '\r' || it == '\n' }
         return if (needsQuoting) {
             "\"" + neutralised.replace("\"", "\"\"") + "\""
@@ -191,28 +191,28 @@ class WorkspaceCsvWriter(private val zone: ZoneId) {
         }
     }
 
-    private companion object {
-        val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@', '\t')
+    companion object {
+        private val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@', '\t')
 
-        val UK_DATE_TIME_FORMAT: DateTimeFormatter =
+        private val UK_DATE_TIME_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMMM yyyy HH:mm", Locale.UK)
-        val UK_DATE_FORMAT: DateTimeFormatter =
+        private val UK_DATE_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.UK)
 
-        val TASKS_HEADER = listOf(
+        internal val TASKS_HEADER = listOf(
             "id", "title", "project", "status", "priority", "start_display", "start_iso",
             "due_display", "due_iso", "completed_display", "completed_iso", "estimate_minutes",
             "tags", "description",
         )
-        val PROJECTS_HEADER = listOf(
+        private val PROJECTS_HEADER = listOf(
             "id", "name", "summary", "health", "due_display", "due_iso", "completed_tasks",
             "total_tasks",
         )
-        val TIME_ENTRIES_HEADER = listOf(
+        private val TIME_ENTRIES_HEADER = listOf(
             "id", "task_id", "task_title", "started_display", "started_iso", "stopped_display",
             "stopped_iso", "duration_minutes", "note",
         )
-        val NOTES_HEADER = listOf(
+        private val NOTES_HEADER = listOf(
             "id", "owner_type", "owner_id", "owner_title", "created_display", "created_iso",
             "edited_iso", "body",
         )

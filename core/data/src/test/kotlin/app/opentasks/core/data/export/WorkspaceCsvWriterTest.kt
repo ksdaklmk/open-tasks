@@ -115,6 +115,26 @@ class WorkspaceCsvWriterTest {
     }
 
     @Test
+    fun formulaNeutralisationPreservesLeadingApostropheCount() {
+        val out = StringBuilder()
+        writer.write(
+            CsvTable.TASKS,
+            snapshot(
+                tasks = listOf(
+                    task(id = "task-1", title = "=SUM(A1)"),
+                    task(id = "task-2", title = "'=SUM(A1)"),
+                    task(id = "task-3", title = "''=SUM(A1)"),
+                ),
+            ),
+            out,
+        )
+
+        assertEquals("'=SUM(A1)", dataLine(out, 0).split(",")[1])
+        assertEquals("'''=SUM(A1)", dataLine(out, 1).split(",")[1])
+        assertEquals("'''''=SUM(A1)", dataLine(out, 2).split(",")[1])
+    }
+
+    @Test
     fun rowsEndWithCrlf() {
         val project = Project(
             id = ProjectId("project-1"),
@@ -282,9 +302,9 @@ class WorkspaceCsvWriterTest {
     }
 
     @Test
-    fun taskTagsAreSemicolonJoinedNames() {
-        val tagA = Tag(TagId("tag-a"), workspaceId, "Admin")
-        val tagB = Tag(TagId("tag-b"), workspaceId, "Deep work")
+    fun taskTagsEscapeSeparatorAndBackslash() {
+        val tagA = Tag(TagId("tag-a"), workspaceId, "ops;urgent")
+        val tagB = Tag(TagId("tag-b"), workspaceId, "path\\name")
         val tagged = task(
             id = "task-1",
             title = "Tagged",
@@ -297,7 +317,7 @@ class WorkspaceCsvWriterTest {
             out,
         )
 
-        assertEquals("Admin;Deep work", dataLine(out, 0).split(",")[12])
+        assertEquals("ops\\;urgent;path\\\\name", dataLine(out, 0).split(",")[12])
     }
 
     @Test

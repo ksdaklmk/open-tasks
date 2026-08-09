@@ -13,13 +13,21 @@ import app.opentasks.backup.OtVaultExporter
 import app.opentasks.backup.OtVaultImportPreview
 import app.opentasks.backup.OtVaultImporter
 import app.opentasks.core.data.export.CsvTable
+import app.opentasks.core.data.export.CsvImportPreviewResult
+import app.opentasks.core.data.export.CsvParseResult
+import app.opentasks.core.data.export.MAX_TASKS_CSV_BYTES
 import app.opentasks.core.data.export.ProjectMarkdownWriter
 import app.opentasks.core.data.export.WorkspaceCsvWriter
+import app.opentasks.core.data.export.parseTasksCsv
+import app.opentasks.core.data.export.previewTasksImport
+import app.opentasks.core.domain.CommandResult
+import app.opentasks.core.domain.ImportedTaskRow
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
+import app.opentasks.feature.more.CsvImportOutcome
 import app.opentasks.feature.more.MarkdownExportOutcome
 import app.opentasks.feature.more.VaultExportOutcome
 import app.opentasks.feature.more.VaultImportOutcome
@@ -42,7 +50,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 /**
- * Owns the whole-vault export/import flows and the plaintext CSV export flow.
+ * Owns the whole-vault export/import flows and the plaintext CSV transfer flows.
  *
  * A confirmed passphrase asks the caller to launch the matching Storage Access
  * Framework picker. An export streams straight into the chosen document's own
@@ -81,6 +89,8 @@ class VaultTransferViewModel @Inject constructor(
     private val mutableImportOutcome = MutableStateFlow<VaultImportOutcome?>(null)
     private val mutableCsvExportInProgress = MutableStateFlow(false)
     private val mutableCsvExportOutcome = MutableStateFlow<CsvExportOutcome?>(null)
+    private val mutableCsvImportInProgress = MutableStateFlow(false)
+    private val mutableCsvImportOutcome = MutableStateFlow<CsvImportOutcome?>(null)
     private val mutableMarkdownExportInProgress = MutableStateFlow(false)
     private val mutableMarkdownExportOutcome = MutableStateFlow<MarkdownExportOutcome?>(null)
 
@@ -90,6 +100,8 @@ class VaultTransferViewModel @Inject constructor(
     val importOutcome: StateFlow<VaultImportOutcome?> = mutableImportOutcome.asStateFlow()
     val csvExportInProgress: StateFlow<Boolean> = mutableCsvExportInProgress.asStateFlow()
     val csvExportOutcome: StateFlow<CsvExportOutcome?> = mutableCsvExportOutcome.asStateFlow()
+    val csvImportInProgress: StateFlow<Boolean> = mutableCsvImportInProgress.asStateFlow()
+    val csvImportOutcome: StateFlow<CsvImportOutcome?> = mutableCsvImportOutcome.asStateFlow()
     val markdownExportInProgress: StateFlow<Boolean> = mutableMarkdownExportInProgress.asStateFlow()
     val markdownExportOutcome: StateFlow<MarkdownExportOutcome?> =
         mutableMarkdownExportOutcome.asStateFlow()
@@ -102,6 +114,12 @@ class VaultTransferViewModel @Inject constructor(
 
     /** The next table to export; the caller launches a `text/csv` create-document picker for it. */
     val csvCreateDocumentRequests = Channel<CsvTable>(Channel.BUFFERED)
+
+    /** Requests a dedicated picker for an Open Tasks Tasks CSV. */
+    val csvOpenDocumentRequests = Channel<Unit>(Channel.BUFFERED)
+
+    /** Parsed rows awaiting normal WorkspaceViewModel command execution. */
+    val csvImportCommitRequests = Channel<List<ImportedTaskRow>>(capacity = 1)
 
     /** The suggested filename for the selected project's Markdown document. */
     val markdownCreateDocumentRequests = Channel<String>(Channel.BUFFERED)
@@ -116,6 +134,9 @@ class VaultTransferViewModel @Inject constructor(
      * each document's picker happens to return.
      */
     private var csvSnapshot: WorkspaceSnapshot? = null
+    private var csvImportRows: List<ImportedTaskRow>? = null
+    private var csvImportState = CsvImportState.IDLE
+    private var csvImportOwnsOperation = false
     private var markdownSnapshot: WorkspaceSnapshot? = null
     private var markdownProjectId: ProjectId? = null
 
@@ -264,6 +285,132 @@ class VaultTransferViewModel @Inject constructor(
         mutableExportOutcome.value = null
     }
 
+    fun beginCsvImport() {
+        if (csvImportState != CsvImportState.IDLE || !operation.tryLock()) return
+        csvImportOwnsOperation = true
+        csvImportState = CsvImportState.AWAITING_DOCUMENT
+        mutableCsvImportOutcome.value = null
+        mutableCsvImportInProgress.value = true
+        if (!csvOpenDocumentRequests.trySend(Unit).isSuccess) {
+            mutableCsvImportOutcome.value = CsvImportOutcome.Failed(
+                rowNumber = null,
+                reason = CSV_IMPORT_FAILED_REASON,
+            )
+            finishCsvImport()
+        }
+    }
+
+    /** The dedicated Tasks CSV picker returned [uri], or null on cancellation. */
+    fun onCsvDocumentSelected(uri: Uri?) {
+        if (csvImportState != CsvImportState.AWAITING_DOCUMENT) return
+        if (uri == null) {
+            finishCsvImport()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var bytes: ByteArray? = null
+            try {
+                val result = try {
+                    bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readNBytes(MAX_TASKS_CSV_BYTES + 1)
+                    }
+                    bytes?.let(::parseTasksCsv)
+                        ?: CsvParseResult.Malformed(0, CSV_IMPORT_FAILED_REASON)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    CsvParseResult.Malformed(0, CSV_IMPORT_FAILED_REASON)
+                }
+                handleCsvParseResult(result)
+            } finally {
+                bytes?.fill(0)
+            }
+        }
+    }
+
+    internal fun handleCsvParseResult(result: CsvParseResult) {
+        if (csvImportState != CsvImportState.AWAITING_DOCUMENT) return
+        when (result) {
+            is CsvParseResult.Malformed -> {
+                mutableCsvImportOutcome.value = CsvImportOutcome.Failed(
+                    rowNumber = result.rowNumber.takeIf { it > 0 },
+                    reason = result.reason,
+                )
+                finishCsvImport()
+            }
+            is CsvParseResult.Parsed -> when (
+                val preview = previewTasksImport(
+                    result.rows,
+                    vaultRepository.observeWorkspace().value,
+                )
+            ) {
+                is CsvImportPreviewResult.Invalid -> {
+                    mutableCsvImportOutcome.value = CsvImportOutcome.Failed(
+                        rowNumber = preview.rowNumber,
+                        reason = preview.message,
+                    )
+                    finishCsvImport()
+                }
+                is CsvImportPreviewResult.Ready -> {
+                    csvImportRows = result.rows
+                    csvImportState = CsvImportState.PREVIEW
+                    mutableCsvImportOutcome.value = CsvImportOutcome.Preview(
+                        taskCount = preview.summary.taskCount,
+                        newProjectCount = preview.summary.newProjectCount,
+                        newTagCount = preview.summary.newTagCount,
+                    )
+                }
+            }
+        }
+    }
+
+    fun confirmCsvImport() {
+        if (csvImportState != CsvImportState.PREVIEW) return
+        val rows = csvImportRows ?: return
+        csvImportState = CsvImportState.COMMITTING
+        if (!csvImportCommitRequests.trySend(rows).isSuccess) {
+            mutableCsvImportOutcome.value = CsvImportOutcome.Failed(
+                rowNumber = null,
+                reason = CSV_IMPORT_FAILED_REASON,
+            )
+            finishCsvImport()
+        } else {
+            mutableCsvImportOutcome.value = null
+        }
+    }
+
+    fun onCsvImportCommandResult(result: CommandResult) {
+        if (csvImportState != CsvImportState.COMMITTING) return
+        val taskCount = csvImportRows?.size ?: 0
+        mutableCsvImportOutcome.value = when (result) {
+            is CommandResult.Success -> CsvImportOutcome.Completed(taskCount)
+            is CommandResult.Rejected -> CsvImportOutcome.Failed(null, result.message)
+        }
+        finishCsvImport()
+    }
+
+    fun cancelCsvImport() {
+        if (csvImportState == CsvImportState.COMMITTING) return
+        mutableCsvImportOutcome.value = null
+        finishCsvImport()
+    }
+
+    fun dismissCsvImportOutcome() {
+        if (csvImportState == CsvImportState.COMMITTING) return
+        mutableCsvImportOutcome.value = null
+        finishCsvImport()
+    }
+
+    private fun finishCsvImport() {
+        csvImportRows = null
+        csvImportState = CsvImportState.IDLE
+        mutableCsvImportInProgress.value = false
+        if (csvImportOwnsOperation) {
+            csvImportOwnsOperation = false
+            operation.unlock()
+        }
+    }
+
     /** Starts a plaintext CSV export of [tables], one document per table. */
     fun beginCsvExport(tables: Set<CsvExportTable>) {
         if (tables.isEmpty() || !operation.tryLock()) return
@@ -285,7 +432,7 @@ class VaultTransferViewModel @Inject constructor(
      * ends the whole batch where it stands: tables already written keep
      * their documents, and nothing further is requested.
      */
-    fun onCsvDocumentSelected(uri: Uri?) {
+    fun onCsvExportDocumentSelected(uri: Uri?) {
         val table = pendingCsvTables.removeFirstOrNull() ?: return
         if (uri == null) {
             val completed = csvCompletedCount
@@ -468,6 +615,7 @@ class VaultTransferViewModel @Inject constructor(
      * key of a staged archive may outlive this ViewModel.
      */
     override fun onCleared() {
+        finishCsvImport()
         releasePendingPassphrase()
         if (mutableImportOutcome.value is VaultImportOutcome.Ready) releaseStagedImport()
     }
@@ -525,4 +673,7 @@ class VaultTransferViewModel @Inject constructor(
  * risks leaking one.
  */
 private const val CSV_EXPORT_FAILED_REASON = "The CSV export could not be completed."
+private const val CSV_IMPORT_FAILED_REASON = "The CSV import could not be completed."
 private const val MARKDOWN_EXPORT_FAILED_REASON = "The Markdown export could not be completed."
+
+private enum class CsvImportState { IDLE, AWAITING_DOCUMENT, PREVIEW, COMMITTING }

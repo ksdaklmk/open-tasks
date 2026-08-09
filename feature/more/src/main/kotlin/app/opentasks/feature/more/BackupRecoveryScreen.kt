@@ -126,6 +126,18 @@ sealed interface CsvExportOutcome {
     data class Failed(val reason: String) : CsvExportOutcome
 }
 
+sealed interface CsvImportOutcome {
+    data class Preview(
+        val taskCount: Int,
+        val newProjectCount: Int,
+        val newTagCount: Int,
+    ) : CsvImportOutcome
+
+    data class Completed(val taskCount: Int) : CsvImportOutcome
+
+    data class Failed(val rowNumber: Int?, val reason: String) : CsvImportOutcome
+}
+
 sealed interface MarkdownExportOutcome {
     data object Completed : MarkdownExportOutcome
 
@@ -154,6 +166,8 @@ fun BackupRecoveryScreen(
     vaultImportOutcome: VaultImportOutcome? = null,
     csvExportInProgress: Boolean = false,
     csvExportOutcome: CsvExportOutcome? = null,
+    csvImportInProgress: Boolean = false,
+    csvImportOutcome: CsvImportOutcome? = null,
     projects: List<Project> = emptyList(),
     markdownExportInProgress: Boolean = false,
     markdownExportOutcome: MarkdownExportOutcome? = null,
@@ -181,6 +195,10 @@ fun BackupRecoveryScreen(
     onDismissVaultImport: () -> Unit = {},
     onExportCsv: (Set<CsvExportTable>) -> Unit = {},
     onDismissCsvExportOutcome: () -> Unit = {},
+    onImportCsv: () -> Unit = {},
+    onConfirmCsvImport: () -> Unit = {},
+    onCancelCsvImport: () -> Unit = {},
+    onDismissCsvImportOutcome: () -> Unit = {},
     onExportMarkdown: (ProjectId) -> Unit = {},
     onDismissMarkdownExportOutcome: () -> Unit = {},
     onBack: () -> Unit,
@@ -355,6 +373,13 @@ fun BackupRecoveryScreen(
                     onExportClick = { showCsvTableSheet = true },
                     onDismissOutcome = onDismissCsvExportOutcome,
                 )
+                Spacer(Modifier.height(20.dp))
+                CsvImportContent(
+                    inProgress = csvImportInProgress,
+                    outcome = csvImportOutcome,
+                    onImportClick = onImportCsv,
+                    onDismissOutcome = onDismissCsvImportOutcome,
+                )
                 HorizontalDivider(Modifier.padding(vertical = 24.dp))
                 Text(
                     stringResource(R.string.markdown_export_heading),
@@ -434,6 +459,13 @@ fun BackupRecoveryScreen(
             preview = ready,
             onReplace = onConfirmVaultImport,
             onCancel = onDismissVaultImport,
+        )
+    }
+    (csvImportOutcome as? CsvImportOutcome.Preview)?.let { preview ->
+        CsvImportPreviewDialog(
+            preview = preview,
+            onConfirm = onConfirmCsvImport,
+            onCancel = onCancelCsvImport,
         )
     }
     remoteSecretAction?.let { action ->
@@ -611,6 +643,108 @@ private fun CsvExportContent(
             onDismiss = onDismissOutcome,
         )
     }
+}
+
+@Composable
+private fun CsvImportContent(
+    inProgress: Boolean,
+    outcome: CsvImportOutcome?,
+    onImportClick: () -> Unit,
+    onDismissOutcome: () -> Unit,
+) {
+    Text(
+        stringResource(R.string.csv_import_explanation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        stringResource(R.string.csv_import_omissions),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        stringResource(R.string.csv_import_zone_normalisation),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        stringResource(R.string.csv_import_full_fidelity),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(12.dp))
+    BackupAction(R.string.csv_import_action, "csv-import", onImportClick)
+    if (inProgress) TransferProgress(R.string.csv_import_in_progress)
+    when (outcome) {
+        is CsvImportOutcome.Completed -> TransferOutcome(
+            message = stringResource(R.string.csv_import_completed, outcome.taskCount),
+            testTag = "csv-import-outcome",
+            dismissTestTag = "csv-import-dismiss",
+            onDismiss = onDismissOutcome,
+        )
+        is CsvImportOutcome.Failed -> TransferOutcome(
+            message = if (outcome.rowNumber == null) {
+                outcome.reason
+            } else {
+                stringResource(R.string.csv_import_failed_row, outcome.rowNumber, outcome.reason)
+            },
+            testTag = "csv-import-outcome",
+            dismissTestTag = "csv-import-dismiss",
+            onDismiss = onDismissOutcome,
+        )
+        is CsvImportOutcome.Preview, null -> Unit
+    }
+}
+
+@Composable
+private fun CsvImportPreviewDialog(
+    preview: CsvImportOutcome.Preview,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        modifier = Modifier.testTag("csv-import-preview"),
+        title = { Text(stringResource(R.string.csv_import_preview_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(
+                        R.string.csv_import_preview_summary,
+                        preview.taskCount,
+                        preview.newProjectCount,
+                        preview.newTagCount,
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    stringResource(R.string.csv_import_preview_create_only),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("csv-import-confirm"),
+            ) {
+                Text(stringResource(R.string.csv_import_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("csv-import-cancel"),
+            ) {
+                Text(stringResource(R.string.csv_import_cancel))
+            }
+        },
+    )
 }
 
 @Composable

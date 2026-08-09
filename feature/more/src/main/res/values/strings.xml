@@ -264,6 +264,19 @@
     <string name="csv_export_disclosure_title">Export as plain-text CSV?</string>
     <string name="csv_export_disclosure_body">CSV files are not encrypted. Once exported, titles, descriptions, notes, dates, and time information become readable outside Open Tasks by anyone who opens the file.</string>
     <string name="csv_export_disclosure_confirm">Export CSV</string>
+    <string name="csv_import_action">Import tasks CSV</string>
+    <string name="csv_import_explanation">Import an Open Tasks tasks CSV to create new tasks, projects and tags. Existing records are never updated or merged.</string>
+    <string name="csv_import_omissions">CSV does not carry attachments, notes, checklists, dependencies, reminders, time entries or full project settings.</string>
+    <string name="csv_import_zone_normalisation">Named time zones are normalised to the UTC offset stored in the exported CSV.</string>
+    <string name="csv_import_full_fidelity">Use an encrypted .otvault transfer when you need a full-fidelity copy of the vault.</string>
+    <string name="csv_import_in_progress">Importing tasks CSV…</string>
+    <string name="csv_import_completed">Imported %1$d tasks.</string>
+    <string name="csv_import_failed_row">Row %1$d: %2$s</string>
+    <string name="csv_import_preview_title">Import these tasks?</string>
+    <string name="csv_import_preview_summary">This creates %1$d tasks, %2$d projects and %3$d tags.</string>
+    <string name="csv_import_preview_create_only">This import is create-only. It will not update or merge existing tasks.</string>
+    <string name="csv_import_confirm">Import tasks</string>
+    <string name="csv_import_cancel">Cancel</string>
 
     <string name="markdown_export_heading">Markdown export</string>
     <string name="markdown_export_explanation">Export one project\'s milestones and tasks as a plain Markdown file.</string>

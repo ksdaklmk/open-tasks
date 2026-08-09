@@ -51,6 +51,22 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): TaskEntity?
 
+    @Query(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM checklist_items WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM task_dependencies
+                WHERE taskId = :taskId OR dependsOnTaskId = :taskId) +
+            (SELECT COUNT(*) FROM reminders WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM attachments WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM attachment_transfer WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM notes WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM time_entries WHERE taskId = :taskId) +
+            (SELECT COUNT(*) FROM tasks WHERE parentTaskId = :taskId)
+        """,
+    )
+    suspend fun importUndoChildCount(taskId: String): Int
+
     @Query("SELECT * FROM tasks WHERE id IN (:ids) ORDER BY id")
     suspend fun getByIds(ids: List<String>): List<TaskEntity>
 
@@ -225,6 +241,12 @@ interface WorkspaceDao {
     @Query("DELETE FROM workflow_statuses WHERE id = :id")
     suspend fun deleteWorkflowStatus(id: String): Int
 
+    @Query("DELETE FROM projects WHERE id = :id")
+    suspend fun deleteProject(id: String): Int
+
+    @Query("DELETE FROM tags WHERE id = :id")
+    suspend fun deleteTag(id: String): Int
+
     @Query("SELECT COUNT(*) FROM tasks WHERE statusId = :statusId")
     suspend fun taskCountForStatus(statusId: String): Int
 
@@ -361,6 +383,18 @@ interface WorkspaceDao {
     @Query("SELECT * FROM activity_entries ORDER BY createdAtEpochMillis, id")
     fun observeActivityEntries(): Flow<List<ActivityEntryEntity>>
 
+    @Query("SELECT * FROM activity_entries WHERE taskId = :taskId ORDER BY id")
+    suspend fun getActivityEntriesForTask(taskId: String): List<ActivityEntryEntity>
+
+    @Query(
+        """
+        SELECT * FROM activity_entries
+        WHERE taskId IS NULL AND projectId = :projectId
+        ORDER BY id
+        """,
+    )
+    suspend fun getActivityEntriesForProject(projectId: String): List<ActivityEntryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertActivityEntry(value: ActivityEntryEntity)
 
@@ -389,6 +423,36 @@ interface WorkspaceDao {
         projectId: String?,
         excess: Int,
     )
+
+    @Query("DELETE FROM activity_entries WHERE id = :id")
+    suspend fun deleteActivityEntry(id: String): Int
+
+    @Query(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM tasks
+                WHERE id NOT IN (:receiptTaskIds)
+                    AND (projectId = :projectId OR statusId IN (:statusIds))) +
+            (SELECT COUNT(*) FROM milestones WHERE projectId = :projectId) +
+            (SELECT COUNT(*) FROM notes WHERE projectId = :projectId)
+        """,
+    )
+    suspend fun importUndoExternalProjectReferenceCount(
+        projectId: String,
+        statusIds: List<String>,
+        receiptTaskIds: List<String>,
+    ): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM task_tags
+        WHERE tagId = :tagId AND taskId NOT IN (:receiptTaskIds)
+        """,
+    )
+    suspend fun importUndoExternalTagReferenceCount(
+        tagId: String,
+        receiptTaskIds: List<String>,
+    ): Int
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun getNoteById(id: String): NoteEntity?

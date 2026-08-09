@@ -13,12 +13,14 @@ import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Revision
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SavedView
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
+import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -37,7 +39,47 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 
+data class ImportedTaskRow(
+    val sourceRowNumber: Int,
+    val title: String,
+    val projectName: String?,
+    val statusName: String?,
+    val priority: Priority,
+    val start: ZonedMoment?,
+    val due: ZonedMoment?,
+    val completedAt: Instant?,
+    val estimateMinutes: Long?,
+    val tagNames: List<String>,
+    val description: String,
+)
+
+data class ImportedTaskReceipt(
+    val taskId: TaskId,
+    val expectedRevision: Revision,
+    val expectedTagIds: Set<TagId>,
+    val activityEntryId: String,
+)
+
+data class ImportedProjectReceipt(
+    val project: Project,
+    val statuses: List<WorkflowStatus>,
+    val activityEntryId: String,
+)
+
+data class ImportedTagReceipt(val tag: Tag)
+
+data class ImportReceipt(
+    val tasks: List<ImportedTaskReceipt>,
+    val projects: List<ImportedProjectReceipt>,
+    val tags: List<ImportedTagReceipt>,
+)
+
 sealed interface DomainCommand {
+    data class ImportTasks(val rows: List<ImportedTaskRow>) : DomainCommand
+
+    /** Repository-produced Undo only; never constructed by UI code. */
+    data class RemoveImportedRecords(val receipt: ImportReceipt) : DomainCommand
+
     data class CreateProject(
         val projectId: ProjectId,
         val name: String,
@@ -486,6 +528,12 @@ enum class RejectionReason {
     SAVED_VIEW_PAYLOAD_TOO_LARGE,
     EMPTY_BULK_SELECTION,
     BULK_SELECTION_TOO_LARGE,
+    IMPORT_TOO_LARGE,
+    IMPORT_EMPTY,
+    IMPORT_NAME_COLLISION,
+    IMPORT_STATUS_CONFLICT,
+    IMPORT_BACKUP_LIMIT_EXCEEDED,
+    IMPORT_UNDO_CONFLICT,
 }
 
 interface VaultRepository {
