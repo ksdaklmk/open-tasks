@@ -1,7 +1,11 @@
 package app.opentasks.feature.projects
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,12 +29,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -41,7 +56,9 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.Task
@@ -55,6 +72,17 @@ data class BoardColumn(
     val status: WorkflowStatus,
     val tasks: List<Task>,
 )
+
+private data class BoardDragState(
+    val taskId: TaskId,
+    val sourceStatusId: WorkflowStatusId,
+    val startInRoot: Offset,
+    val startScroll: Int,
+    val accumulatedOffset: Offset = Offset.Zero,
+) {
+    val positionInRoot: Offset
+        get() = startInRoot + accumulatedOffset
+}
 
 fun boardColumns(
     project: Project,
@@ -93,59 +121,136 @@ fun BoardView(
     onOpenTask: (TaskId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    val scrollState = rememberScrollState()
+    val columnBounds = remember { mutableStateMapOf<WorkflowStatusId, Rect>() }
+    var boardBounds by remember { mutableStateOf(Rect.Zero) }
+    var dragState by remember { mutableStateOf<BoardDragState?>(null) }
+    val edgeThreshold = with(LocalDensity.current) { 48.dp.toPx() }
+    val edgeScrollStep = with(LocalDensity.current) { 16.dp.toPx() }
+    val layoutDirection = LocalLayoutDirection.current
+    val scrollDirection = if (layoutDirection == LayoutDirection.Ltr) 1 else -1
+
+    fun dropTarget(drag: BoardDragState): WorkflowStatusId? =
+        columns.firstOrNull { column ->
+            column.status.id != drag.sourceStatusId &&
+                columnBounds[column.status.id]?.contains(drag.positionInRoot) == true
+        }?.status?.id
+
+    val hoveredStatusId = dragState?.let(::dropTarget)
+
+    LaunchedEffect(dragState?.positionInRoot, boardBounds, layoutDirection) {
+        while (true) {
+            val pointerX = dragState?.positionInRoot?.x ?: break
+            val scroll = when {
+                pointerX < boardBounds.left + edgeThreshold -> -edgeScrollStep
+                pointerX > boardBounds.right - edgeThreshold -> edgeScrollStep
+                else -> break
+            } * scrollDirection
+            if (scrollState.scrollBy(scroll) == 0f) break
+            withFrameNanos { }
+        }
+    }
+
+    fun finishDrag() {
+        val drag = dragState
+        val target = drag?.let(::dropTarget)
+        if (drag != null && target != null) {
+            onMoveTask(drag.taskId, target)
+        }
+        dragState = null
+    }
+
+    Box(
+        modifier = modifier.onGloballyPositioned { boardBounds = it.boundsInRoot() },
     ) {
-        columns.forEach { column ->
-            Surface(
-                modifier = Modifier
-                    .width(columnWidth)
-                    .height(440.dp)
-                    .testTag("board-column-${column.status.id.value}"),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Column {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            column.status.name,
-                            modifier = Modifier.semantics { heading() },
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            pluralStringResource(
-                                R.plurals.board_open_task_count,
-                                column.tasks.size,
-                                column.tasks.size,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (column.tasks.isEmpty()) {
-                            item {
-                                Text(
-                                    stringResource(R.string.board_no_open_tasks),
-                                    modifier = Modifier.padding(8.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        } else {
-                            items(column.tasks, key = { it.id.value }) { task ->
-                                BoardTaskCard(
-                                    task = task,
-                                    targets = moveTargets(columns, column.status.id),
-                                    onMoveTask = onMoveTask,
-                                    onOpenTask = onOpenTask,
-                                )
+        Row(
+            modifier = Modifier.horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            columns.forEach { column ->
+                Surface(
+                    modifier = Modifier
+                        .width(columnWidth)
+                        .height(440.dp)
+                        .onGloballyPositioned {
+                            columnBounds[column.status.id] = it.boundsInRoot()
+                        }
+                        .testTag("board-column-${column.status.id.value}"),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.large,
+                    border = if (hoveredStatusId == column.status.id) {
+                        BorderStroke(2.dp, MaterialTheme.colorScheme.secondary)
+                    } else {
+                        null
+                    },
+                ) {
+                    Column {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                column.status.name,
+                                modifier = Modifier.semantics { heading() },
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                pluralStringResource(
+                                    R.plurals.board_open_task_count,
+                                    column.tasks.size,
+                                    column.tasks.size,
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (column.tasks.isEmpty()) {
+                                item {
+                                    Text(
+                                        stringResource(R.string.board_no_open_tasks),
+                                        modifier = Modifier.padding(8.dp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                items(column.tasks, key = { it.id.value }) { task ->
+                                    val taskDrag = dragState?.takeIf { it.taskId == task.id }
+                                    val scrollCompensation = taskDrag?.let {
+                                        (scrollState.value - it.startScroll).toFloat() *
+                                            scrollDirection
+                                    } ?: 0f
+                                    BoardTaskCard(
+                                        task = task,
+                                        targets = moveTargets(columns, column.status.id),
+                                        dragOffset = taskDrag?.accumulatedOffset
+                                            ?.plus(Offset(scrollCompensation, 0f))
+                                            ?: Offset.Zero,
+                                        onDragStart = { positionInRoot ->
+                                            dragState = BoardDragState(
+                                                taskId = task.id,
+                                                sourceStatusId = column.status.id,
+                                                startInRoot = positionInRoot,
+                                                startScroll = scrollState.value,
+                                            )
+                                        },
+                                        onDrag = { dragAmount ->
+                                            dragState = dragState?.let {
+                                                it.copy(
+                                                    accumulatedOffset =
+                                                        it.accumulatedOffset + dragAmount,
+                                                )
+                                            }
+                                        },
+                                        onDragEnd = ::finishDrag,
+                                        onDragCancel = { dragState = null },
+                                        onMoveTask = onMoveTask,
+                                        onOpenTask = onOpenTask,
+                                    )
+                                }
                             }
                         }
                     }
@@ -159,10 +264,16 @@ fun BoardView(
 private fun BoardTaskCard(
     task: Task,
     targets: List<WorkflowStatus>,
+    dragOffset: Offset,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
 ) {
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
+    var bounds by remember(task.id) { mutableStateOf(Rect.Zero) }
     val locale = LocalLocale.current.platformLocale
     val priorityDescription = stringResource(
         R.string.board_priority_description,
@@ -181,6 +292,21 @@ private fun BoardTaskCard(
         onClick = { onOpenTask(task.id) },
         modifier = Modifier
             .fillMaxWidth()
+            .zIndex(if (dragOffset == Offset.Zero) 0f else 1f)
+            .graphicsLayer {
+                translationX = dragOffset.x
+                translationY = dragOffset.y
+            }
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .pointerInput(task.id) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { onDragStart(bounds.topLeft + it) },
+                    onDragEnd = onDragEnd,
+                    onDragCancel = onDragCancel,
+                    onDrag = { _, dragAmount -> onDrag(dragAmount) },
+                )
+            }
+            .testTag("board-card-${task.id.value}")
             .semantics {
                 customActions = moveLabels.map { (status, label) ->
                     CustomAccessibilityAction(label) {

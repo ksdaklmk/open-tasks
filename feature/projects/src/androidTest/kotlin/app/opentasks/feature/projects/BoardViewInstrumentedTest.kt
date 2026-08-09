@@ -1,8 +1,11 @@
 package app.opentasks.feature.projects
 
+import android.view.ViewConfiguration
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
@@ -50,6 +53,50 @@ class BoardViewInstrumentedTest {
         composeRule.onNodeWithTag(
             "board-move-${task.id.value}-to-${OpenTasksFixtures.planned.value}",
         ).performClick()
+
+        assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
+    }
+
+    @Test
+    fun longPressDragDispatchesTaskAndTargetStatus() {
+        val task = OpenTasksFixtures.tasks
+            .first { it.id.value == "task-proposal" }
+            .copy(
+                statusId = OpenTasksFixtures.backlog,
+                semanticStatus = SemanticStatus.BACKLOG,
+            )
+        val moved = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = boardColumns(
+                        project = OpenTasksFixtures.studioProject,
+                        statuses = OpenTasksFixtures.workflowStatuses,
+                        tasks = listOf(task),
+                    ),
+                    columnWidth = 160.dp,
+                    onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
+                    onOpenTask = {},
+                )
+            }
+        }
+
+        val cardBounds = composeRule
+            .onNodeWithTag("board-card-${task.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val targetBounds = composeRule
+            .onNodeWithTag("board-column-${OpenTasksFixtures.planned.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        composeRule.onRoot().performTouchInput {
+            down(cardBounds.center)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(targetBounds.center)
+            up()
+        }
 
         assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
     }
