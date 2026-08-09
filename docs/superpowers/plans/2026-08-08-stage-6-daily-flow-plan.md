@@ -27,6 +27,9 @@ bulk composites, and CSV import require exact Undo; `MarkReviewed` is the
 deliberate append-only activity action and returns no Undo. All other features
 are additive product surfaces over existing data and commands: no new
 transport, no provider changes, no merge path, no new runtime permissions.
+Focus timer Start and Stop operations serialize with boundary reconciliation;
+a manual stop of the focus-owned timer clears the transient session before an
+owner-checked stop, while unrelated timer stops keep their generic behavior.
 
 **Tech Stack:** Kotlin 2.3.21, AGP 9 built-in Kotlin, Java 17 on JDK 21,
 Room 2.8.4, SQLCipher 4.15.0, `androidx.glance:glance-appwidget`, Storage
@@ -1078,6 +1081,164 @@ Boundary notification and timer ownership land in Task 14's device checklist.
 git add core/domain core/data app feature/tasks
 git commit -m "feat: add preset focus cycles on the task timer" \
   -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+#### Approved Task 6 amendment: focus-aware manual timer Stop
+
+Execute this amendment after the whole-stage final-fix review and before Task
+14. It is one implementation and review boundary; it adds no UI, persistence,
+domain command, or device suite before Task 14.
+
+**Files:**
+
+- Modify: `app/src/main/kotlin/app/opentasks/focus/FocusAlarms.kt:204-309`
+- Modify: `app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt:273-340`
+- Modify: `app/src/test/kotlin/app/opentasks/lock/AppLockControllerTest.kt:131-221`
+  (reuse its in-memory `SharedPreferences` double)
+- Modify: `app/src/test/kotlin/app/opentasks/focus/FocusTimerOwnershipTest.kt`
+
+**Interfaces:**
+
+- Consumes: the existing `FocusCoordinator` mutex, `FocusSessionStore`,
+  `DomainCommand.StartTimer`, `DomainCommand.StopTimer`, and
+  `DomainCommand.StopTimerIfOwned`.
+- Produces:
+
+```kotlin
+suspend fun FocusCoordinator.start(
+    taskId: TaskId,
+    preset: FocusPreset,
+    repository: VaultRepository,
+): CommandResult
+
+suspend fun FocusCoordinator.stopTimer(
+    taskId: TaskId,
+    repository: VaultRepository,
+): CommandResult
+
+suspend fun FocusCoordinator.stop(
+    repository: VaultRepository,
+): CommandResult?
+```
+
+`start` serializes the timer command and session/alarm save under the existing
+gate. `stopTimer` preserves generic `StopTimer` when the requested task is not
+the active focus-session task. When it matches, it clears the session/alarm
+and dispatches `StopTimerIfOwned` before releasing the gate. Banner `stop`
+uses the same focus-owned sequence. Keep the production Hilt constructor and
+add only an internal JVM-test constructor accepting schedule, cancel, and
+notify function values; do not introduce one-implementation interfaces.
+
+- [ ] **Step 1: Write the failing coordinator tests**
+
+Make the existing `FakeSharedPreferences` test double `internal`, import it in
+`FocusTimerOwnershipTest`, and construct a real `FocusSessionStore` plus a real
+`FocusCoordinator`. Use `InMemoryVaultRepository(OpenTasksFixtures.snapshot)`
+for timer truth. For deterministic races, wrap that repository with a tiny
+test-only delegating repository that blocks one selected command using
+`CompletableDeferred`; every wait stays inside `withTimeout(5_000)`.
+
+Add these cases:
+
+```kotlin
+@Test fun manualStopRacingBoundaryCannotRestartTimer()
+@Test fun manualStopRacingNewFocusStartLeavesNoOrphanedSession()
+@Test fun manualStopDoesNotTouchAnotherTimerOwner()
+@Test fun onResumeAfterManualStopDoesNotStartReplacementEntry()
+@Test fun unrelatedTimerStopKeepsGenericStopBehavior()
+```
+
+The boundary race starts with a persisted FOCUS session exactly at its end and
+its task timer running; hold the manual owner-checked stop inside the gate,
+start `onBoundary`, release, then assert the session and active timer are both
+absent. The Start race holds `StartTimer` inside the gate, queues manual Stop,
+releases Start, and asserts Stop wins with neither session nor active timer.
+The owner-change case persists a session for task A while task B owns the live
+timer, calls `stopTimer(A, repository)`, and asserts
+`TIMER_OWNERSHIP_CHANGED`, a cleared session, and B still active. The
+ON_RESUME case calls `stopTimer(A)` and then `reconcile`; assert no new
+`StartTimer` command, no session, and no active timer. The unrelated case
+persists a session for A, runs B's timer, calls `stopTimer(B)`, and asserts the
+generic stop succeeds while A's session remains.
+
+- [ ] **Step 2: Run the focused test to prove RED**
+
+```bash
+./gradlew :app:testDebugUnitTest --tests \
+  "app.opentasks.focus.FocusTimerOwnershipTest"
+```
+
+Expected: FAIL to compile because the repository-aware coordinator methods and
+JVM-test constructor do not exist.
+
+- [ ] **Step 3: Implement the serialized policy**
+
+In `FocusCoordinator`, keep the one existing mutex and move all focus Start and
+Stop repository dispatches inside it:
+
+```kotlin
+suspend fun start(
+    taskId: TaskId,
+    preset: FocusPreset,
+    repository: VaultRepository,
+): CommandResult = gate.withLock {
+    val result = repository.execute(DomainCommand.StartTimer(taskId))
+    if (result is CommandResult.Success) {
+        val session = controller.start(taskId.value, preset)
+        store.save(session)
+        scheduleAlarm(session)
+    }
+    result
+}
+
+suspend fun stopTimer(
+    taskId: TaskId,
+    repository: VaultRepository,
+): CommandResult = gate.withLock {
+    if (store.load()?.taskId != taskId.value) {
+        return@withLock repository.execute(DomainCommand.StopTimer)
+    }
+    clearFocus()
+    repository.execute(DomainCommand.StopTimerIfOwned(taskId))
+}
+
+suspend fun stop(repository: VaultRepository): CommandResult? = gate.withLock {
+    val session = store.load() ?: return@withLock null
+    clearFocus()
+    repository.execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
+}
+```
+
+Route `WorkspaceViewModel.toggleTimer`, `stopActiveTimer`, `startFocus`, and
+`stopFocus` through these methods. `toggleTimer` passes the task id whose row
+showed Stop; `stopActiveTimer` passes the projected active owner when present
+and retains the old idempotent generic Stop fallback when absent. Publish the
+same success/rejection events as today; banner Stop keeps an idempotent success
+silent and reports only a rejection.
+
+- [ ] **Step 4: Run focused and non-device verification**
+
+```bash
+./gradlew :app:testDebugUnitTest --tests \
+  "app.opentasks.focus.FocusTimerOwnershipTest"
+./gradlew :app:testDebugUnitTest --tests "*Focus*"
+./gradlew :app:compileDebugAndroidTestKotlin
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug
+git diff --check
+```
+
+Expected: all pass. Do not start ADB, an emulator, or a connected suite.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src/main/kotlin/app/opentasks/focus/FocusAlarms.kt \
+  app/src/main/kotlin/app/opentasks/WorkspaceViewModel.kt \
+  app/src/test/kotlin/app/opentasks/lock/AppLockControllerTest.kt \
+  app/src/test/kotlin/app/opentasks/focus/FocusTimerOwnershipTest.kt
+git diff --cached --check
+git commit -m "fix: end focus cycle on manual timer stop" \
+  -m "Co-Authored-By: OpenAI Codex <noreply@openai.com>"
 ```
 
 ---
@@ -2450,8 +2611,10 @@ after unlock; widget: open one focus row and confirm the canonical task,
 return, tap-complete a different row, verify counts update, then find that
 completed task in the app and Reopen it; enable app lock → widget
 conceals and taps route to unlock; start a 25/5 focus session →
-boundary notification fires with generic text, then start another task's
-timer before a stale focus alarm and prove it is not stopped; save a search
+use task-detail Stop, background/foreground the app, and prove the banner stays
+gone with no replacement time entry; start another 25/5 cycle → boundary
+notification fires with generic text, then start another task's timer before a
+stale focus alarm and prove it is not stopped; save a search
 with project/tag filters, restart the process, apply it; `.otvault` export → import → saved views
 survive; bulk-select 3 tasks → complete → Undo restores all; run the
 weekly review across all four sections; Markdown-export a project and
@@ -2467,14 +2630,15 @@ the manifest/static checks already pin both normal and round resource ids.
 - [ ] **Step 5: Contract documents + closure**
 
 `docs/architecture.md` (saved views live, composite commands,
-`REVIEWED` activity kind, import boundary); `docs/threat-model.md`
+`REVIEWED` activity kind, import boundary, focus-aware manual Stop);
+`docs/threat-model.md`
 (share-intent text handling, tile surface, CSV import parsing bounds,
 Markdown plaintext note); `DESIGN.md` (board, review, selection bar,
 focus banner, widget actions, launcher icon); `PRODUCT.md` (Stage 6 boundary
 including the installed Ember icon);
 `CLAUDE.md` (new bounds: 20 saved views, 200 bulk, 5_000 import rows,
-14-day staleness, focus presets; the saved-view content-fingerprint
-rule); `HANDOFF.md` (Stage 6 closure checkpoint). Write
+14-day staleness, focus presets, focus-aware manual Stop; the saved-view
+content-fingerprint rule); `HANDOFF.md` (Stage 6 closure checkpoint). Write
 `docs/qualification/stage6-daily-flow.md` with every gate result and
 exact counts, no private identifiers.
 
@@ -2506,7 +2670,7 @@ must not contain
 | Share-sheet and text-selection intake | 3 |
 | Quick Settings tile | 4 |
 | Interactive Today widget | 5 |
-| Focus cycles | 6 |
+| Focus cycles | 6, 14 |
 | Saved searches UI | 7 |
 | Bulk multi-select | 8 |
 | Weekly review | 9 |
