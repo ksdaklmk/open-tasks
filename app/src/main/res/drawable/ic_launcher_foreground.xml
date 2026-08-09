@@ -3,13 +3,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- card -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M29,27h50a8,8 0,0 1,8 8v38a8,8 0,0 1,-8 8H29a8,8 0,0 1,-8 -8V35a8,8 0,0 1,8 -8z" />
+        android:pathData="M37.5,34.5h33a7.5,7.5 0,0 1,7.5 7.5v24a7.5,7.5 0,0 1,-7.5 7.5h-33a7.5,7.5 0,0 1,-7.5 -7.5v-24a7.5,7.5 0,0 1,7.5 -7.5z" />
+    <!-- bars -->
     <path
         android:fillColor="#252321"
-        android:pathData="M35,41h31v7H35zM35,57h22v7H35z" />
+        android:pathData="M41.7,45h18.6a2.7,2.7 0,0 1,0 5.4h-18.6a2.7,2.7 0,0 1,0 -5.4z" />
+    <path
+        android:fillColor="#252321"
+        android:pathData="M41.7,57.8h11.1a2.7,2.7 0,0 1,0 5.4h-11.1a2.7,2.7 0,0 1,0 -5.4z" />
+    <!-- ember cursor -->
     <path
         android:fillColor="#C64E2B"
-        android:pathData="M71,53h7v7h-7z" />
+        android:pathData="M65.3,57.8h2.4a1.5,1.5 0,0 1,1.5 1.5v2.4a1.5,1.5 0,0 1,-1.5 1.5h-2.4a1.5,1.5 0,0 1,-1.5 -1.5v-2.4a1.5,1.5 0,0 1,1.5 -1.5z" />
 </vector>
