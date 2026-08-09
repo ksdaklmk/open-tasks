@@ -1,8 +1,8 @@
 # Open Tasks Handoff
 
 - Last updated: 9 August 2026
-- Branch: `main` at `ade3634` plus this checkpoint docs commit. Local is
-  ahead of `origin/main` (`8c08570`) by 38 commits, not
+- Branch: `main` at `2254cb1` plus this checkpoint docs commit. Local is
+  ahead of `origin/main` (`8c08570`) by 41 commits, not
   yet pushed (matching the established Stage 6 practice; a push triggers
   a CI run).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
@@ -10,10 +10,9 @@
   `verify`, compact API 36, and `release` green, only expanded API 37.0
   red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — Tasks 1–13 COMPLETE and independently
-     reviewed. The whole-stage review is PAUSED during synthesis after its
-     full range read; its fix wave, the open Task 6 product decision, and
-     controller-owned Task 14 remain.**
+  1. **Stage 6 execution — Tasks 1–13, the whole-stage review, and its
+     single consolidated final-fix wave are COMPLETE. The open Task 6
+     product decision and controller-owned Task 14 remain.**
      Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      launcher-icon authority:
@@ -23,18 +22,18 @@
      implementation-base SHA). Execution ledger with full per-task
      review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 Task 13 closure + whole-stage review pause checkpoint
-     below for the confirmed findings, the one open user decision, and exact
-     resume instructions.
+     See the Stage 6 final-review fix closure checkpoint below for the six
+     discharged findings, scoped re-review ruling, one open user decision,
+     and exact resume instructions.
      Execution mode (user
      ruling, recorded in the plan header): Tasks 2–11 and Task 12 phase 1 via
      `superpowers:subagent-driven-development` — fresh implementer per
      task; Task 12 phase 2 completed inline on the fresh go; independent
      task review per boundary, no-subagent/no-fork clause in every
      implementer dispatch, Task 14 controller-owned; no task before Task 14
-     runs a device suite. Task 13 is complete; the whole-stage review read the
-     complete `fc4aad8..ade3634` package but was interrupted before its final
-     verdict; controller-owned Task 14 has not started.
+     runs a device suite. Task 13, the complete `fc4aad8..ade3634`
+     whole-stage review, and its final-fix wave are complete;
+     controller-owned Task 14 has not started.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -172,8 +171,9 @@
   slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `ade3634` (`feat: apply ember
-  launcher icon`), the independently reviewed Stage 6 Task 13 tip. Stage 6
+- Current product source implementation point: `4f42dfe` (`fix: close stage 6
+  final review gaps`), with `2254cb1` only removing its accidentally tracked
+  ignored execution report while preserving the local file. Stage 6
   starts from the recorded `fc4aad8` implementation base; its complete task,
   review, and fix history is in the ignored execution ledger named above.
   The prior Stage 5 implementation point is `6bfafa8` (`fix: wipe
@@ -234,6 +234,42 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 6 final-review fix closure + Task 6 decision pause — 9 August 2026
+
+The resumed whole-stage review over `fc4aad8..ade3634` returned Needs fixes:
+zero Critical and six Important. One consolidated TDD fix wave at `4f42dfe`
+closed forward InMemory import visibility, natural-date locale/12-hour
+validation, Today-widget live action authority, Markdown project selection
+semantics, Quick Add's ineffective sub-48 dp date clear, and applied due-date
+restoration. The ignored reports are `final-review-report.md` and
+`final-fix-report.md` in the Stage 6 SDD workspace.
+
+The implementer and controller independently ran the five focused tests and
+Android-test compile targets. The full `testDebugUnitTest lintDebug
+:app:assembleDebug` gate passed at 550 tasks, and `git diff --check` is clean.
+No emulator, ADB mutation, install, or connected suite ran.
+
+The one scoped re-review marked findings 1, 2, and 4–6 ADDRESSED and disputed
+finding 3. The controller parked that residual as a false positive with this
+ruling: an allowed widget action linearizes at its live-authority read; its
+later atomic generation comparison proves it also precedes any stop or
+concealment invalidation. Invalidation during authority evaluation is covered
+and aborts. Invalidation after the final comparison is concurrent with an
+already-authorized operation, not stale authorization; requiring it to cancel
+an in-flight suspending repository transaction is a stronger contract than
+the authority spec and would force invalidation to block across that write.
+The durable re-review is `final-fix-re-review.md`.
+
+Exactly one product decision now blocks Task 14. During FOCUS, generic
+task-detail Stop ends only the current time entry; foreground reconciliation
+starts a new entry for the same task. Keeping this pinned rule needs no source
+change and Task 14 must prove it never touches another timer owner. Making
+generic Stop end the focus cycle requires a spec/plan amendment, coordinated
+`FocusCoordinator.stop()`, and concurrency/reconciliation tests before Task
+14. On the user's ruling, take that chosen path, update this checkpoint, and
+only then start controller-owned Task 14. The protected historical Stage 3
+plan amendment, `.kotlin/`, and `artifacts/` remain untouched.
 
 ## Stage 6 Task 13 closure + whole-stage review pause — 9 August 2026
 
