@@ -6,13 +6,14 @@
 > executed and reviewed inline before the switch). One fresh implementer
 > subagent per task with an independent review per boundary; implementer
 > dispatches must never spawn subagents or forks of their own (standing
-> fork-swarm ruling); Task 13 stays controller-owned because it drives
+> fork-swarm ruling); Task 14 stays controller-owned because it drives
 > the device gate. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cut daily-use friction: share-sheet/selection/tile capture with
 natural-language dates, an interactive Today widget, preset focus cycles,
 saved searches, bulk multi-select, a guided weekly review, Markdown project
-export, own-schema CSV import, and a Kanban board over existing workflows.
+export, own-schema CSV import, a Kanban board over existing workflows, and the
+approved Ember launcher icon.
 
 **Architecture:** Room stays the sole live structured-data authority at
 version 9 — no schema change: saved searches light up the dormant Stage 1
@@ -37,6 +38,8 @@ catalogue entries.
 
 - Authority spec:
   `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`.
+- Launcher-icon authority spec:
+  `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`.
 - Work directly on `main`; no branch, worktree, or pull request.
 - The user-owned untracked `artifacts/` and `.kotlin/` stay untouched, as
   does the uncommitted historical Stage 3 plan amendment.
@@ -85,16 +88,16 @@ catalogue entries.
 
 - Immediately before Task 1, record `git rev-parse HEAD` as the Stage 6
   implementation-base SHA in the ignored execution ledger at
-  `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`. Task 13
+  `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`. Task 14
   uses that exact `<base>..HEAD` range for privacy and release-surface diff
   scans; do not infer the base later from dates or commit counts.
 - Each task is an independent review boundary: dispatch an independent
   review after the task commit and fix findings before the next task.
 - Implementer dispatches must not spawn subagents or forks of their own
   (standing ruling; see the fork-swarm hazard note in the SDD ledger).
-- No task before Task 13 runs a device suite. Instrumented tests are
+- No task before Task 14 runs a device suite. Instrumented tests are
   compile-verified with `:<module>:compileDebugAndroidTestKotlin` and
-  execute at the Task 13 connected gate.
+  execute at the Task 14 connected gate.
 - No `BackupRecordFamily` change: `SAVED_VIEW` already exists with codec
   validation, capture attribution, and recovery import. Task 1 must move
   its journal fingerprint from identity-only to the content-fingerprint
@@ -351,7 +354,7 @@ without mutation, and assert rename plus query-update each append a
 fourth inserts one malformed dormant payload beside a valid row, proves the
 repository exposes only the valid row and remains ready, and proves the raw
 malformed entity remains in the DAO. The instrumented class executes at
-Task 13.
+Task 14.
 Run: `scripts/check-schema-drift.sh` — clean (no schema change).
 Run the CI gate: `./gradlew testDebugUnitTest lintDebug :app:assembleDebug`.
 
@@ -489,7 +492,7 @@ class NaturalDateParserTest {
 
 Add `createTaskPersistsProvidedDue` to both repository test classes. Dispatch
 `CreateTask("Due task", due = expected)`, read the created task back, and
-assert the exact instant and zone id; the Room case executes at Task 13.
+assert the exact instant and zone id; the Room case executes at Task 14.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -635,7 +638,7 @@ explicitly shared.
 Run: `./gradlew :app:testDebugUnitTest --tests "*QuickAddPrefill*"` — PASS.
 Run: `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` — green;
 manifest merges (lint would flag a malformed filter).
-Device proof lands in the Task 13 checklist (share from a real app,
+Device proof lands in the Task 14 checklist (share from a real app,
 select-text → "Open Tasks").
 
 - [ ] **Step 5: Commit**
@@ -665,7 +668,7 @@ git commit -m "feat: accept shared and selected text into quick add" \
 - Produces: nothing later tasks consume.
 
 - [ ] **Step 1: Implement (no JVM-testable logic — the service is
-  declarative glue; device proof is Task 13's checklist)**
+  declarative glue; device proof is Task 14's checklist)**
 
 ```kotlin
 class QuickAddTileService : TileService() {
@@ -707,7 +710,7 @@ Manifest, inside `<application>`:
 
 The bind permission means only SystemUI can bind — this is the one new
 exported component of the stage besides the Task 3 intent filters, and
-Task 13's release-scope check names it.
+Task 14's release-scope check names it.
 
 - [ ] **Step 2: Verify**
 
@@ -833,7 +836,7 @@ deliberate glance-surface trade-off, recorded in the spec.
 
 Run: `./gradlew :app:testDebugUnitTest` then the CI gate. Expected:
 PASS; `StopGatedWriterTest` untouched and green. Device tap +
-locked-state concealment land in Task 13's checklist.
+locked-state concealment land in Task 14's checklist.
 
 - [ ] **Step 5: Commit**
 
@@ -1067,7 +1070,7 @@ Run: `./gradlew :app:testDebugUnitTest --tests "*Focus*"` → PASS, then
 `:feature:tasks:compileDebugAndroidTestKotlin` still compiles, and
 `:app:compileDebugAndroidTestKotlin` plus
 `:core:data:compileDebugAndroidTestKotlin` compile the instrumented tests.
-Boundary notification and timer ownership land in Task 13's device checklist.
+Boundary notification and timer ownership land in Task 14's device checklist.
 
 - [ ] **Step 5: Commit**
 
@@ -1115,7 +1118,7 @@ fun search(query: SearchQuery)
 ```
 
 - [ ] **Step 1: Write the instrumented test (compile-verified now,
-  executes at Task 13)**
+  executes at Task 14)**
 
 `SearchSurfaceSavedViewsInstrumentedTest.kt` — `createComposeRule`
 (`.v2`), `OpenTasksTheme`, fixture `SavedView`s; asserts: chips render
@@ -2193,7 +2196,7 @@ root-coordinate bounds asserts the same callback: fetch the card and target
 column `boundsInRoot`, then call `onRoot().performTouchInput { down(cardCenter);
 advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1);
 moveTo(targetCenter); up() }`. `longClick()` is not used because it releases
-before the drag. The test is compile-verified here and executes at Task 13.
+before the drag. The test is compile-verified here and executes at Task 14.
 
 - [ ] **Step 5: Verify + commit**
 
@@ -2208,7 +2211,165 @@ git commit -m "feat: add drag between board columns" \
 
 ---
 
-### Task 13: Qualification and exit gates
+### Task 13: Apply the approved Ember launcher icon
+
+**Files:**
+
+- Modify: `app/src/main/res/drawable/ic_launcher_foreground.xml`
+- Modify: `app/src/main/res/drawable/ic_launcher_monochrome.xml`
+- Modify: `app/src/main/res/values/colors.xml`
+- Reference only:
+  `/Users/kk/Downloads/deliverables-1a-ember/README.md` and its `res/` tree
+
+**Interfaces:**
+
+- Consumes: the existing manifest references to `@mipmap/ic_launcher` and
+  `@mipmap/ic_launcher_round`; the byte-identical adaptive definitions in
+  `mipmap-anydpi-v26`; the approved design at
+  `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`.
+- Produces: the same launcher resource ids with the approved Ember full-colour
+  foreground/background and matching Material You monochrome layer. No API or
+  manifest surface changes.
+
+- [ ] **Step 1: Prove the installed resources do not yet match the delivery**
+
+Run each comparison separately:
+
+```bash
+diff -u app/src/main/res/drawable/ic_launcher_foreground.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/drawable/ic_launcher_foreground.xml
+diff -u app/src/main/res/drawable/ic_launcher_monochrome.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/drawable/ic_launcher_monochrome.xml
+diff -u app/src/main/res/values/colors.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/values/colors.xml
+```
+
+Expected: each exits non-zero and shows the current geometry or charcoal
+background differing from the approved delivery. Also run:
+
+```bash
+cmp -s app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/mipmap-anydpi-v26/ic_launcher.xml
+cmp -s app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/mipmap-anydpi-v26/ic_launcher_round.xml
+```
+
+Expected: both exit 0. Do not edit those byte-identical definitions.
+
+- [ ] **Step 2: Replace only the three differing adaptive resources**
+
+`app/src/main/res/drawable/ic_launcher_foreground.xml`:
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- card -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37.5,34.5h33a7.5,7.5 0,0 1,7.5 7.5v24a7.5,7.5 0,0 1,-7.5 7.5h-33a7.5,7.5 0,0 1,-7.5 -7.5v-24a7.5,7.5 0,0 1,7.5 -7.5z" />
+    <!-- bars -->
+    <path
+        android:fillColor="#252321"
+        android:pathData="M41.7,45h18.6a2.7,2.7 0,0 1,0 5.4h-18.6a2.7,2.7 0,0 1,0 -5.4z" />
+    <path
+        android:fillColor="#252321"
+        android:pathData="M41.7,57.8h11.1a2.7,2.7 0,0 1,0 5.4h-11.1a2.7,2.7 0,0 1,0 -5.4z" />
+    <!-- ember cursor -->
+    <path
+        android:fillColor="#C64E2B"
+        android:pathData="M65.3,57.8h2.4a1.5,1.5 0,0 1,1.5 1.5v2.4a1.5,1.5 0,0 1,-1.5 1.5h-2.4a1.5,1.5 0,0 1,-1.5 -1.5v-2.4a1.5,1.5 0,0 1,1.5 -1.5z" />
+</vector>
+```
+
+`app/src/main/res/drawable/ic_launcher_monochrome.xml`:
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M37.5,34.5h33a7.5,7.5 0,0 1,7.5 7.5v24a7.5,7.5 0,0 1,-7.5 7.5h-33a7.5,7.5 0,0 1,-7.5 -7.5v-24a7.5,7.5 0,0 1,7.5 -7.5z"
+        android:strokeColor="#000000"
+        android:strokeLineJoin="round"
+        android:strokeWidth="4.5" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M41.7,45h18.6a2.7,2.7 0,0 1,0 5.4h-18.6a2.7,2.7 0,0 1,0 -5.4z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M41.7,57.8h11.1a2.7,2.7 0,0 1,0 5.4h-11.1a2.7,2.7 0,0 1,0 -5.4z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M65.3,57.8h2.4a1.5,1.5 0,0 1,1.5 1.5v2.4a1.5,1.5 0,0 1,-1.5 1.5h-2.4a1.5,1.5 0,0 1,-1.5 -1.5v-2.4a1.5,1.5 0,0 1,1.5 -1.5z" />
+</vector>
+```
+
+`app/src/main/res/values/colors.xml`:
+
+```xml
+<resources>
+    <color name="launcher_background">#C64E2B</color>
+</resources>
+```
+
+Do not add the package's legacy-density PNGs, Play Store image, README, or
+`.DS_Store`; the design spec records why each is outside this runtime task.
+
+- [ ] **Step 3: Prove exact delivery parity and unchanged wiring**
+
+```bash
+cmp -s app/src/main/res/drawable/ic_launcher_foreground.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/drawable/ic_launcher_foreground.xml
+cmp -s app/src/main/res/drawable/ic_launcher_monochrome.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/drawable/ic_launcher_monochrome.xml
+cmp -s app/src/main/res/values/colors.xml \
+  /Users/kk/Downloads/deliverables-1a-ember/res/values/colors.xml
+rg -n 'android:icon="@mipmap/ic_launcher"|android:roundIcon="@mipmap/ic_launcher_round"' \
+  app/src/main/AndroidManifest.xml
+rg -n 'launcher_background|ic_launcher_foreground|ic_launcher_monochrome' \
+  app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+  app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+```
+
+Expected: all comparisons exit 0; the manifest reports both stable resource
+ids; each adaptive definition reports all three layers.
+
+- [ ] **Step 4: Build and run the non-device gates**
+
+```bash
+./gradlew :app:processDebugResources :app:assembleDebug --console=plain
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain
+git diff --check
+```
+
+Expected: all pass. Do not start an emulator or connected suite; Task 14 owns
+the visual/device proof.
+
+- [ ] **Step 5: Commit the independently reviewable icon change**
+
+```bash
+git add app/src/main/res/drawable/ic_launcher_foreground.xml \
+  app/src/main/res/drawable/ic_launcher_monochrome.xml \
+  app/src/main/res/values/colors.xml
+git diff --cached --name-only
+git diff --cached --check
+git commit -m "feat: apply ember launcher icon" \
+  -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+The staged-name audit must contain exactly the three resource files above.
+Dispatch the normal independent task review and resolve its findings before
+Task 14.
+
+---
+
+### Task 14: Qualification and exit gates
 
 **Files:**
 
@@ -2297,7 +2458,11 @@ weekly review across all four sections; Markdown-export a project and
 open the file; CSV-export tasks, re-import the file, confirm the
 preview counts and the created duplicates, then Undo; Kanban: drag a
 card between columns, and move one with TalkBack enabled via the
-accessibility action.
+accessibility action. Launcher icon: with themed icons off, confirm the
+installed full-colour Ember/card artwork is centred and unclipped under the
+device launcher's mask; enable themed icons and confirm the monochrome card,
+bars, and cursor remain distinct and legible. Record the launcher mask used;
+the manifest/static checks already pin both normal and round resource ids.
 
 - [ ] **Step 5: Contract documents + closure**
 
@@ -2305,7 +2470,8 @@ accessibility action.
 `REVIEWED` activity kind, import boundary); `docs/threat-model.md`
 (share-intent text handling, tile surface, CSV import parsing bounds,
 Markdown plaintext note); `DESIGN.md` (board, review, selection bar,
-focus banner, widget actions); `PRODUCT.md` (Stage 6 boundary);
+focus banner, widget actions, launcher icon); `PRODUCT.md` (Stage 6 boundary
+including the installed Ember icon);
 `CLAUDE.md` (new bounds: 20 saved views, 200 bulk, 5_000 import rows,
 14-day staleness, focus presets; the saved-view content-fingerprint
 rule); `HANDOFF.md` (Stage 6 closure checkpoint). Write
@@ -2332,8 +2498,8 @@ must not contain
 
 | Spec section | Tasks |
 |---|---|
-| Goal | 1–13 |
-| Recorded scope rulings | Global constraints, 11, 12, 13 |
+| Goal | 1–14 |
+| Recorded scope rulings | Global constraints, 11, 12, 13, 14 |
 | Execution order | the task order above |
 | Saved-search commands (dormant `saved_views`) | 1 |
 | Natural-language dates in Quick Add | 2 |
@@ -2347,10 +2513,11 @@ must not contain
 | Markdown project export | 10 |
 | CSV import | 11 |
 | Kanban board | 12 |
-| Data and formats (no Room/backup schema change; backup fixtures untouched) | 1, 11, 13 |
+| Ember launcher icon | 13 |
+| Data and formats (no Room/backup schema change; backup fixtures untouched) | 1, 11, 14 |
 | Constraints carried forward | Global constraints; every task |
-| Privacy and security | 3, 4, 5, 6, 13 |
+| Privacy and security | 3, 4, 5, 6, 14 |
 | Error handling | 1, 2, 3, 5, 6, 8, 9, 10, 11, 12 |
-| Testing and qualification | every task's gates, 13 |
+| Testing and qualification | every task's gates, 14 |
 | Main risk pre-mitigated (fallback-first board) | 12 |
-| External and deferred work | 13 (recorded, unchanged) |
+| External and deferred work | 13, 14 (recorded, unchanged) |

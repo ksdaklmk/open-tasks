@@ -3,7 +3,8 @@
 - Date: 8 August 2026
 - Status: approved by the user in the brainstorming session of 8 August
   2026 (all four candidate directions selected; one stage; per-feature
-  rulings recorded inline below).
+  rulings recorded inline below); amended on 9 August 2026 with the
+  separately approved Ember launcher-icon design.
 - Authority: this document is the Stage 6 design authority. Its plan
   will live at `docs/superpowers/plans/` and derives from this spec.
 
@@ -16,11 +17,12 @@ widget, focus cycles), in-app power (saved searches, bulk
 multi-select, Kanban board), a guided weekly review, and plaintext
 interop (Markdown export, own-schema CSV import). No new cloud
 surface, no sync, and — after the planning-time discovery below — no
-durable schema change at all.
+durable schema change at all. The approved Ember launcher artwork closes the
+stage before qualification.
 
 ## Recorded scope rulings
 
-- One stage, all four directions, thirteen ordered tasks
+- One stage, all four directions, fourteen ordered tasks
   (Stage 5-style single spec and plan).
 - CSV import accepts exactly the task-table schema the Stage 5
   exporter writes (own-schema round-trip). No third-party formats.
@@ -30,6 +32,9 @@ durable schema change at all.
 - The weekly review walks overdue, stale, unscheduled, and project
   health.
 - Focus mode offers preset cycles only: 25/5 and 50/10.
+- The launcher icon uses the approved adaptive Ember artwork from
+  `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`; it is a
+  standalone implementation/review boundary before qualification.
 - Standing rulings hold: offline-first, encrypted Room as the sole
   live structured-data authority, no bidirectional sync, create-only
   Drive with `drive.appdata` as the sole scope, sideload-only
@@ -51,7 +56,8 @@ Foundation first, biggest UI risk last, qualification closes:
 10. Markdown project export
 11. CSV import
 12. Kanban board
-13. Qualification and exit gates
+13. Ember launcher icon
+14. Qualification and exit gates
 
 ## Foundations
 
@@ -241,6 +247,18 @@ adding a new one:
   remains the real transfer format; named zone ids normalise to the
   exported offset, and the import UI copy says so.
 
+## Identity
+
+### Ember launcher icon (task 13)
+
+The approved design authority is
+`docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`. Replace only
+the existing foreground vector, monochrome vector, and launcher background
+colour with the supplied Ember versions. The existing adaptive definitions
+and manifest references stay unchanged. Legacy PNG fallbacks are unnecessary
+at minSdk 36, and the Play Store image remains deferred with the sideload-only
+distribution ruling.
+
 ## Constraints carried forward
 
 - Every write is a `DomainCommand` through `VaultRepository.execute`;
@@ -272,9 +290,9 @@ adding a new one:
   via shared tests, including journal atomicity and Undo exactness.
 - Compose tests use `createComposeRule` (`.v2`) with
   `OpenTasksFixtures`; instrumented tests are compile-verified per
-  task and execute at the task 13 connected gate on the sole
+  task and execute at the task 14 connected gate on the sole
   disposable read-only AVD.
-- Task 13 gates: forced-fresh CI gate and release assembly (separate
+- Task 14 gates: forced-fresh CI gate and release assembly (separate
   invocations), schema-drift check, all fixture generators
   byte-identical, privacy scans over the stage range, release-scope
   check (`drive.appdata` sole scope, no new exported components
@@ -283,7 +301,8 @@ adding a new one:
   locked-state concealment, a focus boundary notification,
   saved-search persistence across restart and through an `.otvault`
   round-trip, bulk undo, the full review flow, Markdown and CSV
-  export/import via SAF, Kanban drag plus TalkBack tap-to-move.
+  export/import via SAF, Kanban drag plus TalkBack tap-to-move, and the Ember
+  launcher artwork under normal, round, and Material You themed treatments.
 - Qualification record: `docs/qualification/stage6-daily-flow.md`.
 
 ## External and deferred work
@@ -294,3 +313,5 @@ adding a new one:
   (e.g. haptics, spring animations) is follow-up work, not gating.
 - F6 (API 37.0 canary lane) remains observe-only; the Ctrl+K CI
   blind spot remains parked.
+- The supplied 512 px Play Store listing icon remains with the parked Play
+  Console work; Task 13 changes installed-app resources only.
