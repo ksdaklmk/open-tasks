@@ -88,10 +88,6 @@ class BoardViewInstrumentedTest {
                 )
             }
         }
-        composeRule.runOnIdle {
-            onMoveTask.value = { taskId, statusId -> moved.set(taskId to statusId) }
-        }
-
         val cardBounds = composeRule
             .onNodeWithTag("board-card-${task.id.value}")
             .fetchSemanticsNode()
@@ -108,6 +104,9 @@ class BoardViewInstrumentedTest {
         }
         composeRule.onNodeWithTag("board-drag-preview-${task.id.value}")
             .assertIsDisplayed()
+        composeRule.runOnIdle {
+            onMoveTask.value = { taskId, statusId -> moved.set(taskId to statusId) }
+        }
         composeRule.onRoot().performTouchInput {
             up()
         }

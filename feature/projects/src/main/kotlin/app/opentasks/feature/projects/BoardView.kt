@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -265,7 +265,7 @@ fun BoardView(
         dragState?.let { drag ->
             Surface(
                 modifier = Modifier
-                    .offset {
+                    .absoluteOffset {
                         val x = drag.cardBounds.left - boardBounds.left +
                             drag.accumulatedOffset.x
                         val y = drag.cardBounds.top - boardBounds.top +
@@ -339,8 +339,8 @@ private fun BoardTaskCard(
                     onDragStart = {
                         currentOnDragStart(bounds.topLeft + it, bounds)
                     },
-                    onDragEnd = currentOnDragEnd,
-                    onDragCancel = currentOnDragCancel,
+                    onDragEnd = { currentOnDragEnd() },
+                    onDragCancel = { currentOnDragCancel() },
                     onDrag = { _, dragAmount -> currentOnDrag(dragAmount) },
                 )
             }
