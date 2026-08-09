@@ -1,17 +1,19 @@
 # Open Tasks Handoff
 
-- Last updated: 8 August 2026
-- Branch: `main` at `50d0a7b` plus this checkpoint docs commit. Local is
+- Last updated: 9 August 2026
+- Branch: `main` at `0e5d06d` plus this checkpoint docs commit. Local is
   ahead of `origin/main` (`8c08570`) by the entire Stage 6 range, not
-  yet pushed (matching Tasks 1–7 practice; a push triggers a CI run).
+  yet pushed (matching the established Stage 6 practice; a push triggers
+  a CI run).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
   completed run at `c74a435` confirmed the expected post-F6 shape —
   `verify`, compact API 36, and `release` green, only expanded API 37.0
   red. No open PRs or issues.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — Tasks 1–8 COMPLETE and independently
-     reviewed; PAUSED before Task 9 by user instruction (8 August
-     2026); do not start Task 9 without the user's go.**
+  1. **Stage 6 execution — Tasks 1–11 COMPLETE and independently
+     reviewed; Task 12's tap-to-move checkpoint COMPLETE and independently
+     reviewed; PAUSED before Task 12 Step 4 drag by user instruction
+     (9 August 2026); do not start drag without the user's go.**
      Authority spec:
      `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
      plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
@@ -19,13 +21,16 @@
      implementation-base SHA). Execution ledger with full per-task
      review/fix history:
      `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 Tasks 1–8 checkpoint below for state, the one open
-     user decision, and exact resume instructions. Execution mode (user
+     See the Stage 6 Tasks 9–11 + Task 12 tap-to-move checkpoint below
+     for current state, the one open user decision, and exact resume
+     instructions. Execution mode (user
      ruling, recorded in the plan header): Tasks 2–12 via
      `superpowers:subagent-driven-development` — fresh implementer per
      task, independent task review per boundary, no-subagent/no-fork
      clause in every implementer dispatch, Task 13 controller-owned; no
-     task before Task 13 runs a device suite.
+     task before Task 13 runs a device suite. Task 12 remains incomplete:
+     pointer drag, the complete Task 12 review, the whole-stage review,
+     and controller-owned Task 13 have not started.
   2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -222,7 +227,72 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 6 Tasks 1–8 checkpoint — 8 August 2026 (PAUSED before Task 9)
+## Stage 6 Tasks 9–11 + Task 12 tap-to-move checkpoint — 9 August 2026
+
+Execution resumed from checkpoint `89cff2c` with the Stage 6 plan, ignored
+SDD ledger, direct-to-`main` rule, and independent-review-per-boundary
+discipline. Tasks 9–11 are complete. Task 12 is intentionally incomplete:
+its mandatory accessible tap-to-move checkpoint is committed and review-clean,
+but Step 4 pointer drag has not started. No device suite has run; Task 13
+still owns all connected testing.
+
+- Task 9 (`f354deb`, fix `3c0b3f6`) added the guided weekly review: pure
+  overdue > stale > unscheduled queueing with the exclusive 14-day boundary,
+  active-project health cards, bounded `REVIEWED` activity through
+  `MarkReviewed` in both engines, saved progress in `List<String>` state,
+  Navigation 3 routing, and the stateless More surface. Review fix round 1
+  made pending system Back consume rather than escape; the review also
+  corrected its own false assumption that Compose's member-form
+  `assertDoesNotExist` required a top-level import. Final re-review: zero
+  open Critical/Important findings.
+- Task 10 (`567a726`) added pure, escaped, single-line-normalised Markdown
+  project export with active workflow grouping, milestones, tasks, tags,
+  checklist rows and stored-zone UK dates; the single-document SAF flow reuses
+  the existing operation mutex and non-cancellable partial-document cleanup.
+  Independent review returned Approved with no findings.
+- Task 11 (`bffb5c7`, fix `ca7b103`) added strict bounded own-schema CSV
+  import: reversible formula/tag encoding, 5 MiB strict UTF-8/RFC 4180 parser,
+  one shared pure project/tag/status resolver, create-only transactional
+  `ImportTasks`, complete backup-representability preflight, exact receipt
+  Undo, and ViewModel preview/commit state. Review fix round 1 remapped preview
+  status identities to fresh project defaults, accepted valid historical
+  second-precision offsets through `ZoneOffset.of`, added post-Undo backup
+  encode/zero preflight in both engines, and made InMemory Undo publish once
+  with task-owned rows removed before shared rows. Final re-review: all four
+  findings addressed; parser 14/14 and InMemory import 12/12 green; Room
+  instrumentation compile-verified only.
+- Task 12 phase 1 (`0e5d06d`) added the pure board projection, project-scoped
+  saved board/list mode, the only board-width policy decision, and a stateless
+  Material 3 board over active project workflow columns. Tap-to-move is fully
+  shippable through 48 dp menus and equivalent per-target TalkBack custom
+  actions; card tap still opens the task. The mandatory checkpoint review
+  returned Approved with no findings and confirmed no pointer/drag/geometry/
+  drop-target/auto-scroll code exists. On-device nested scrolling, popup and
+  TalkBack behaviour remain correctly deferred to Task 13.
+
+Every checkpoint above passed its focused tests, named Android-test compile
+targets, `git diff --check`, and the full
+`testDebugUnitTest lintDebug :app:assembleDebug` gate. The Task 12 checkpoint
+gate covered 550 Gradle tasks. The working tree after the tracked checkpoint
+contains only the three protected pre-existing items: the modified Stage 3
+plan amendment, `.kotlin/`, and `artifacts/`.
+
+**Open user decision unchanged (Task 6):** the pinned `FOCUS + no timer →
+START` rule restarts a manually stopped task timer while the focus phase is
+active. Keep the pinned rule, or make a manual task-timer stop end the focus
+cycle. Resolve this before or at the whole-stage final review.
+
+**PAUSED by user instruction before Task 12 Step 4 drag. Resume only on a
+fresh go.** Use the existing ignored `task-12-brief.md`,
+`task-12-report.md`, and ledger. Start from `0e5d06d`; do not redo phase 1.
+Dispatch a fresh Task 12 implementer with the no-subagent/no-fork clause for
+Step 4 only: long-press drag, geometry-backed drop targets, non-colour hover
+highlight, horizontal edge auto-scroll, and the compile-verified drag test.
+Then run the full Task 12 review, the whole-stage final review over the
+recorded `fc4aad8..HEAD` range, resolve findings and the Task 6 decision, and
+only then execute controller-owned Task 13. No device suite before Task 13.
+
+## Superseded: Stage 6 Tasks 1–8 checkpoint — 8 August 2026
 
 Execution ran from base `fc4aad8` directly on `main`. Task 1 was
 executed inline; Tasks 2–8 ran subagent-driven per the user ruling
