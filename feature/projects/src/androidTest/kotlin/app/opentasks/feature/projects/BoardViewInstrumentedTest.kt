@@ -1,6 +1,8 @@
 package app.opentasks.feature.projects
 
 import android.view.ViewConfiguration
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
@@ -15,6 +17,7 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkflowStatusId
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,7 +68,11 @@ class BoardViewInstrumentedTest {
                 statusId = OpenTasksFixtures.backlog,
                 semanticStatus = SemanticStatus.BACKLOG,
             )
+        val staleMove = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
         val moved = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
+        val onMoveTask = mutableStateOf<(TaskId, WorkflowStatusId) -> Unit>(
+            { taskId, statusId -> staleMove.set(taskId to statusId) },
+        )
 
         composeRule.setContent {
             OpenTasksTheme {
@@ -76,10 +83,13 @@ class BoardViewInstrumentedTest {
                         tasks = listOf(task),
                     ),
                     columnWidth = 160.dp,
-                    onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
+                    onMoveTask = onMoveTask.value,
                     onOpenTask = {},
                 )
             }
+        }
+        composeRule.runOnIdle {
+            onMoveTask.value = { taskId, statusId -> moved.set(taskId to statusId) }
         }
 
         val cardBounds = composeRule
@@ -95,9 +105,14 @@ class BoardViewInstrumentedTest {
             down(cardBounds.center)
             advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
             moveTo(targetBounds.center)
+        }
+        composeRule.onNodeWithTag("board-drag-preview-${task.id.value}")
+            .assertIsDisplayed()
+        composeRule.onRoot().performTouchInput {
             up()
         }
 
+        assertNull(staleMove.get())
         assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
     }
 }
