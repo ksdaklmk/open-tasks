@@ -202,31 +202,64 @@ class FocusNotifier @Inject constructor(
  * so it cannot interleave destructively with anything here.
  */
 @Singleton
-class FocusCoordinator @Inject constructor(
+class FocusCoordinator internal constructor(
     private val store: FocusSessionStore,
-    private val alarms: FocusAlarms,
     private val controller: FocusSessionController,
-    private val notifier: FocusNotifier,
+    private val scheduleAlarm: (FocusSession) -> Unit,
+    private val cancelAlarm: () -> Unit,
+    private val notifyPhaseStarted: (FocusPhaseKind) -> Unit,
 ) {
+    @Inject
+    constructor(
+        store: FocusSessionStore,
+        alarms: FocusAlarms,
+        controller: FocusSessionController,
+        notifier: FocusNotifier,
+    ) : this(
+        store = store,
+        controller = controller,
+        scheduleAlarm = alarms::schedule,
+        cancelAlarm = alarms::cancel,
+        notifyPhaseStarted = notifier::notifyPhaseStarted,
+    )
+
     private val gate = Mutex()
 
-    /** Persists a fresh cycle and arms its first boundary. */
-    suspend fun start(taskId: String, preset: FocusPreset) = gate.withLock {
-        val session = controller.start(taskId, preset)
-        store.save(session)
-        alarms.schedule(session)
+    /** Starts the timer, persists its fresh cycle, and arms the first boundary. */
+    suspend fun start(
+        taskId: TaskId,
+        preset: FocusPreset,
+        repository: VaultRepository,
+    ): CommandResult = gate.withLock {
+        val result = repository.execute(DomainCommand.StartTimer(taskId))
+        if (result is CommandResult.Success) {
+            val session = controller.start(taskId.value, preset)
+            store.save(session)
+            scheduleAlarm(session)
+        }
+        result
     }
 
     /**
-     * Ends the cycle and returns the session that was running, or `null` when
-     * none was. Reading and clearing share the lock, so the caller's own
-     * follow-up decision about the vault's timer is made against a session no
-     * concurrent advance can still be acting on.
+     * Stops an app timer, ending the cycle first only when that timer belongs
+     * to the persisted focus task.
      */
-    suspend fun stop(): FocusSession? = gate.withLock {
-        val stopped = store.load()
+    suspend fun stopTimer(
+        taskId: TaskId,
+        repository: VaultRepository,
+    ): CommandResult = gate.withLock {
+        if (store.load()?.taskId != taskId.value) {
+            return@withLock repository.execute(DomainCommand.StopTimer)
+        }
         clearFocus()
-        stopped
+        repository.execute(DomainCommand.StopTimerIfOwned(taskId))
+    }
+
+    /** Ends the banner's cycle and owner-checks its timer under the same lock. */
+    suspend fun stop(repository: VaultRepository): CommandResult? = gate.withLock {
+        val session = store.load() ?: return@withLock null
+        clearFocus()
+        repository.execute(DomainCommand.StopTimerIfOwned(TaskId(session.taskId)))
     }
 
     /** A delivered boundary waits its turn: it must never be dropped. */
@@ -254,7 +287,7 @@ class FocusCoordinator @Inject constructor(
     private suspend fun advance(repository: () -> VaultRepository, alert: Boolean) {
         val stored = store.load()
         if (stored == null) {
-            alarms.cancel()
+            cancelAlarm()
             return
         }
         val advanced = controller.reconcile(stored)
@@ -265,9 +298,9 @@ class FocusCoordinator @Inject constructor(
         if (advanced != stored) {
             store.save(advanced)
         }
-        alarms.schedule(advanced)
+        scheduleAlarm(advanced)
         if (alert && advanced.phase != stored.phase) {
-            notifier.notifyPhaseStarted(advanced.phase)
+            notifyPhaseStarted(advanced.phase)
         }
         applyTimerOwnership(advanced, repository())
     }
@@ -366,7 +399,7 @@ class FocusCoordinator @Inject constructor(
 
     private fun clearFocus() {
         store.clear()
-        alarms.cancel()
+        cancelAlarm()
     }
 
     private companion object {

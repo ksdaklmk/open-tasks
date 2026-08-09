@@ -272,17 +272,20 @@ class WorkspaceViewModel @Inject constructor(
 
     fun toggleTimer(task: Task) {
         val activeTimer = snapshot.value.home.activeTimer
-        execute(
-            if (activeTimer?.taskId == task.id) {
-                DomainCommand.StopTimer
-            } else {
-                DomainCommand.StartTimer(task.id)
-            },
-        )
+        if (activeTimer?.taskId == task.id) {
+            stopTimer(task.id)
+        } else {
+            execute(DomainCommand.StartTimer(task.id))
+        }
     }
 
     fun stopActiveTimer() {
-        execute(DomainCommand.StopTimer)
+        val taskId = snapshot.value.home.activeTimer?.taskId
+        if (taskId == null) {
+            execute(DomainCommand.StopTimer)
+        } else {
+            stopTimer(taskId)
+        }
     }
 
     /**
@@ -291,38 +294,25 @@ class WorkspaceViewModel @Inject constructor(
      * nothing later reconciles a cycle that never began.
      */
     fun startFocus(taskId: TaskId, preset: FocusPreset) {
-        execute(DomainCommand.StartTimer(taskId)) { result ->
-            if (result !is CommandResult.Success) return@execute
-            // Launched rather than run inline: saving the session takes the
-            // coordinator's lock, so it must be able to wait for a boundary
-            // that is already mid-flight.
-            viewModelScope.launch { focusCoordinator.start(taskId.value, preset) }
+        viewModelScope.launch {
+            when (val result = focusCoordinator.start(taskId, preset, repository)) {
+                is CommandResult.Success -> send(result)
+                is CommandResult.Rejected ->
+                    eventChannel.send(WorkspaceEvent.Message(result.message))
+            }
         }
     }
 
     /**
      * Ends the focus cycle, and with it the timer its own task owns.
      *
-     * The coordinator hands back the session it cleared, so the session read
-     * and its removal cannot straddle a concurrent boundary. The stop is then
-     * dispatched unconditionally rather than gated on [snapshot]: that flow is
-     * an eventually-consistent projection, so a timer this cycle started
-     * moments ago may not appear in it yet, and gating on it would let a Stop
-     * press leave that timer running with no session left to stop it.
-     * `StopTimerIfOwned` compares owners against live rows inside its own
-     * transaction, which is the stronger check anyway -- a timer someone moved
-     * to another task is refused there, not here.
-     *
-     * Dispatched straight at the repository rather than through [execute] so
-     * the idempotent "no timer is running" success stays silent; only a refusal
-     * is worth telling anyone about.
+     * Dispatched through the coordinator so clearing the session and the
+     * owner-checked repository stop share its gate. An idempotent success stays
+     * silent; only a refusal is worth telling anyone about.
      */
     fun stopFocus() {
         viewModelScope.launch {
-            val session = focusCoordinator.stop() ?: return@launch
-            val result = repository.execute(
-                DomainCommand.StopTimerIfOwned(TaskId(session.taskId)),
-            )
+            val result = focusCoordinator.stop(repository) ?: return@launch
             if (result is CommandResult.Rejected) {
                 eventChannel.send(WorkspaceEvent.Message(result.message))
             }
@@ -543,6 +533,16 @@ class WorkspaceViewModel @Inject constructor(
 
     fun clearSearch() {
         mutableSearchResults.value = emptyList()
+    }
+
+    private fun stopTimer(taskId: TaskId) {
+        viewModelScope.launch {
+            when (val result = focusCoordinator.stopTimer(taskId, repository)) {
+                is CommandResult.Success -> send(result)
+                is CommandResult.Rejected ->
+                    eventChannel.send(WorkspaceEvent.Message(result.message))
+            }
+        }
     }
 
     private suspend fun send(result: CommandResult.Success) {

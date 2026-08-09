@@ -135,7 +135,7 @@ class AppLockControllerTest {
  * interfaces with nothing to stub, so implementing them directly runs as
  * real code under plain JVM unit tests.
  */
-private class FakeSharedPreferences : SharedPreferences {
+internal class FakeSharedPreferences : SharedPreferences {
     private val values = mutableMapOf<String, Any?>()
     private val listeners = mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
 
