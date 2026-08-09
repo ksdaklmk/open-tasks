@@ -28,6 +28,12 @@ object WorkspaceLayoutPolicy {
     private const val MEDIUM_LIST_FRACTION = 0.42f
     private const val WIDE_LIST_FRACTION = 0.38f
 
+    fun boardColumnWidthDp(layout: WorkspaceLayout): Int = when {
+        layout.showSupportingPane -> 320
+        layout.showDetailPane -> 296
+        else -> 272
+    }
+
     fun contentListFraction(
         split: PaneSplit,
         windowWidthDp: Int,

@@ -90,6 +90,7 @@ class WorkspaceViewModel @Inject constructor(
     private val selectionState = WorkspaceSelectionState(savedStateHandle)
     private val bulkSelectionState = WorkspaceBulkSelectionState(savedStateHandle)
     private val reviewProgressState = WorkspaceReviewProgressState(savedStateHandle)
+    private val boardViewState = WorkspaceBoardViewState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val pendingBlockedBulk = MutableStateFlow(false)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
@@ -118,6 +119,8 @@ class WorkspaceViewModel @Inject constructor(
     val reviewedTaskIds: StateFlow<Set<TaskId>> = reviewProgressState.reviewedTaskIds
 
     val reviewedProjectIds: StateFlow<Set<ProjectId>> = reviewProgressState.reviewedProjectIds
+
+    val boardModeProjectIds: StateFlow<Set<ProjectId>> = boardViewState.projectIds
 
     val reviewActionPending: StateFlow<Boolean> = reviewProgressState.actionPending
 
@@ -167,6 +170,10 @@ class WorkspaceViewModel @Inject constructor(
 
     fun closeProject() {
         selectionState.closeProject()
+    }
+
+    fun setBoardMode(projectId: ProjectId, enabled: Boolean) {
+        boardViewState.setBoardMode(projectId, enabled)
     }
 
     fun setInsightsRange(range: InsightsRange) {
@@ -929,6 +936,37 @@ internal class WorkspaceReviewProgressState(
     internal companion object {
         const val REVIEWED_TASK_IDS = "reviewedTaskIds"
         const val REVIEWED_PROJECT_IDS = "reviewedProjectIds"
+    }
+}
+
+internal class WorkspaceBoardViewState(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    private val mutableProjectIds = MutableStateFlow(restoredProjectIds())
+
+    val projectIds: StateFlow<Set<ProjectId>> = mutableProjectIds.asStateFlow()
+
+    fun setBoardMode(projectId: ProjectId, enabled: Boolean) {
+        val ids = if (enabled) {
+            mutableProjectIds.value + projectId
+        } else {
+            mutableProjectIds.value - projectId
+        }
+        mutableProjectIds.value = ids
+        savedStateHandle[PROJECT_BOARD_MODE_IDS] = ids
+            .map(ProjectId::value)
+            .toCollection(ArrayList())
+    }
+
+    private fun restoredProjectIds(): Set<ProjectId> =
+        (savedStateHandle.get<Any?>(PROJECT_BOARD_MODE_IDS) as? List<*>)
+            .orEmpty()
+            .mapNotNull { (it as? String)?.takeIf(String::isNotBlank) }
+            .distinct()
+            .mapTo(linkedSetOf(), ::ProjectId)
+
+    internal companion object {
+        const val PROJECT_BOARD_MODE_IDS = "projectBoardModeIds"
     }
 }
 

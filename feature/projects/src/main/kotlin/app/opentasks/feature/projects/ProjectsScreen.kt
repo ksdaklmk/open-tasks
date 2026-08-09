@@ -52,6 +52,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,12 +75,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.NotesTimelineSection
@@ -128,7 +133,12 @@ fun ProjectsScreen(
     workflowStatuses: List<WorkflowStatus>,
     selectedProjectId: ProjectId?,
     showDetailPane: Boolean,
+    modifier: Modifier = Modifier,
     listPaneFraction: Float = 0.42f,
+    boardMode: Boolean = false,
+    boardColumnWidth: Dp = 272.dp,
+    onBoardModeChange: (Boolean) -> Unit = {},
+    onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit = { _, _ -> },
     onSelectProject: (ProjectId) -> Unit,
     onCloseDetail: () -> Unit,
     onUpdateProject: (ProjectId, ProjectEdit) -> Unit,
@@ -149,7 +159,6 @@ fun ProjectsScreen(
     onAddNote: (ProjectId, String) -> Unit = { _, _ -> },
     onUpdateNote: (NoteId, String) -> Unit = { _, _ -> },
     onDeleteNote: (NoteId) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val activeTasks = tasks.filter { it.deletedAt == null }
     val activeProjects = projects
@@ -169,6 +178,10 @@ fun ProjectsScreen(
             tasks = tasks,
             milestones = milestones,
             workflowStatuses = workflowStatuses,
+            boardMode = boardMode,
+            boardColumnWidth = boardColumnWidth,
+            onBoardModeChange = onBoardModeChange,
+            onChangeTaskStatus = onChangeTaskStatus,
             onBack = onCloseDetail,
             onUpdate = { onUpdateProject(selectedProject.id, it) },
             onArchive = { onArchiveProject(selectedProject) },
@@ -230,6 +243,10 @@ fun ProjectsScreen(
                     tasks = tasks,
                     milestones = milestones,
                     workflowStatuses = workflowStatuses,
+                    boardMode = boardMode,
+                    boardColumnWidth = boardColumnWidth,
+                    onBoardModeChange = onBoardModeChange,
+                    onChangeTaskStatus = onChangeTaskStatus,
                     onBack = null,
                     onUpdate = { onUpdateProject(selectedProject.id, it) },
                     onArchive = { onArchiveProject(selectedProject) },
@@ -356,6 +373,10 @@ private fun ProjectWorkbench(
     tasks: List<Task>,
     milestones: List<Milestone>,
     workflowStatuses: List<WorkflowStatus>,
+    boardMode: Boolean,
+    boardColumnWidth: Dp,
+    onBoardModeChange: (Boolean) -> Unit,
+    onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit,
     onBack: (() -> Unit)?,
     onUpdate: (ProjectEdit) -> Unit,
     onArchive: () -> Unit,
@@ -621,27 +642,63 @@ private fun ProjectWorkbench(
                 },
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                workflowStatuses
-                    .filter { it.projectId == project.id && it.archivedAt == null }
-                    .sortedBy(WorkflowStatus::rank)
-                    .forEach { status ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = MaterialTheme.shapes.small,
-                        ) {
-                            Text(
-                                "${status.name} ${projectTasks.count { it.statusId == status.id }}",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                            )
+            SingleChoiceSegmentedButtonRow {
+                SegmentedButton(
+                    selected = !boardMode,
+                    onClick = { onBoardModeChange(false) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("workbench-view-list"),
+                ) {
+                    Text(stringResource(R.string.workbench_view_list))
+                }
+                SegmentedButton(
+                    selected = boardMode,
+                    onClick = { onBoardModeChange(true) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("workbench-view-board"),
+                ) {
+                    Text(stringResource(R.string.workbench_view_board))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (boardMode) {
+                BoardView(
+                    columns = boardColumns(project, workflowStatuses, tasks),
+                    columnWidth = boardColumnWidth,
+                    onMoveTask = onChangeTaskStatus,
+                    onOpenTask = onOpenTask,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    workflowStatuses
+                        .filter { it.projectId == project.id && it.archivedAt == null }
+                        .sortedBy(WorkflowStatus::rank)
+                        .forEach { status ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.small,
+                            ) {
+                                Text(
+                                    "${status.name} ${projectTasks.count { it.statusId == status.id }}",
+                                    modifier = Modifier.padding(
+                                        horizontal = 12.dp,
+                                        vertical = 10.dp,
+                                    ),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
                         }
-                    }
+                }
             }
             Spacer(Modifier.height(28.dp))
 
@@ -677,21 +734,23 @@ private fun ProjectWorkbench(
             )
         }
 
-        item {
-            Spacer(Modifier.height(24.dp))
-            SectionHeader(
-                title = "Tasks",
-                supportingText = if (projectTasks.isEmpty()) {
-                    "No active tasks are assigned to this project."
-                } else {
-                    "${projectTasks.size} active tasks"
-                },
-            )
-            Spacer(Modifier.height(8.dp))
-        }
+        if (!boardMode) {
+            item {
+                Spacer(Modifier.height(24.dp))
+                SectionHeader(
+                    title = "Tasks",
+                    supportingText = if (projectTasks.isEmpty()) {
+                        "No active tasks are assigned to this project."
+                    } else {
+                        "${projectTasks.size} active tasks"
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
 
-        items(projectTasks, key = { it.id.value }) { task ->
-            ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+            items(projectTasks, key = { it.id.value }) { task ->
+                ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+            }
         }
 
         item {

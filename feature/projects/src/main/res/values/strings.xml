@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="workbench_view_list">List</string>
+    <string name="workbench_view_board">Board</string>
+    <plurals name="board_open_task_count">
+        <item quantity="one">%1$d open task</item>
+        <item quantity="other">%1$d open tasks</item>
+    </plurals>
+    <string name="board_no_open_tasks">No open tasks</string>
+    <string name="board_move_task_description">Move %1$s to another stage</string>
+    <string name="board_move_to_stage">Move %1$s to %2$s</string>
+    <string name="board_due_date">Due %1$s</string>
+    <string name="board_priority_description">Priority: %1$s</string>
+    <string name="board_priority_none">None</string>
+    <string name="board_priority_low">Low</string>
+    <string name="board_priority_medium">Medium</string>
+    <string name="board_priority_high">High</string>
+    <string name="board_priority_urgent">Urgent</string>
+</resources>

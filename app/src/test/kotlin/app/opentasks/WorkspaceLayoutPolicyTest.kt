@@ -20,6 +20,28 @@ class WorkspaceLayoutPolicyTest {
     ) = FoldLine(FoldOrientation.VERTICAL, isSeparating, positionDp, occludedWidthDp)
 
     @Test
+    fun boardColumnsWidenWithAvailablePaneLayout() {
+        assertEquals(
+            272,
+            WorkspaceLayoutPolicy.boardColumnWidthDp(
+                WorkspaceLayoutPolicy.calculate(posture(412)),
+            ),
+        )
+        assertEquals(
+            296,
+            WorkspaceLayoutPolicy.boardColumnWidthDp(
+                WorkspaceLayoutPolicy.calculate(posture(840)),
+            ),
+        )
+        assertEquals(
+            320,
+            WorkspaceLayoutPolicy.boardColumnWidthDp(
+                WorkspaceLayoutPolicy.calculate(posture(1_200)),
+            ),
+        )
+    }
+
+    @Test
     fun compactWindowUsesBottomNavigationAndOnePane() {
         val layout = WorkspaceLayoutPolicy.calculate(posture(412))
 

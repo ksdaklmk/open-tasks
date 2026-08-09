@@ -27,6 +27,8 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.compose.ui.tooling.preview)
 
+    testImplementation(libs.junit)
+
     debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)

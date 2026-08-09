@@ -270,6 +270,7 @@ fun OpenTasksApp(
         val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
         val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
         val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
+        val boardModeProjectIds by viewModel.boardModeProjectIds.collectAsStateWithLifecycle()
         val reviewActionPending by viewModel.reviewActionPending.collectAsStateWithLifecycle()
         val pendingBlockedBulk by
             viewModel.pendingBlockedBulkCompletion.collectAsStateWithLifecycle()
@@ -784,6 +785,7 @@ fun OpenTasksApp(
             )
             val compact = layout.windowClass == WorkspaceWindowClass.COMPACT
             val showDetailPane = layout.showDetailPane
+            val boardColumnWidth = WorkspaceLayoutPolicy.boardColumnWidthDp(layout).dp
 
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
@@ -1141,6 +1143,18 @@ fun OpenTasksApp(
                                     selectedProjectId = selectedProjectId,
                                     showDetailPane = showDetailPane,
                                     listPaneFraction = listPaneFraction,
+                                    boardMode = selectedProjectId in boardModeProjectIds,
+                                    boardColumnWidth = boardColumnWidth,
+                                    onBoardModeChange = { enabled ->
+                                        selectedProjectId?.let {
+                                            viewModel.setBoardMode(it, enabled)
+                                        }
+                                    },
+                                    onChangeTaskStatus = { taskId, statusId ->
+                                        viewModel.execute(
+                                            DomainCommand.ChangeTaskStatus(taskId, statusId),
+                                        )
+                                    },
                                     onSelectProject = viewModel::selectProject,
                                     onCloseDetail = viewModel::closeProject,
                                     onUpdateProject = { projectId, edit ->
