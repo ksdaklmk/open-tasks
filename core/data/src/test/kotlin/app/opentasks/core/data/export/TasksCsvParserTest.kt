@@ -68,6 +68,27 @@ class TasksCsvParserTest {
     }
 
     @Test
+    fun historicalSecondPrecisionOffsetRoundTripsAndPreviews() {
+        val historical = task(
+            index = 0,
+            title = "Historical offset",
+            start = ZonedMoment(Instant.parse("1900-01-01T00:00:00Z"), "Europe/Paris"),
+        )
+        val out = StringBuilder()
+
+        WorkspaceCsvWriter(ZoneId.of("UTC")).write(
+            CsvTable.TASKS,
+            snapshot(tasks = listOf(historical)),
+            out,
+        )
+
+        val parsed = parsed(out.toString())
+        assertEquals("+00:09:21", parsed.rows.single().start?.zoneId)
+        val preview = previewTasksImport(parsed.rows, snapshot(tasks = emptyList()))
+        assertTrue(preview.toString(), preview is CsvImportPreviewResult.Ready)
+    }
+
+    @Test
     fun invalidTagEscapeReportsItsDataRow() {
         val result = parseTasksCsv(csv(row(title = "Bad tag", tags = "bad\\x")).toByteArray())
 

@@ -423,6 +423,13 @@ class InMemoryVaultRepository internal constructor(
                 )
             }
         }
+        return isBackupRepresentable(projected, taskTags + plannedTaskTags)
+    }
+
+    private fun isBackupRepresentable(
+        snapshot: WorkspaceSnapshot,
+        retainedTaskTags: List<TaskTagEntity>,
+    ): Boolean {
         val records = buildList {
             add(
                 VaultEntity(
@@ -443,7 +450,7 @@ class InMemoryVaultRepository internal constructor(
                     name = "Open Tasks",
                 ).toBackupRecordV1(),
             )
-            addAll(projected.toBackupRecords(tombstones, taskTags + plannedTaskTags))
+            addAll(snapshot.toBackupRecords(tombstones, retainedTaskTags))
         }
         var plaintext: ByteArray? = null
         return try {
@@ -500,15 +507,27 @@ class InMemoryVaultRepository internal constructor(
             receipt.projects.mapTo(ids) { it.activityEntryId }
         }
         val taskIdValues = taskIds.mapTo(hashSetOf(), TaskId::value)
-        taskTags = taskTags.filterNot { it.taskId in taskIdValues }
-        publishProjects(
+        val retainedTaskTags = taskTags.filterNot { it.taskId in taskIdValues }
+        val projected = current.copy(
+            tasks = current.tasks.filterNot { it.id in taskIds },
             projects = current.projects.filterNot { it.id in projectIds },
             workflowStatuses = current.workflowStatuses.filterNot { it.id in statusIds },
-        )
-        publish(
-            tasks = current.tasks.filterNot { it.id in taskIds },
             tags = current.tags.filterNot { it.id in tagIds },
             activityEntries = current.activityEntries.filterNot { it.id in activityIds },
+        )
+        if (!isBackupRepresentable(projected, retainedTaskTags)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_UNDO_CONFLICT,
+                "The post-Undo state cannot be backed up.",
+            )
+        }
+        taskTags = retainedTaskTags
+        publish(
+            tasks = projected.tasks,
+            projects = projected.projects,
+            workflowStatuses = projected.workflowStatuses,
+            tags = projected.tags,
+            activityEntries = projected.activityEntries,
         )
         val count = receipt.tasks.size
         return CommandResult.Success("Import removed ($count ${if (count == 1) "task" else "tasks"})")
@@ -2592,7 +2611,7 @@ class InMemoryVaultRepository internal constructor(
             tagIds = task.tagIds + tag.id,
             revision = nextRevision(task),
         )
-        publish(current.tasks.replace(updated), current.tags + tag)
+        publish(tasks = current.tasks.replace(updated), tags = current.tags + tag)
         return CommandResult.Success(
             message = "Tag created and added",
             undo = DomainCommand.SetTaskTag(task.id, tag.id, false),
@@ -3551,6 +3570,8 @@ class InMemoryVaultRepository internal constructor(
 
     private fun publish(
         tasks: List<Task>,
+        projects: List<Project> = mutableWorkspace.value.projects,
+        workflowStatuses: List<WorkflowStatus> = mutableWorkspace.value.workflowStatuses,
         tags: List<Tag> = mutableWorkspace.value.tags,
         reminders: List<Reminder> = mutableWorkspace.value.reminders,
         milestones: List<Milestone> = mutableWorkspace.value.milestones,
@@ -3568,10 +3589,16 @@ class InMemoryVaultRepository internal constructor(
         val home = current.home.copy(
             focusTasks = activeTasks.filterNot(Task::isCompleted).take(3),
             upcomingTasks = activeTasks.filter { it.start != null || it.due != null }.take(3),
+            projects = projects.filter { it.archivedAt == null },
         )
         mutableWorkspace.value = current.copy(
             home = home,
             tasks = resolvedTasks,
+            projects = projects,
+            workflowStatuses = workflowStatuses.sortedWith(
+                compareBy<WorkflowStatus> { it.projectId?.value.orEmpty() }
+                    .thenBy(WorkflowStatus::rank),
+            ),
             tags = tags,
             reminders = reminders.sortedBy { it.triggerAt.instant },
             milestones = milestones.sortedWith(

@@ -103,11 +103,39 @@ class RoomImportTasksInstrumentedTest {
         }
     }
 
+    @Test
+    fun undoRejectsBeforeMutationWhenProjectedStateIsNotBackupRepresentable() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.currentWorkspace()
+            val imported = repository!!.execute(DomainCommand.ImportTasks(listOf(importRow())))
+                as CommandResult.Success
+            val undo = imported.undo as DomainCommand.RemoveImportedRecords
+            val importedTask = checkNotNull(
+                database!!.taskDao().getById(undo.receipt.tasks.single().taskId.value),
+            )
+            database!!.taskDao().upsert(
+                importedTask.copy(
+                    id = "unrepresentable-task",
+                    projectId = null,
+                    statusId = "missing-status",
+                ),
+            )
+            val beforeCounts = allTableCounts()
+            val beforeState = database!!.backupStateDao().require(VAULT_ID)
+
+            val rejected = repository!!.execute(undo) as CommandResult.Rejected
+
+            assertEquals(RejectionReason.IMPORT_UNDO_CONFLICT, rejected.reason)
+            assertEquals(beforeState, database!!.backupStateDao().require(VAULT_ID))
+            assertEquals(beforeCounts, allTableCounts())
+        }
+    }
+
     private fun importRow() = ImportedTaskRow(
         sourceRowNumber = 1,
         title = "Imported task",
         projectName = "Imported project",
-        statusName = null,
+        statusName = "In progress",
         priority = Priority.HIGH,
         start = null,
         due = null,

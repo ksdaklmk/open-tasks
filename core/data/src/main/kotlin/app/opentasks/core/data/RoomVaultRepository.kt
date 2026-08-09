@@ -462,6 +462,10 @@ class RoomVaultRepository(
                 add(planned.activity.toEntity().toBackupRecordV1())
             }
         }
+        return isBackupRepresentable(records)
+    }
+
+    private suspend fun isBackupRepresentable(records: List<BackupRecordV1>): Boolean {
         var plaintext: ByteArray? = null
         return try {
             plaintext = BackupSnapshotCodec.encode(
@@ -490,6 +494,12 @@ class RoomVaultRepository(
                 "Imported records changed and could not be removed.",
             )
         }
+        if (!preflightImportUndoBackup(receipt)) {
+            return CommandResult.Rejected(
+                RejectionReason.IMPORT_UNDO_CONFLICT,
+                "The post-Undo state cannot be backed up.",
+            )
+        }
         val workspaceDao = database.workspaceDao()
         receipt.tasks.forEach { imported ->
             workspaceDao.deleteTagsForTask(imported.taskId.value)
@@ -504,6 +514,30 @@ class RoomVaultRepository(
         receipt.tags.forEach { workspaceDao.deleteTag(it.tag.id.value) }
         val count = receipt.tasks.size
         return CommandResult.Success("Import removed ($count ${if (count == 1) "task" else "tasks"})")
+    }
+
+    private suspend fun preflightImportUndoBackup(receipt: ImportReceipt): Boolean {
+        val taskIds = receipt.tasks.mapTo(hashSetOf()) { it.taskId.value }
+        val projectIds = receipt.projects.mapTo(hashSetOf()) { it.project.id.value }
+        val statusIds = receipt.projects.flatMapTo(hashSetOf()) { project ->
+            project.statuses.map { it.id.value }
+        }
+        val tagIds = receipt.tags.mapTo(hashSetOf()) { it.tag.id.value }
+        val activityIds = receipt.tasks.mapTo(hashSetOf()) { it.activityEntryId }.also { ids ->
+            receipt.projects.mapTo(ids) { it.activityEntryId }
+        }
+        val retainedRecords = database.backupCaptureDao().allRecords(VAULT_ID.value).filterNot {
+            when (it.family) {
+                BackupRecordFamily.TASK -> it.identity.firstOrNull() in taskIds
+                BackupRecordFamily.TASK_TAG -> it.identity.firstOrNull() in taskIds
+                BackupRecordFamily.ACTIVITY_ENTRY -> it.identity.firstOrNull() in activityIds
+                BackupRecordFamily.PROJECT -> it.identity.firstOrNull() in projectIds
+                BackupRecordFamily.WORKFLOW_STATUS -> it.identity.firstOrNull() in statusIds
+                BackupRecordFamily.TAG -> it.identity.firstOrNull() in tagIds
+                else -> false
+            }
+        }
+        return isBackupRepresentable(retainedRecords)
     }
 
     private suspend fun canRemoveImportedRecords(receipt: ImportReceipt): Boolean {

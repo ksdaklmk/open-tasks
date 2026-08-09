@@ -1,12 +1,28 @@
 package app.opentasks.core.data
 
 import app.opentasks.core.data.backup.InMemoryBackupJournal
+import app.opentasks.core.data.export.CsvParseResult
+import app.opentasks.core.data.export.CsvTable
+import app.opentasks.core.data.export.WorkspaceCsvWriter
+import app.opentasks.core.data.export.parseTasksCsv
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.ImportedTaskRow
 import app.opentasks.core.domain.RejectionReason
+import app.opentasks.core.model.WorkflowStatusId
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
+import app.opentasks.core.model.Project
+import app.opentasks.core.model.ProjectHealth
+import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.WorkflowStatus
 import java.time.Instant
+import java.time.ZoneId
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -55,6 +71,55 @@ class InMemoryImportTasksTest {
     }
 
     @Test
+    fun exportedTaskWithExactStatusImportsIntoFreshProjectDefaults() = runBlocking {
+        withTimeout(10_000) {
+            val sourceProject = Project(
+                id = ProjectId("source-csv-project"),
+                workspaceId = OpenTasksFixtures.workspaceId,
+                name = "CSV-only project",
+                summary = "",
+                status = ProjectHealth.ON_TRACK,
+                dueDate = null,
+                completedTasks = 0,
+                totalTasks = 1,
+            )
+            val sourceStatuses = WorkflowStatus.defaults(sourceProject.id)
+            val sourceTask = OpenTasksFixtures.snapshot.tasks.first().copy(
+                id = TaskId("source-csv-task"),
+                projectId = sourceProject.id,
+                statusId = sourceStatuses[2].id,
+                semanticStatus = sourceStatuses[2].semanticStatus,
+                title = "Exported task",
+                tagIds = emptySet(),
+                completedAt = null,
+                deletedAt = null,
+            )
+            val source = OpenTasksFixtures.snapshot.copy(
+                tasks = listOf(sourceTask),
+                projects = listOf(sourceProject),
+                workflowStatuses = sourceStatuses,
+                tags = emptyList(),
+            )
+            val csv = StringBuilder().also {
+                WorkspaceCsvWriter(ZoneId.of("UTC")).write(CsvTable.TASKS, source, it)
+            }.toString().toByteArray()
+            val parsed = parseTasksCsv(csv) as CsvParseResult.Parsed
+            val repository = InMemoryVaultRepository(now = fixedNow)
+
+            val result = repository.execute(DomainCommand.ImportTasks(parsed.rows))
+
+            assertTrue(result.toString(), result is CommandResult.Success)
+            val after = repository.currentWorkspace()
+            val importedProject = after.projects.single { it.name == sourceProject.name }
+            val importedTask = after.tasks.single { it.title == sourceTask.title }
+            val importedStatus = after.workflowStatuses.single { it.id == importedTask.statusId }
+            assertEquals(importedProject.id, importedTask.projectId)
+            assertEquals(importedProject.id, importedStatus.projectId)
+            assertEquals("In progress", importedStatus.name)
+        }
+    }
+
+    @Test
     fun reimportAlwaysCreatesDuplicateTasks() = runBlocking {
         withTimeout(10_000) {
             val repository = InMemoryVaultRepository(now = fixedNow)
@@ -95,6 +160,69 @@ class InMemoryImportTasksTest {
             assertEquals(before.activityEntries.toSet(), after.activityEntries.toSet())
             assertEquals(before.retiredBlobSets.toSet(), after.retiredBlobSets.toSet())
             assertEquals(before.savedViews.toSet(), after.savedViews.toSet())
+        }
+    }
+
+    @Test
+    fun undoRejectsBeforeMutationWhenProjectedStateIsNotBackupRepresentable() = runBlocking {
+        withTimeout(10_000) {
+            val sourceRepository = InMemoryVaultRepository(now = fixedNow)
+            val imported = sourceRepository.execute(
+                DomainCommand.ImportTasks(listOf(row(1, "Imported target"))),
+            ) as CommandResult.Success
+            val undo = imported.undo as DomainCommand.RemoveImportedRecords
+            val importedTask = sourceRepository.currentWorkspace().tasks.single {
+                it.id == undo.receipt.tasks.single().taskId
+            }
+            val invalidTask = importedTask.copy(
+                id = TaskId("unrepresentable-task"),
+                statusId = WorkflowStatusId("missing-status"),
+            )
+            val journal = InMemoryBackupJournal()
+            val repository = InMemoryVaultRepository(
+                initial = sourceRepository.currentWorkspace().copy(
+                    tasks = sourceRepository.currentWorkspace().tasks + invalidTask,
+                ),
+                now = fixedNow,
+                backupJournal = journal,
+            )
+            val before = repository.currentWorkspace()
+
+            val result = repository.execute(undo)
+
+            assertTrue(result.toString(), result is CommandResult.Rejected)
+            assertEquals(RejectionReason.IMPORT_UNDO_CONFLICT, (result as CommandResult.Rejected).reason)
+            assertEquals(before, repository.currentWorkspace())
+            assertTrue(journal.entries.isEmpty())
+        }
+    }
+
+    @Test
+    fun undoPublishesOnlyOneFinalSnapshotWithTaskOwnedRowsRemovedFirst() = runBlocking {
+        withTimeout(10_000) {
+            val repository = InMemoryVaultRepository(now = fixedNow)
+            val imported = repository.execute(
+                DomainCommand.ImportTasks(
+                    listOf(row(1, "Atomic undo", project = "Atomic project", tags = listOf("Atomic tag"))),
+                ),
+            ) as CommandResult.Success
+            val observed = mutableListOf<app.opentasks.core.model.WorkspaceSnapshot>()
+            val observer = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                repository.observeWorkspace().drop(1).collect(observed::add)
+            }
+
+            val result = repository.execute(requireNotNull(imported.undo))
+            observer.cancel()
+
+            assertTrue(result is CommandResult.Success)
+            assertEquals(1, observed.size)
+            val final = observed.single()
+            assertTrue(final.tasks.none { it.title == "Atomic undo" })
+            assertTrue(final.projects.none { it.name == "Atomic project" })
+            assertTrue(final.workflowStatuses.all { status ->
+                status.projectId == null || final.projects.any { it.id == status.projectId }
+            })
+            assertTrue(final.tags.none { it.name == "Atomic tag" })
         }
     }
 

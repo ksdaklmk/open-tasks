@@ -22,8 +22,10 @@ import app.opentasks.core.model.ZonedMoment
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.Locale
@@ -168,7 +170,12 @@ internal fun buildTasksImportPlan(
             ProjectSelection.Inbox -> null
         }
         val workflow = when (val selected = resolved.status) {
-            is StatusSelection.Existing -> selected.status
+            is StatusSelection.Existing -> when (val selectedProject = resolved.project) {
+                is ProjectSelection.New -> projects.getValue(selectedProject.name).statuses.first {
+                    it.name == selected.status.name
+                }
+                else -> selected.status
+            }
             is StatusSelection.Default -> {
                 val statuses = if (project == null) {
                     snapshot.workflowStatuses.filter { it.projectId == null }
@@ -643,16 +650,11 @@ private fun validateRow(row: ImportedTaskRow): ResolutionResult.Invalid? {
     }
 }
 
-private fun isOffsetId(value: String): Boolean {
-    if (value == "Z") return true
-    if (
-        value.length != 6 || value[0] !in charArrayOf('+', '-') || value[3] != ':' ||
-        !value.substring(1, 3).all(Char::isDigit) ||
-        !value.substring(4, 6).all(Char::isDigit)
-    ) return false
-    val hours = value.substring(1, 3).toInt()
-    val minutes = value.substring(4, 6).toInt()
-    return hours <= 18 && minutes <= 59 && (hours < 18 || minutes == 0)
+private fun isOffsetId(value: String): Boolean = try {
+    ZoneOffset.of(value)
+    true
+} catch (_: DateTimeException) {
+    false
 }
 
 private fun collision(row: ImportedTaskRow, kind: String, name: String) = invalid(
