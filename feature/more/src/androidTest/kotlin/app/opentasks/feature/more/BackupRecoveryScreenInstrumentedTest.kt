@@ -162,7 +162,9 @@ class BackupRecoveryScreenInstrumentedTest {
         composeRule.onNodeWithText("Backup & recovery").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Local package ready • generation 7")
             .assertIsDisplayed()
-        composeRule.onNodeWithTag("open-backup-recovery").performClick()
+        composeRule.onNodeWithTag("open-backup-recovery")
+            .performScrollTo()
+            .performClick()
         composeRule.onNodeWithTag("backup-screen").assertIsDisplayed()
     }
 
@@ -186,7 +188,9 @@ class BackupRecoveryScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithTag("open-backup-recovery").performClick()
+        composeRule.onNodeWithTag("open-backup-recovery")
+            .performScrollTo()
+            .performClick()
         composeRule.onNodeWithTag("backup-retry").assertDoesNotExist()
         composeRule.onNodeWithTag("backup-reprepare")
             .performScrollTo()
@@ -488,7 +492,7 @@ class BackupRecoveryScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("backup-passphrase").performTextInput(" and now valid")
         composeRule.onNodeWithTag("backup-confirmation").performTextInput("not the same")
-        composeRule.onNodeWithTag("backup-submit").performClick()
+        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
         composeRule.onNodeWithText("Passphrases do not match.").assertIsDisplayed()
     }
 
@@ -514,7 +518,7 @@ class BackupRecoveryScreenInstrumentedTest {
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
         composeRule.onNodeWithTag("backup-passphrase").performTextInput("correct horse")
         composeRule.onNodeWithTag("backup-confirmation").performTextInput("correct horse")
-        composeRule.onNodeWithTag("backup-submit").performClick()
+        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
 
         assertEquals("correct horse", prepared.get())
         composeRule.onNodeWithTag("backup-passphrase").assertDoesNotExist()

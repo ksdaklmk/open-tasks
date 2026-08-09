@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -2327,7 +2328,13 @@ class RoomVaultRepositoryInstrumentedTest {
             (rejected as CommandResult.Rejected).reason,
         )
         val stateAfter = database!!.backupStateDao().require("vault-primary")
-        assertEquals(activeBefore, database!!.timeEntryDao().getActive())
+        val activeAfter = checkNotNull(database!!.timeEntryDao().getActive())
+        val ignoredCiphertext = byteArrayOf()
+        assertEquals(
+            activeBefore.copy(noteCiphertext = ignoredCiphertext),
+            activeAfter.copy(noteCiphertext = ignoredCiphertext),
+        )
+        assertArrayEquals(activeBefore.noteCiphertext, activeAfter.noteCiphertext)
         assertEquals(stateBefore.currentGeneration, stateAfter.currentGeneration)
         assertTrue(
             database!!.backupJournalDao()

@@ -107,6 +107,7 @@ class BoardViewInstrumentedTest {
         composeRule.runOnIdle {
             onMoveTask.value = { taskId, statusId -> moved.set(taskId to statusId) }
         }
+        composeRule.waitForIdle()
         composeRule.onRoot().performTouchInput {
             up()
         }

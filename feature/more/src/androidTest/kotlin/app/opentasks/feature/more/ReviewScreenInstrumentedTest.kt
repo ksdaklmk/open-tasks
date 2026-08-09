@@ -1,9 +1,6 @@
 package app.opentasks.feature.more
 
-import androidx.activity.OnBackPressedDispatcher
-import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -14,7 +11,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ReviewQueue
@@ -123,40 +119,32 @@ class ReviewScreenInstrumentedTest {
 
     @Test
     fun pendingActionConsumesSystemBackWithoutCallingBackOrHost() {
-        var fallbackCount = 0
-        val dispatcher = OnBackPressedDispatcher { fallbackCount++ }
+        lateinit var dispatcher: androidx.activity.OnBackPressedDispatcher
         var reviewBackCount = 0
         composeRule.setContent {
-            val lifecycleOwner = LocalLifecycleOwner.current
-            val dispatcherOwner = remember(lifecycleOwner) {
-                object : OnBackPressedDispatcherOwner {
-                    override val lifecycle = lifecycleOwner.lifecycle
-                    override val onBackPressedDispatcher = dispatcher
-                }
-            }
-            CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides dispatcherOwner) {
-                OpenTasksTheme {
-                    ReviewScreen(
-                        queue = ReviewQueue(emptyList(), emptyList(), emptyList(), emptyList()),
-                        projectNames = emptyMap(),
-                        reviewedTaskIds = emptySet(),
-                        reviewedProjectIds = emptySet(),
-                        actionPending = true,
-                        onBack = { reviewBackCount++ },
-                        onCompleteTask = { _, _ -> },
-                        onRescheduleTask = { _, _ -> },
-                        onKeepTask = {},
-                        onBinTask = {},
-                        onKeepProject = {},
-                        onArchiveProject = {},
-                    )
-                }
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            OpenTasksTheme {
+                ReviewScreen(
+                    queue = ReviewQueue(emptyList(), emptyList(), emptyList(), emptyList()),
+                    projectNames = emptyMap(),
+                    reviewedTaskIds = emptySet(),
+                    reviewedProjectIds = emptySet(),
+                    actionPending = true,
+                    onBack = { reviewBackCount++ },
+                    onCompleteTask = { _, _ -> },
+                    onRescheduleTask = { _, _ -> },
+                    onKeepTask = {},
+                    onBinTask = {},
+                    onKeepProject = {},
+                    onArchiveProject = {},
+                )
             }
         }
 
+        composeRule.waitForIdle()
         composeRule.runOnUiThread(dispatcher::onBackPressed)
         assertEquals(0, reviewBackCount)
-        assertEquals(0, fallbackCount)
+        composeRule.onNodeWithTag("review-screen").assertIsDisplayed()
     }
 
     private fun task(id: String, title: String): Task =

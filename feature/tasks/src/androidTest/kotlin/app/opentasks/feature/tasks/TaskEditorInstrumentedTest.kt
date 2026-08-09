@@ -963,7 +963,7 @@ class TaskEditorInstrumentedTest {
         composeRule.onNodeWithTag("time-entry-start").performTextReplacement("09:30")
         composeRule.onNodeWithTag("time-entry-duration").performTextReplacement("45")
         composeRule.onNodeWithTag("time-entry-note").performTextReplacement("Client review")
-        composeRule.onNodeWithTag("save-time-entry").performClick()
+        composeRule.onNodeWithTag("save-time-entry").performScrollTo().performClick()
 
         assertEquals(Duration.ofMinutes(45), submitted.get()?.let {
             Duration.between(it.startedAt, it.stoppedAt)

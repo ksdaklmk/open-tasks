@@ -1,12 +1,5 @@
 package app.opentasks.input
 
-import android.os.SystemClock
-import android.view.KeyEvent
-import android.view.View
-import android.view.accessibility.AccessibilityEvent
-import android.view.inspector.WindowInspector
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,23 +21,20 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.withKeyDown
-import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.QuickAddSheet
 import app.opentasks.SearchSurface
 import app.opentasks.core.designsystem.OpenTasksTheme
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -63,56 +53,53 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ShortcutRootWiringInstrumentedTest {
     @get:Rule
-    val activityRule = ActivityScenarioRule(ComponentActivity::class.java)
+    val composeRule = createComposeRule()
 
     @Test
     fun ctrlKOpensSearchAndFocusesTheQueryField() {
         val rootFocused = CountDownLatch(1)
-        lateinit var hostRoot: View
-        activityRule.scenario.onActivity { activity ->
-            hostRoot = activity.window.decorView
-            activity.setContent {
-                val rootFocusRequester = remember { FocusRequester() }
-                var showSearch by remember { mutableStateOf(false) }
-                var editableFocused by remember { mutableStateOf(false) }
-                OpenTasksTheme {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .focusRequester(rootFocusRequester)
-                            .onFocusEvent { focusState ->
-                                editableFocused = focusState.hasFocus
-                                if (focusState.isFocused) rootFocused.countDown()
-                            }
-                            .onPreviewKeyEvent { event ->
-                                if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
-                                    return@onPreviewKeyEvent false
-                                }
-                                val action = shortcutActionFor(
-                                    key = event.key,
-                                    isCtrlPressed = true,
-                                    isShiftPressed = event.isShiftPressed,
-                                    inProjectsRoute = false,
-                                    editableFocused = editableFocused,
-                                )
-                                if (action == ShortcutAction.OPEN_SEARCH) showSearch = true
-                                action == ShortcutAction.OPEN_SEARCH
-                            }
-                            .focusable(),
-                    ) {
-                        if (showSearch) {
-                            SearchSurface(
-                                results = emptyList(),
-                                onQueryChange = {},
-                                onDismiss = { showSearch = false },
-                                onOpenTask = {},
-                                onOpenProject = {},
-                            )
+        composeRule.setContent {
+            val rootFocusRequester = remember { FocusRequester() }
+            var showSearch by remember { mutableStateOf(false) }
+            var editableFocused by remember { mutableStateOf(false) }
+            OpenTasksTheme {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("shortcut-root")
+                        .focusRequester(rootFocusRequester)
+                        .onFocusEvent { focusState ->
+                            editableFocused = focusState.hasFocus
+                            if (focusState.isFocused) rootFocused.countDown()
                         }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
+                                return@onPreviewKeyEvent false
+                            }
+                            val action = shortcutActionFor(
+                                key = event.key,
+                                isCtrlPressed = true,
+                                isShiftPressed = event.isShiftPressed,
+                                inProjectsRoute = false,
+                                editableFocused = editableFocused,
+                            )
+                            if (action == ShortcutAction.OPEN_SEARCH) showSearch = true
+                            action == ShortcutAction.OPEN_SEARCH
+                        }
+                        .focusable(),
+                ) {
+                    if (showSearch) {
+                        SearchSurface(
+                            results = emptyList(),
+                            onQueryChange = {},
+                            onDismiss = { showSearch = false },
+                            onOpenTask = {},
+                            onOpenProject = {},
+                        )
                     }
                 }
-                LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             }
+            LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
         }
 
         assertTrue(
@@ -120,56 +107,10 @@ class ShortcutRootWiringInstrumentedTest {
             rootFocused.await(10, TimeUnit.SECONDS),
         )
 
-        val nextFrame = CountDownLatch(1)
-        activityRule.scenario.onActivity {
-            it.dispatchCtrlK()
-            it.window.decorView.postOnAnimation { nextFrame.countDown() }
+        composeRule.onNodeWithTag("shortcut-root").performKeyInput {
+            withKeyDown(Key.CtrlLeft) { pressKey(Key.K) }
         }
-        assertTrue(
-            "The shortcut did not settle on the next frame",
-            nextFrame.await(10, TimeUnit.SECONDS),
-        )
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        instrumentation.waitForIdleSync()
-        val dialogRoot = WindowInspector.getGlobalWindowViews().single { it !== hostRoot }
-        assumeTrue(
-            "Headless API 36 runner did not grant the search Dialog window focus",
-            dialogRoot.hasWindowFocus(),
-        )
-
-        val observedEvents = mutableListOf<String>()
-        try {
-            instrumentation.uiAutomation.executeAndWaitForEvent(
-                {
-                    activityRule.scenario.onActivity {
-                        // The headless CI window manager never focuses the host Activity.
-                        // Deliver its missing Dialog transition; SearchSurface's own
-                        // FocusRequester remains responsible for choosing the query field.
-                        dialogRoot.dispatchWindowFocusChanged(true)
-                    }
-                },
-                { event ->
-                    if (observedEvents.size < 16) {
-                        observedEvents += "type=${event.eventType}, " +
-                            "class=${event.className}, package=${event.packageName}"
-                    }
-                    event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
-                        event.packageName?.toString() == "app.opentasks" &&
-                        event.className?.toString() == "android.widget.EditText"
-                },
-                10_000,
-            )
-        } catch (error: TimeoutException) {
-            val focusedView = dialogRoot.findFocus()
-            throw AssertionError(
-                "Search query focus event timed out: " +
-                    "dialogAttached=${dialogRoot.isAttachedToWindow}, " +
-                    "dialogWindowFocused=${dialogRoot.hasWindowFocus()}, " +
-                    "dialogFocused=${dialogRoot.isFocused}, " +
-                    "focusedView=${focusedView?.javaClass?.name}, " +
-                    "events=$observedEvents",
-            ).apply { initCause(error) }
-        }
+        composeRule.onNodeWithTag("workspace-search-query").assertIsFocused()
     }
 }
 
@@ -217,30 +158,4 @@ class ShortcutRootEscapeInstrumentedTest {
 
         composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
     }
-}
-
-private fun ComponentActivity.dispatchCtrlK() {
-    val downTime = SystemClock.uptimeMillis()
-    assertTrue(
-        dispatchKeyEvent(
-            KeyEvent(
-                downTime,
-                downTime,
-                KeyEvent.ACTION_DOWN,
-                KeyEvent.KEYCODE_K,
-                0,
-                KeyEvent.META_CTRL_ON,
-            ),
-        ),
-    )
-    dispatchKeyEvent(
-        KeyEvent(
-            downTime,
-            SystemClock.uptimeMillis(),
-            KeyEvent.ACTION_UP,
-            KeyEvent.KEYCODE_K,
-            0,
-            KeyEvent.META_CTRL_ON,
-        ),
-    )
 }

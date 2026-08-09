@@ -914,6 +914,7 @@ private fun SaveTemplateSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
         ) {
             Text(

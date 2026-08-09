@@ -136,6 +136,7 @@ fun BoardView(
     val columnBounds = remember { mutableStateMapOf<WorkflowStatusId, Rect>() }
     var boardBounds by remember { mutableStateOf(Rect.Zero) }
     var dragState by remember { mutableStateOf<BoardDragState?>(null) }
+    val currentOnMoveTask by rememberUpdatedState(onMoveTask)
     val density = LocalDensity.current
     val edgeThreshold = with(density) { 48.dp.toPx() }
     val edgeScrollStep = with(density) { 16.dp.toPx() }
@@ -167,7 +168,7 @@ fun BoardView(
         val drag = dragState
         val target = drag?.let(::dropTarget)
         if (drag != null && target != null) {
-            onMoveTask(drag.taskId, target)
+            currentOnMoveTask(drag.taskId, target)
         }
         dragState = null
     }
@@ -280,8 +281,8 @@ fun BoardView(
                     .width(with(density) { drag.cardBounds.width.toDp() })
                     .height(with(density) { drag.cardBounds.height.toDp() })
                     .zIndex(1f)
-                    .clearAndSetSemantics { }
-                    .testTag("board-drag-preview-${drag.taskId.value}"),
+                    .testTag("board-drag-preview-${drag.taskId.value}")
+                    .clearAndSetSemantics { },
                 color = MaterialTheme.colorScheme.surface,
                 shape = MaterialTheme.shapes.medium,
                 shadowElevation = 8.dp,

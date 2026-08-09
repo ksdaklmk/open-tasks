@@ -3,6 +3,7 @@ package app.opentasks.feature.tasks
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -25,9 +26,12 @@ class TaskEditorHingeInstrumentedTest {
         setContent(hingeExclusionBandDp = 400..440)
 
         assertTwoPaneFixture()
-        val top = composeRule.onNodeWithTag("editorSheetContent")
+        val fixtureTop = composeRule.onNodeWithTag("hinge-fixture")
             .getUnclippedBoundsInRoot()
             .top
+        val top = composeRule.onNodeWithTag("editorSheetContent")
+            .getUnclippedBoundsInRoot()
+            .top - fixtureTop
 
         assertTrue("Editor content top $top should clear the 440 dp hinge band", top >= 440.dp)
     }
@@ -37,9 +41,12 @@ class TaskEditorHingeInstrumentedTest {
         setContent(hingeExclusionBandDp = null)
 
         assertTwoPaneFixture()
-        val top = composeRule.onNodeWithTag("editorSheetContent")
+        val fixtureTop = composeRule.onNodeWithTag("hinge-fixture")
             .getUnclippedBoundsInRoot()
             .top
+        val top = composeRule.onNodeWithTag("editorSheetContent")
+            .getUnclippedBoundsInRoot()
+            .top - fixtureTop
 
         assertTrue("Editor content top $top should remain above 440 dp", top < 440.dp)
     }
@@ -63,7 +70,11 @@ class TaskEditorHingeInstrumentedTest {
         composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
             OpenTasksTheme {
-                Box(modifier = Modifier.requiredSize(width = 900.dp, height = 840.dp)) {
+                Box(
+                    modifier = Modifier
+                        .requiredSize(width = 900.dp, height = 840.dp)
+                        .testTag("hinge-fixture"),
+                ) {
                     TasksScreen(
                         tasks = OpenTasksFixtures.tasks,
                         reminders = emptyList(),

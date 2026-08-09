@@ -203,7 +203,7 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("save-template-sheet").assertIsDisplayed()
         composeRule.onNodeWithTag("template-name-field")
             .performTextReplacement("  Client delivery  ")
-        composeRule.onNodeWithTag("confirm-save-template").performClick()
+        composeRule.onNodeWithTag("confirm-save-template").performScrollTo().performClick()
 
         assertEquals(project.id to "Client delivery", captured.get())
     }
@@ -251,6 +251,7 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("workflow-name-${OpenTasksFixtures.planned.value}")
             .performTextReplacement("Ready next")
         composeRule.onNodeWithTag("save-workflow-name-${OpenTasksFixtures.planned.value}")
+            .performScrollTo()
             .performClick()
         assertEquals(OpenTasksFixtures.planned to "Ready next", renamed.get())
 
@@ -312,7 +313,7 @@ class ProjectWorkbenchInstrumentedTest {
             .performScrollToNode(hasTestTag("add-milestone"))
         composeRule.onNodeWithTag("add-milestone").performClick()
         composeRule.onNodeWithTag("milestone-name-field").performTextInput("  Beta ready  ")
-        composeRule.onNodeWithTag("save-milestone").performClick()
+        composeRule.onNodeWithTag("save-milestone").performScrollTo().performClick()
         assertEquals(Triple(project.id, "Beta ready", null), created.get())
 
         composeRule.onNodeWithTag("project-workbench-list")
@@ -320,12 +321,12 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithText(milestone.name).performClick()
         composeRule.onNodeWithTag("milestone-name-field")
             .performTextReplacement("Public release")
-        composeRule.onNodeWithTag("save-milestone").performClick()
+        composeRule.onNodeWithTag("save-milestone").performScrollTo().performClick()
         assertEquals(milestone.id, updated.get()?.id)
         assertEquals("Public release", updated.get()?.name)
 
         composeRule.onNodeWithText(milestone.name).performClick()
-        composeRule.onNodeWithTag("delete-milestone").performClick()
+        composeRule.onNodeWithTag("delete-milestone").performScrollTo().performClick()
         composeRule.onNodeWithText("Delete").performClick()
         assertEquals(milestone.id, deleted.get())
     }

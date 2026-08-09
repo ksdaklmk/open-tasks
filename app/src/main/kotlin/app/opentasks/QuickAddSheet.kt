@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -157,7 +158,9 @@ fun QuickAddSheet(
                                 appliedDueZoneId = null
                             }
                         },
-                        modifier = Modifier.testTag("quick-add-date-clear"),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("quick-add-date-clear"),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,

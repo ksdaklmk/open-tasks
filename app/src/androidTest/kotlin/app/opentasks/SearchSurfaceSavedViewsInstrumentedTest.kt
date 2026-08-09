@@ -123,7 +123,8 @@ class SearchSurfaceSavedViewsInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("saved-view-chip-${focusView.id.value}").performClick()
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(151)
         composeRule.waitForIdle()
 
         assertEquals(focusView.query, captured.get())
@@ -198,8 +199,11 @@ class SearchSurfaceSavedViewsInstrumentedTest {
 
         composeRule.onNodeWithTag("workspace-search-query")
             .performTextReplacement("custom text query")
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.onNodeWithTag("save-search").performClick()
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.onNodeWithTag("save-search-name").performTextReplacement("My saved search")
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.onNodeWithTag("save-search-confirm").performClick()
 
         assertEquals("My saved search", savedName.get())
