@@ -4,7 +4,8 @@
 - Status: approved by the user in the brainstorming session of 8 August
   2026 (all four candidate directions selected; one stage; per-feature
   rulings recorded inline below); amended on 9 August 2026 with the
-  separately approved Ember launcher-icon design.
+  separately approved Ember launcher-icon design and the approved
+  focus-aware manual-stop policy.
 - Authority: this document is the Stage 6 design authority. Its plan
   will live at `docs/superpowers/plans/` and derives from this spec.
 
@@ -32,6 +33,8 @@ stage before qualification.
 - The weekly review walks overdue, stale, unscheduled, and project
   health.
 - Focus mode offers preset cycles only: 25/5 and 50/10.
+- Manually stopping the timer that belongs to an active focus cycle ends that
+  cycle; foreground reconciliation must not restart it.
 - The launcher icon uses the approved adaptive Ember artwork from
   `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`; it is a
   standalone implementation/review boundary before qualification.
@@ -147,9 +150,17 @@ adding a new one:
 - A pure, clock-injected `FocusSessionController` state machine:
   focus/break phases, preset cycles 25/5 and 50/10 only. Focus phase
   runs the existing task timer; break pauses it. Starts use the existing
-  task-specific command; stops use an additive owner-checked command so the
-  ownership check and stop are atomic while existing `StopTimer` callers stay
-  unchanged.
+  task-specific command; focus-owned stops use an additive owner-checked
+  command so the ownership check and stop are atomic.
+- Focus start, focus-boundary reconciliation, banner Stop, and app timer Stop
+  serialize through the same `FocusCoordinator` gate. If the requested timer
+  belongs to the active focus session, app timer Stop first clears the session
+  and alarm, then dispatches the owner-checked stop. A concurrent boundary
+  cannot restart it, and a timer that another task acquired is never touched.
+  If the requested timer is unrelated to the session, the existing generic
+  `StopTimer` behavior is preserved. A concurrent new focus Start is ordered
+  wholly before or after Stop, including both its timer command and persisted
+  session, so no timer or session can be left orphaned between them.
 - Boundary alerts reuse the reminder scheduling infrastructure and
   the generic-content notification path (no task text when privacy
   is engaged).
