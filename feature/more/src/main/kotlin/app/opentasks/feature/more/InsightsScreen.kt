@@ -25,7 +25,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -42,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.opentasks.core.designsystem.DotRunBar
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.model.DurationQuality
 import app.opentasks.core.model.EstimateActual
@@ -555,6 +555,7 @@ private fun InsightsChart(snapshot: InsightsSnapshot) {
                 snapshot.completed.current,
             ),
             progress = snapshot.completed.current.toFloat() / completedMax,
+            unitCount = snapshot.completed.current,
         )
         MetricBar(
             label = stringResource(R.string.insights_completed_previous),
@@ -563,6 +564,7 @@ private fun InsightsChart(snapshot: InsightsSnapshot) {
                 snapshot.completed.previous,
             ),
             progress = snapshot.completed.previous.toFloat() / completedMax,
+            unitCount = snapshot.completed.previous,
         )
 
         Spacer(Modifier.height(24.dp))
@@ -669,12 +671,13 @@ private fun MetricBar(
     label: String,
     value: String,
     progress: Float,
+    unitCount: Long? = null,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp)
-            .semantics {
+            .semantics(mergeDescendants = true) {
                 contentDescription = "$label, $value"
             },
     ) {
@@ -694,11 +697,10 @@ private fun MetricBar(
             )
         }
         Spacer(Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { progress.coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.secondary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        DotRunBar(
+            progress = progress,
+            unitCount = unitCount,
+            modifier = Modifier.fillMaxWidth().height(12.dp),
         )
     }
 }

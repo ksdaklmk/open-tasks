@@ -30,4 +30,5 @@ dependencies {
     implementation(libs.compose.icons)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation(libs.junit)
 }

@@ -18,6 +18,9 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -27,6 +30,7 @@ import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -331,6 +335,14 @@ class InsightsScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("insights-chart").performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithTag("dot-run-bar", useUnmergedTree = true)
+            .assertCountEquals(8)
+        composeRule.onAllNodes(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo),
+            useUnmergedTree = true,
+        ).assertCountEquals(0)
+        composeRule.onNodeWithContentDescription("Alpha, 1 h").assertExists()
+        composeRule.onNodeWithContentDescription("Focus, 45 min").assertExists()
         composeRule.onNodeWithContentDescription("Alpha, 1 h")
             .performScrollTo()
             .assertIsDisplayed()
