@@ -1,5 +1,7 @@
 package app.opentasks.feature.projects
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -64,7 +66,7 @@ class ProjectWorkbenchInstrumentedTest {
         val groupedFirst = base.copy(id = TaskId("grouped-first"), title = "Grouped first")
         val flat = base.copy(id = TaskId("flat"), title = "Flat task")
         val selectedSort = AtomicReference<TaskSortKey?>()
-        val selectedGroup = AtomicReference<TaskGroupKey?>()
+        val selectedGroup = AtomicReference<TaskGroupKey?>(TaskGroupKey.PROJECT)
 
         setWorkbenchContent(
             project = project,
@@ -98,7 +100,11 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("workbench-sort-option-updated").assertIsSelected()
         composeRule.onNodeWithTag("workbench-sort-option-due").assertIsNotSelected().performClick()
         assertEquals(TaskSortKey.DUE, selectedSort.get())
-        composeRule.onNodeWithTag("workbench-sort-control").performClick()
+        composeRule.onNodeWithTag("workbench-sort-control")
+            .assertContentDescriptionEquals("Sort project tasks: Updated")
+            .performClick()
+        composeRule.onNodeWithTag("workbench-sort-option-updated").assertIsSelected()
+        composeRule.onNodeWithTag("workbench-sort-option-due").assertIsNotSelected()
         composeRule.onNodeWithTag("workbench-sort-option-priority").performClick()
         assertEquals(TaskSortKey.PRIORITY, selectedSort.get())
         composeRule.onNodeWithTag("workbench-sort-control").performClick()
@@ -114,7 +120,11 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("workbench-group-option-priority").assertIsSelected()
         composeRule.onNodeWithTag("workbench-group-option-none").assertIsNotSelected().performClick()
         assertEquals(null, selectedGroup.get())
-        composeRule.onNodeWithTag("workbench-group-control").performClick()
+        composeRule.onNodeWithTag("workbench-group-control")
+            .assertContentDescriptionEquals("Group project tasks: Priority")
+            .performClick()
+        composeRule.onNodeWithTag("workbench-group-option-priority").assertIsSelected()
+        composeRule.onNodeWithTag("workbench-group-option-none").assertIsNotSelected()
         composeRule.onNodeWithTag("workbench-group-option-due_bucket").performClick()
         assertEquals(TaskGroupKey.DUE_BUCKET, selectedGroup.get())
         composeRule.onNodeWithTag("workbench-group-control").performClick()
@@ -547,6 +557,7 @@ class ProjectWorkbenchInstrumentedTest {
         onGroupChange: (TaskGroupKey?) -> Unit = {},
     ) {
         composeRule.setContent {
+            val boardMode = remember { mutableStateOf(false) }
             OpenTasksTheme {
                 ProjectsScreen(
                     projects = OpenTasksFixtures.snapshot.projects,
@@ -555,11 +566,13 @@ class ProjectWorkbenchInstrumentedTest {
                     workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
                     selectedProjectId = project.id,
                     showDetailPane = false,
+                    boardMode = boardMode.value,
                     workbenchTaskGroups = groups,
                     workbenchSort = sort,
                     workbenchGroupBy = groupBy,
                     onWorkbenchSortChange = onSortChange,
                     onWorkbenchGroupChange = onGroupChange,
+                    onBoardModeChange = { boardMode.value = it },
                     onSelectProject = {},
                     onCloseDetail = {},
                     onUpdateProject = { _, _ -> },
