@@ -655,6 +655,10 @@ then begin Task 2.
   `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryVaultRepositoryTest.kt:34-40`
   (class fixtures) and `:1283-1336`
   (`projectTemplateCaptureInstantiationAndDeleteUndoPreserveReusableStructure`)
+- Modify:
+  `core/data/src/test/kotlin/app/opentasks/core/data/InMemoryActivityGenerationTest.kt`
+  (`statusChangeRecordsOldAndNewNames` and
+  `generated501EntriesKeepNewest500WithOldestEviction`)
 
 **Interfaces:**
 
@@ -780,7 +784,11 @@ fun boardColumnsFilterCardsAndUseTheRequestedSharedComparator() {
     val backlog = statuses.single { it.id == OpenTasksFixtures.backlog }
     val alpha = alphaA.copy(projectId = project.id, statusId = backlog.id)
     val beta = betaB.copy(projectId = project.id, statusId = backlog.id)
-    val completed = beta.copy(id = TaskId("completed"), completedAt = clock.instant())
+    val completed = beta.copy(
+        id = TaskId("completed"),
+        semanticStatus = SemanticStatus.COMPLETED,
+        completedAt = clock.instant(),
+    )
     val deleted = beta.copy(id = TaskId("deleted"), deletedAt = clock.instant())
 
     val priorityColumns = boardColumns(project, statuses, listOf(beta, alpha, completed, deleted))
@@ -849,6 +857,20 @@ assertEquals(
     snapshot.tasks.map { it.id.value },
 )
 ```
+
+In `InMemoryActivityGenerationTest`, make both order-sensitive tests select the
+started fixture semantically instead of relying on `tasks.first()` after
+snapshot id-order normalisation:
+
+```kotlin
+val task = repository.currentWorkspace().tasks.first {
+    it.semanticStatus == SemanticStatus.STARTED
+}
+```
+
+Apply that lookup in `statusChangeRecordsOldAndNewNames` and
+`generated501EntriesKeepNewest500WithOldestEviction`; leave the other activity
+tests unchanged.
 
 - [ ] **Step 3: Run the RED tests**
 
@@ -926,11 +948,12 @@ Room, whose DAO already orders snapshot tasks by id.
 ./gradlew :core:domain:testDebugUnitTest \
   --tests "app.opentasks.core.domain.TaskArrangementRulesTest"
 ./gradlew :core:data:testDebugUnitTest \
-  --tests "app.opentasks.core.data.InMemoryVaultRepositoryTest"
+  --tests "app.opentasks.core.data.InMemoryVaultRepositoryTest" \
+  --tests "app.opentasks.core.data.InMemoryActivityGenerationTest"
 ```
 
 Expected: PASS, including constructor, mutation, and template publication
-parity.
+parity, plus semantic fixture selection in the two activity-generation tests.
 
 - [ ] **Step 7: Audit task publication call sites and patch validity**
 
@@ -951,11 +974,12 @@ git add core/model/src/main/kotlin/app/opentasks/core/model/TaskArrangement.kt \
   core/domain/src/main/kotlin/app/opentasks/core/domain/TaskArrangementRules.kt \
   core/domain/src/test/kotlin/app/opentasks/core/domain/TaskArrangementRulesTest.kt \
   core/data/src/main/kotlin/app/opentasks/core/data/InMemoryVaultRepository.kt \
-  core/data/src/test/kotlin/app/opentasks/core/data/InMemoryVaultRepositoryTest.kt
+  core/data/src/test/kotlin/app/opentasks/core/data/InMemoryVaultRepositoryTest.kt \
+  core/data/src/test/kotlin/app/opentasks/core/data/InMemoryActivityGenerationTest.kt
 git diff --cached --name-only
 ```
 
-Expected: exactly the five paths in this task's **Files** block.
+Expected: exactly the six paths in this task's **Files** block.
 
 - [ ] **Step 9: Commit**
 
