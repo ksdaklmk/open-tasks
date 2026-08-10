@@ -6230,6 +6230,9 @@ class DotMatrixTest {
     fun unitCountsAndProportionsProduceBoundedVisibleDots() {
         assertEquals(DotRunLayout(0, 0), dotRunLayout(0f, 0L, 24))
         assertEquals(DotRunLayout(3, 3), dotRunLayout(0.6f, 3L, 24))
+        assertEquals(DotRunLayout(24, 12), dotRunLayout(0.5f, -1L, 24))
+        assertEquals(DotRunLayout(24, 12), dotRunLayout(0.5f, 25L, 24))
+        assertEquals(DotRunLayout(24, 24), dotRunLayout(0.5f, 24L, 24))
         assertEquals(DotRunLayout(24, 1), dotRunLayout(0.01f, null, 24))
         assertEquals(DotRunLayout(24, 12), dotRunLayout(0.5f, null, 24))
         assertEquals(DotRunLayout(24, 24), dotRunLayout(2f, null, 24))
@@ -6247,6 +6250,10 @@ class DotMatrixTest {
         assertEquals(
             listOf(0, 0, 0),
             dottedColumnHeights(listOf(-1f, Float.NaN, Float.POSITIVE_INFINITY), 12),
+        )
+        assertEquals(
+            listOf(0, 0, 0, 12),
+            dottedColumnHeights(listOf(-1f, Float.NaN, Float.POSITIVE_INFINITY, 12f), 12),
         )
     }
 
@@ -6323,9 +6330,9 @@ Build each visual as a tagged `Box` containing a semantics-free `Canvas`:
 @Composable
 fun DotRunBar(
     progress: Float,
-    modifier: Modifier,
-    unitCount: Long?,
-    maxDots: Int,
+    modifier: Modifier = Modifier,
+    unitCount: Long? = null,
+    maxDots: Int = 24,
 ) {
     val layout = dotRunLayout(progress, unitCount, maxDots)
     val filledColor = MaterialTheme.colorScheme.secondary
@@ -6352,16 +6359,56 @@ fun DotRunBar(
 }
 ```
 
-Keep the public defaults from the Interfaces block. `DottedAreaChart` follows
-the same wrapper pattern with tag `dotted-area-chart`, calls
-`dottedColumnHeights(values, maxRows)`, and draws each positive height as a
-bottom-aligned column of `secondary` circles. It returns an empty Canvas for an
-empty/all-zero series and calls neither semantics nor text APIs.
+`DottedAreaChart` must repeat its public defaults exactly:
+
+```kotlin
+@Composable
+fun DottedAreaChart(
+    values: List<Float>,
+    modifier: Modifier = Modifier,
+    maxRows: Int = 12,
+) {
+    val heights = dottedColumnHeights(values, maxRows)
+    val filledColor = MaterialTheme.colorScheme.secondary
+    Box(modifier.testTag("dotted-area-chart")) {
+        Canvas(Modifier.matchParentSize().clearAndSetSemantics {}) {
+            if (heights.isEmpty() || heights.all { it == 0 }) return@Canvas
+            val columnWidth = size.width / heights.size
+            val diameter = minOf(
+                columnWidth / 1.5f,
+                size.height / (maxRows + (maxRows - 1) * 0.5f),
+            )
+            val step = diameter * 1.5f
+            heights.forEachIndexed { column, height ->
+                repeat(height) { row ->
+                    drawCircle(
+                        color = filledColor,
+                        radius = diameter / 2f,
+                        center = Offset(
+                            x = columnWidth * (column + 0.5f),
+                            y = size.height - diameter / 2f - row * step,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+```
+
+Both composables call neither semantics nor text APIs on their `Canvas` nodes.
 
 - [ ] **Step 4: Replace every Insights progress bar**
 
 Remove the `LinearProgressIndicator` import/use. Keep existing merged semantics
-and replace its body with:
+and add this production import in `InsightsScreen.kt`:
+
+```kotlin
+import app.opentasks.core.designsystem.DotRunBar
+```
+
+Replace `MetricBar` with this body, retaining the live label/value `Row`
+verbatim before the spacer:
 
 ```kotlin
 @Composable
@@ -6379,7 +6426,21 @@ private fun MetricBar(
                 contentDescription = "$label, $value"
             },
     ) {
-        // Keep the existing label/value Row unchanged.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
         Spacer(Modifier.height(6.dp))
         DotRunBar(
             progress = progress,
@@ -6395,6 +6456,18 @@ duration calls on the default `null` value so their existing progress ratios
 remain proportional.
 
 - [ ] **Step 5: Extend Compose assertions**
+
+In `InsightsScreenInstrumentedTest.kt`, add these Compose test imports unless
+they are already present (deduplicate against the existing import list):
+
+```kotlin
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.onAllNodesWithTag
+```
 
 In the existing populated chart test, retain all label/value assertions and
 add unmerged-tree checks so merged accessibility remains authoritative:
