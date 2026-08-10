@@ -86,6 +86,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
@@ -114,7 +115,11 @@ import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskGroup
+import app.opentasks.core.model.TaskGroupKey
+import app.opentasks.core.model.TaskGroupValue
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.TimeEntry
 import app.opentasks.core.model.TimeEntryConflict
 import app.opentasks.core.model.TimeEntryId
@@ -187,6 +192,11 @@ private enum class RecurrenceEndMode(val label: String) {
 fun TasksScreen(
     tasks: List<Task>,
     dueBucketsByTaskId: Map<TaskId, DueBucket> = emptyMap(),
+    taskGroups: List<TaskGroup> = listOf(TaskGroup(value = null, tasks = tasks)),
+    taskSort: TaskSortKey = TaskSortKey.DUE,
+    taskGroupBy: TaskGroupKey? = null,
+    onTaskSortChange: (TaskSortKey) -> Unit = {},
+    onTaskGroupChange: (TaskGroupKey?) -> Unit = {},
     reminders: List<Reminder> = emptyList(),
     projectNames: Map<ProjectId, String>,
     workflowStatuses: List<WorkflowStatus>,
@@ -250,21 +260,20 @@ fun TasksScreen(
     onBulkDelete: () -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
-    val visibleTasks = when (filter) {
-        TaskFilter.INBOX -> tasks.filter { it.projectId == null && it.deletedAt == null }
-        TaskFilter.TODAY -> tasks.filter {
-            !it.isCompleted && it.deletedAt == null &&
-                dueBucketsByTaskId[it.id] == DueBucket.TODAY
+    val visibleTaskGroups = taskGroups.mapNotNull { group ->
+        val visible = group.tasks.filter { task ->
+            when (filter) {
+                TaskFilter.INBOX -> task.projectId == null && task.deletedAt == null
+                TaskFilter.TODAY -> !task.isCompleted && task.deletedAt == null &&
+                    dueBucketsByTaskId[task.id] == DueBucket.TODAY
+                TaskFilter.UPCOMING -> !task.isCompleted && task.deletedAt == null &&
+                    dueBucketsByTaskId[task.id] in setOf(DueBucket.THIS_WEEK, DueBucket.LATER)
+                TaskFilter.OVERDUE -> !task.isCompleted && task.deletedAt == null &&
+                    dueBucketsByTaskId[task.id] == DueBucket.OVERDUE
+                TaskFilter.ALL -> task.deletedAt == null
+            }
         }
-        TaskFilter.UPCOMING -> tasks.filter {
-            !it.isCompleted && it.deletedAt == null &&
-                dueBucketsByTaskId[it.id] in setOf(DueBucket.THIS_WEEK, DueBucket.LATER)
-        }
-        TaskFilter.OVERDUE -> tasks.filter {
-            !it.isCompleted && it.deletedAt == null &&
-                dueBucketsByTaskId[it.id] == DueBucket.OVERDUE
-        }
-        TaskFilter.ALL -> tasks.filter { it.deletedAt == null }
+        group.copy(tasks = visible).takeIf { visible.isNotEmpty() }
     }
     val selectedTask = tasks.firstOrNull { it.id == selectedTaskId }
     val selectedReminder = reminders.firstOrNull { it.taskId == selectedTaskId }
@@ -346,7 +355,7 @@ fun TasksScreen(
     Box(modifier = modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxSize()) {
             TaskListPane(
-                tasks = visibleTasks,
+                taskGroups = visibleTaskGroups,
                 projectNames = projectNames,
                 activeProjectIds = activeProjectIds,
                 tags = tags,
@@ -355,6 +364,10 @@ fun TasksScreen(
                 selectedBulkTasks = tasks.filter { it.id in selectedBulkIds },
                 filter = filter,
                 onFilterChange = { filter = it },
+                taskSort = taskSort,
+                taskGroupBy = taskGroupBy,
+                onTaskSortChange = onTaskSortChange,
+                onTaskGroupChange = onTaskGroupChange,
                 onSelectTask = onSelectTask,
                 onCompleteTask = onCompleteTask,
                 onToggleBulkSelection = onToggleBulkSelection,
@@ -461,7 +474,7 @@ fun TasksScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskListPane(
-    tasks: List<Task>,
+    taskGroups: List<TaskGroup>,
     projectNames: Map<ProjectId, String>,
     activeProjectIds: Set<ProjectId>,
     tags: List<Tag>,
@@ -470,6 +483,10 @@ private fun TaskListPane(
     selectedBulkTasks: List<Task>,
     filter: TaskFilter,
     onFilterChange: (TaskFilter) -> Unit,
+    taskSort: TaskSortKey,
+    taskGroupBy: TaskGroupKey?,
+    onTaskSortChange: (TaskSortKey) -> Unit,
+    onTaskGroupChange: (TaskGroupKey?) -> Unit,
     onSelectTask: (TaskId) -> Unit,
     onCompleteTask: (Task) -> Unit,
     onToggleBulkSelection: (TaskId) -> Unit,
@@ -501,16 +518,30 @@ private fun TaskListPane(
             )
         } else {
             Column(modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
-                Text(
-                    "Tasks",
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Text(
-                    "${tasks.count { !it.isCompleted }} open • ${tasks.count(Task::isBlocked)} blocked",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Tasks",
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.semantics { heading() },
+                        )
+                        Text(
+                            "${taskGroups.sumOf { group -> group.tasks.count { !it.isCompleted } }} open • " +
+                                "${taskGroups.sumOf { group -> group.tasks.count(Task::isBlocked) }} blocked",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TaskArrangementControls(
+                        taskSort = taskSort,
+                        taskGroupBy = taskGroupBy,
+                        onTaskSortChange = onTaskSortChange,
+                        onTaskGroupChange = onTaskGroupChange,
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -542,7 +573,7 @@ private fun TaskListPane(
             }
         }
 
-        if (tasks.isEmpty()) {
+        if (taskGroups.isEmpty()) {
             EmptyState(
                 icon = Icons.Rounded.CheckCircle,
                 title = "This view is clear",
@@ -558,45 +589,189 @@ private fun TaskListPane(
                     bottom = 104.dp,
                 ),
             ) {
-                items(tasks, key = { it.id.value }) { task ->
-                    if (selectionMode) {
-                        val checked = task.id in selectedBulkIds
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.semantics { selected = checked },
-                        ) {
-                            Checkbox(
-                                checked = checked,
-                                onCheckedChange = { onToggleBulkSelection(task.id) },
-                                modifier = Modifier.testTag("bulk-check-${task.id.value}"),
+                taskGroups.forEach { group ->
+                    group.value?.let { value ->
+                        item(key = "header:${value.stableKey()}") {
+                            SectionHeader(
+                                title = taskGroupLabel(value, projectNames),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
                             )
+                        }
+                    }
+                    items(group.tasks, key = { "task:${it.id.value}" }) { task ->
+                        if (selectionMode) {
+                            val checked = task.id in selectedBulkIds
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.semantics { selected = checked },
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = { onToggleBulkSelection(task.id) },
+                                    modifier = Modifier.testTag("bulk-check-${task.id.value}"),
+                                )
+                                TaskRow(
+                                    task = task,
+                                    projectName = projectNames[task.projectId] ?: "Inbox",
+                                    selected = checked,
+                                    onSelect = { onToggleBulkSelection(task.id) },
+                                    onComplete = { onCompleteTask(task) },
+                                    onLongPress = { onToggleBulkSelection(task.id) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        } else {
                             TaskRow(
                                 task = task,
                                 projectName = projectNames[task.projectId] ?: "Inbox",
-                                selected = checked,
-                                onSelect = { onToggleBulkSelection(task.id) },
+                                selected = selectedTaskId == task.id,
+                                onSelect = { onSelectTask(task.id) },
                                 onComplete = { onCompleteTask(task) },
                                 onLongPress = { onToggleBulkSelection(task.id) },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.semantics {
+                                    selected = selectedTaskId == task.id
+                                },
                             )
                         }
-                    } else {
-                        TaskRow(
-                            task = task,
-                            projectName = projectNames[task.projectId] ?: "Inbox",
-                            selected = selectedTaskId == task.id,
-                            onSelect = { onSelectTask(task.id) },
-                            onComplete = { onCompleteTask(task) },
-                            onLongPress = { onToggleBulkSelection(task.id) },
-                            modifier = Modifier.semantics {
-                                selected = selectedTaskId == task.id
-                            },
-                        )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun TaskArrangementControls(
+    taskSort: TaskSortKey,
+    taskGroupBy: TaskGroupKey?,
+    onTaskSortChange: (TaskSortKey) -> Unit,
+    onTaskGroupChange: (TaskGroupKey?) -> Unit,
+) {
+    var sortExpanded by remember { mutableStateOf(false) }
+    var groupExpanded by remember { mutableStateOf(false) }
+    val sortControlDescription = stringResource(
+        R.string.tasks_sort_control,
+        taskSortLabel(taskSort),
+    )
+    val groupControlDescription = stringResource(
+        R.string.tasks_group_control,
+        taskGroupLabel(taskGroupBy),
+    )
+
+    Box {
+        IconButton(
+            onClick = { sortExpanded = true },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("tasks-sort-control")
+                .semantics { contentDescription = sortControlDescription },
+        ) {
+            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = sortExpanded,
+            onDismissRequest = { sortExpanded = false },
+        ) {
+            TaskSortKey.entries.forEach { candidate ->
+                DropdownMenuItem(
+                    text = { Text(taskSortLabel(candidate)) },
+                    onClick = {
+                        sortExpanded = false
+                        onTaskSortChange(candidate)
+                    },
+                    modifier = Modifier
+                        .semantics { selected = taskSort == candidate }
+                        .testTag("tasks-sort-option-${candidate.name.lowercase(Locale.ROOT)}"),
+                )
+            }
+        }
+    }
+    Box {
+        IconButton(
+            onClick = { groupExpanded = true },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("tasks-group-control")
+                .semantics { contentDescription = groupControlDescription },
+        ) {
+            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = groupExpanded,
+            onDismissRequest = { groupExpanded = false },
+        ) {
+            listOf(null, TaskGroupKey.DUE_BUCKET, TaskGroupKey.PROJECT, TaskGroupKey.PRIORITY)
+                .forEach { candidate ->
+                    DropdownMenuItem(
+                        text = { Text(taskGroupLabel(candidate)) },
+                        onClick = {
+                            groupExpanded = false
+                            onTaskGroupChange(candidate)
+                        },
+                        modifier = Modifier
+                            .semantics { selected = taskGroupBy == candidate }
+                            .testTag(
+                                "tasks-group-option-" +
+                                    (candidate?.name?.lowercase(Locale.ROOT) ?: "none"),
+                            ),
+                    )
+                }
+        }
+    }
+}
+
+@Composable
+private fun taskSortLabel(value: TaskSortKey): String = stringResource(
+    when (value) {
+        TaskSortKey.DUE -> R.string.tasks_sort_due_label
+        TaskSortKey.PRIORITY -> R.string.tasks_sort_priority_label
+        TaskSortKey.TITLE -> R.string.tasks_sort_title_label
+        TaskSortKey.UPDATED -> R.string.tasks_sort_updated_label
+    },
+)
+
+@Composable
+private fun taskGroupLabel(value: TaskGroupKey?): String = stringResource(
+    when (value) {
+        null -> R.string.tasks_group_none_label
+        TaskGroupKey.DUE_BUCKET -> R.string.tasks_group_due_label
+        TaskGroupKey.PROJECT -> R.string.tasks_group_project_label
+        TaskGroupKey.PRIORITY -> R.string.tasks_group_priority_label
+    },
+)
+
+private fun TaskGroupValue.stableKey(): String = when (this) {
+    is TaskGroupValue.Due -> "due:${bucket.name}"
+    is TaskGroupValue.Project -> projectId?.let { "project:id:${it.value}" } ?: "project:inbox"
+    is TaskGroupValue.PriorityValue -> "priority:${priority.name}"
+}
+
+@Composable
+private fun taskGroupLabel(
+    value: TaskGroupValue,
+    projectNames: Map<ProjectId, String>,
+): String = when (value) {
+    is TaskGroupValue.Due -> stringResource(
+        when (value.bucket) {
+            DueBucket.OVERDUE -> R.string.tasks_group_due_overdue
+            DueBucket.TODAY -> R.string.tasks_group_due_today
+            DueBucket.THIS_WEEK -> R.string.tasks_group_due_this_week
+            DueBucket.LATER -> R.string.tasks_group_due_later
+            DueBucket.NO_DATE -> R.string.tasks_group_due_no_date
+        },
+    )
+    is TaskGroupValue.Project -> value.projectId?.let { projectId ->
+        projectNames[projectId] ?: stringResource(R.string.tasks_group_project)
+    } ?: stringResource(R.string.tasks_group_inbox)
+    is TaskGroupValue.PriorityValue -> stringResource(
+        when (value.priority) {
+            Priority.URGENT -> R.string.tasks_group_priority_urgent
+            Priority.HIGH -> R.string.tasks_group_priority_high
+            Priority.MEDIUM -> R.string.tasks_group_priority_medium
+            Priority.LOW -> R.string.tasks_group_priority_low
+            Priority.NONE -> R.string.tasks_group_priority_none
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

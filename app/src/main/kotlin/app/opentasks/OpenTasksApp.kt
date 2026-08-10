@@ -113,6 +113,7 @@ import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.domain.arrangeTasks
 import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.model.Attachment
@@ -274,6 +275,7 @@ fun OpenTasksApp(
         val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
         val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
         val boardModeProjectIds by viewModel.boardModeProjectIds.collectAsStateWithLifecycle()
+        val viewArrangement by viewModel.viewArrangement.collectAsStateWithLifecycle()
         val reviewActionPending by viewModel.reviewActionPending.collectAsStateWithLifecycle()
         val pendingBlockedBulk by
             viewModel.pendingBlockedBulkCompletion.collectAsStateWithLifecycle()
@@ -483,8 +485,22 @@ fun OpenTasksApp(
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
         val selectedProjectId = selectedProjectValue?.let(::ProjectId)
         val projectNames = snapshot.projects.associate { it.id to it.name }
-        val dueBucketsByTaskId = remember(snapshot.tasks, clock) {
-            snapshot.tasks.associate { task -> task.id to classifyDueBucket(task.due, clock) }
+        val tasksArrangement = viewArrangement.tasks
+        val (dueBucketsByTaskId, taskGroups) = remember(
+            snapshot.tasks,
+            projectNames,
+            tasksArrangement,
+            clock,
+        ) {
+            val projectionClock = Clock.fixed(clock.instant(), clock.zone)
+            snapshot.tasks.associate { task ->
+                task.id to classifyDueBucket(task.due, projectionClock)
+            } to arrangeTasks(
+                tasks = snapshot.tasks,
+                arrangement = tasksArrangement,
+                projectNames = projectNames,
+                clock = projectionClock,
+            )
         }
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
@@ -952,6 +968,19 @@ fun OpenTasksApp(
                                 TasksScreen(
                                     tasks = snapshot.tasks,
                                     dueBucketsByTaskId = dueBucketsByTaskId,
+                                    taskGroups = taskGroups,
+                                    taskSort = tasksArrangement.sort,
+                                    taskGroupBy = tasksArrangement.groupBy,
+                                    onTaskSortChange = { sort ->
+                                        viewModel.setTasksArrangement(
+                                            viewModel.viewArrangement.value.tasks.copy(sort = sort),
+                                        )
+                                    },
+                                    onTaskGroupChange = { groupBy ->
+                                        viewModel.setTasksArrangement(
+                                            viewModel.viewArrangement.value.tasks.copy(groupBy = groupBy),
+                                        )
+                                    },
                                     reminders = snapshot.reminders,
                                     projectNames = projectNames,
                                     activeProjectIds = snapshot.projects

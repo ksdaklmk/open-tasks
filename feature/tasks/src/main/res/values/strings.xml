@@ -13,6 +13,29 @@
     <string name="task_editing_state_description">Editing %1$s</string>
     <string name="task_add_to_calendar">Add to calendar</string>
 
+    <string name="tasks_sort_control">Sort tasks: %1$s</string>
+    <string name="tasks_group_control">Group tasks: %1$s</string>
+    <string name="tasks_sort_due_label">Due</string>
+    <string name="tasks_sort_priority_label">Priority</string>
+    <string name="tasks_sort_title_label">Title</string>
+    <string name="tasks_sort_updated_label">Updated</string>
+    <string name="tasks_group_none_label">None</string>
+    <string name="tasks_group_due_label">Due</string>
+    <string name="tasks_group_project_label">Project</string>
+    <string name="tasks_group_priority_label">Priority</string>
+    <string name="tasks_group_due_overdue">Overdue</string>
+    <string name="tasks_group_due_today">Today</string>
+    <string name="tasks_group_due_this_week">This week</string>
+    <string name="tasks_group_due_later">Later</string>
+    <string name="tasks_group_due_no_date">No date</string>
+    <string name="tasks_group_inbox">Inbox</string>
+    <string name="tasks_group_project">Project</string>
+    <string name="tasks_group_priority_urgent">Urgent</string>
+    <string name="tasks_group_priority_high">High</string>
+    <string name="tasks_group_priority_medium">Medium</string>
+    <string name="tasks_group_priority_low">Low</string>
+    <string name="tasks_group_priority_none">None</string>
+
     <string name="task_focus_start">Start focus cycle</string>
     <string name="task_focus_preset_twenty_five_five">25 minutes focus, 5 minutes break</string>
     <string name="task_focus_preset_fifty_ten">50 minutes focus, 10 minutes break</string>
