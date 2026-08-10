@@ -535,13 +535,7 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     fun search(query: SearchQuery) {
-        viewModelScope.launch {
-            mutableSearchResults.value = if (query.text.isBlank()) {
-                emptyList()
-            } else {
-                repository.search(query)
-            }
-        }
+        viewModelScope.launch { mutableSearchResults.value = repository.search(query) }
     }
 
     fun clearSearch() {

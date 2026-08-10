@@ -17,10 +17,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
@@ -43,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,16 +57,65 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SavedView
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
+import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
+import app.opentasks.feature.tasks.R as TasksR
 import kotlinx.coroutines.delay
+import java.util.Locale
+
+private val SearchQuerySaver = listSaver<SearchQuery, Any>(
+    save = { query ->
+        listOf(
+            query.text,
+            ArrayList(query.projectIds.map(ProjectId::value).sorted()),
+            ArrayList(query.tagIds.map(TagId::value).sorted()),
+            query.includeCompleted,
+            query.includeTrash,
+            ArrayList(query.dueBuckets.map { it.name }.sorted()),
+            ArrayList(query.priorities.map { it.name }.sorted()),
+            ArrayList(query.statuses.map { it.name }.sorted()),
+            query.sort?.name.orEmpty(),
+        )
+    },
+    restore = { values ->
+        fun names(index: Int) = (values[index] as? List<*>)
+            .orEmpty().mapNotNull { it as? String }
+        SearchQuery(
+            text = values[0] as String,
+            projectIds = names(1).mapTo(linkedSetOf(), ::ProjectId),
+            tagIds = names(2).mapTo(linkedSetOf(), ::TagId),
+            includeCompleted = values[3] as Boolean,
+            includeTrash = values[4] as Boolean,
+            dueBuckets = names(5).mapNotNull { name ->
+                DueBucket.entries.firstOrNull { it.name == name }
+            }.toSet(),
+            priorities = names(6).mapNotNull { name ->
+                Priority.entries.firstOrNull { it.name == name }
+            }.toSet(),
+            statuses = names(7).mapNotNull { name ->
+                SemanticStatus.entries.firstOrNull { it.name == name }
+            }.toSet(),
+            sort = (values[8] as? String)?.let { name ->
+                TaskSortKey.entries.firstOrNull { it.name == name }
+            },
+        )
+    },
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -76,18 +130,20 @@ fun SearchSurface(
     onRenameView: (SavedViewId, String) -> Unit = { _, _ -> },
     onDeleteView: (SavedViewId) -> Unit = {},
 ) {
-    var queryText by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable(stateSaver = SearchQuerySaver) {
+        mutableStateOf(SearchQuery(""))
+    }
     var selectedSavedViewId by rememberSaveable { mutableStateOf<String?>(null) }
     var showSaveDialog by rememberSaveable { mutableStateOf(false) }
+    var dueMenuExpanded by remember { mutableStateOf(false) }
+    var priorityMenuExpanded by remember { mutableStateOf(false) }
+    var statusMenuExpanded by remember { mutableStateOf(false) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
-    // Only trusted while the field still reads exactly what the saved view
-    // stored -- any further typing (or a rename that changes the underlying
-    // text) drops back to a plain, filter-less query for the typed text.
-    val currentQuery = savedViews
-        .firstOrNull { it.id.value == selectedSavedViewId && it.query.text == queryText }
-        ?.query
-        ?: SearchQuery(queryText)
+    val hasV2Criterion = query.dueBuckets.isNotEmpty() || query.priorities.isNotEmpty() ||
+        query.statuses.isNotEmpty() || query.sort != null
+    val activeView = savedViews.firstOrNull { it.id.value == selectedSavedViewId }
     val savingDisabled = savedViews.size >= MAX_SAVED_VIEWS
 
     Dialog(
@@ -113,10 +169,11 @@ fun SearchSurface(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         OutlinedTextField(
-                            value = queryText,
-                            onValueChange = {
-                                queryText = it.take(MAX_SEARCH_QUERY_LENGTH)
-                                selectedSavedViewId = null
+                            value = query.text,
+                            onValueChange = { value ->
+                                query = query.copy(
+                                    text = value.take(MAX_SEARCH_QUERY_LENGTH),
+                                )
                             },
                             modifier = Modifier
                                 .weight(1f)
@@ -133,7 +190,7 @@ fun SearchSurface(
                             },
                             singleLine = true,
                         )
-                        if (onSaveView != null && queryText.isNotBlank()) {
+                        if (onSaveView != null && (query.text.isNotBlank() || hasV2Criterion)) {
                             Spacer(Modifier.width(8.dp))
                             IconButton(
                                 onClick = { showSaveDialog = true },
@@ -154,8 +211,267 @@ fun SearchSurface(
                             Icon(Icons.Rounded.Close, contentDescription = "Close search")
                         }
                     }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Box {
+                            IconButton(
+                                onClick = { dueMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(DUE_FILTER_TAG),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Event,
+                                    contentDescription =
+                                        stringResource(R.string.saved_search_filter_due),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = dueMenuExpanded,
+                                onDismissRequest = { dueMenuExpanded = false },
+                            ) {
+                                DueBucket.entries.forEach { bucket ->
+                                    val selectedOption = bucket in query.dueBuckets
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(
+                                                    when (bucket) {
+                                                        DueBucket.OVERDUE ->
+                                                            TasksR.string.tasks_group_due_overdue
+                                                        DueBucket.TODAY ->
+                                                            TasksR.string.tasks_group_due_today
+                                                        DueBucket.THIS_WEEK ->
+                                                            TasksR.string.tasks_group_due_this_week
+                                                        DueBucket.LATER ->
+                                                            TasksR.string.tasks_group_due_later
+                                                        DueBucket.NO_DATE ->
+                                                            TasksR.string.tasks_group_due_no_date
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        onClick = {
+                                            query = query.copy(
+                                                dueBuckets = query.dueBuckets.toggled(bucket),
+                                            )
+                                            dueMenuExpanded = false
+                                        },
+                                        modifier = Modifier
+                                            .testTag(
+                                                "search-due-${bucket.name.lowercase(Locale.ROOT)}",
+                                            )
+                                            .semantics {
+                                                role = Role.Checkbox
+                                                selected = selectedOption
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                        Box {
+                            IconButton(
+                                onClick = { priorityMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(PRIORITY_FILTER_TAG),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Flag,
+                                    contentDescription =
+                                        stringResource(R.string.saved_search_filter_priority),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = priorityMenuExpanded,
+                                onDismissRequest = { priorityMenuExpanded = false },
+                            ) {
+                                Priority.entries.forEach { priority ->
+                                    val selectedOption = priority in query.priorities
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(
+                                                    when (priority) {
+                                                        Priority.NONE ->
+                                                            TasksR.string.tasks_group_priority_none
+                                                        Priority.LOW ->
+                                                            TasksR.string.tasks_group_priority_low
+                                                        Priority.MEDIUM ->
+                                                            TasksR.string.tasks_group_priority_medium
+                                                        Priority.HIGH ->
+                                                            TasksR.string.tasks_group_priority_high
+                                                        Priority.URGENT ->
+                                                            TasksR.string.tasks_group_priority_urgent
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        onClick = {
+                                            query = query.copy(
+                                                priorities = query.priorities.toggled(priority),
+                                            )
+                                            priorityMenuExpanded = false
+                                        },
+                                        modifier = Modifier
+                                            .testTag(
+                                                "search-priority-" +
+                                                    priority.name.lowercase(Locale.ROOT),
+                                            )
+                                            .semantics {
+                                                role = Role.Checkbox
+                                                selected = selectedOption
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                        Box {
+                            IconButton(
+                                onClick = { statusMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(STATUS_FILTER_TAG),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Checklist,
+                                    contentDescription =
+                                        stringResource(R.string.saved_search_filter_status),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = statusMenuExpanded,
+                                onDismissRequest = { statusMenuExpanded = false },
+                            ) {
+                                SemanticStatus.entries.forEach { status ->
+                                    val selectedOption = status in query.statuses
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(
+                                                    when (status) {
+                                                        SemanticStatus.BACKLOG ->
+                                                            R.string.saved_search_status_backlog
+                                                        SemanticStatus.PLANNED ->
+                                                            R.string.saved_search_status_planned
+                                                        SemanticStatus.STARTED ->
+                                                            R.string.saved_search_status_started
+                                                        SemanticStatus.BLOCKED ->
+                                                            R.string.saved_search_status_blocked
+                                                        SemanticStatus.COMPLETED ->
+                                                            R.string.saved_search_status_completed
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        onClick = {
+                                            query = query.copy(
+                                                statuses = query.statuses.toggled(status),
+                                            )
+                                            statusMenuExpanded = false
+                                        },
+                                        modifier = Modifier
+                                            .testTag(
+                                                "search-status-${status.name.lowercase(Locale.ROOT)}",
+                                            )
+                                            .semantics {
+                                                role = Role.Checkbox
+                                                selected = selectedOption
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                        Box {
+                            IconButton(
+                                onClick = { sortMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(SORT_FILTER_TAG),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.Sort,
+                                    contentDescription =
+                                        stringResource(R.string.saved_search_sort),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                            ) {
+                                (listOf<TaskSortKey?>(null) + TaskSortKey.entries).forEach { sort ->
+                                    val selectedOption = query.sort == sort
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(
+                                                    when (sort) {
+                                                        null -> R.string.saved_search_relevance
+                                                        TaskSortKey.DUE ->
+                                                            TasksR.string.tasks_sort_due_label
+                                                        TaskSortKey.PRIORITY ->
+                                                            TasksR.string.tasks_sort_priority_label
+                                                        TaskSortKey.TITLE ->
+                                                            TasksR.string.tasks_sort_title_label
+                                                        TaskSortKey.UPDATED ->
+                                                            TasksR.string.tasks_sort_updated_label
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        onClick = {
+                                            query = query.copy(sort = sort)
+                                            sortMenuExpanded = false
+                                        },
+                                        modifier = Modifier
+                                            .testTag(
+                                                sort?.let {
+                                                    "search-sort-${it.name.lowercase(Locale.ROOT)}"
+                                                } ?: "search-sort-relevance",
+                                            )
+                                            .semantics {
+                                                role = Role.RadioButton
+                                                selected = selectedOption
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (activeView != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp)
+                                .testTag("$ACTIVE_VIEW_TAG-${activeView.id.value}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.saved_search_active_view, activeView.name),
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    selectedSavedViewId = null
+                                    query = SearchQuery(query.text)
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(CLEAR_ACTIVE_VIEW_TAG),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = stringResource(
+                                        R.string.saved_search_clear_active_view,
+                                    ),
+                                )
+                            }
+                        }
+                    }
                     HorizontalDivider()
-                    if (queryText.isBlank() && savedViews.isNotEmpty()) {
+                    if (query.text.isBlank() && savedViews.isNotEmpty()) {
                         FlowRow(
                             modifier = Modifier.padding(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -165,7 +481,7 @@ fun SearchSurface(
                                 SavedViewChip(
                                     savedView = savedView,
                                     onSelect = {
-                                        queryText = savedView.query.text
+                                        query = savedView.query
                                         selectedSavedViewId = savedView.id.value
                                     },
                                     onRename = { name -> onRenameView(savedView.id, name) },
@@ -175,7 +491,7 @@ fun SearchSurface(
                         }
                     }
                     when {
-                        queryText.isBlank() -> {
+                        query.text.isBlank() && !hasV2Criterion -> {
                             SearchHint()
                         }
                         results.isEmpty() -> {
@@ -220,9 +536,9 @@ fun SearchSurface(
         }
     }
 
-    LaunchedEffect(currentQuery) {
+    LaunchedEffect(query) {
         delay(150)
-        onQueryChange(currentQuery)
+        onQueryChange(query)
     }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -237,15 +553,24 @@ fun SearchSurface(
             initialName = "",
             onDismiss = { showSaveDialog = false },
             onConfirm = { name ->
-                onSaveView?.invoke(name, currentQuery)
+                onSaveView?.invoke(name, query)
                 showSaveDialog = false
             },
         )
     }
 }
 
+private const val ACTIVE_VIEW_TAG = "active-saved-view"
+private const val CLEAR_ACTIVE_VIEW_TAG = "clear-active-saved-view"
+private const val DUE_FILTER_TAG = "search-filter-due"
+private const val PRIORITY_FILTER_TAG = "search-filter-priority"
+private const val STATUS_FILTER_TAG = "search-filter-status"
+private const val SORT_FILTER_TAG = "search-sort"
 private const val MAX_SEARCH_QUERY_LENGTH = 500
 private const val MAX_SAVED_VIEWS = 20
+
+private fun <T> Set<T>.toggled(value: T): Set<T> =
+    if (value in this) this - value else this + value
 
 @Composable
 private fun SearchHint() {

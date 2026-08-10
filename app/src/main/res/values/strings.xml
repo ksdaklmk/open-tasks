@@ -71,6 +71,18 @@
     <string name="calendar_no_provider">No app on this device can accept a calendar event.</string>
 
     <string name="saved_search_save_description">Save this search</string>
+    <string name="saved_search_filter_due">Filter by due date</string>
+    <string name="saved_search_filter_priority">Filter by priority</string>
+    <string name="saved_search_filter_status">Filter by status</string>
+    <string name="saved_search_sort">Sort search results</string>
+    <string name="saved_search_relevance">Relevance</string>
+    <string name="saved_search_active_view">Active view: %1$s</string>
+    <string name="saved_search_clear_active_view">Clear active view filters</string>
+    <string name="saved_search_status_backlog">Backlog</string>
+    <string name="saved_search_status_planned">Planned</string>
+    <string name="saved_search_status_started">In progress</string>
+    <string name="saved_search_status_blocked">Blocked</string>
+    <string name="saved_search_status_completed">Done</string>
     <string name="saved_search_limit">You\'ve reached the limit of 20 saved searches.</string>
     <string name="saved_search_name_label">Name</string>
     <string name="saved_search_save_title">Save search</string>

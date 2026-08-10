@@ -21,7 +21,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.Priority
+import app.opentasks.core.model.SavedView
+import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.lock.AppLockSettings
 import java.time.LocalDate
@@ -123,6 +130,19 @@ class ProcessRestorationInstrumentedTest {
     fun searchQueryRestoresAndReissuesTheQueryAfterSavedInstanceStateRecreation() {
         val restorationTester = StateRestorationTester(composeRule)
         val latestQuery = AtomicReference(SearchQuery(""))
+        val restored = SearchQuery(
+            text = "restored",
+            dueBuckets = setOf(DueBucket.LATER),
+            priorities = setOf(Priority.HIGH),
+            statuses = setOf(SemanticStatus.BLOCKED),
+            sort = TaskSortKey.TITLE,
+        )
+        val view = SavedView(
+            id = SavedViewId("restored-filter-view"),
+            workspaceId = OpenTasksFixtures.workspaceId,
+            name = "Restored filters",
+            query = restored,
+        )
         restorationTester.setContent {
             OpenTasksTheme {
                 SearchSurface(
@@ -131,20 +151,21 @@ class ProcessRestorationInstrumentedTest {
                     onDismiss = {},
                     onOpenTask = {},
                     onOpenProject = {},
+                    savedViews = listOf(view),
                 )
             }
         }
 
-        composeRule.onNodeWithTag("workspace-search-query")
-            .performTextReplacement("restored search")
+        composeRule.onNodeWithTag("saved-view-chip-${view.id.value}").performClick()
 
         restorationTester.emulateSavedInstanceStateRestore()
         composeRule.waitUntil(timeoutMillis = 2_000) {
-            latestQuery.get().text == "restored search"
+            latestQuery.get() == restored
         }
 
         composeRule.onNodeWithTag("workspace-search-query")
-            .assertTextContains("restored search", substring = true)
+            .assertTextContains("restored", substring = true)
+        composeRule.onNodeWithTag("active-saved-view-${view.id.value}").assertIsDisplayed()
     }
 }
 
