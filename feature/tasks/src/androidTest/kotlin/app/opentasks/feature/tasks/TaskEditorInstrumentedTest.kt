@@ -2,17 +2,21 @@ package app.opentasks.feature.tasks
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -62,6 +66,105 @@ import java.util.concurrent.atomic.AtomicReference
 class TaskEditorInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun duplicateActionEmitsTaskId() {
+        val task = OpenTasksFixtures.tasks.first()
+        val duplicated = AtomicReference<TaskId?>()
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.workflowStatuses,
+                    tags = OpenTasksFixtures.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, _ -> },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    onDuplicateTask = duplicated::set,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("duplicate-task")
+            .performScrollTo()
+            .assertTextEquals("Duplicate task")
+            .assertHeightIsAtLeast(48.dp)
+            .assertIsEnabled()
+            .performClick()
+        assertEquals(task.id, duplicated.get())
+    }
+
+    @Test
+    fun duplicateActionRequiresValidPersistedTask() {
+        val task = OpenTasksFixtures.tasks.first()
+        val renderedTask = mutableStateOf(task)
+        val duplicated = AtomicReference<TaskId?>()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(renderedTask.value),
+                    projectNames = OpenTasksFixtures.snapshot.projects.associate {
+                        it.id to it.name
+                    },
+                    workflowStatuses = OpenTasksFixtures.workflowStatuses,
+                    tags = OpenTasksFixtures.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit ->
+                        renderedTask.value = renderedTask.value.copy(
+                            title = edit.title,
+                            description = edit.description,
+                            projectId = edit.projectId,
+                            priority = edit.priority,
+                            due = edit.due,
+                            recurrence = edit.recurrence,
+                            estimate = edit.estimate,
+                            milestoneId = edit.milestoneId,
+                        )
+                    },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                    onDuplicateTask = duplicated::set,
+                )
+            }
+        }
+
+        val duplicateAction = composeRule.onNodeWithTag("duplicate-task").performScrollTo()
+        composeRule.onNodeWithTag("task-title-field").performTextReplacement("Updated title")
+        duplicateAction.assertIsNotEnabled()
+        composeRule.mainClock.advanceTimeBy(650)
+        composeRule.waitForIdle()
+        duplicateAction.assertIsEnabled()
+        composeRule.onNodeWithTag("task-title-field").performTextReplacement("")
+        duplicateAction.assertIsNotEnabled()
+        assertNull(duplicated.get())
+    }
 
     @Test
     fun validTitleAutoSavesAfterDebounce() {

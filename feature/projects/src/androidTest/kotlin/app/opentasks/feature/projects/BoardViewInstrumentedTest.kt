@@ -3,6 +3,8 @@ package app.opentasks.feature.projects
 import android.view.ViewConfiguration
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -31,6 +33,58 @@ import org.junit.runner.RunWith
 class BoardViewInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun duplicateMenuEmitsTaskIdAndKeepsMoveTargets() {
+        val task = OpenTasksFixtures.tasks.first { it.id.value == "task-proposal" }
+        val duplicated = AtomicReference<TaskId?>()
+        val moved = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
+        val backlog = OpenTasksFixtures.workflowStatuses.single {
+            it.id == OpenTasksFixtures.backlog
+        }
+        val planned = OpenTasksFixtures.workflowStatuses.single {
+            it.id == OpenTasksFixtures.planned
+        }
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = listOf(
+                        BoardColumn(
+                            status = backlog,
+                            tasks = listOf(
+                                task.copy(
+                                    projectId = OpenTasksFixtures.studioProject.id,
+                                    statusId = backlog.id,
+                                    semanticStatus = backlog.semanticStatus,
+                                ),
+                            ),
+                        ),
+                        BoardColumn(status = planned, tasks = emptyList()),
+                    ),
+                    columnWidth = 272.dp,
+                    onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
+                    onOpenTask = {},
+                    onDuplicateTask = duplicated::set,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
+        composeRule.onNodeWithTag("board-duplicate-${task.id.value}")
+            .assertHeightIsAtLeast(48.dp)
+            .assertContentDescriptionEquals("Duplicate ${task.title}")
+            .performClick()
+        assertEquals(task.id, duplicated.get())
+
+        composeRule.onNodeWithTag("board-duplicate-${task.id.value}").assertDoesNotExist()
+        composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
+        composeRule.onNodeWithTag("board-duplicate-${task.id.value}").assertIsDisplayed()
+        composeRule.onNodeWithTag(
+            "board-move-${task.id.value}-to-${OpenTasksFixtures.planned.value}",
+        ).performClick()
+        assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
+    }
 
     @Test
     fun moveMenuDispatchesTaskAndTargetStatus() {

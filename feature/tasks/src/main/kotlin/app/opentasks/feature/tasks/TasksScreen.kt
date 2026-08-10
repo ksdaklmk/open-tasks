@@ -210,6 +210,7 @@ fun TasksScreen(
     onCompleteTask: (Task) -> Unit,
     onChangeTaskStatus: (Task, WorkflowStatusId) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onDuplicateTask: (TaskId) -> Unit = {},
     activeTimerTaskId: TaskId?,
     onToggleTimer: (Task) -> Unit,
     onUpdateTask: (TaskId, TaskEdit) -> Unit,
@@ -312,6 +313,7 @@ fun TasksScreen(
                 onEnablePreciseReminders = onEnablePreciseReminders,
                 onChangeStatus = { onChangeTaskStatus(selectedTask, it) },
                 onMoveToTrash = { onDeleteTask(selectedTask) },
+                onDuplicateTask = onDuplicateTask,
                 onUpdate = { onUpdateTask(selectedTask.id, it) },
                 onAddChecklistItem = { onAddChecklistItem(selectedTask.id, it) },
                 onUpdateChecklistItem = { onUpdateChecklistItem(selectedTask.id, it) },
@@ -424,6 +426,7 @@ fun TasksScreen(
                         onEnablePreciseReminders = onEnablePreciseReminders,
                         onChangeStatus = { onChangeTaskStatus(selectedTask, it) },
                         onMoveToTrash = { onDeleteTask(selectedTask) },
+                        onDuplicateTask = onDuplicateTask,
                         onUpdate = { onUpdateTask(selectedTask.id, it) },
                         onAddChecklistItem = { onAddChecklistItem(selectedTask.id, it) },
                         onUpdateChecklistItem = { onUpdateChecklistItem(selectedTask.id, it) },
@@ -970,6 +973,7 @@ private fun TaskDetailPane(
     dependencyError: String?,
     onChangeStatus: (WorkflowStatusId) -> Unit,
     onMoveToTrash: () -> Unit,
+    onDuplicateTask: (TaskId) -> Unit,
     onUpdate: (TaskEdit) -> Unit,
     onAddChecklistItem: (String) -> Unit,
     onUpdateChecklistItem: (ChecklistItem) -> Unit,
@@ -2388,6 +2392,16 @@ private fun TaskDetailPane(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.task_add_to_calendar))
                 }
+            }
+            OutlinedButton(
+                onClick = { onDuplicateTask(task.id) },
+                enabled = valid && !dirty,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("duplicate-task"),
+            ) {
+                Text(stringResource(R.string.task_duplicate))
             }
             TextButton(
                 onClick = onMoveToTrash,

@@ -101,6 +101,7 @@ fun BoardView(
     columnWidth: Dp,
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
+    onDuplicateTask: (TaskId) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -227,6 +228,7 @@ fun BoardView(
                                         onDragCancel = { dragState = null },
                                         onMoveTask = onMoveTask,
                                         onOpenTask = onOpenTask,
+                                        onDuplicateTask = onDuplicateTask,
                                     )
                                 }
                             }
@@ -285,6 +287,7 @@ private fun BoardTaskCard(
     onDragCancel: () -> Unit,
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
+    onDuplicateTask: (TaskId) -> Unit,
 ) {
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
     var bounds by remember(task.id) { mutableStateOf(Rect.Zero) }
@@ -295,6 +298,10 @@ private fun BoardTaskCard(
     val moveLabels = targets.map { status ->
         status to stringResource(R.string.board_move_to_stage, task.title, status.name)
     }
+    val duplicateTaskDescription = stringResource(
+        R.string.board_duplicate_task_description,
+        task.title,
+    )
     Surface(
         onClick = { onOpenTask(task.id) },
         modifier = Modifier
@@ -366,6 +373,17 @@ private fun BoardTaskCard(
                                     ),
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.board_duplicate_task)) },
+                            onClick = {
+                                menuExpanded = false
+                                onDuplicateTask(task.id)
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics { contentDescription = duplicateTaskDescription }
+                                .testTag("board-duplicate-${task.id.value}"),
+                        )
                     }
                 }
             },

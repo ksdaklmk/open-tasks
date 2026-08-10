@@ -1040,6 +1040,9 @@ fun OpenTasksApp(
                                     onCompleteTask = viewModel::completeTask,
                                     onChangeTaskStatus = viewModel::changeTaskStatus,
                                     onDeleteTask = viewModel::deleteTask,
+                                    onDuplicateTask = { taskId ->
+                                        viewModel.execute(DomainCommand.DuplicateTask(taskId))
+                                    },
                                     selectedBulkIds = bulkSelection,
                                     onToggleBulkSelection = viewModel::toggleBulkSelection,
                                     onClearBulkSelection = viewModel::clearBulkSelection,
@@ -1262,6 +1265,9 @@ fun OpenTasksApp(
                                         viewModel.execute(
                                             DomainCommand.ChangeTaskStatus(taskId, statusId),
                                         )
+                                    },
+                                    onDuplicateTask = { taskId ->
+                                        viewModel.execute(DomainCommand.DuplicateTask(taskId))
                                     },
                                     onSelectProject = viewModel::selectProject,
                                     onCloseDetail = viewModel::closeProject,

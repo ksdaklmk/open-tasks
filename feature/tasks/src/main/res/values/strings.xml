@@ -12,6 +12,7 @@
 
     <string name="task_editing_state_description">Editing %1$s</string>
     <string name="task_add_to_calendar">Add to calendar</string>
+    <string name="task_duplicate">Duplicate task</string>
 
     <string name="tasks_sort_control">Sort tasks: %1$s</string>
     <string name="tasks_group_control">Group tasks: %1$s</string>
