@@ -581,10 +581,15 @@ fun OpenTasksApp(
          * then expanded search -- and falls through to nothing when none of
          * those are open. Never calls `activity.finish()`.
          */
+        fun closeQuickAdd() {
+            showQuickAdd = false
+            quickAddSheetTitle = ""
+        }
+
         fun dismissTopShortcutSurface() {
             when {
                 showShortcutHelp -> showShortcutHelp = false
-                showQuickAdd -> showQuickAdd = false
+                showQuickAdd -> closeQuickAdd()
                 showNewProject -> showNewProject = false
                 showSearch -> {
                     showSearch = false
@@ -1626,14 +1631,10 @@ fun OpenTasksApp(
             // Neither source alone covers both mounts, hence the `?:`.
             key(quickAddSignal) {
                 QuickAddSheet(
-                    onDismiss = {
-                        showQuickAdd = false
-                        quickAddSheetTitle = ""
-                    },
+                    onDismiss = ::closeQuickAdd,
                     onAdd = { command ->
                         viewModel.execute(command)
-                        showQuickAdd = false
-                        quickAddSheetTitle = ""
+                        closeQuickAdd()
                     },
                     initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
                     projects = snapshot.projects.filter { it.archivedAt == null },

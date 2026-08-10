@@ -1,10 +1,13 @@
 package app.opentasks
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -340,6 +343,38 @@ class QuickAddSheetInstrumentedTest {
         composeRule.onNodeWithTag(suggestionTag(match)).assertDoesNotExist()
         composeRule.onNodeWithTag("quick-add-title")
             .assertTextContains(text, substring = true)
+    }
+
+    @Test
+    fun longSuggestionKeepsTheDismissTargetAtFortyEightDp() {
+        val longProject = OpenTasksFixtures.studioProject.copy(
+            name = "An intentionally very long project suggestion that must not steal dismiss width",
+        )
+        val text = "Task #an"
+        val match = parseQuickAdd(text, now, zone, listOf(longProject), tags).single()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f),
+            ) {
+                Box(Modifier.width(280.dp)) {
+                    OpenTasksTheme {
+                        QuickAddSheet(
+                            onDismiss = {},
+                            onAdd = {},
+                            projects = listOf(longProject),
+                            tags = tags,
+                            clock = clock,
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+        composeRule.onNodeWithTag(dismissTag(match), useUnmergedTree = true)
+            .assertWidthIsAtLeast(48.dp)
+            .assertHeightIsAtLeast(48.dp)
     }
 
     @Test

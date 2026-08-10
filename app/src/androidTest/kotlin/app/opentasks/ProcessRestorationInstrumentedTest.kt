@@ -218,6 +218,19 @@ class ProcessRestorationInstrumentedTest {
         assertEquals(false, observed.get().dueIsExplicit)
 
         restorationTester.emulateSavedInstanceStateRestore()
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Weekday",
+                due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.MONDAY),
+                ),
+            ),
+            observed.get().toCommand(),
+        )
+        assertEquals(false, observed.get().dueIsExplicit)
+
         composeRule.onNodeWithTag("restored-weekday-title")
             .performTextReplacement("Weekday every tuesday")
         composeRule.onNodeWithTag("restored-weekday-confirm").performClick()

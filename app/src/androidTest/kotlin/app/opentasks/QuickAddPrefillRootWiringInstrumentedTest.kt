@@ -12,6 +12,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -21,7 +26,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.text.AnnotatedString
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
@@ -284,6 +291,44 @@ class QuickAddPrefillRootWiringInstrumentedTest {
             SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")),
         )
     }
+
+    @Test
+    fun escapeAfterPrefillDoesNotResurrectTheConsumedTitleOnReopen() {
+        composeRule.setContent {
+            var signal by remember { mutableIntStateOf(0) }
+            var prefillText by remember { mutableStateOf<String?>(null) }
+            OpenTasksTheme {
+                Column {
+                    Button(
+                        onClick = {
+                            prefillText = "Escape me"
+                            signal++
+                        },
+                    ) { Text("Open Escape prefill") }
+                    QuickAddPrefillReplica(
+                        quickAddSignal = signal,
+                        quickAddPrefillText = prefillText,
+                        onQuickAddConsumed = { prefillText = null },
+                        onAdd = {},
+                        projects = emptyList(),
+                        tags = emptyList(),
+                        clock = clock,
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Open Escape prefill").performClick()
+        composeRule.onNodeWithTag("quick-add-title")
+            .assertTextContains("Escape me", substring = true)
+            .performKeyInput { pressKey(Key.Escape) }
+        composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("quick-add-reopen").performClick()
+        composeRule.onNodeWithTag("quick-add-title").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")),
+        )
+    }
 }
 
 /**
@@ -315,7 +360,26 @@ private fun QuickAddPrefillReplica(
             onQuickAddConsumed()
         }
     }
-    Column {
+    fun closeQuickAdd() {
+        showQuickAdd = false
+        quickAddSheetTitle = ""
+    }
+    Column(
+        modifier = Modifier
+            .testTag("quick-add-prefill-root")
+            .onKeyEvent { event ->
+                if (
+                    event.type == KeyEventType.KeyDown &&
+                    event.key == Key.Escape &&
+                    showQuickAdd
+                ) {
+                    closeQuickAdd()
+                    true
+                } else {
+                    false
+                }
+            },
+    ) {
         Button(
             onClick = { showQuickAdd = true },
             modifier = Modifier.testTag("quick-add-reopen"),
@@ -323,14 +387,10 @@ private fun QuickAddPrefillReplica(
         if (showQuickAdd) {
             key(quickAddSignal) {
                 QuickAddSheet(
-                    onDismiss = {
-                        showQuickAdd = false
-                        quickAddSheetTitle = ""
-                    },
+                    onDismiss = ::closeQuickAdd,
                     onAdd = { command ->
                         onAdd(command)
-                        showQuickAdd = false
-                        quickAddSheetTitle = ""
+                        closeQuickAdd()
                     },
                     initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
                     projects = projects,

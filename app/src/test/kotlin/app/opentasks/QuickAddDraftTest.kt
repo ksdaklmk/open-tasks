@@ -246,6 +246,8 @@ class QuickAddDraftTest {
                     "frequency", "INVALID",
                     "interval", 0,
                     "weekdays", arrayListOf("FUNDAY"),
+                    "dueEpoch", 1_234L,
+                    "dueZone", "Not/AZone",
                     "dueExplicit", true,
                 ),
             ),
@@ -254,6 +256,8 @@ class QuickAddDraftTest {
         assertNull(restored.recurrenceFrequency)
         assertEquals(1, restored.recurrenceInterval)
         assertTrue(restored.recurrenceWeekdays.isEmpty())
+        assertNull(restored.dueEpochMillis)
+        assertNull(restored.dueZoneId)
         assertFalse(restored.dueIsExplicit)
         assertEquals(DomainCommand.CreateTask("Malformed"), restored.toCommand())
     }

@@ -215,15 +215,15 @@ internal val QuickAddDraftSaver = mapSaver(
             ?.takeIf { raw -> RecurrenceFrequency.entries.any { it.name == raw } }
         val dueEpoch = saved["dueEpoch"] as? Long
         val dueZone = saved["dueZone"] as? String
+        val dueIsValid = dueEpoch != null &&
+            dueZone?.let { runCatching { ZoneId.of(it) }.isSuccess } == true
         QuickAddDraft(
             title = saved["title"] as? String ?: "",
             projectId = saved["project"] as? String,
             priority = priority,
-            dueEpochMillis = dueEpoch,
-            dueZoneId = dueZone,
-            dueIsExplicit = (saved["dueExplicit"] as? Boolean) == true &&
-                dueEpoch != null &&
-                dueZone?.let { runCatching { ZoneId.of(it) }.isSuccess } == true,
+            dueEpochMillis = dueEpoch.takeIf { dueIsValid },
+            dueZoneId = dueZone.takeIf { dueIsValid },
+            dueIsExplicit = (saved["dueExplicit"] as? Boolean) == true && dueIsValid,
             tagNames = (saved["tags"] as? ArrayList<*>)
                 ?.filterIsInstance<String>().orEmpty(),
             estimateSeconds = saved["estimate"] as? Long,
@@ -337,6 +337,7 @@ fun QuickAddSheet(
                         onClick = { draft = draft.confirm(match, matches) },
                         label = { Text(suggestionLabel(match, draft.title)) },
                         modifier = Modifier
+                            .weight(1f, fill = false)
                             .height(48.dp)
                             .testTag(suggestionTag(match)),
                     )
