@@ -100,6 +100,7 @@ import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.ChecklistItem
+import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Note
@@ -185,6 +186,7 @@ private enum class RecurrenceEndMode(val label: String) {
 @Composable
 fun TasksScreen(
     tasks: List<Task>,
+    dueBucketsByTaskId: Map<TaskId, DueBucket> = emptyMap(),
     reminders: List<Reminder> = emptyList(),
     projectNames: Map<ProjectId, String>,
     workflowStatuses: List<WorkflowStatus>,
@@ -250,9 +252,18 @@ fun TasksScreen(
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTasks = when (filter) {
         TaskFilter.INBOX -> tasks.filter { it.projectId == null && it.deletedAt == null }
-        TaskFilter.TODAY -> tasks.filter { it.due != null && !it.isCompleted && it.deletedAt == null }
-        TaskFilter.UPCOMING -> tasks.filter { it.start != null && !it.isCompleted && it.deletedAt == null }
-        TaskFilter.OVERDUE -> tasks.filter { it.priority >= app.opentasks.core.model.Priority.HIGH && !it.isCompleted }
+        TaskFilter.TODAY -> tasks.filter {
+            !it.isCompleted && it.deletedAt == null &&
+                dueBucketsByTaskId[it.id] == DueBucket.TODAY
+        }
+        TaskFilter.UPCOMING -> tasks.filter {
+            !it.isCompleted && it.deletedAt == null &&
+                dueBucketsByTaskId[it.id] in setOf(DueBucket.THIS_WEEK, DueBucket.LATER)
+        }
+        TaskFilter.OVERDUE -> tasks.filter {
+            !it.isCompleted && it.deletedAt == null &&
+                dueBucketsByTaskId[it.id] == DueBucket.OVERDUE
+        }
         TaskFilter.ALL -> tasks.filter { it.deletedAt == null }
     }
     val selectedTask = tasks.firstOrNull { it.id == selectedTaskId }

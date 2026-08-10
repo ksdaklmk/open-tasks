@@ -114,6 +114,7 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.domain.buildReviewQueue
+import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
@@ -152,6 +153,7 @@ import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
 import java.time.Duration
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
@@ -250,6 +252,7 @@ fun OpenTasksApp(
     encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
     attachmentViewModel: AttachmentIntakeViewModel = viewModel(),
     vaultTransferViewModel: VaultTransferViewModel = viewModel(),
+    clock: Clock = Clock.systemDefaultZone(),
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -480,6 +483,9 @@ fun OpenTasksApp(
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
         val selectedProjectId = selectedProjectValue?.let(::ProjectId)
         val projectNames = snapshot.projects.associate { it.id to it.name }
+        val dueBucketsByTaskId = remember(snapshot.tasks, clock) {
+            snapshot.tasks.associate { task -> task.id to classifyDueBucket(task.due, clock) }
+        }
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
         // case is keyed on a null project name, and `projectNames` has no Inbox entry.
@@ -945,6 +951,7 @@ fun OpenTasksApp(
                             entry<TasksRoute> {
                                 TasksScreen(
                                     tasks = snapshot.tasks,
+                                    dueBucketsByTaskId = dueBucketsByTaskId,
                                     reminders = snapshot.reminders,
                                     projectNames = projectNames,
                                     activeProjectIds = snapshot.projects
