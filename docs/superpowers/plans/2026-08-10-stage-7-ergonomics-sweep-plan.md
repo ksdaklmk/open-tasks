@@ -3892,41 +3892,86 @@ Create `QuickAddDraftTest.kt` with exact primitive-state expectations:
 
 ```kotlin
 class QuickAddDraftTest {
-    private val due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "UTC")
+    private val zone = ZoneId.of("Asia/Bangkok")
+    private val now = Instant.parse("2026-08-10T03:00:00Z")
+    private val projects = listOf(OpenTasksFixtures.studioProject)
+    private val tags = OpenTasksFixtures.tags
 
-    @Test fun confirmationsAreExplicitAndClearsRespectRecurrenceCoupling() {
-        val original = "Plan #studio @Focus !1 every monday ~45m tomorrow"
+    private fun match(text: String, kind: QuickAddTokenKind) =
+        parseQuickAdd(text, now, zone, projects, tags).single { it.kind == kind }
+
+    private fun QuickAddDraft.confirmCurrent(kind: QuickAddTokenKind) =
+        confirm(match(title, kind))
+
+    @Test fun rightToLeftConfirmationProducesTheExactGrammarFreeCommand() {
+        val original = "Plan #stu @Admin !1 every monday ~45m tomorrow"
+        val expectedDue = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id)
         var draft = QuickAddDraft(title = original)
-        val project = QuickAddTokenMatch(
-            5, 12,
-            QuickAddTokenValue.ProjectValue(ProjectId("project-studio"), "Studio"),
-        )
-        val tag = QuickAddTokenMatch(
-            13, 19,
-            QuickAddTokenValue.TagValue("Focus", TagId("tag-focus")),
-        )
-        val recurrence = QuickAddTokenMatch(
-            23, 35,
-            QuickAddTokenValue.RecurrenceValue(
-                RecurrenceRule(RecurrenceFrequency.WEEKLY, weekdays = setOf(DayOfWeek.MONDAY)),
-                due,
-            ),
-        )
 
         assertEquals(DomainCommand.CreateTask(original), draft.toCommand())
-        // Confirm right-to-left so stripping never invalidates a remaining span.
-        // Recurrence goes first while its explicit date token is still present.
-        draft = draft.confirm(recurrence).confirm(tag).confirm(project)
-        assertEquals(ProjectId("project-studio"), draft.toCommand().projectId)
-        assertEquals(listOf("Focus"), draft.toCommand().tagNames)
-        assertEquals(due, draft.toCommand().due)
-        assertNotNull(draft.toCommand().recurrence)
+        // Recurrence is confirmed while its explicit date token is still present;
+        // every later match is obtained from the current, stripped title.
+        draft = draft.confirmCurrent(QuickAddTokenKind.RECURRENCE)
+        draft = draft.confirmCurrent(QuickAddTokenKind.DATE)
+        draft = draft.confirmCurrent(QuickAddTokenKind.ESTIMATE)
+        draft = draft.confirmCurrent(QuickAddTokenKind.PRIORITY)
+        draft = draft.confirmCurrent(QuickAddTokenKind.TAG)
+        draft = draft.confirmCurrent(QuickAddTokenKind.PROJECT)
 
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Plan",
+                projectId = OpenTasksFixtures.studioProject.id,
+                priority = Priority.URGENT,
+                due = expectedDue,
+                tagNames = listOf("Admin"),
+                estimate = Duration.ofMinutes(45),
+                recurrence = RecurrenceRule(
+                    frequency = RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.MONDAY),
+                ),
+            ),
+            draft.toCommand(),
+        )
         assertNull(draft.clear(QuickAddTokenKind.DATE).toCommand().recurrence)
-        assertEquals(due, draft.clear(QuickAddTokenKind.RECURRENCE).toCommand().due)
-        val dismissed = QuickAddDraft(original).dismiss(project)
-        assertTrue(dismissed.dismissedTokenKeys.contains(project.tokenKey(original)))
-        assertTrue(dismissed.editTitle(original + " now").dismissedTokenKeys.isEmpty())
+        assertEquals(expectedDue, draft.clear(QuickAddTokenKind.RECURRENCE).toCommand().due)
+    }
+
+    @Test fun recurrenceConfirmedAfterDateKeepsTheExplicitAppliedDue() {
+        var draft = QuickAddDraft("Plan tomorrow every monday")
+        draft = draft.confirmCurrent(QuickAddTokenKind.DATE)
+        val explicitDue = draft.toCommand().due
+        val reparsedRecurrence = match(draft.title, QuickAddTokenKind.RECURRENCE)
+        val implicitDue = (reparsedRecurrence.value as QuickAddTokenValue.RecurrenceValue).due
+        assertEquals(ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id), explicitDue)
+        assertNotEquals(explicitDue, implicitDue)
+
+        draft = draft.confirm(reparsedRecurrence)
+
+        assertEquals("Plan", draft.toCommand().title)
+        assertEquals(explicitDue, draft.toCommand().due)
+        assertEquals(
+            RecurrenceRule(
+                frequency = RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.MONDAY),
+            ),
+            draft.toCommand().recurrence,
+        )
+    }
+
+    @Test fun dismissedTokenSurvivesEarlierConfirmationAndReparse() {
+        val original = "Plan #stu @Admin"
+        val project = match(original, QuickAddTokenKind.PROJECT)
+        val tag = match(original, QuickAddTokenKind.TAG)
+        var draft = QuickAddDraft(original).dismiss(tag)
+        assertEquals(setOf("tag:@admin"), draft.dismissedTokenKeys)
+
+        draft = draft.confirm(project)
+        val reparsedTag = match(draft.title, QuickAddTokenKind.TAG)
+
+        assertEquals("Plan @Admin", draft.title)
+        assertTrue(reparsedTag.tokenKey(draft.title) in draft.dismissedTokenKeys)
+        assertTrue(draft.editTitle(draft.title + " now").dismissedTokenKeys.isEmpty())
     }
 
     @Test fun tagsAccumulateCaseInsensitivelyAndSingleValuesReplace() {
@@ -3938,6 +3983,25 @@ class QuickAddDraftTest {
         assertEquals(listOf("Focus"), first.toCommand().tagNames)
         assertEquals(Priority.URGENT, first.toCommand().priority)
     }
+
+    @Test fun malformedSaverValuesRestoreFailClosed() {
+        val restored = requireNotNull(
+            QuickAddDraftSaver.restore(
+                mapOf(
+                    "title" to "Malformed",
+                    "priority" to "INVALID",
+                    "frequency" to "INVALID",
+                    "interval" to 0,
+                    "weekdays" to arrayListOf("FUNDAY"),
+                ),
+            ),
+        )
+        assertEquals(Priority.NONE.name, restored.priority)
+        assertNull(restored.recurrenceFrequency)
+        assertEquals(1, restored.recurrenceInterval)
+        assertTrue(restored.recurrenceWeekdays.isEmpty())
+        assertEquals(DomainCommand.CreateTask("Malformed"), restored.toCommand())
+    }
 }
 ```
 
@@ -3948,7 +4012,8 @@ class QuickAddDraftTest {
   --tests "app.opentasks.QuickAddDraftTest"
 ```
 
-Expected: compilation fails because `QuickAddDraft` does not exist.
+Expected: compilation fails because `QuickAddDraft` and its Saver seam do not
+exist.
 
 - [ ] **Step 3: Write the Compose contract RED cases**
 
@@ -3956,8 +4021,8 @@ Use these exact test-tag functions in production and tests:
 
 ```kotlin
 internal fun QuickAddTokenMatch.tokenKey(text: String): String =
-    "${kind.name.lowercase(Locale.ROOT)}:$startIndex:$endIndex:" +
-        text.substring(startIndex, endIndex).lowercase(Locale.ROOT)
+    "${kind.name.lowercase(Locale.ROOT)}:" +
+        SearchNormalizer.normalize(text.substring(startIndex, endIndex))
 internal fun suggestionTag(match: QuickAddTokenMatch) =
     "quick-add-suggestion-${match.kind.name.lowercase(Locale.ROOT)}-" +
         "${match.startIndex}-${match.endIndex}"
@@ -4001,13 +4066,92 @@ Add this confirm-only case to `QuickAddSheetInstrumentedTest`:
 Add a second case that obtains matches with `parseQuickAdd`, confirms
 RECURRENCE first while its explicit DATE token remains, then reparses after
 each tap and confirms the remaining current matches from right to left. Submit
-and assert project Studio, tag Admin, Urgent, a 45-minute estimate, and the
-explicit parsed due. Add individual
-cases for replacement, dismiss/edit revival, unknown-tag copy, clear coupling,
-and the four numeric priority labels. Use `StateRestorationTester` to apply and
-restore all eight primitive fields plus dismissed token keys. Root/prefill and
-shortcut tests capture the emitted command and assert prefilled text uses the
-same parser.
+and assert the exact command from Step 1: title `Plan`, project ID
+`OpenTasksFixtures.studioProject.id` (the fixture name is `Studio refresh`, so
+never assert the assumed literal `Studio`), tag `Admin`, `Priority.URGENT`, due
+`ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "Asia/Bangkok")`, estimate
+45 minutes, and exactly `RecurrenceRule(RecurrenceFrequency.WEEKLY,
+weekdays = setOf(DayOfWeek.MONDAY))`.
+
+Make every UI contract observable with individual cases:
+
+- Confirming a project or priority replaces the previously applied value;
+  confirming tags accumulates them case-insensitively.
+- Dismiss `@Admin`, assert its positional suggestion tag no longer exists,
+  edit the title to append ` now`, then assert the current reparsed suggestion
+  tag exists again. Also dismiss `@Admin`, confirm the earlier `#stu`, and
+  assert the reparsed `@Admin` suggestion stays absent.
+- Parse `@Roadmap` with no matching tag and assert the chip text is exactly
+  `New tag: Roadmap`; parse fixture tag `@Admin` and assert `Tag: Admin`.
+- For `!1`, `!2`, `!3`, and `!4`, assert visible chip labels exactly
+  `Priority: Urgent`, `Priority: High`, `Priority: Medium`, and
+  `Priority: Low`.
+- Clear DATE and assert both due and recurrence disappear on submission;
+  clear RECURRENCE and assert the explicit due remains.
+
+Use `StateRestorationTester` in `ProcessRestorationInstrumentedTest` for these
+separate restoration witnesses; each submits after restore and compares the
+captured `DomainCommand.CreateTask` rather than only checking chip presence:
+all three inject `Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"),
+ZoneId.of("Asia/Bangkok"))`, `listOf(OpenTasksFixtures.studioProject)`, and
+`OpenTasksFixtures.tags`.
+
+1. Confirm `#stu`, `@Admin`, `!2`, `tomorrow`, `~45m`, and `every 2 weeks`
+   from `Restore #stu @Admin !2 tomorrow ~45m every 2 weeks`, restore, and
+   assert title `Restore`, project `OpenTasksFixtures.studioProject.id`,
+   `Priority.HIGH`, due instant `2026-08-11T10:00:00Z` with zone ID
+   `Asia/Bangkok`, tags `listOf("Admin")`, estimate 45 minutes, and recurrence
+   `RecurrenceRule(RecurrenceFrequency.WEEKLY, interval = 2)`. This witnesses
+   Saver keys `title`, `project`, `priority`, `dueEpoch`, `dueZone`, `tags`,
+   `estimate`, `frequency`, and the non-default `interval`.
+2. Confirm `every monday` from `Weekday every monday`, restore, submit, and
+   assert title `Weekday` plus exactly
+   `RecurrenceRule(RecurrenceFrequency.WEEKLY,
+   weekdays = setOf(DayOfWeek.MONDAY))`. This separately witnesses the
+   `weekdays` key without conflating a weekday rule with the interval case.
+3. Dismiss `@Admin`, restore, and assert its suggestion is still absent. This
+   witnesses the `dismissed` key as suppression behavior, not merely a saved
+   collection value.
+
+In `QuickAddPrefillRootWiringInstrumentedTest`, extend
+`QuickAddPrefillReplica` to accept `onAdd: (DomainCommand.CreateTask) -> Unit`,
+`projects`, `tags`, and `clock`. Pass the parser inputs unchanged to
+`QuickAddSheet`, but retain the replica's live post-submit behavior exactly:
+
+```kotlin
+onAdd = { command ->
+    onAdd(command)
+    showQuickAdd = false
+    quickAddSheetTitle = ""
+}
+```
+
+Add a prefill `Root #stu @Admin !2 every monday tomorrow ~45m`, using
+`Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"),
+ZoneId.of("Asia/Bangkok"))`, `listOf(OpenTasksFixtures.studioProject)`, and
+`OpenTasksFixtures.tags`. Confirm every current match right-to-left, tap Add,
+and assert the captured command has title `Root`, the fixture project ID, tag
+`Admin`, `Priority.HIGH`, due
+`ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "Asia/Bangkok")`, estimate
+45 minutes, and recurrence exactly
+`RecurrenceRule(RecurrenceFrequency.WEEKLY,
+weekdays = setOf(DayOfWeek.MONDAY))`. Then assert the sheet is absent; reopen
+through a replica FAB button whose handler only sets `showQuickAdd = true`
+(it does not change the signal or prefill), and assert `quick-add-title` is
+empty. The absence proves `showQuickAdd` was cleared; the FAB remount's null
+prefill fallback proves `quickAddSheetTitle` was reset after the callback.
+
+In `ShortcutRootWiringInstrumentedTest`, add the corresponding `Ctrl+N` host
+case. The shortcut handler opens the real `QuickAddSheet`; inject the same
+fixed clock/projects/tags, enter and confirm
+`Shortcut #stu @Admin !2 every monday tomorrow ~45m`, capture its emitted
+`DomainCommand.CreateTask`, submit, and assert title `Shortcut` plus every
+parser-applied field: project `OpenTasksFixtures.studioProject.id`, tag
+`Admin`, `Priority.HIGH`, due
+`ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "Asia/Bangkok")`, estimate
+45 minutes, and exactly `RecurrenceRule(RecurrenceFrequency.WEEKLY,
+weekdays = setOf(DayOfWeek.MONDAY))`. Do not leave either replica's `onAdd` or
+parser inputs as discard lambdas/defaults.
 
 - [ ] **Step 4: Compile the RED instrumentation sources**
 
@@ -4059,8 +4203,10 @@ internal data class QuickAddDraft(
             )
             is QuickAddTokenValue.RecurrenceValue -> copy(
                 title = stripped,
-                dueEpochMillis = value.due.instant.toEpochMilli(),
-                dueZoneId = value.due.zoneId,
+                // A confirmed DATE is explicit user state and wins over a
+                // recurrence match reparsed later with an implicit anchor.
+                dueEpochMillis = dueEpochMillis ?: value.due.instant.toEpochMilli(),
+                dueZoneId = dueZoneId ?: value.due.zoneId,
                 recurrenceFrequency = value.rule.frequency.name,
                 recurrenceInterval = value.rule.interval,
                 recurrenceWeekdays = value.rule.weekdays.map(DayOfWeek::name).sorted(),
@@ -4111,7 +4257,7 @@ internal data class QuickAddDraft(
 Save only those primitive values and restore enums fail-closed:
 
 ```kotlin
-private val QuickAddDraftSaver = mapSaver(
+internal val QuickAddDraftSaver = mapSaver(
     save = { draft ->
         mapOf(
             "title" to draft.title,
@@ -4143,7 +4289,8 @@ private val QuickAddDraftSaver = mapSaver(
                 ?.filterIsInstance<String>().orEmpty(),
             estimateSeconds = saved["estimate"] as? Long,
             recurrenceFrequency = frequency,
-            recurrenceInterval = (saved["interval"] as? Int)?.coerceIn(1, 999) ?: 1,
+            recurrenceInterval = (saved["interval"] as? Int)
+                ?.takeIf { it in 1..999 } ?: 1,
             recurrenceWeekdays = (saved["weekdays"] as? ArrayList<*>)
                 ?.filterIsInstance<String>()
                 ?.filter { raw -> DayOfWeek.entries.any { it.name == raw } }
@@ -4154,6 +4301,13 @@ private val QuickAddDraftSaver = mapSaver(
     },
 )
 ```
+
+The package-internal `QuickAddDraftSaver` value is the entire host-test seam;
+do not add a wrapper, mapper, or production restore API. The stable dismissal
+identity is only kind plus `SearchNormalizer`-normalised claimed token text as
+shown in Step 3. Positional indices remain only in Compose test tags. Two
+identical suggestions may intentionally share a dismissal key because they are
+semantically redundant.
 
 - [ ] **Step 6: Parse once per stable clock and render exact controls**
 
@@ -4168,6 +4322,24 @@ keys: `quick_add_project_suggestion`, `quick_add_existing_tag_suggestion`,
 `quick_add_recurrence_suggestion`, `quick_add_estimate_suggestion`,
 `quick_add_dismiss_suggestion`, and `quick_add_clear_applied`.
 
+Use these exact values so the RED UI assertions in Step 3 pin user-visible
+copy rather than merely finding a node by tag:
+
+```xml
+<string name="quick_add_project_suggestion">Project: %1$s</string>
+<string name="quick_add_existing_tag_suggestion">Tag: %1$s</string>
+<string name="quick_add_new_tag_suggestion">New tag: %1$s</string>
+<string name="quick_add_priority_suggestion">Priority: %1$s</string>
+<string name="quick_add_recurrence_suggestion">Repeat: %1$s</string>
+<string name="quick_add_estimate_suggestion">Estimate: %1$s</string>
+<string name="quick_add_dismiss_suggestion">Dismiss %1$s suggestion</string>
+<string name="quick_add_clear_applied">Clear %1$s</string>
+```
+
+Priority display names are exactly `Urgent`, `High`, `Medium`, and `Low` for
+`!1`, `!2`, `!3`, and `!4`. Existing and new tag suggestions select their
+resource by whether `TagValue.existingTagId` is non-null.
+
 `submit()` calls `onAdd(draft.toCommand())` only when the trimmed title is in
 `1..240`. Detection never calls `confirm`; only a suggestion tap does.
 
@@ -4177,11 +4349,21 @@ Pass active snapshot projects, snapshot tags, and the root clock from
 `OpenTasksApp`; execute the emitted command directly through the ViewModel's
 existing `execute`:
 
+Use the live root names `showQuickAdd`, `quickAddSheetTitle`, and
+`quickAddPrefillText`:
+
 ```kotlin
 QuickAddSheet(
-    onDismiss = { quickAddVisible = false },
-    onAdd = { command -> viewModel.execute(command) },
-    initialTitle = quickAddPrefill,
+    onDismiss = {
+        showQuickAdd = false
+        quickAddSheetTitle = ""
+    },
+    onAdd = { command ->
+        viewModel.execute(command)
+        showQuickAdd = false
+        quickAddSheetTitle = ""
+    },
+    initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
     projects = snapshot.projects.filter { it.archivedAt == null },
     tags = snapshot.tags,
     clock = clock,
