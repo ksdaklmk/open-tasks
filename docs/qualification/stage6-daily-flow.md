@@ -127,6 +127,15 @@ Release inspection passed:
 - The normal and round launcher entries resolve to the approved adaptive
   Ember resources, with a distinct monochrome layer.
 
+### Post-push remote CI: blocked before runner
+
+Commit `0d61c53` was pushed to `origin/main` and triggered Android run
+[`31344561176`](https://github.com/ksdaklmk/open-tasks/actions/runs/31344561176).
+Verify, compact API 36, and expanded API 37.0 each received no runner and
+executed zero steps. GitHub annotated all three with the same account
+payments/spending-limit error; release was skipped. The run supplies no code or
+test result and does not supersede the successful local qualification gates.
+
 ## Step 3 — privacy and boundary scans
 
 The complete `fc4aad8..c5c5e11` range added zero `Log.`, `println`, or
@@ -187,6 +196,9 @@ own-schema, create-only, and undoable.
 The documented deterministic substitutions are evidence-source limitations,
 not hidden manual claims. Standing project residuals remain:
 
+- GitHub Actions is blocked before runner assignment by an account
+  billing/spending-limit error; rerun the push workflow after that external
+  account state is repaired;
 - the expanded API 37.0 F6 canary lane is observe-only;
 - a real headless `MainActivity` Ctrl+K Dialog focus transition is not a CI
   claim, although deterministic root wiring and query focus now pass without a

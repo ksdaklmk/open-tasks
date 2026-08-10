@@ -1,14 +1,15 @@
 # Open Tasks Handoff
 
 - Last updated: 10 August 2026
-- Branch: `main` at `6b55f87` plus this closure docs commit. Local is
-  ahead of `origin/main` (`8c08570`) by 47 commits after this commit, not
-  yet pushed (matching the established Stage 6 practice; a push triggers
-  a CI run).
+- Branch: `main` with the Stage 7–9 roadmap spec committed at `a80a9d6`;
+  this docs-only status update commits on top and both are pushed. After
+  that commit the working tree holds only the pre-existing user-owned
+  Stage 3 plan edit, `.kotlin/`, and `artifacts/`.
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
   completed run at `c74a435` confirmed the expected post-F6 shape —
   `verify`, compact API 36, and `release` green, only expanded API 37.0
-  red. No open PRs or issues.
+  red. There are no open issues. Six Dependabot PRs (#14–#19) are open; all
+  await a usable CI runner.
 - **Stage 6 is complete and qualified.** Tasks 1–14, the whole-stage
   review, its six-finding consolidated fix wave, the focus-aware manual-Stop
   amendment, the connected-gate fix, all repository/release/privacy gates,
@@ -20,16 +21,37 @@
   ignored execution ledger remains
   `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
 - Remaining and planned work, in order (the live backlog):
-  1. **F6 observe-only** (ruling, 7 August 2026): the expanded API
+  1. **Restore GitHub Actions execution.** Push run
+     [`31344561176`](https://github.com/ksdaklmk/open-tasks/actions/runs/31344561176)
+     assigned no runner and executed zero steps for verify, compact API 36,
+     and expanded API 37.0. GitHub annotated each job: recent account payments
+     failed or the spending limit must be increased. Release was skipped.
+     Resolve Billing & plans, then rerun; this is infrastructure failure with
+     no product or test signal. Later docs-only pushes repeat the same
+     zero-runner failure until billing is restored.
+  2. **Dependabot queue.** PRs #14–#19 cover SQLite, setup-java, Gradle,
+     SQLCipher, KSP, and coroutines updates. Review them only after Actions can
+     execute; reruns cannot provide a fresh signal while the billing block
+     remains.
+  3. **Tasks date-chip defect.** `TasksScreen.kt:255`: the Overdue chip
+     filters by `priority >= HIGH`, Today matches any task with a due
+     date, and Upcoming matches any task with a start date, so the Tasks
+     tab has no genuine overdue view (widget, Home, Insights, and Weekly
+     review compute overdue correctly). Fix is pure view-code date
+     predicates — a shared date-bucket rule in `core:domain` — plus unit
+     tests; no command, schema, or backup change. Found by the 10 August
+     competitive audit; it is also the opening move of the paused Stage
+     7–9 roadmap checkpoint below.
+  4. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
      it self-restores. Green signal = API 36 + verify + release. No
      action, just observe on natural runs.
-  2. **Ctrl+K production-window blind spot** — parked: the deterministic
+  5. **Ctrl+K production-window blind spot** — parked: the deterministic
      Compose root wiring now passes without a skip, but CI still cannot prove
      that a real headless `MainActivity` Dialog window receives OS focus.
      Revisit only if the runner or assertion strategy changes.
-  3. **Play Console** — externally pending and out of scope by the
+  6. **Play Console** — externally pending and out of scope by the
      sideload-only ruling; revisit only if that distribution ruling changes.
   Future releases follow `RELEASING.md`'s per-release loop (bump
   `versionCode` by exactly 1, gate, build, verify, smoke on the
@@ -220,6 +242,108 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 7–9 roadmap — spec written, awaiting user review — 10 August 2026
+
+A competitive feature analysis (Asana, Jira, monday.com, ClickUp, Todoist,
+Notion) produced a published reference report
+(https://claude.ai/code/artifact/e7363086-75c8-45bd-8b91-bc3809ff1a9e) and a
+code-level feature inventory. Verdict: solo-use parity is largely won; the
+credible gaps are list ergonomics, capture grammar, and view surfaces. The
+audit also found the Tasks date-chip defect recorded as backlog item 3. No
+product code was changed in this session.
+
+A superpowers:brainstorming session then covered the report's Tier 1 and
+Tier 2 recommendations plus three reconsidered non-goals (custom fields,
+automation rules, Gantt). Recorded rulings:
+
+- The user works mainly in project boards and Schedule/planning and feels
+  near-term pull for Gantt/timeline and automation rules. Custom fields
+  stays parked with a written reopen condition: a concrete field needed
+  repeatedly that priority, tags, estimate, and milestones cannot express.
+- Roadmap shape B, cheap wins first, chosen over pain-first and
+  canvas-first alternatives: Stage 7 is a no-schema ergonomics sweep,
+  Stage 8 planning surfaces, Stage 9 the single Room v10 wave.
+- Standing assumptions accepted: the chip fix ships immediately outside
+  the stages; every durable-schema need batches into one Room v10
+  migration in Stage 9; each stage ends with qualification and a sideload
+  release per RELEASING.md; the Actions billing restore and Dependabot
+  queue precede Stage 7 execution.
+- All new or restyled visualisations use the dot-matrix / dotted-area
+  language (user directive, 10 August): unit dots and dot-run bars in the
+  ember system, with density and shape carrying the signal.
+
+Approved stage contents (design sections 1–4 presented and approved):
+
+- **Stage 7 — ergonomics sweep** (no schema or backup-format change):
+  sort and group controls for the Tasks list, workbench list, and
+  in-column board ordering (manual ordering excluded — it waits for the
+  Stage 9 rank store); saved-view filters v2 (due-range, priority,
+  workflow status, chosen sort; payload codec format v2 with strict
+  fail-closed decode of v1 and v2; bounds 20/64/500 unchanged; the
+  content-based SAVED_VIEW fingerprint already journals richer payloads);
+  Quick Add grammar (#project, @tag, !priority, recurrence phrases onto
+  the existing RecurrenceRule, ~estimate; Locale.ROOT per the Stage 6
+  lesson); search ranking (exact > prefix > word boundary > substring
+  inside the existing 50 cap); System/Light/Dark theme preference
+  (device-local, never vault data or backup content; whether forcing dark
+  promotes it beyond best-effort is a design-time decision); task
+  duplication (copies title, description, priority, estimate, tags,
+  unticked checklist, dependencies; excludes completion, activity, time
+  entries, attachments; recurrence copy is open); Insights dot-matrix
+  restyle (unit dots and dotted-area trends in Compose Canvas, Insights
+  scope only, chart↔table toggle retained).
+- **Stage 8 — planning surfaces** (no durable schema): month calendar
+  view (read-only WorkspaceSnapshot projection, start-else-due placement,
+  dot-density day cells, tap-through, no parallel store); drag-to-
+  reschedule reusing the Stage 6 board-drag infrastructure across week
+  columns, month cells, and the unscheduled tray (default drop time and
+  due-only semantics are design-time decisions); Gantt-lite per-project
+  timeline, read-only in v1 (start–due bars as dot runs, milestone
+  diamonds, blocked markers, tap-to-highlight dependency chain; no arrow
+  routing and no bar drag — edits via existing editors); daily digest
+  notification (opt-in, computeTodayProjection reuse, generic lock-screen
+  copy, boot/time-change re-arm on the reminder scheduler precedent).
+- **Stage 9 — board flow and automation** (the one Room v10 wave): v10
+  adds an automation_rules table with a new backup record family and a My
+  Day ordered store; WIP limits amend the workflow-status payload inside
+  its existing family; one exported schema, one deterministic fixture
+  regeneration, one recovery-import extension. Automations-lite is a
+  fixed rule menu (design trims to ~4 from: auto-archive completed after
+  N days, stale marking, on-enter-status side effects, auto-remove
+  completed from My Day), bounded at ~20 rules, firing at deterministic
+  reconcile points and acting only by dispatching ordinary DomainCommands
+  so journaling, undo, and activity attribution hold. Board WIP limits
+  are soft per-column limits (confirm over limit, never block). My Day is
+  a curated ordered plan (bounded ~200 IDs) on Home; manual rank exists
+  only there. Subtasks UI lights up the dormant parentTaskId end-to-end:
+  SetTaskParent with cycle/depth guards mirroring DependencyRules,
+  CreateTask(parent:), a detail sub-task section, list indentation, and
+  board-card rollups; no migration, full dual-engine command tax.
+
+Resumed later on 10 August 2026: the final design section — the backlog
+pool, parked custom fields, sequencing, risks, and per-stage exit
+criteria — was presented and approved. The roadmap spec is written,
+self-reviewed, and committed at `a80a9d6`:
+`docs/superpowers/specs/2026-08-10-stage-7-9-roadmap-design.md`. Beyond
+the approved stage contents above it pins the backlog pool (recurrence
+skip/pause; SAF-folder second backup target), the custom-fields reopen
+condition, sequencing (chip fix now; billing restore then Dependabot
+before Stage 7; three per-stage releases), risks, uniform and per-stage
+exit criteria, the manual-ordering clarification (Stage 7 ships
+attribute sorts only; the roadmap's only manual rank is My Day's Stage 9
+store), the pinned single-pass automation-rule evaluation, and the open
+design-time decisions left to stage specs (dark-theme promotion,
+duplication-recurrence copy, drag-to-reschedule drop-time and due-only
+semantics, exact rule menu).
+
+**PAUSED by user instruction after the spec commit.** On resume: get the
+user's review of the written spec; on approval, brainstorm the detailed
+Stage 7 design (superpowers:brainstorming) feeding
+superpowers:writing-plans. Backlog item 3 (the chip fix) may be executed
+at any time independent of the roadmap. Nothing from the roadmap has
+been implemented; after this status commit the working tree holds only
+the protected Stage 3 plan amendment, `.kotlin/`, and `artifacts/`.
 
 ## Stage 6 closure — 10 August 2026
 
