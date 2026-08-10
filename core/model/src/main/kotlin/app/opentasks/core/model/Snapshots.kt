@@ -52,6 +52,10 @@ data class SearchQuery(
     val tagIds: Set<TagId> = emptySet(),
     val includeCompleted: Boolean = true,
     val includeTrash: Boolean = false,
+    val dueBuckets: Set<DueBucket> = emptySet(),
+    val priorities: Set<Priority> = emptySet(),
+    val statuses: Set<SemanticStatus> = emptySet(),
+    val sort: TaskSortKey? = null,
 )
 
 sealed interface SearchResult {

@@ -5,9 +5,13 @@ import app.opentasks.core.data.backup.InMemoryBackupJournal
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
+import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.TaskSortKey
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -101,6 +105,24 @@ class InMemorySavedViewCommandTest {
 
             repository.execute(updated.undo!!)
             assertEquals(original, repository.currentWorkspace().savedViews.single().query)
+        }
+    }
+
+    @Test
+    fun v2QueryUpdateUndoRestoresEveryField() = runBlocking {
+        withTimeout(5_000) {
+            val query = SearchQuery(
+                text = "", dueBuckets = setOf(DueBucket.TODAY),
+                priorities = setOf(Priority.URGENT),
+                statuses = setOf(SemanticStatus.STARTED), sort = TaskSortKey.UPDATED,
+            )
+            val id = SavedViewId("saved-view-v2")
+            repository.execute(DomainCommand.CreateSavedView(id, "V2", query))
+            val update = repository.execute(
+                DomainCommand.UpdateSavedViewQuery(id, SearchQuery("replacement")),
+            ) as CommandResult.Success
+            repository.execute(checkNotNull(update.undo))
+            assertEquals(query, repository.currentWorkspace().savedViews.single { it.id == id }.query)
         }
     }
 

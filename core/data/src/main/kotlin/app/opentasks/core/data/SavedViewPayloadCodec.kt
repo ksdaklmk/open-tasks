@@ -1,10 +1,17 @@
 package app.opentasks.core.data
 
+import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TagId
+import app.opentasks.core.model.TaskSortKey
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
@@ -17,7 +24,6 @@ import java.nio.charset.CodingErrorAction
  */
 internal object SavedViewPayloadCodec {
     const val MAX_PAYLOAD_BYTES = 2 * 1024 * 1024
-    private const val FORMAT_VERSION = 1
     private const val MAX_QUERY_TEXT_LENGTH = 500
 
     private val json = Json {
@@ -28,7 +34,7 @@ internal object SavedViewPayloadCodec {
 
     fun encode(query: SearchQuery): ByteArray {
         validate(query)
-        val bytes = json.encodeToString(SavedViewPayload.from(query))
+        val bytes = json.encodeToString(SavedViewPayloadV2.from(query))
             .toByteArray(Charsets.UTF_8)
         require(bytes.size <= MAX_PAYLOAD_BYTES) {
             "Saved view payload exceeds $MAX_PAYLOAD_BYTES bytes"
@@ -45,11 +51,19 @@ internal object SavedViewPayloadCodec {
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(ByteBuffer.wrap(payload))
             .toString()
-        val decoded = json.decodeFromString<SavedViewPayload>(text)
-        require(decoded.formatVersion == FORMAT_VERSION) {
-            "Unsupported saved view format ${decoded.formatVersion}"
-        }
-        return decoded.toModel().also(::validate)
+        return decodeText(text)
+    }
+
+    private fun decodeText(text: String): SearchQuery {
+        val primitive = json.parseToJsonElement(text).jsonObject["formatVersion"]
+            as? JsonPrimitive ?: error("Missing formatVersion")
+        require(!primitive.isString) { "formatVersion must be an integer" }
+        val version = primitive.intOrNull ?: error("formatVersion must be an integer")
+        return when (version) {
+            1 -> json.decodeFromString<SavedViewPayloadV1>(text).toModel()
+            2 -> json.decodeFromString<SavedViewPayloadV2>(text).toModel()
+            else -> error("Unsupported saved view format $version")
+        }.also(::validate)
     }
 
     private fun validate(query: SearchQuery) {
@@ -59,29 +73,57 @@ internal object SavedViewPayloadCodec {
     }
 
     @Serializable
-    private data class SavedViewPayload(
-        val formatVersion: Int = FORMAT_VERSION,
+    private data class SavedViewPayloadV1(
+        val formatVersion: Int,
         val text: String,
         val projectIds: List<String>,
         val tagIds: List<String>,
         val includeCompleted: Boolean,
         val includeTrash: Boolean,
     ) {
-        fun toModel(): SearchQuery = SearchQuery(
+        fun toModel() = SearchQuery(
+            text, projectIds.mapTo(linkedSetOf(), ::ProjectId),
+            tagIds.mapTo(linkedSetOf(), ::TagId), includeCompleted, includeTrash,
+        )
+    }
+
+    @Serializable
+    private data class SavedViewPayloadV2(
+        val formatVersion: Int,
+        val text: String,
+        val projectIds: List<String>,
+        val tagIds: List<String>,
+        val includeCompleted: Boolean,
+        val includeTrash: Boolean,
+        val dueBuckets: List<DueBucket>,
+        val priorities: List<Priority>,
+        val statuses: List<SemanticStatus>,
+        val sort: TaskSortKey?,
+    ) {
+        fun toModel() = SearchQuery(
             text = text,
             projectIds = projectIds.mapTo(linkedSetOf(), ::ProjectId),
             tagIds = tagIds.mapTo(linkedSetOf(), ::TagId),
             includeCompleted = includeCompleted,
             includeTrash = includeTrash,
+            dueBuckets = dueBuckets.toSet(),
+            priorities = priorities.toSet(),
+            statuses = statuses.toSet(),
+            sort = sort,
         )
 
         companion object {
-            fun from(query: SearchQuery): SavedViewPayload = SavedViewPayload(
+            fun from(query: SearchQuery) = SavedViewPayloadV2(
+                formatVersion = 2,
                 text = query.text,
                 projectIds = query.projectIds.map(ProjectId::value).sorted(),
                 tagIds = query.tagIds.map(TagId::value).sorted(),
                 includeCompleted = query.includeCompleted,
                 includeTrash = query.includeTrash,
+                dueBuckets = query.dueBuckets.sortedBy { it.name },
+                priorities = query.priorities.sortedBy { it.name },
+                statuses = query.statuses.sortedBy { it.name },
+                sort = query.sort,
             )
         }
     }

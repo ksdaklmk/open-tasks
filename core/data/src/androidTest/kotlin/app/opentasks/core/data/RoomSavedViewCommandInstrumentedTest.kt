@@ -12,11 +12,15 @@ import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SavedView
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TagId
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.WorkspaceSnapshot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -112,6 +116,32 @@ class RoomSavedViewCommandInstrumentedTest {
             repository!!.execute(deleted.undo as DomainCommand)
             assertEquals(stored, awaitSavedView { it.id == id })
             assertNotNull(database!!.workspaceDao().getSavedView(id.value))
+        }
+    }
+
+    @Test
+    fun v2QuerySurvivesUpdateUndoAndEncryptedRestart() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val query = SearchQuery(
+                text = "", dueBuckets = setOf(DueBucket.TODAY),
+                priorities = setOf(Priority.URGENT),
+                statuses = setOf(SemanticStatus.STARTED), sort = TaskSortKey.UPDATED,
+            )
+            val id = SavedViewId("saved-view-v2")
+            repository!!.execute(DomainCommand.CreateSavedView(id, "V2", query))
+            val update = repository!!.execute(
+                DomainCommand.UpdateSavedViewQuery(id, SearchQuery("replacement")),
+            ) as CommandResult.Success
+            repository!!.execute(checkNotNull(update.undo))
+            repository!!.close()
+            database!!.close()
+            repository = null
+            database = VaultDatabase.create(context, databaseName, databaseKey)
+            repository = RoomVaultRepository(
+                database = database!!,
+                deviceId = DeviceId("saved-view-instrumented-test-device"),
+            )
+            assertEquals(query, awaitSavedView { it.id == id }.query)
         }
     }
 

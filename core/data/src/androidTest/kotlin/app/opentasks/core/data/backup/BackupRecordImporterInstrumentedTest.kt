@@ -10,6 +10,7 @@ import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.LocalVaultRuntimeFactory
+import app.opentasks.core.data.RoomVaultRepository
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
@@ -35,6 +36,7 @@ import app.opentasks.core.data.db.WorkflowStatusEntity
 import app.opentasks.core.data.db.WorkspaceEntity
 import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.VaultId
 import java.time.Duration
@@ -1029,6 +1031,47 @@ class BackupRecordImporterInstrumentedTest {
             assertEquals(listOf("Recovered tag"), workspace.tags.map { it.name })
         } finally {
             runtime.close()
+        }
+    }
+
+    @Test
+    fun recoveryImportsV1V2AndRetainsFutureSavedViewBytes() = runBlocking {
+        withTimeout(TIMEOUT_MILLIS) {
+            val v1Bytes =
+                """{"formatVersion":1,"text":"legacy","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false}""".encodeToByteArray()
+            val v2Json =
+                """{"formatVersion":2,"text":"","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false,"dueBuckets":["TODAY"],"priorities":[],"statuses":[],"sort":null}"""
+            val v2Bytes = v2Json.encodeToByteArray()
+            val v3Bytes = v2Json.replace("\"formatVersion\":2", "\"formatVersion\":3")
+                .encodeToByteArray()
+            val records = completeVaultSnapshot().records
+                .filterNot { it.family == BackupRecordFamily.SAVED_VIEW } +
+                listOf(
+                    SavedViewEntity("view-v1", WORKSPACE_ID, "V1", v1Bytes).toBackupRecordV1(),
+                    SavedViewEntity("view-v2", WORKSPACE_ID, "V2", v2Bytes).toBackupRecordV1(),
+                    SavedViewEntity("view-v3", WORKSPACE_ID, "V3", v3Bytes).toBackupRecordV1(),
+                )
+            importer.importInto(staging(), request(completeVaultSnapshot().copy(records = records)))
+            val room = RoomVaultRepository(staging(), DeviceId("recovery-codec-test"))
+            try {
+                assertEquals(
+                    listOf("view-v1", "view-v2"),
+                    room.currentWorkspace().savedViews.map { it.id.value }.sorted(),
+                )
+                val recaptured = RoomBackupCaptureSource(staging(), VaultId(VAULT_ID)).capture()
+                listOf("view-v1", "view-v2", "view-v3").forEach { id ->
+                    assertEquals(
+                        records.single {
+                            it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf(id)
+                        },
+                        recaptured.records.single {
+                            it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf(id)
+                        },
+                    )
+                }
+            } finally {
+                room.close()
+            }
         }
     }
 
