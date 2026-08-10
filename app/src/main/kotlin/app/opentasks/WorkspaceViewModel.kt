@@ -17,6 +17,8 @@ import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskArrangement
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.WorkflowStatusId
@@ -84,6 +86,7 @@ class WorkspaceViewModel @Inject constructor(
     private val insightsEngine: InsightsEngine,
     private val focusSessionStore: FocusSessionStore,
     private val focusCoordinator: FocusCoordinator,
+    private val viewArrangementStore: ViewArrangementStore,
     insightsTimeProvider: InsightsTimeProvider,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -127,6 +130,8 @@ class WorkspaceViewModel @Inject constructor(
     val pendingBlockedBulkCompletion: StateFlow<Boolean> = pendingBlockedBulk.asStateFlow()
 
     val focusSession: StateFlow<FocusSession?> = focusSessionStore.session
+
+    val viewArrangement: StateFlow<ViewArrangementState> = viewArrangementStore.state
 
     val pendingBlockedCompletion: StateFlow<PendingBlockedCompletion?> = pendingBlocked.asStateFlow()
     val dependencyFeedback: StateFlow<DependencyFeedback?> =
@@ -175,6 +180,14 @@ class WorkspaceViewModel @Inject constructor(
     fun setBoardMode(projectId: ProjectId, enabled: Boolean) {
         boardViewState.setBoardMode(projectId, enabled)
     }
+
+    fun setTasksArrangement(value: TaskArrangement) = viewArrangementStore.saveTasks(value)
+
+    fun setWorkbenchArrangement(projectId: ProjectId, value: TaskArrangement) =
+        viewArrangementStore.saveWorkbench(projectId, value)
+
+    fun setBoardSort(projectId: ProjectId, value: TaskSortKey) =
+        viewArrangementStore.saveBoardSort(projectId, value)
 
     fun setInsightsRange(range: InsightsRange) {
         workspaceInsightsState.setRange(range)

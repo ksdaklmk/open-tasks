@@ -77,6 +77,7 @@ import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RemoteBackupVerifiedInfo
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
+import app.opentasks.ViewArrangementStore
 import app.opentasks.focus.FocusSessionController
 import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
@@ -137,6 +138,14 @@ object AppModule {
         @ApplicationContext context: Context,
     ): FocusSessionStore = FocusSessionStore(
         context.getSharedPreferences("focus_session", Context.MODE_PRIVATE),
+    )
+
+    @Provides
+    @Singleton
+    fun provideViewArrangementStore(
+        @ApplicationContext context: Context,
+    ): ViewArrangementStore = ViewArrangementStore(
+        context.getSharedPreferences("view_prefs", Context.MODE_PRIVATE),
     )
 
     @Provides
