@@ -2440,13 +2440,17 @@ private fun SearchResult.id() = when (this) {
         tasks = listOf(
             task("task-prefix", "alpha beta"),
             task("task-word", "go-alpha"),
+            task("task-unicode-substring", "éalpha"),
             task("task-substring", "go2alpha"),
             task("task-exact", "ALPHA"),
         ),
         projects = listOf(project("project-exact", "alpha")),
     )
     assertEquals(
-        listOf("task-exact", "project-exact", "task-prefix", "task-word", "task-substring"),
+        listOf(
+            "task-exact", "project-exact", "task-prefix", "task-word",
+            "task-unicode-substring", "task-substring",
+        ),
         searchWorkspace(input, SearchQuery("alpha"), clock).map { it.id() },
     )
     assertEquals(
@@ -2482,7 +2486,23 @@ Add one deterministic relation fixture and the conflict-resolution assertions:
         description = "alpha",
     )
     val input = snapshot(
-        tasks = listOf(keep, keep.copy(id = TaskId("wrong-priority"), priority = Priority.LOW)),
+        tasks = listOf(
+            keep,
+            keep.copy(id = TaskId("wrong-priority"), priority = Priority.LOW),
+            keep.copy(id = TaskId("wrong-project"), projectId = ProjectId("other")),
+            keep.copy(id = TaskId("wrong-tag"), tagIds = emptySet()),
+            keep.copy(
+                id = TaskId("wrong-completed"),
+                semanticStatus = SemanticStatus.COMPLETED,
+                completedAt = now,
+            ),
+            keep.copy(id = TaskId("wrong-trash"), deletedAt = now),
+            keep.copy(
+                id = TaskId("wrong-due"),
+                due = ZonedMoment(now.plusSeconds(86_400), zone.id),
+            ),
+            keep.copy(id = TaskId("wrong-status"), semanticStatus = SemanticStatus.BLOCKED),
+        ),
         projects = listOf(project("project", "alpha")),
     ).copy(tags = listOf(Tag(TagId("tag"), OpenTasksFixtures.workspaceId, "Focus")))
     val query = SearchQuery(
@@ -2492,7 +2512,7 @@ Add one deterministic relation fixture and the conflict-resolution assertions:
         includeCompleted = false,
         dueBuckets = setOf(DueBucket.TODAY),
         priorities = setOf(Priority.URGENT),
-        statuses = setOf(SemanticStatus.STARTED),
+        statuses = setOf(SemanticStatus.STARTED, SemanticStatus.COMPLETED),
     )
     assertEquals(listOf("project", "keep"), searchWorkspace(input, query, clock).map { it.id() })
     assertTrue(searchWorkspace(input, SearchQuery(""), clock).isEmpty())
@@ -2520,6 +2540,20 @@ Add one deterministic relation fixture and the conflict-resolution assertions:
         searchWorkspace(input, SearchQuery("", sort = TaskSortKey.PRIORITY), clock)
             .map { it.id() },
     )
+
+    val capInput = snapshot(
+        tasks = (0 until 50).map { index ->
+            task("cap-prefix-%02d".format(index), "alpha cap $index", Priority.LOW)
+        } + task("cap-urgent", "xalpha", Priority.URGENT),
+        projects = emptyList(),
+    )
+    val capped = searchWorkspace(
+        capInput,
+        SearchQuery("alpha", sort = TaskSortKey.PRIORITY),
+        clock,
+    ).map { it.id() }
+    assertEquals(50, capped.size)
+    assertFalse(capped.contains("cap-urgent"))
 }
 ```
 
@@ -2709,20 +2743,22 @@ not run the instrumented test before Task 18; compile it in Step 7.
 
 ```kotlin
 @Test fun blankDueBucketSearchUsesTheInjectedClock() = runBlocking {
-    val instant = Instant.parse("2026-08-10T03:00:00Z")
-    val zone = ZoneId.of("Asia/Bangkok")
-    openRepository(now = { instant }, zoneId = { zone })
-    repository!!.execute(
-        DomainCommand.CreateTask(
-            "Today adapter",
-            due = ZonedMoment(instant.plusSeconds(3_600), zone.id),
-        ),
-    )
-    assertEquals(
-        listOf("Today adapter"),
-        repository!!.search(SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)))
-            .map(SearchResult::title),
-    )
+    withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+        val instant = Instant.parse("2026-08-10T03:00:00Z")
+        val zone = ZoneId.of("Asia/Bangkok")
+        openRepository(now = { instant }, zoneId = { zone })
+        repository!!.execute(
+            DomainCommand.CreateTask(
+                "Today adapter",
+                due = ZonedMoment(instant.plusSeconds(3_600), zone.id),
+            ),
+        )
+        assertEquals(
+            listOf("Today adapter"),
+            repository!!.search(SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)))
+                .map(SearchResult::title),
+        )
+    }
 }
 
 private fun openRepository(
