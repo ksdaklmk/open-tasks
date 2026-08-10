@@ -4850,7 +4850,10 @@ fun planTaskDuplicate(
 - [ ] **Step 1: Write the pure inclusion/exclusion RED test**
 
 Use the real fixture as the constructor authority and populate every ruled
-field. The core assertions are:
+field. Add the exact imports used below, including
+`app.opentasks.core.model.MilestoneId`,
+`org.junit.Assert.assertNotNull`, and `org.junit.Assert.assertNull`. The core
+assertions are:
 
 ```kotlin
 @Test
@@ -4869,6 +4872,7 @@ fun copiesOnlyTheApprovedFieldSet() {
         recurrenceAnchor = anchor,
         recurrenceOccurrenceIndex = 3,
         estimate = Duration.ofMinutes(90),
+        milestoneId = MilestoneId("milestone-duplicate-source"),
         tagIds = setOf(TagId("tag-a"), TagId("tag-b")),
         checklist = listOf(
             ChecklistItem("old-1", "First", completed = true, rank = "a"),
@@ -4877,6 +4881,7 @@ fun copiesOnlyTheApprovedFieldSet() {
         dependencyIds = setOf(TaskId("dependency")),
         blockedBy = setOf(TaskId("dependency")),
         completedAt = Instant.parse("2026-08-10T09:00:00Z"),
+        deletedAt = Instant.parse("2026-08-10T09:30:00Z"),
     )
     val target = OpenTasksFixtures.workflowStatuses.first {
         it.projectId == source.projectId && it.semanticStatus == SemanticStatus.BACKLOG
@@ -4901,7 +4906,8 @@ fun copiesOnlyTheApprovedFieldSet() {
     assertEquals(source.start, duplicate.start)
     assertEquals(source.due, duplicate.due)
     assertEquals(source.estimate, duplicate.estimate)
-    assertEquals(source.milestoneId, duplicate.milestoneId)
+    assertNotNull(source.milestoneId)
+    assertEquals(MilestoneId("milestone-duplicate-source"), duplicate.milestoneId)
     assertEquals(source.tagIds, duplicate.tagIds)
     assertEquals(source.dependencyIds, duplicate.dependencyIds)
     assertEquals(target.id, duplicate.statusId)
@@ -4911,6 +4917,7 @@ fun copiesOnlyTheApprovedFieldSet() {
     assertEquals(listOf("a", "b"), duplicate.checklist.map { it.rank })
     assertTrue(duplicate.checklist.none { it.completed })
     assertNull(duplicate.completedAt)
+    assertNotNull(source.deletedAt)
     assertNull(duplicate.deletedAt)
     assertTrue(duplicate.blockedBy.isEmpty())
     assertNull(duplicate.recurrence)
@@ -4949,12 +4956,332 @@ fun rejectsMismatchedTargetOrChecklistIdentityCounts() {
 
 - [ ] **Step 2: Write dual-engine command RED tests**
 
-Add the same behavioural matrix to both repository test classes. Use their
-existing repository/open-repository fixtures and these exact assertions:
+Do not use the default fixture: it has no reminder, note, prior activity, time
+entry, or attachment owned by the chosen open task. Add the exact imports
+required by this step.
+
+- In `InMemoryVaultRepositoryTest.kt`, add `Attachment`, `AttachmentId`,
+  `BlobSetId`, `DeviceId`, `Note`, `NoteId`, `TimeEntry`,
+  `WorkspaceSnapshot`, `WorkflowStatus`, `assertArrayEquals`,
+  `assertNotNull`, and `assertNull`.
+- In `RoomVaultRepositoryInstrumentedTest.kt`, add `BackupMutationKind`,
+  `Note`, `NoteId`, `Task`, `TaskId`, `TimeEntry`,
+  `WorkspaceSnapshot`, `WorkflowStatus`, `assertNotNull`, and
+  `assertNull`. Keep its existing `filterNotNull`, `first`, and
+  `withTimeout` imports.
 
 ```kotlin
+// InMemoryVaultRepositoryTest.kt additions
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
+import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.WorkflowStatus
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+
+// RoomVaultRepositoryInstrumentedTest.kt additions
+import app.opentasks.core.domain.BackupMutationKind
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
+import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TimeEntry
+import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.WorkflowStatus
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+```
+
+Use this one exact `duplicationSnapshot()` matrix in each test source set.
+Keeping the helper local to each source set avoids adding an eighth path:
+
+```kotlin
+private fun duplicationSnapshot(): WorkspaceSnapshot {
+    val seed = OpenTasksFixtures.snapshot
+    val project = OpenTasksFixtures.studioProject
+    val sourceTemplate = OpenTasksFixtures.tasks.first { it.checklist.isNotEmpty() }
+    val revision = sourceTemplate.revision
+    val archivedAt = Instant.parse("2026-08-01T00:00:00Z")
+    val relationAt = Instant.parse("2026-08-09T09:00:00Z")
+    val anchor = ZonedMoment(Instant.parse("2026-08-12T09:00:00Z"), "UTC")
+    val archivedOpen = WorkflowStatus(
+        WorkflowStatusId("duplicate-status-archived-open"),
+        project.id,
+        "Archived in progress",
+        SemanticStatus.STARTED,
+        "m0",
+        archivedAt,
+    )
+    val archivedBacklog = WorkflowStatus(
+        WorkflowStatusId("duplicate-status-backlog-archived"),
+        project.id,
+        "Old backlog",
+        SemanticStatus.BACKLOG,
+        "a0",
+        archivedAt,
+    )
+    val firstActiveBacklog = WorkflowStatus(
+        WorkflowStatusId("duplicate-status-backlog-first"),
+        project.id,
+        "Backlog first",
+        SemanticStatus.BACKLOG,
+        "b0",
+    )
+    val laterActiveBacklog = WorkflowStatus(
+        WorkflowStatusId("duplicate-status-backlog-later"),
+        project.id,
+        "Backlog later",
+        SemanticStatus.BACKLOG,
+        "z0",
+    )
+    val completedStatus = WorkflowStatus(
+        WorkflowStatusId("duplicate-status-completed"),
+        project.id,
+        "Done",
+        SemanticStatus.COMPLETED,
+        "zz",
+    )
+    val activeDependency = sourceTemplate.copy(
+        id = TaskId("duplicate-dependency-active"),
+        statusId = firstActiveBacklog.id,
+        semanticStatus = SemanticStatus.BACKLOG,
+        title = "Active dependency",
+        checklist = emptyList(),
+        tagIds = emptySet(),
+        dependencyIds = emptySet(),
+        blockedBy = emptySet(),
+        completedAt = null,
+        deletedAt = null,
+    )
+    val completedDependency = activeDependency.copy(
+        id = TaskId("duplicate-dependency-completed"),
+        statusId = completedStatus.id,
+        semanticStatus = SemanticStatus.COMPLETED,
+        title = "Completed dependency",
+        completedAt = relationAt,
+    )
+    val deletedDependency = activeDependency.copy(
+        id = TaskId("duplicate-dependency-deleted"),
+        title = "Deleted dependency",
+        deletedAt = relationAt,
+    )
+    val source = sourceTemplate.copy(
+        id = TaskId("duplicate-source"),
+        projectId = project.id,
+        statusId = archivedOpen.id,
+        semanticStatus = SemanticStatus.STARTED,
+        title = "Duplicate source",
+        due = anchor,
+        recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY),
+        recurrenceSeriesId = TaskId("duplicate-series"),
+        recurrenceAnchor = anchor,
+        recurrenceOccurrenceIndex = 4,
+        milestoneId = OpenTasksFixtures.milestones.first {
+            it.projectId == project.id
+        }.id,
+        dependencyIds = linkedSetOf(
+            activeDependency.id,
+            completedDependency.id,
+            deletedDependency.id,
+        ),
+        blockedBy = linkedSetOf(
+            activeDependency.id,
+            completedDependency.id,
+            deletedDependency.id,
+        ),
+        completedAt = null,
+        deletedAt = null,
+    )
+    val incoming = activeDependency.copy(
+        id = TaskId("duplicate-incoming"),
+        title = "Incoming dependency owner",
+        dependencyIds = setOf(source.id),
+        blockedBy = setOf(source.id),
+    )
+    val completedSource = source.copy(
+        id = TaskId("duplicate-source-completed"),
+        statusId = completedStatus.id,
+        semanticStatus = SemanticStatus.COMPLETED,
+        title = "Completed source",
+        checklist = emptyList(),
+        tagIds = emptySet(),
+        dependencyIds = emptySet(),
+        blockedBy = emptySet(),
+        completedAt = relationAt,
+    )
+    val deletedSource = source.copy(
+        id = TaskId("duplicate-source-deleted"),
+        title = "Deleted source",
+        checklist = emptyList(),
+        tagIds = emptySet(),
+        dependencyIds = emptySet(),
+        blockedBy = emptySet(),
+        deletedAt = relationAt,
+    )
+    val sourceWithoutRequiredStatus = source.copy(
+        id = TaskId("duplicate-source-missing-status"),
+        statusId = WorkflowStatusId("duplicate-status-missing"),
+        title = "Missing-status source",
+        checklist = emptyList(),
+        tagIds = emptySet(),
+        dependencyIds = emptySet(),
+        blockedBy = emptySet(),
+    )
+    val tasks = listOf(
+        source,
+        activeDependency,
+        completedDependency,
+        deletedDependency,
+        incoming,
+        completedSource,
+        deletedSource,
+        sourceWithoutRequiredStatus,
+    )
+    return seed.copy(
+        home = seed.home.copy(
+            focusTasks = emptyList(),
+            upcomingTasks = emptyList(),
+            projects = listOf(project),
+            activeTimer = null,
+        ),
+        tasks = tasks,
+        projects = listOf(project),
+        workflowStatuses = listOf(
+            archivedOpen,
+            archivedBacklog,
+            firstActiveBacklog,
+            laterActiveBacklog,
+            completedStatus,
+        ),
+        milestones = seed.milestones.filter { it.projectId == project.id },
+        tags = seed.tags.filter { it.id in source.tagIds },
+        reminders = listOf(
+            Reminder(
+                Reminder.primaryId(source.id),
+                source.id,
+                ZonedMoment(Instant.parse("2026-08-11T09:00:00Z"), "UTC"),
+                precise = true,
+            ),
+        ),
+        templates = emptyList(),
+        timeEntries = listOf(
+            TimeEntry(
+                TimeEntryId("duplicate-source-time"),
+                source.id,
+                DeviceId("duplicate-fixture-device"),
+                relationAt.minusSeconds(600),
+                relationAt,
+                "Source time",
+            ),
+        ),
+        timeEntryConflicts = emptyList(),
+        notes = listOf(
+            Note(
+                NoteId("duplicate-source-note"),
+                source.id,
+                null,
+                "Source note",
+                relationAt,
+                null,
+                revision,
+            ),
+        ),
+        attachments = listOf(
+            Attachment(
+                AttachmentId("duplicate-source-attachment"),
+                source.id,
+                "source.txt",
+                "text/plain",
+                6,
+                "a".repeat(64),
+                BlobSetId("duplicate-source-blob"),
+                1,
+                null,
+                revision,
+            ),
+        ),
+        activityEntries = listOf(
+            ActivityEntry(
+                "duplicate-source-prior-activity",
+                source.id,
+                source.projectId,
+                ActivityKind.STATUS_CHANGED,
+                "Prior source activity",
+                relationAt,
+            ),
+        ),
+        retiredBlobSets = emptyList(),
+        savedViews = emptyList(),
+    )
+}
+```
+
+Add this exact isolation helper to both classes:
+
+```kotlin
+private fun assertDuplicateIsolation(
+    before: WorkspaceSnapshot,
+    after: WorkspaceSnapshot,
+    source: Task,
+    duplicate: Task,
+) {
+    assertEquals(source, after.tasks.single { it.id == source.id })
+    assertEquals(
+        before.reminders.filter { it.taskId == source.id },
+        after.reminders.filter { it.taskId == source.id },
+    )
+    assertEquals(
+        before.notes.filter { it.taskId == source.id },
+        after.notes.filter { it.taskId == source.id },
+    )
+    assertEquals(
+        before.activityEntries.filter { it.taskId == source.id },
+        after.activityEntries.filter { it.taskId == source.id },
+    )
+    assertEquals(
+        before.timeEntries.filter { it.taskId == source.id },
+        after.timeEntries.filter { it.taskId == source.id },
+    )
+    assertEquals(
+        before.attachments.filter { it.taskId == source.id },
+        after.attachments.filter { it.taskId == source.id },
+    )
+    assertTrue(after.tasks.filter { it.id != duplicate.id }.none {
+        duplicate.id in it.dependencyIds
+    })
+    assertFalse(after.reminders.any { it.taskId == duplicate.id })
+    assertFalse(after.notes.any { it.taskId == duplicate.id })
+    assertFalse(after.timeEntries.any { it.taskId == duplicate.id })
+    assertFalse(after.attachments.any { it.taskId == duplicate.id })
+    assertEquals(
+        listOf(ActivityKind.RECORD_CREATED),
+        after.activityEntries.filter { it.taskId == duplicate.id }.map { it.kind },
+    )
+}
+```
+
+For the in-memory success case, create a local journal and repository from that
+matrix. Use the archived-open source so this test also implements
+`duplicateTaskKeepsAnArchivedOpenStatus`:
+
+```kotlin
+val fixedNow = Instant.parse("2026-08-10T10:00:00Z")
+val journal = InMemoryBackupJournal()
+val repository = InMemoryVaultRepository(
+    initial = duplicationSnapshot(),
+    now = { fixedNow },
+    backupJournal = journal,
+)
 val before = repository.observeWorkspace().value
-val source = before.tasks.first { !it.isCompleted && it.deletedAt == null }
+val source = before.tasks.single { it.id == TaskId("duplicate-source") }
 val result = repository.execute(DomainCommand.DuplicateTask(source.id))
     as CommandResult.Success
 val after = repository.observeWorkspace().value
@@ -4965,25 +5292,11 @@ assertEquals(source.semanticStatus, duplicate.semanticStatus)
 assertFalse(duplicate.isCompleted)
 assertEquals(source.tagIds, duplicate.tagIds)
 assertEquals(source.dependencyIds, duplicate.dependencyIds)
-assertEquals(
-    source.dependencyIds.filterTo(linkedSetOf()) { dependencyId ->
-        after.tasks.first { it.id == dependencyId }.let { !it.isCompleted && it.deletedAt == null }
-    },
-    duplicate.blockedBy,
-)
+assertEquals(setOf(TaskId("duplicate-dependency-active")), duplicate.blockedBy)
 assertTrue(duplicate.checklist.none { it.completed })
 assertTrue(duplicate.checklist.map { it.id }.intersect(source.checklist.map { it.id }.toSet()).isEmpty())
-assertFalse(after.reminders.any { it.taskId == duplicate.id })
-assertFalse(after.notes.any { it.taskId == duplicate.id })
-assertFalse(after.timeEntries.any { it.taskId == duplicate.id })
-assertFalse(after.attachments.any { it.taskId == duplicate.id })
 assertNull(duplicate.recurrence)
-assertEquals(
-    1,
-    after.activityEntries.count {
-        it.taskId == duplicate.id && it.kind == ActivityKind.RECORD_CREATED
-    },
-)
+assertDuplicateIsolation(before, after, source, duplicate)
 
 repository.execute(checkNotNull(result.undo))
 val undone = repository.observeWorkspace().value
@@ -4991,48 +5304,285 @@ assertNotNull(undone.tasks.single { it.id == duplicate.id }.deletedAt)
 assertNull(undone.tasks.single { it.id == source.id }.deletedAt)
 ```
 
-Add named cases `duplicateTaskKeepsAnArchivedOpenStatus`,
-`duplicateTaskMovesACompletedSourceToTheFirstActiveBacklog`, and
-`duplicateTaskRejectionsAreMutationFree`. The rejection table is exact:
+In both engines, `duplicateTaskMovesACompletedSourceToTheFirstActiveBacklog`
+must duplicate `duplicate-source-completed` and assert
+`duplicate-status-backlog-first`. The lower-rank
+`duplicate-status-backlog-archived` must be ignored, and the active
+`duplicate-status-backlog-later` proves the minimum-rank choice rather
+than a single-candidate accident. Use this assertion body in the in-memory
+case, and the same ids inside a bounded Room observation:
 
 ```kotlin
+val before = repository.observeWorkspace().value
+val completedSource = before.tasks.single {
+    it.id == TaskId("duplicate-source-completed")
+}
+val success = repository.execute(
+    DomainCommand.DuplicateTask(completedSource.id),
+) as CommandResult.Success
+val duplicateId = (checkNotNull(success.undo) as DomainCommand.DeleteTask).taskId
+val duplicate = repository.observeWorkspace().value.tasks.single {
+    it.id == duplicateId
+}
+assertEquals(WorkflowStatusId("duplicate-status-backlog-first"), duplicate.statusId)
+assertEquals(SemanticStatus.BACKLOG, duplicate.semanticStatus)
+assertFalse(duplicate.isCompleted)
+```
+
+```kotlin
+val seed = duplicationSnapshot()
+openRepository(
+    now = { Instant.parse("2026-08-10T10:00:00Z") },
+    seedSnapshot = seed,
+)
+val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.any { it.id == TaskId("duplicate-source-completed") }
+    }
+}
+val completedSource = before.tasks.single {
+    it.id == TaskId("duplicate-source-completed")
+}
+val success = repository!!.execute(
+    DomainCommand.DuplicateTask(completedSource.id),
+) as CommandResult.Success
+val duplicateId = (checkNotNull(success.undo) as DomainCommand.DeleteTask).taskId
+val after = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.singleOrNull { it.id == duplicateId }?.statusId ==
+            WorkflowStatusId("duplicate-status-backlog-first")
+    }
+}
+val duplicate = after.tasks.single { it.id == duplicateId }
+assertEquals(WorkflowStatusId("duplicate-status-backlog-first"), duplicate.statusId)
+assertEquals(SemanticStatus.BACKLOG, duplicate.semanticStatus)
+assertFalse(duplicate.isCompleted)
+```
+
+For the in-memory `duplicateTaskRejectionsAreMutationFree` test, use one
+local repository/journal from `duplicationSnapshot()`. For every exact
+case below, capture both the complete workspace and journal entries before
+execution, then compare journal metadata and payload bytes:
+
+```kotlin
+val journal = InMemoryBackupJournal()
+val repository = InMemoryVaultRepository(
+    initial = duplicationSnapshot(),
+    now = { Instant.parse("2026-08-10T10:00:00Z") },
+    backupJournal = journal,
+)
 listOf(
     DomainCommand.DuplicateTask(TaskId("missing")) to RejectionReason.NOT_FOUND,
-    DomainCommand.DuplicateTask(deletedSource.id) to RejectionReason.INVALID_STATE,
-    DomainCommand.DuplicateTask(sourceWithoutRequiredStatus.id) to
+    DomainCommand.DuplicateTask(TaskId("duplicate-source-deleted")) to
+        RejectionReason.INVALID_STATE,
+    DomainCommand.DuplicateTask(TaskId("duplicate-source-missing-status")) to
         RejectionReason.INVALID_STATE,
 ).forEach { (command, expectedReason) ->
     val before = repository.observeWorkspace().value
+    val journalBefore = journal.entries
     val result = repository.execute(command) as CommandResult.Rejected
     assertEquals(expectedReason, result.reason)
     assertEquals(before, repository.observeWorkspace().value)
+    val journalAfter = journal.entries
+    assertEquals(journalBefore.size, journalAfter.size)
+    journalBefore.zip(journalAfter).forEach { (expected, actual) ->
+        assertEquals(
+            expected.copy(payload = byteArrayOf()),
+            actual.copy(payload = byteArrayOf()),
+        )
+        assertArrayEquals(expected.payload, actual.payload)
+    }
 }
 ```
 
-In the Room success case, close and reopen before reading the duplicate, then
-decode the one new journal generation and assert:
+For Room, extend `openRepository` with
+`seedSnapshot: WorkspaceSnapshot = OpenTasksFixtures.snapshot` and pass it
+to `RoomVaultRepository(seedSnapshot = seedSnapshot)`. Open with
+`duplicationSnapshot()`. Every observation before duplication, after
+duplication, after reopen, and after Undo must be bounded with
+`withTimeout(DEVICE_TEST_TIMEOUT_MILLIS)` and
+`observeWorkspace().filterNotNull().first { predicate }`; do not read
+`observeWorkspace().value` or use an unqualified `first()` in these
+Room cases.
+
+The Room rejection test uses the same exact three-command table. Before and
+after each rejection, await a snapshot containing all eight fixture task ids,
+capture `currentGeneration`, and capture every row through that generation:
 
 ```kotlin
-val families = latestJournalPayloads().map { payload ->
-    checkNotNull(payload.record).family
+openRepository(
+    now = { Instant.parse("2026-08-10T10:00:00Z") },
+    seedSnapshot = duplicationSnapshot(),
+)
+listOf(
+    DomainCommand.DuplicateTask(TaskId("missing")) to RejectionReason.NOT_FOUND,
+    DomainCommand.DuplicateTask(TaskId("duplicate-source-deleted")) to
+        RejectionReason.INVALID_STATE,
+    DomainCommand.DuplicateTask(TaskId("duplicate-source-missing-status")) to
+        RejectionReason.INVALID_STATE,
+).forEach { (command, expectedReason) ->
+val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.mapTo(hashSetOf(), Task::id).containsAll(
+            duplicationSnapshot().tasks.map(Task::id),
+        )
+    }
 }
-assertEquals(1, families.count { it == BackupRecordFamily.TASK })
-assertEquals(1, families.count { it == BackupRecordFamily.ACTIVITY_ENTRY })
-assertEquals(source.checklist.size, families.count {
-    it == BackupRecordFamily.CHECKLIST_ITEM
-})
-assertEquals(source.tagIds.size, families.count {
-    it == BackupRecordFamily.TASK_TAG
-})
-assertEquals(source.dependencyIds.size, families.count {
-    it == BackupRecordFamily.TASK_DEPENDENCY
-})
-assertEquals(0, families.count { it == BackupRecordFamily.TAG })
+val generationBefore =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+val rowsBefore =
+    database!!.backupJournalDao().between("vault-primary", 0, generationBefore)
+val result = repository!!.execute(command) as CommandResult.Rejected
+assertEquals(expectedReason, result.reason)
+val after = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { it == before }
+}
+val generationAfter =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+val rowsAfter =
+    database!!.backupJournalDao().between("vault-primary", 0, generationAfter)
+assertEquals(before, after)
+assertEquals(generationBefore, generationAfter)
+assertEquals(rowsBefore.size, rowsAfter.size)
+rowsBefore.zip(rowsAfter).forEach { (expected, actual) ->
+    assertEquals(
+        expected.copy(payload = byteArrayOf()),
+        actual.copy(payload = byteArrayOf()),
+    )
+    assertArrayEquals(expected.payload, actual.payload)
+}
+}
 ```
 
-Seed incoming dependencies, reminder, notes, prior activity, time entries, and
-attachments through the existing fixtures. Assert none point at the duplicate;
-the outgoing dependencies above are the only dependency rows copied.
+In the Room archived-open success case, capture the fixture snapshot with a
+bounded predicate before executing. Execute `DuplicateTask`, capture
+`generationAfter` immediately, and audit that exact generation before
+reopen or Undo. Derive `duplicateId` from the returned
+`DeleteTask` Undo, rather than discovering it from a later snapshot:
+
+```kotlin
+val fixedNow = Instant.parse("2026-08-10T10:00:00Z")
+val seed = duplicationSnapshot()
+openRepository(now = { fixedNow }, seedSnapshot = seed)
+val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        val source = snapshot.tasks.singleOrNull {
+            it.id == TaskId("duplicate-source")
+        } ?: return@first false
+        source.blockedBy == setOf(TaskId("duplicate-dependency-active")) &&
+            snapshot.reminders.any { it.taskId == source.id } &&
+            snapshot.notes.any { it.taskId == source.id } &&
+            snapshot.activityEntries.any { it.taskId == source.id } &&
+            snapshot.timeEntries.any { it.taskId == source.id } &&
+            snapshot.attachments.any { it.taskId == source.id }
+    }
+}
+val source = before.tasks.single { it.id == TaskId("duplicate-source") }
+val generationBefore =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+val success = repository!!.execute(DomainCommand.DuplicateTask(source.id))
+    as CommandResult.Success
+val duplicateId = (checkNotNull(success.undo) as DomainCommand.DeleteTask).taskId
+val generationAfter =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+assertEquals(generationBefore + 1, generationAfter)
+val rows = journalRows(generationAfter)
+val mutations = rows.map { BackupMutationCodec.decode(it.payload) }
+assertEquals(rows.indices.toList(), rows.map { it.sequence })
+assertTrue(mutations.all {
+    it.mutationKind == BackupMutationKind.UPSERT &&
+        it.record != null &&
+        it.deletedFamily == null &&
+        it.deletedIdentity == null
+})
+assertEquals(
+    2 + source.checklist.size + source.tagIds.size + source.dependencyIds.size,
+    rows.size,
+)
+val families = mutations.map { checkNotNull(it.record).family }
+val expectedCounts = mapOf(
+    BackupRecordFamily.TASK to 1,
+    BackupRecordFamily.ACTIVITY_ENTRY to 1,
+    BackupRecordFamily.CHECKLIST_ITEM to source.checklist.size,
+    BackupRecordFamily.TASK_TAG to source.tagIds.size,
+    BackupRecordFamily.TASK_DEPENDENCY to source.dependencyIds.size,
+)
+expectedCounts.forEach { (family, count) ->
+    assertEquals(count, families.count { it == family })
+}
+BackupRecordFamily.entries.filterNot(expectedCounts::containsKey).forEach { family ->
+    assertEquals(0, families.count { it == family })
+}
+```
+
+Do not call `latestJournalPayloads()` for this test: after Undo it would
+decode the Undo generation, not the duplication generation. Observe, reopen,
+and assert with these exact bounded predicates:
+
+```kotlin
+withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.any { it.id == duplicateId } &&
+            snapshot.activityEntries.count {
+                it.taskId == duplicateId && it.kind == ActivityKind.RECORD_CREATED
+            } == 1
+    }
+}
+repository!!.close()
+database!!.close()
+repository = null
+database = null
+openRepository(now = { fixedNow }, seedSnapshot = seed)
+val reopened = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.singleOrNull { it.id == duplicateId }?.let { duplicate ->
+            duplicate.dependencyIds == source.dependencyIds &&
+                duplicate.blockedBy ==
+                    setOf(TaskId("duplicate-dependency-active")) &&
+                snapshot.activityEntries.count {
+                    it.taskId == duplicateId &&
+                        it.kind == ActivityKind.RECORD_CREATED
+                } == 1
+        } == true
+    }
+}
+val duplicate = reopened.tasks.single { it.id == duplicateId }
+assertEquals(source.statusId, duplicate.statusId)
+assertEquals(source.semanticStatus, duplicate.semanticStatus)
+assertFalse(duplicate.isCompleted)
+assertEquals(source.tagIds, duplicate.tagIds)
+assertEquals(source.dependencyIds, duplicate.dependencyIds)
+assertEquals(setOf(TaskId("duplicate-dependency-active")), duplicate.blockedBy)
+assertTrue(duplicate.checklist.none { it.completed })
+assertTrue(
+    duplicate.checklist.map { it.id }
+        .intersect(source.checklist.map { it.id }.toSet())
+        .isEmpty(),
+)
+assertNull(duplicate.recurrence)
+assertDuplicateIsolation(before, reopened, source, duplicate)
+assertEquals(
+    setOf(source.id),
+    reopened.tasks.single { it.id == TaskId("duplicate-incoming") }.dependencyIds,
+)
+```
+
+Finally execute the captured Undo and boundedly await
+`duplicate.deletedAt == fixedNow`. Assert every pre-existing task equals
+its reopened value and only the duplicate task changed:
+
+```kotlin
+val undone = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.single { it.id == duplicateId }.deletedAt == fixedNow
+    }
+}
+assertNotNull(undone.tasks.single { it.id == duplicateId }.deletedAt)
+assertEquals(
+    reopened.tasks.filter { it.id != duplicateId },
+    undone.tasks.filter { it.id != duplicateId },
+)
+```
 
 - [ ] **Step 3: Run the RED tests**
 
@@ -5092,7 +5642,65 @@ fun planTaskDuplicate(
 - [ ] **Step 5: Preflight and apply in both repositories**
 
 Add `is DomainCommand.DuplicateTask -> duplicateTask(command)` to both
-exhaustive dispatches. Room begins with its existing database lookup:
+exhaustive dispatches. Before adding duplication, correct the existing
+dependency normalisation at every live read/update site while preserving all
+existing outgoing `dependencyIds`.
+
+In `InMemoryVaultRepository.resolveDependencyState`, keep the existing-id
+filter for `dependencyIds` and require both active and non-deleted targets
+for `blockedBy`:
+
+```kotlin
+blockedBy = existingDependencies.filterTo(linkedSetOf()) { dependencyId ->
+    tasksById[dependencyId]?.let { !it.isCompleted && it.deletedAt == null } == true
+},
+```
+
+In Room, apply the same predicate in all three existing calculations:
+
+- `setTaskDependency`: assign `getByIds(...)` to
+  `dependencyEntities`, then derive `blockingDependencyIds` where
+  semantic status is not `COMPLETED` and
+  `deletedAtEpochMillis == null`, then assign it to `blockedBy`.
+- `currentTask`: keep every returned entity id in `dependencyIds`,
+  derive `blockingDependencyIds` with the same predicate, and pass it to
+  `toModel`.
+- `buildSnapshot`: replace `completedTaskIds` with
+  `blockingTaskIds` selected from non-completed, non-deleted entities and
+  pass `dependencyIds.filterTo(linkedSetOf()) { it in blockingTaskIds }`
+  as `blockedBy`.
+
+```kotlin
+val blockingDependencyIds = dependencyEntities
+    .filter {
+        it.semanticStatus != SemanticStatus.COMPLETED.name &&
+            it.deletedAtEpochMillis == null
+    }
+    .mapTo(hashSetOf()) { TaskId(it.id) }
+// setTaskDependency/currentTask:
+blockedBy = blockingDependencyIds
+```
+
+```kotlin
+val blockingTaskIds = base.tasks
+    .filter {
+        it.semanticStatus != SemanticStatus.COMPLETED.name &&
+            it.deletedAtEpochMillis == null
+    }
+    .mapTo(hashSetOf()) { TaskId(it.id) }
+// buildSnapshot:
+blockedBy = dependencyIds.filterTo(linkedSetOf()) { it in blockingTaskIds }
+```
+
+Also make the existing Room seed path honor the matrix's note relation:
+
+```kotlin
+seedSnapshot.notes.forEach { note ->
+    workspaceDao.upsertNote(note.toEntity())
+}
+```
+
+Room duplication begins with its existing database lookup:
 
 ```kotlin
 val source = currentTask(command.taskId)
@@ -5135,7 +5743,35 @@ val targetStatus = if (!source.isCompleted) {
 
 Capture `createdAt` once, then call the pure function with `TaskId.new()`, one
 `UUID.randomUUID().toString()` per source checklist row, and a logical counter
-of zero. Mirror the existing create-task activity and Undo:
+of zero. Use that same `createdAt` for the duplicate revision, Created
+activity, and Undo.
+
+In-memory must use one captured snapshot and one `publish(...)`. Append
+the duplicate task and Created activity together; do not call
+`recordActivity` and do not assign `mutableWorkspace.value` a second
+time:
+
+```kotlin
+val createdAt = now()
+// preflight and planTaskDuplicate(...) use only current and createdAt
+publish(
+    tasks = current.tasks + duplicate,
+    activityEntries = current.activityEntries.appendedActivity(
+        taskId = duplicate.id,
+        projectId = duplicate.projectId,
+        kind = ActivityKind.RECORD_CREATED,
+        body = "Created",
+        at = createdAt,
+    ),
+    at = createdAt,
+)
+return CommandResult.Success(
+    message = "Task duplicated",
+    undo = DomainCommand.DeleteTask(duplicate.id, createdAt),
+)
+```
+
+Room mirrors the same Created activity and Undo:
 
 ```kotlin
 return CommandResult.Success(
@@ -5160,12 +5796,11 @@ recordActivity(
 )
 ```
 
-`tagEntities()` creates `TaskTagEntity` relation rows. Do not upsert, create, or
-modify any `TagEntity`; a successful duplicate therefore emits zero `TAG`
-journal mutations. In-memory publishes the copied task and records one Created
-activity through its existing atomic `execute` boundary. Neither engine reads
-or writes reminders, notes, prior activity, time entries, attachments,
-recurrence metadata, or incoming dependency rows for the copy.
+`tagEntities()` creates `TaskTagEntity` relation rows. Do not upsert,
+create, or modify any `TagEntity`; a successful duplicate therefore emits
+zero `TAG` journal mutations. Neither engine reads or writes reminders,
+notes, prior activity, time entries, attachments, recurrence metadata, or
+incoming dependency rows for the copy.
 
 - [ ] **Step 6: Run focused verification**
 
