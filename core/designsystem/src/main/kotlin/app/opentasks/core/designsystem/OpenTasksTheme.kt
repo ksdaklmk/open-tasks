@@ -1,11 +1,9 @@
 package app.opentasks.core.designsystem
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -29,16 +27,6 @@ object OpenTasksColors {
     val LightError = oklch(0.520, 0.190, 25.0)
     val LightSuccess = oklch(0.480, 0.100, 150.0)
 
-    val DarkBackground = oklch(0.150, 0.006, 29.0)
-    val DarkSurface = oklch(0.190, 0.007, 29.0)
-    val DarkSurfaceBright = oklch(0.250, 0.009, 29.0)
-    val DarkInk = oklch(0.940, 0.004, 29.0)
-    val DarkMutedInk = oklch(0.720, 0.008, 29.0)
-    val DarkOutline = oklch(0.420, 0.010, 29.0)
-    val DarkEmber = oklch(0.720, 0.150, 32.0)
-    val DarkDeepEmber = oklch(0.300, 0.065, 32.0)
-    val DarkError = oklch(0.720, 0.150, 25.0)
-    val DarkSuccess = oklch(0.720, 0.100, 150.0)
 }
 
 private val LightColorScheme = lightColorScheme(
@@ -61,28 +49,6 @@ private val LightColorScheme = lightColorScheme(
     outline = OpenTasksColors.LightOutline,
     error = OpenTasksColors.LightError,
     onError = Color.White,
-)
-
-private val DarkColorScheme = darkColorScheme(
-    primary = OpenTasksColors.DarkInk,
-    onPrimary = OpenTasksColors.DarkBackground,
-    primaryContainer = OpenTasksColors.DarkSurfaceBright,
-    onPrimaryContainer = OpenTasksColors.DarkInk,
-    secondary = OpenTasksColors.DarkEmber,
-    onSecondary = OpenTasksColors.DarkBackground,
-    secondaryContainer = OpenTasksColors.DarkDeepEmber,
-    onSecondaryContainer = OpenTasksColors.DarkInk,
-    tertiary = OpenTasksColors.DarkSuccess,
-    onTertiary = OpenTasksColors.DarkBackground,
-    background = OpenTasksColors.DarkBackground,
-    onBackground = OpenTasksColors.DarkInk,
-    surface = OpenTasksColors.DarkSurface,
-    onSurface = OpenTasksColors.DarkInk,
-    surfaceVariant = OpenTasksColors.DarkSurfaceBright,
-    onSurfaceVariant = OpenTasksColors.DarkMutedInk,
-    outline = OpenTasksColors.DarkOutline,
-    error = OpenTasksColors.DarkError,
-    onError = OpenTasksColors.DarkBackground,
 )
 
 private val OpenTasksTypography = Typography().run {
@@ -119,14 +85,9 @@ private val OpenTasksShapes = Shapes(
 )
 
 @Composable
-fun OpenTasksTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit,
-) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-
+fun OpenTasksTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = LightColorScheme,
         typography = OpenTasksTypography,
         shapes = OpenTasksShapes,
         content = content,

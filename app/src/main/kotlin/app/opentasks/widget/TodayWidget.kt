@@ -82,13 +82,13 @@ private val QuickAddKey = ActionParameters.Key<Boolean>("open_quick_add")
 private val TaskIdKey = ActionParameters.Key<String>("today_focus_task_id")
 
 private val WidgetBackground =
-    ColorProvider(day = OpenTasksColors.LightSurface, night = OpenTasksColors.DarkSurface)
+    ColorProvider(day = OpenTasksColors.LightSurface, night = OpenTasksColors.LightSurface)
 private val WidgetInk =
-    ColorProvider(day = OpenTasksColors.LightInk, night = OpenTasksColors.DarkInk)
+    ColorProvider(day = OpenTasksColors.LightInk, night = OpenTasksColors.LightInk)
 private val WidgetMutedInk =
-    ColorProvider(day = OpenTasksColors.LightMutedInk, night = OpenTasksColors.DarkMutedInk)
+    ColorProvider(day = OpenTasksColors.LightMutedInk, night = OpenTasksColors.LightMutedInk)
 private val WidgetAccent =
-    ColorProvider(day = OpenTasksColors.LightEmber, night = OpenTasksColors.DarkEmber)
+    ColorProvider(day = OpenTasksColors.LightEmber, night = OpenTasksColors.LightEmber)
 
 // Glance (1.1.1) has no typography-role system of its own -- `glance-material3`
 // only converts a Compose Material3 `ColorScheme` to Glance `ColorProviders`,

@@ -642,7 +642,7 @@ class InsightsScreenInstrumentedTest {
             CompositionLocalProvider(
                 LocalDensity provides Density(density.density, fontScale = 2f),
             ) {
-                OpenTasksTheme(darkTheme = false) {
+                OpenTasksTheme {
                     Box(
                         modifier = Modifier
                             .width(320.dp)
