@@ -1047,20 +1047,32 @@ board_sort:{projectId.value}
 Write two projects, reconstruct the store, and assert round-trip. Directly
 seed unknown enum strings and assert defaults: Tasks/workbench DUE with no
 group, board PRIORITY. Assert workbench PROJECT grouping and board UPDATED are
-rejected to their defaults on load. Assert no task title or other vault value
-appears in `prefs.all`.
+rejected to their defaults on load. Seed `workbench_sort:` with an empty
+project-ID suffix plus a nonmatching key family, and assert neither creates a
+project entry. Assert `prefs.all` contains only enum names and project IDs,
+never a task title or other vault value.
 
 Pin invalid programmatic selections as well as invalid stored strings. The
 immediate StateFlow value and a newly constructed store must agree:
 
 ```kotlin
+private val context: Context
+    get() = ApplicationProvider.getApplicationContext<Context>()
+
+private val prefs: SharedPreferences
+    get() = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+@After
+fun tearDown() {
+    context.deleteSharedPreferences(PREFS_NAME)
+}
+
+private companion object {
+    const val PREFS_NAME = "view_arrangement_store_instrumented_test"
+}
+
 @Test
 fun invalidSelectionsNormaliseBeforeStateAndPreferences() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val prefs = context.getSharedPreferences(
-        "view-arrangement-test-${UUID.randomUUID()}",
-        Context.MODE_PRIVATE,
-    )
     val projectId = ProjectId("project-normalisation")
     val store = ViewArrangementStore(prefs)
 
@@ -1081,6 +1093,44 @@ fun invalidSelectionsNormaliseBeforeStateAndPreferences() {
     assertEquals("UPDATED", prefs.getString("workbench_sort:${projectId.value}", null))
     assertFalse(prefs.contains("workbench_group:${projectId.value}"))
     assertEquals("PRIORITY", prefs.getString("board_sort:${projectId.value}", null))
+}
+
+@Test
+fun blankProjectIdsAreRejectedWithoutMutation() {
+    val store = ViewArrangementStore(prefs)
+    val initialPreferences = prefs.all
+    val initialState = store.state.value
+    val blankProjectId = ProjectId("")
+
+    assertThrows(IllegalArgumentException::class.java) {
+        store.saveWorkbench(blankProjectId, TaskArrangement(TaskSortKey.TITLE))
+    }
+    assertThrows(IllegalArgumentException::class.java) {
+        store.saveBoardSort(blankProjectId, TaskSortKey.TITLE)
+    }
+
+    assertEquals(initialPreferences, prefs.all)
+    assertEquals(initialState, store.state.value)
+}
+
+@Test
+fun loadRefreshesStateAndIgnoresEmptyOrUnrelatedProjectKeys() {
+    val store = ViewArrangementStore(prefs)
+    prefs.edit()
+        .putString("tasks_sort", TaskSortKey.UPDATED.name)
+        .putString("tasks_group", TaskGroupKey.PRIORITY.name)
+        .putString("workbench_sort:", TaskSortKey.TITLE.name)
+        .putString("not_a_view_key:project", TaskSortKey.DUE.name)
+        .apply()
+
+    val loaded = store.load()
+
+    assertEquals(
+        TaskArrangement(TaskSortKey.UPDATED, TaskGroupKey.PRIORITY),
+        loaded.tasks,
+    )
+    assertTrue(loaded.workbenchByProject.isEmpty())
+    assertEquals(loaded, store.state.value)
 }
 ```
 
@@ -1112,15 +1162,19 @@ Expected: compilation fails because the store/state do not exist.
 - [ ] **Step 3: Implement the plain store**
 
 Use `SharedPreferences.edit` directly; do not introduce an interface, JSON,
-repository, cleanup worker, or preference listener. `load()` scans `prefs.all`
+repository, cleanup worker, or preference listener. `read()` scans `prefs.all`
 once, parses only the five exact key families with `enum.entries.firstOrNull`,
-and ignores malformed/empty project ids. Normalise each incoming value exactly
+and ignores empty project-ID suffixes and nonmatching key families. Project IDs
+remain opaque; do not parse them as UUIDs. Normalise each incoming value exactly
 once, then use that same value for both preferences and StateFlow:
 
 ```kotlin
 class ViewArrangementStore(private val prefs: SharedPreferences) {
-    private val mutableState = MutableStateFlow(load())
+    private val mutableState = MutableStateFlow(read())
     val state: StateFlow<ViewArrangementState> = mutableState.asStateFlow()
+
+    fun load(): ViewArrangementState =
+        read().also { mutableState.value = it }
 
     fun saveTasks(arrangement: TaskArrangement) {
         val normalised = arrangement
@@ -1132,6 +1186,7 @@ class ViewArrangementStore(private val prefs: SharedPreferences) {
     }
 
     fun saveWorkbench(projectId: ProjectId, arrangement: TaskArrangement) {
+        require(projectId.value.isNotBlank())
         val normalised = arrangement.copy(
             groupBy = arrangement.groupBy?.takeIf {
                 it == TaskGroupKey.DUE_BUCKET || it == TaskGroupKey.PRIORITY
@@ -1147,6 +1202,7 @@ class ViewArrangementStore(private val prefs: SharedPreferences) {
     }
 
     fun saveBoardSort(projectId: ProjectId, sort: TaskSortKey) {
+        require(projectId.value.isNotBlank())
         val normalised = sort.takeIf {
             it == TaskSortKey.PRIORITY || it == TaskSortKey.DUE || it == TaskSortKey.TITLE
         } ?: TaskSortKey.PRIORITY
@@ -1163,17 +1219,24 @@ class ViewArrangementStore(private val prefs: SharedPreferences) {
 }
 ```
 
-Complete `load()` in the same class by building all three maps from the one
+Complete `read()` in the same class by building all three maps from the one
 `prefs.all` value. Invalid Tasks/workbench sort becomes DUE, invalid group
-becomes null, and invalid board sort becomes PRIORITY. Keep deleted-project
-keys as bounded garbage.
+becomes null, and invalid board sort becomes PRIORITY. Accept non-empty
+project-key suffixes as opaque project IDs. Keep deleted-project keys as
+bounded garbage.
 
 - [ ] **Step 4: Provide and expose state**
 
-In `AppModule`, provide one singleton with:
+In `AppModule`, import the store and provide one process singleton:
 
 ```kotlin
-ViewArrangementStore(
+import app.opentasks.ViewArrangementStore
+
+@Provides
+@Singleton
+fun provideViewArrangementStore(
+    @ApplicationContext context: Context,
+): ViewArrangementStore = ViewArrangementStore(
     context.getSharedPreferences("view_prefs", Context.MODE_PRIVATE),
 )
 ```
