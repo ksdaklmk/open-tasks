@@ -3429,12 +3429,14 @@ private fun invalidCreates(due: ZonedMoment): List<Pair<DomainCommand.CreateTask
     listOf(
         DomainCommand.CreateTask("   ") to RejectionReason.EMPTY_TITLE,
         DomainCommand.CreateTask("x".repeat(241)) to RejectionReason.TITLE_TOO_LONG,
-        DomainCommand.CreateTask("Task", tagNames = listOf("")) to RejectionReason.EMPTY_TAG_NAME,
+        DomainCommand.CreateTask("Task", tagNames = listOf("   ")) to RejectionReason.EMPTY_TAG_NAME,
         DomainCommand.CreateTask("Task", tagNames = listOf("x".repeat(65))) to
             RejectionReason.TAG_NAME_TOO_LONG,
         DomainCommand.CreateTask("Task", tagNames = List(51) { "tag-$it" }) to
             RejectionReason.TAG_LIMIT_REACHED,
         DomainCommand.CreateTask("Task", estimate = Duration.ZERO) to
+            RejectionReason.INVALID_STATE,
+        DomainCommand.CreateTask("Task", estimate = Duration.ofMinutes(-1)) to
             RejectionReason.INVALID_STATE,
         DomainCommand.CreateTask(
             "Task", recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
@@ -3502,11 +3504,32 @@ Add the Room equivalent; unchanged generation proves no backup-journal write:
 }
 ```
 
-In each suite also execute:
+In each suite, declare `fixedNow = Instant.parse("2026-07-26T10:00:00Z")`
+(the in-memory suite's repository already supplies that instant; open Room with
+`now = { fixedNow }`) and first prove that the limit is applied after
+trim/case-fold dedupe:
 
 ```kotlin
-val due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "UTC")
-val rule = RecurrenceRule(RecurrenceFrequency.WEEKLY)
+val fixedNow = Instant.parse("2026-07-26T10:00:00Z")
+assertTrue(
+    repository.execute(
+        DomainCommand.CreateTask(
+            "Deduped tags",
+            tagNames = List(51) { " deep WORK " },
+        ),
+    ) is CommandResult.Success,
+)
+```
+
+Then execute:
+
+```kotlin
+// This is 2026-08-09 in America/Los_Angeles but 2026-08-10 in UTC.
+val due = ZonedMoment(Instant.parse("2026-08-10T00:30:00Z"), "America/Los_Angeles")
+val rule = RecurrenceRule(
+    RecurrenceFrequency.WEEKLY,
+    endDate = LocalDate.of(2026, 8, 9),
+)
 val command = DomainCommand.CreateTask(
     title = "Enriched",
     tagNames = listOf("deep WORK", "New tag", "NEW TAG"),
@@ -3515,24 +3538,78 @@ val command = DomainCommand.CreateTask(
     recurrence = rule,
 )
 val before = repository.currentWorkspace()
+val beforeActivityIds = before.activityEntries.mapTo(hashSetOf(), ActivityEntry::id)
 val success = repository.execute(command) as CommandResult.Success
 val after = repository.currentWorkspace()
 val created = after.tasks.single { task -> before.tasks.none { it.id == task.id } }
-assertEquals(2, created.tagIds.size)
 assertEquals(before.tags.size + 1, after.tags.size)
+val newTag = after.tags.single { it.id !in before.tags.map(Tag::id).toSet() }
+assertEquals("New tag", newTag.name)
+assertEquals(setOf(TagId("tag-deep-work"), newTag.id), created.tagIds)
 assertEquals(Duration.ofMinutes(45), created.estimate)
 assertEquals(rule, created.recurrence)
 assertEquals(created.id, created.recurrenceSeriesId)
 assertEquals(due, created.recurrenceAnchor)
 assertEquals(0, created.recurrenceOccurrenceIndex)
+val newActivities = after.activityEntries.filter { it.id !in beforeActivityIds }
+assertEquals(1, newActivities.size)
+assertEquals(ActivityKind.RECORD_CREATED, newActivities.single().kind)
+assertEquals(created.id, newActivities.single().taskId)
+assertEquals(DomainCommand.DeleteTask(created.id, fixedNow), success.undo)
 repository.execute(checkNotNull(success.undo))
 assertTrue(repository.currentWorkspace().tasks.single { it.id == created.id }.deletedAt != null)
 ```
 
-Use `repository!!` in the Room class. Before Room Undo, assert the current
-generation's decoded record families contain TASK, one new TAG, two TASK_TAG,
-and ACTIVITY_ENTRY with contiguous row sequences; close/reopen and reassert the
-created task fields, then execute Undo.
+Use `repository!!` in the Room class. Replace the common successful execute
+line with the following, which captures `generationBefore` immediately before
+success and asserts the resulting generation is exactly `generationBefore + 1`.
+Decode its rows and assert exactly five upserts:
+TASK x1, TAG x1, TASK_TAG x2, and ACTIVITY_ENTRY x1. Assert
+`rows.map { it.sequence } == rows.indices.toList()` and that every decoded
+mutation has a non-null `record` and no `deletedFamily`; do not merely assert
+family containment:
+
+```kotlin
+val generationBefore = database!!.backupStateDao().require("vault-primary").currentGeneration
+val success = repository!!.execute(command) as CommandResult.Success
+val generationAfter = database!!.backupStateDao().require("vault-primary").currentGeneration
+val rows = journalRows(generationAfter)
+val mutations = rows.map { BackupMutationCodec.decode(it.payload) }
+assertEquals(generationBefore + 1, generationAfter)
+assertEquals(rows.indices.toList(), rows.map { it.sequence })
+assertEquals(5, mutations.size)
+assertTrue(mutations.all { it.record != null && it.deletedFamily == null })
+assertEquals(1, mutations.count { it.record!!.family == BackupRecordFamily.TASK })
+assertEquals(1, mutations.count { it.record!!.family == BackupRecordFamily.TAG })
+assertEquals(2, mutations.count { it.record!!.family == BackupRecordFamily.TASK_TAG })
+assertEquals(1, mutations.count { it.record!!.family == BackupRecordFamily.ACTIVITY_ENTRY })
+```
+
+Room's repository feed is asynchronous: replace the success `after` read with
+a bounded observation, and use the same form after reopening and after Undo:
+
+```kotlin
+val after = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.any { it.title == "Enriched" && it.recurrenceAnchor == due } &&
+            snapshot.tags.size == before.tags.size + 1
+    }
+}
+// Close/reopen, then use another bounded observeWorkspace().filterNotNull().first { ... }
+// read to reassert the created fields before Undo.
+repository!!.execute(checkNotNull(success.undo))
+val undone = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.single { it.id == created.id }.deletedAt == fixedNow
+    }
+}
+assertEquals(fixedNow, undone.tasks.single { it.id == created.id }.deletedAt)
+```
+
+Use `BackupMutationCodec.decode(rows.single().payload)` for each decoded row;
+assert the five-record family counts exactly, not a set of contained families.
+Add `ActivityKind`, `TagId`, and `ActivityEntry` imports where those assertions
+need them.
 
 - [ ] **Step 2: Run the RED tests**
 
@@ -3547,9 +3624,11 @@ Expected: new constructor fields/rejection reason are unresolved or ignored.
 - [ ] **Step 3: Add command fields and complete preflight**
 
 Append the command fields and rejection enum exactly as specified in
-Interfaces. In both `createTask` functions, run this validation block after the
-existing active-project/Backlog lookup and before `now()`, `TaskId.new()`, or
-any `UUID.randomUUID()` call:
+Interfaces. In memory, capture `val current = mutableWorkspace.value` before
+the project/Backlog preflight and use that same snapshot throughout the method;
+do not reread `mutableWorkspace.value`. In both `createTask` functions, run
+this validation block after the existing active-project/Backlog lookup and
+before `now()`, `TaskId.new()`, or any `UUID.randomUUID()` call:
 
 ```kotlin
 val title = command.title.trim()
@@ -3671,9 +3750,27 @@ Use the in-memory engine's existing `DeviceId("local-device")` revision value
 instead of `deviceId` in that file.
 
 Room writes planned tags, task, TaskTag rows, and one Created activity inside
-the existing outer `execute` transaction. In-memory publishes tasks, tags, and
-the one Created activity in one `publish` call; let existing
-`reconcileTaskTags` journal relations. No follow-up command is emitted.
+the existing outer `execute` transaction. In-memory builds the Created activity
+with `current.activityEntries.appendedActivity(..., at = createdAt)` and
+publishes tasks, tags, and that activity in one call:
+
+```kotlin
+publish(
+    tasks = current.tasks + task,
+    tags = current.tags + freshTags,
+    activityEntries = current.activityEntries.appendedActivity(
+        taskId = task.id,
+        projectId = task.projectId,
+        kind = ActivityKind.RECORD_CREATED,
+        body = "Created",
+        at = createdAt,
+    ),
+    at = createdAt,
+)
+```
+
+Let existing `reconcileTaskTags` journal relations. No follow-up command is
+emitted.
 
 - [ ] **Step 5: Run focused verification**
 
