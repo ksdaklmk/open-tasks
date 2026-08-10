@@ -6634,9 +6634,14 @@ data class InsightsSnapshot(
 
 - [ ] **Step 1: Write trend-engine RED tests**
 
-Add one parameter loop for shape and one boundary test. Reuse the file's
-existing `workspace(tasks = ...)` helper or add the same one-line
-`OpenTasksFixtures.snapshot.copy(tasks = tasks)` helper:
+Add this domain-test import:
+
+```kotlin
+import java.time.ZonedDateTime
+```
+
+Add one parameter loop for shape, one boundary test, and one exact
+filter-parity test:
 
 ```kotlin
 @Test
@@ -6689,11 +6694,62 @@ fun completionTrendUsesHalfOpenZoneAwareDaysAcrossDst() {
     assertEquals(1L, trend.first().completed)
     assertEquals(1L, trend.last().completed)
 }
-```
 
-Add a third test using one selected project and tag; assert the trend and the
-existing `completed.current` both count the same matching tasks. Include a
-deleted completed task and pin its current existing inclusion in both values.
+@Test
+fun completionTrendMatchesFilteredCompletedCountIncludingBinHistory() {
+    val now = Instant.parse("2026-08-10T12:00:00Z")
+    val projectId = OpenTasksFixtures.studioProject.id
+    val otherProjectId = OpenTasksFixtures.taxProject.id
+    val tagId = TagId("tag-deep-work")
+    val otherTagId = TagId("tag-admin")
+    val matching = completedTask(
+        id = "matching",
+        completedAt = Instant.parse("2026-08-04T00:00:00Z"),
+    ).copy(projectId = projectId, tagIds = setOf(tagId))
+    val matchingDeleted = completedTask(
+        id = "matching-deleted",
+        completedAt = Instant.parse("2026-08-10T11:00:00Z"),
+    ).copy(
+        projectId = projectId,
+        tagIds = setOf(tagId),
+        deletedAt = Instant.parse("2026-08-10T11:30:00Z"),
+    )
+    val wrongProject = completedTask(
+        id = "wrong-project",
+        completedAt = Instant.parse("2026-08-05T12:00:00Z"),
+    ).copy(projectId = otherProjectId, tagIds = setOf(tagId))
+    val wrongTag = completedTask(
+        id = "wrong-tag",
+        completedAt = Instant.parse("2026-08-06T12:00:00Z"),
+    ).copy(projectId = projectId, tagIds = setOf(otherTagId))
+    val outOfRange = completedTask(
+        id = "out-of-range",
+        completedAt = Instant.parse("2026-08-03T23:59:59.999999999Z"),
+    ).copy(projectId = projectId, tagIds = setOf(tagId))
+
+    val snapshot = engine.calculate(
+        OpenTasksFixtures.snapshot.copy(
+            tasks = listOf(
+                matching,
+                matchingDeleted,
+                wrongProject,
+                wrongTag,
+                outOfRange,
+            ),
+        ),
+        InsightsSelection(
+            range = InsightsRange.SEVEN_DAYS,
+            projectIds = setOf(projectId),
+            tagIds = setOf(tagId),
+        ),
+        now,
+        ZoneId.of("UTC"),
+    )
+
+    assertEquals(2L, snapshot.completed.current)
+    assertEquals(2L, snapshot.completionTrend.sumOf { it.completed })
+}
+```
 
 - [ ] **Step 2: Run the RED unit test**
 
@@ -6706,7 +6762,18 @@ Expected: `completionTrend` assertions fail to compile.
 
 - [ ] **Step 3: Compute one point per selected local day**
 
-Append the model default last, then compute from the already-filtered task list:
+Add these imports to their named files:
+
+```kotlin
+// Insights.kt
+import java.time.LocalDate
+
+// InsightsEngine.kt
+import app.opentasks.core.model.CompletionTrendPoint
+```
+
+Append the model default last, then compute from the already-filtered task
+list:
 
 ```kotlin
 data class CompletionTrendPoint(
@@ -6753,6 +6820,17 @@ Add resources with no hardcoded new copy:
 </plurals>
 ```
 
+Add these production imports to `InsightsScreen.kt` unless Task 16 or the
+formatter imports already supplied them; deduplicate the final import list:
+
+```kotlin
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import app.opentasks.core.designsystem.DottedAreaChart
+import app.opentasks.core.model.CompletionTrendPoint
+import java.time.LocalDate
+```
+
 Guard the compatibility default before reading first/last:
 
 ```kotlin
@@ -6772,7 +6850,7 @@ private fun CompletionTrendChart(points: List<CompletionTrendPoint>) {
     val lastDate = formatInsightsDate(points.last().date)
     val summary = pluralStringResource(
         R.plurals.insights_completion_trend_summary,
-        total.toInt(),
+        total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
         total,
         firstDate,
         lastDate,
@@ -6809,7 +6887,7 @@ snapshot.completionTrend.forEach { point ->
         label = formatInsightsDate(point.date),
         value = pluralStringResource(
             R.plurals.insights_completion_day_count,
-            point.completed.toInt(),
+            point.completed.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
             point.completed,
         ),
         modifier = Modifier.testTag("insights-completion-day-${point.date}"),
@@ -6822,13 +6900,78 @@ INSIGHTS_DATE_FORMAT.format(date)`. Keep the selector and all existing sections.
 
 - [ ] **Step 5: Add Compose coverage**
 
-Add four exact cases:
+Add these imports to `InsightsScreenInstrumentedTest.kt` unless Task 16 already
+added them; deduplicate the final import list:
+
+```kotlin
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import app.opentasks.core.model.CompletionTrendPoint
+import java.time.LocalDate
+```
+
+Add this prefix matcher beside the Compose rule. Counting individual known tags
+alone would let an unexpected eighth trend row pass:
+
+```kotlin
+private val hasCompletionTrendDayTag = SemanticsMatcher(
+    "has completion trend day test tag",
+) { node ->
+    SemanticsProperties.TestTag in node.config &&
+        node.config[SemanticsProperties.TestTag]
+            .startsWith("insights-completion-day-")
+}
+```
+
+Add these four exact cases:
 
 ```kotlin
 @Test
 fun defaultEmptyCompletionTrendRendersExistingFixturesWithoutATrendSection() {
     composeRule.setContent { OpenTasksTheme { TestInsightsScreen(populatedState()) } }
     composeRule.onNodeWithTag("insights-completion-trend-scroll").assertDoesNotExist()
+}
+
+@Test
+fun sevenDayTrendChartHasOneExactSummary() {
+    composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendState(7)) } }
+
+    composeRule.onAllNodesWithContentDescription(
+        "7 completions from 4 Aug 2026 to 10 Aug 2026",
+    ).assertCountEquals(1)
+}
+
+@Test
+fun sevenDayTrendTableHasExactlyOneRowPerPoint() {
+    composeRule.setContent {
+        OpenTasksTheme {
+            TestInsightsScreen(
+                trendState(7).copy(presentation = InsightsPresentation.TABLE),
+            )
+        }
+    }
+
+    composeRule.onAllNodes(hasCompletionTrendDayTag).assertCountEquals(7)
+    listOf(
+        Triple("2026-08-04", "4 Aug 2026", "0 tasks"),
+        Triple("2026-08-05", "5 Aug 2026", "1 task"),
+        Triple("2026-08-06", "6 Aug 2026", "0 tasks"),
+        Triple("2026-08-07", "7 Aug 2026", "2 tasks"),
+        Triple("2026-08-08", "8 Aug 2026", "1 task"),
+        Triple("2026-08-09", "9 Aug 2026", "0 tasks"),
+        Triple("2026-08-10", "10 Aug 2026", "3 tasks"),
+    ).forEach { (date, label, value) ->
+        composeRule.onNodeWithTag("insights-completion-day-$date")
+            .assertExists()
+            .assertTextContains(label)
+            .assertTextContains(value)
+    }
 }
 
 @Test
@@ -6842,11 +6985,31 @@ fun ninetyDayTrendScrollsAndKeepsDotsDecorative() {
 }
 ```
 
-Also assert the 7-day chart has one summary description and table mode has
-exactly `insights-completion-day-2026-08-04` through
-`insights-completion-day-2026-08-10`, including a `0 tasks` row.
-`trendState(dayCount)` constructs ascending points ending on 10 August 2026 and
-otherwise reuses `populatedState()`.
+Add this deterministic fixture helper. Its seven explicit values include zero,
+sum to the chart summary above, and pin every table label/value; the wider
+fixture only needs enough non-zero values to exercise scrolling:
+
+```kotlin
+private fun trendState(dayCount: Int): InsightsUiState {
+    require(dayCount > 0)
+    val counts = if (dayCount == 7) {
+        listOf(0L, 1L, 0L, 2L, 1L, 0L, 3L)
+    } else {
+        List(dayCount) { index -> if (index % 10 == 0) 1L else 0L }
+    }
+    val lastDate = LocalDate.of(2026, 8, 10)
+    val points = counts.mapIndexed { index, completed ->
+        CompletionTrendPoint(
+            date = lastDate.minusDays((counts.lastIndex - index).toLong()),
+            completed = completed,
+        )
+    }
+    val base = populatedState()
+    return base.copy(
+        snapshot = base.snapshot.copy(completionTrend = points),
+    )
+}
+```
 
 - [ ] **Step 6: Run focused verification**
 
