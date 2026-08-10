@@ -3521,6 +3521,34 @@ assertTrue(
 )
 ```
 
+Keep the in-memory direct reads shown below. In Room, replace the prerequisite
+assertion with a bounded observation before taking `before`, so all independently
+fed task/tag/relation/activity state is present:
+
+```kotlin
+assertTrue(
+    repository!!.execute(
+        DomainCommand.CreateTask(
+            "Deduped tags",
+            tagNames = List(51) { " deep WORK " },
+        ),
+    ) is CommandResult.Success,
+)
+val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        val task = snapshot.tasks.singleOrNull { it.title == "Deduped tags" }
+            ?: return@first false
+        task.tagIds == setOf(TagId("tag-deep-work")) &&
+            snapshot.activityEntries.any {
+                it.taskId == task.id && it.kind == ActivityKind.RECORD_CREATED
+            }
+    }
+}
+```
+
+In the following common block, omit Room's direct `val before =
+repository.currentWorkspace()` line and use this observed `before` instead.
+
 Then execute:
 
 ```kotlin
@@ -3543,7 +3571,7 @@ val success = repository.execute(command) as CommandResult.Success
 val after = repository.currentWorkspace()
 val created = after.tasks.single { task -> before.tasks.none { it.id == task.id } }
 assertEquals(before.tags.size + 1, after.tags.size)
-val newTag = after.tags.single { it.id !in before.tags.map(Tag::id).toSet() }
+val newTag = after.tags.single { it.id !in before.tags.map { tag -> tag.id }.toSet() }
 assertEquals("New tag", newTag.name)
 assertEquals(setOf(TagId("tag-deep-work"), newTag.id), created.tagIds)
 assertEquals(Duration.ofMinutes(45), created.estimate)
@@ -3591,8 +3619,16 @@ a bounded observation, and use the same form after reopening and after Undo:
 ```kotlin
 val after = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
     repository!!.observeWorkspace().filterNotNull().first { snapshot ->
-        snapshot.tasks.any { it.title == "Enriched" && it.recurrenceAnchor == due } &&
-            snapshot.tags.size == before.tags.size + 1
+        val created = snapshot.tasks.singleOrNull {
+            it.title == "Enriched" && it.recurrenceAnchor == due
+        } ?: return@first false
+        created.tagIds.size == 2 &&
+            TagId("tag-deep-work") in created.tagIds &&
+            snapshot.tags.size == before.tags.size + 1 &&
+            snapshot.tags.any { it.id in created.tagIds && it.name == "New tag" } &&
+            snapshot.activityEntries.count {
+                it.taskId == created.id && it.kind == ActivityKind.RECORD_CREATED
+            } == 1
     }
 }
 // Close/reopen, then use another bounded observeWorkspace().filterNotNull().first { ... }
@@ -3606,8 +3642,7 @@ val undone = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
 assertEquals(fixedNow, undone.tasks.single { it.id == created.id }.deletedAt)
 ```
 
-Use `BackupMutationCodec.decode(rows.single().payload)` for each decoded row;
-assert the five-record family counts exactly, not a set of contained families.
+Assert the five decoded-record family counts exactly, not a set of contained families.
 Add `ActivityKind`, `TagId`, and `ActivityEntry` imports where those assertions
 need them.
 
