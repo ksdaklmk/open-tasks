@@ -5076,9 +5076,11 @@ private fun duplicationSnapshot(): WorkspaceSnapshot {
     val source = sourceTemplate.copy(
         id = TaskId("duplicate-source"),
         projectId = project.id,
+        parentTaskId = TaskId("duplicate-parent"),
         statusId = archivedOpen.id,
         semanticStatus = SemanticStatus.STARTED,
         title = "Duplicate source",
+        start = anchor,
         due = anchor,
         recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY),
         recurrenceSeriesId = TaskId("duplicate-series"),
@@ -5282,6 +5284,7 @@ val repository = InMemoryVaultRepository(
 )
 val before = repository.observeWorkspace().value
 val source = before.tasks.single { it.id == TaskId("duplicate-source") }
+val incomingBefore = before.tasks.single { it.id == TaskId("duplicate-incoming") }
 val result = repository.execute(DomainCommand.DuplicateTask(source.id))
     as CommandResult.Success
 val after = repository.observeWorkspace().value
@@ -5290,18 +5293,39 @@ val duplicate = after.tasks.single { it.id != source.id && it.title == "${source
 assertEquals(source.statusId, duplicate.statusId)
 assertEquals(source.semanticStatus, duplicate.semanticStatus)
 assertFalse(duplicate.isCompleted)
+assertEquals("${source.title} (copy)", duplicate.title)
+assertEquals(source.workspaceId, duplicate.workspaceId)
+assertEquals(source.projectId, duplicate.projectId)
+assertEquals(source.parentTaskId, duplicate.parentTaskId)
+assertEquals(source.description, duplicate.description)
+assertEquals(source.priority, duplicate.priority)
+assertEquals(source.start, duplicate.start)
+assertEquals(source.due, duplicate.due)
+assertEquals(source.estimate, duplicate.estimate)
+assertEquals(source.milestoneId, duplicate.milestoneId)
 assertEquals(source.tagIds, duplicate.tagIds)
 assertEquals(source.dependencyIds, duplicate.dependencyIds)
 assertEquals(setOf(TaskId("duplicate-dependency-active")), duplicate.blockedBy)
+assertEquals(source.checklist.size, duplicate.checklist.size)
+assertEquals(source.checklist.map { it.text }, duplicate.checklist.map { it.text })
+assertEquals(source.checklist.map { it.rank }, duplicate.checklist.map { it.rank })
 assertTrue(duplicate.checklist.none { it.completed })
 assertTrue(duplicate.checklist.map { it.id }.intersect(source.checklist.map { it.id }.toSet()).isEmpty())
 assertNull(duplicate.recurrence)
 assertDuplicateIsolation(before, after, source, duplicate)
+assertEquals(
+    incomingBefore,
+    after.tasks.single { it.id == TaskId("duplicate-incoming") },
+)
 
 repository.execute(checkNotNull(result.undo))
 val undone = repository.observeWorkspace().value
 assertNotNull(undone.tasks.single { it.id == duplicate.id }.deletedAt)
-assertNull(undone.tasks.single { it.id == source.id }.deletedAt)
+assertEquals(source, undone.tasks.single { it.id == source.id })
+assertEquals(
+    incomingBefore,
+    undone.tasks.single { it.id == TaskId("duplicate-incoming") },
+)
 ```
 
 In both engines, `duplicateTaskMovesACompletedSourceToTheFirstActiveBacklog`
@@ -5371,6 +5395,17 @@ val repository = InMemoryVaultRepository(
     now = { Instant.parse("2026-08-10T10:00:00Z") },
     backupJournal = journal,
 )
+assertTrue(
+    repository.execute(
+        DomainCommand.RenameTask(
+            TaskId("duplicate-dependency-active"),
+            "Primed unrelated task",
+        ),
+    ) is CommandResult.Success,
+)
+assertTrue(journal.currentGeneration > 0)
+assertTrue(journal.entries.isNotEmpty())
+val payloadSentinel = ByteArray(0)
 listOf(
     DomainCommand.DuplicateTask(TaskId("missing")) to RejectionReason.NOT_FOUND,
     DomainCommand.DuplicateTask(TaskId("duplicate-source-deleted")) to
@@ -5379,17 +5414,19 @@ listOf(
         RejectionReason.INVALID_STATE,
 ).forEach { (command, expectedReason) ->
     val before = repository.observeWorkspace().value
+    val generationBefore = journal.currentGeneration
     val journalBefore = journal.entries
     val result = repository.execute(command) as CommandResult.Rejected
     assertEquals(expectedReason, result.reason)
     assertEquals(before, repository.observeWorkspace().value)
+    assertEquals(generationBefore, journal.currentGeneration)
     val journalAfter = journal.entries
     assertEquals(journalBefore.size, journalAfter.size)
+    assertEquals(
+        journalBefore.map { it.copy(payload = payloadSentinel) },
+        journalAfter.map { it.copy(payload = payloadSentinel) },
+    )
     journalBefore.zip(journalAfter).forEach { (expected, actual) ->
-        assertEquals(
-            expected.copy(payload = byteArrayOf()),
-            actual.copy(payload = byteArrayOf()),
-        )
         assertArrayEquals(expected.payload, actual.payload)
     }
 }
@@ -5414,6 +5451,28 @@ openRepository(
     now = { Instant.parse("2026-08-10T10:00:00Z") },
     seedSnapshot = duplicationSnapshot(),
 )
+val generationBeforePrime =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+assertTrue(
+    repository!!.execute(
+        DomainCommand.RenameTask(
+            TaskId("duplicate-dependency-active"),
+            "Primed unrelated task",
+        ),
+    ) is CommandResult.Success,
+)
+val generationAfterPrime =
+    database!!.backupStateDao().require("vault-primary").currentGeneration
+assertEquals(generationBeforePrime + 1, generationAfterPrime)
+withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+    repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+        snapshot.tasks.singleOrNull {
+            it.id == TaskId("duplicate-dependency-active")
+        }?.title == "Primed unrelated task"
+    }
+}
+assertTrue(journalRows(generationAfterPrime).isNotEmpty())
+val payloadSentinel = ByteArray(0)
 listOf(
     DomainCommand.DuplicateTask(TaskId("missing")) to RejectionReason.NOT_FOUND,
     DomainCommand.DuplicateTask(TaskId("duplicate-source-deleted")) to
@@ -5444,11 +5503,11 @@ val rowsAfter =
 assertEquals(before, after)
 assertEquals(generationBefore, generationAfter)
 assertEquals(rowsBefore.size, rowsAfter.size)
+assertEquals(
+    rowsBefore.map { it.copy(payload = payloadSentinel) },
+    rowsAfter.map { it.copy(payload = payloadSentinel) },
+)
 rowsBefore.zip(rowsAfter).forEach { (expected, actual) ->
-    assertEquals(
-        expected.copy(payload = byteArrayOf()),
-        actual.copy(payload = byteArrayOf()),
-    )
     assertArrayEquals(expected.payload, actual.payload)
 }
 }
@@ -5478,11 +5537,13 @@ val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
     }
 }
 val source = before.tasks.single { it.id == TaskId("duplicate-source") }
+val incomingBefore = before.tasks.single { it.id == TaskId("duplicate-incoming") }
 val generationBefore =
     database!!.backupStateDao().require("vault-primary").currentGeneration
 val success = repository!!.execute(DomainCommand.DuplicateTask(source.id))
     as CommandResult.Success
-val duplicateId = (checkNotNull(success.undo) as DomainCommand.DeleteTask).taskId
+val undo = checkNotNull(success.undo)
+val duplicateId = (undo as DomainCommand.DeleteTask).taskId
 val generationAfter =
     database!!.backupStateDao().require("vault-primary").currentGeneration
 assertEquals(generationBefore + 1, generationAfter)
@@ -5520,7 +5581,7 @@ decode the Undo generation, not the duplication generation. Observe, reopen,
 and assert with these exact bounded predicates:
 
 ```kotlin
-withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+val afterDuplicate = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
     repository!!.observeWorkspace().filterNotNull().first { snapshot ->
         snapshot.tasks.any { it.id == duplicateId } &&
             snapshot.activityEntries.count {
@@ -5528,6 +5589,10 @@ withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             } == 1
     }
 }
+assertEquals(
+    incomingBefore,
+    afterDuplicate.tasks.single { it.id == TaskId("duplicate-incoming") },
+)
 repository!!.close()
 database!!.close()
 repository = null
@@ -5550,9 +5615,22 @@ val duplicate = reopened.tasks.single { it.id == duplicateId }
 assertEquals(source.statusId, duplicate.statusId)
 assertEquals(source.semanticStatus, duplicate.semanticStatus)
 assertFalse(duplicate.isCompleted)
+assertEquals("${source.title} (copy)", duplicate.title)
+assertEquals(source.workspaceId, duplicate.workspaceId)
+assertEquals(source.projectId, duplicate.projectId)
+assertEquals(source.parentTaskId, duplicate.parentTaskId)
+assertEquals(source.description, duplicate.description)
+assertEquals(source.priority, duplicate.priority)
+assertEquals(source.start, duplicate.start)
+assertEquals(source.due, duplicate.due)
+assertEquals(source.estimate, duplicate.estimate)
+assertEquals(source.milestoneId, duplicate.milestoneId)
 assertEquals(source.tagIds, duplicate.tagIds)
 assertEquals(source.dependencyIds, duplicate.dependencyIds)
 assertEquals(setOf(TaskId("duplicate-dependency-active")), duplicate.blockedBy)
+assertEquals(source.checklist.size, duplicate.checklist.size)
+assertEquals(source.checklist.map { it.text }, duplicate.checklist.map { it.text })
+assertEquals(source.checklist.map { it.rank }, duplicate.checklist.map { it.rank })
 assertTrue(duplicate.checklist.none { it.completed })
 assertTrue(
     duplicate.checklist.map { it.id }
@@ -5562,8 +5640,8 @@ assertTrue(
 assertNull(duplicate.recurrence)
 assertDuplicateIsolation(before, reopened, source, duplicate)
 assertEquals(
-    setOf(source.id),
-    reopened.tasks.single { it.id == TaskId("duplicate-incoming") }.dependencyIds,
+    incomingBefore,
+    reopened.tasks.single { it.id == TaskId("duplicate-incoming") },
 )
 ```
 
@@ -5572,12 +5650,18 @@ Finally execute the captured Undo and boundedly await
 its reopened value and only the duplicate task changed:
 
 ```kotlin
+repository!!.execute(undo)
 val undone = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
     repository!!.observeWorkspace().filterNotNull().first { snapshot ->
         snapshot.tasks.single { it.id == duplicateId }.deletedAt == fixedNow
     }
 }
 assertNotNull(undone.tasks.single { it.id == duplicateId }.deletedAt)
+assertEquals(source, undone.tasks.single { it.id == source.id })
+assertEquals(
+    incomingBefore,
+    undone.tasks.single { it.id == TaskId("duplicate-incoming") },
+)
 assertEquals(
     reopened.tasks.filter { it.id != duplicateId },
     undone.tasks.filter { it.id != duplicateId },
