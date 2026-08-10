@@ -4557,7 +4557,7 @@ if rg -n 'Dark[A-Z]|darkColorScheme|isSystemInDarkTheme|darkTheme|Theme.Material
   core/designsystem/src app/src/main feature/more/src/androidTest; then
   exit 1
 fi
-if rg -n 'theme[_-]?preference|theme[_-]?mode|ThemeMode' app/src/main; then
+if rg -ni 'theme[_-]?(preference|mode)' app/src/main; then
   exit 1
 fi
 git diff --check
