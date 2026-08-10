@@ -263,14 +263,15 @@ class FocusTimerOwnershipTest {
         // The real constructor is module-internal; keep the production module
         // untouched and cross that boundary only in this JVM test.
         val constructor = InMemoryVaultRepository::class.java.declaredConstructors
-            .single { it.parameterCount == 6 }
+            .single { it.parameterCount == 7 }
             .apply { isAccessible = true }
         return constructor.newInstance(
             OpenTasksFixtures.snapshot,
             null,
             null,
             null,
-            14,
+            null,
+            30,
             null,
         ) as InMemoryVaultRepository
     }
