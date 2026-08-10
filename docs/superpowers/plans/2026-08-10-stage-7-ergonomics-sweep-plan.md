@@ -5961,7 +5961,11 @@ onDuplicateTask: (TaskId) -> Unit = {}
 - [ ] **Step 1: Write detail-action RED coverage**
 
 Add tests using the file's existing `TasksScreen` fixture. The action contract
-is exact:
+is exact. Add `androidx.compose.runtime.mutableStateOf`,
+`androidx.compose.ui.test.assertIsEnabled`,
+`androidx.compose.ui.test.assertIsNotEnabled`, and
+`androidx.compose.ui.test.assertTextEquals`; use the literal UK-English copy
+below rather than adding another instrumented-test dependency or ninth path:
 
 ```kotlin
 val duplicated = AtomicReference<TaskId?>()
@@ -5983,37 +5987,93 @@ composeRule.setContent {
             onToggleTimer = {},
             onUpdateTask = { _, _ -> },
             onAddChecklistItem = { _, _ -> },
-            onUpdateChecklistItem = { _, _, _, _ -> },
+            onUpdateChecklistItem = { _, _ -> },
             onDeleteChecklistItem = { _, _ -> },
             onSetTaskTag = { _, _, _ -> },
+            onCreateAndAssignTag = { _, _ -> },
             onDuplicateTask = duplicated::set,
         )
     }
 }
 composeRule.onNodeWithTag("duplicate-task")
     .performScrollTo()
-    .assertTextEquals(
-        ApplicationProvider.getApplicationContext<Context>()
-            .getString(R.string.task_duplicate),
-    )
+    .assertTextEquals("Duplicate task")
     .assertHeightIsAtLeast(48.dp)
     .assertIsEnabled()
     .performClick()
 assertEquals(task.id, duplicated.get())
 ```
 
-In a second test, replace the title, assert `duplicate-task` is disabled while
-`dirty == true`, advance the existing 650 ms clock, feed the captured
-`TaskEdit` back as the rendered task, and assert it becomes enabled. Replace
-the title with blank text and assert it stays disabled. This pins
-`enabled = valid && !dirty` and prevents stale-state copies.
+In a second test, hoist the rendered task as Compose state so the delayed
+`onUpdateTask` callback actually feeds the submitted edit back through the
+screen. A capture-only callback is tautological because the rendered task
+would stay dirty:
+
+```kotlin
+val renderedTask = mutableStateOf(task)
+val duplicated = AtomicReference<TaskId?>()
+composeRule.mainClock.autoAdvance = false
+composeRule.setContent {
+    OpenTasksTheme {
+        TasksScreen(
+            tasks = listOf(renderedTask.value),
+            projectNames = OpenTasksFixtures.snapshot.projects.associate { it.id to it.name },
+            workflowStatuses = OpenTasksFixtures.workflowStatuses,
+            tags = OpenTasksFixtures.tags,
+            selectedTaskId = task.id,
+            showDetailPane = false,
+            onSelectTask = {},
+            onCloseDetail = {},
+            onCompleteTask = {},
+            onChangeTaskStatus = { _, _ -> },
+            onDeleteTask = {},
+            activeTimerTaskId = null,
+            onToggleTimer = {},
+            onUpdateTask = { _, edit ->
+                renderedTask.value = renderedTask.value.copy(
+                    title = edit.title,
+                    description = edit.description,
+                    projectId = edit.projectId,
+                    priority = edit.priority,
+                    due = edit.due,
+                    recurrence = edit.recurrence,
+                    estimate = edit.estimate,
+                    milestoneId = edit.milestoneId,
+                )
+            },
+            onAddChecklistItem = { _, _ -> },
+            onUpdateChecklistItem = { _, _ -> },
+            onDeleteChecklistItem = { _, _ -> },
+            onSetTaskTag = { _, _, _ -> },
+            onCreateAndAssignTag = { _, _ -> },
+            onDuplicateTask = duplicated::set,
+        )
+    }
+}
+
+val duplicateAction = composeRule.onNodeWithTag("duplicate-task").performScrollTo()
+composeRule.onNodeWithTag("task-title-field").performTextReplacement("Updated title")
+duplicateAction.assertIsNotEnabled()
+composeRule.mainClock.advanceTimeBy(650)
+composeRule.waitForIdle()
+duplicateAction.assertIsEnabled()
+composeRule.onNodeWithTag("task-title-field").performTextReplacement("")
+duplicateAction.assertIsNotEnabled()
+assertNull(duplicated.get())
+```
+
+This pins `enabled = valid && !dirty` and prevents stale-state copies.
 
 - [ ] **Step 2: Write board-menu RED coverage**
 
-Extend the existing board fixture with a capture and assert the menu contract:
+Add `androidx.compose.ui.test.assertContentDescriptionEquals`,
+`androidx.compose.ui.test.assertDoesNotExist`, and
+`androidx.compose.ui.test.assertHeightIsAtLeast`. Extend the existing board
+fixture with both captures and assert the menu contract:
 
 ```kotlin
 val duplicated = AtomicReference<TaskId?>()
+val moved = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
 val backlog = OpenTasksFixtures.workflowStatuses.single {
     it.id == OpenTasksFixtures.backlog
 }
@@ -6041,10 +6101,15 @@ BoardView(
 )
 
 composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
-composeRule.onNodeWithTag("board-duplicate-${task.id.value}").performClick()
+composeRule.onNodeWithTag("board-duplicate-${task.id.value}")
+    .assertHeightIsAtLeast(48.dp)
+    .assertContentDescriptionEquals("Duplicate ${task.title}")
+    .performClick()
 assertEquals(task.id, duplicated.get())
 
+composeRule.onNodeWithTag("board-duplicate-${task.id.value}").assertDoesNotExist()
 composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
+composeRule.onNodeWithTag("board-duplicate-${task.id.value}").assertIsDisplayed()
 composeRule.onNodeWithTag(
     "board-move-${task.id.value}-to-${OpenTasksFixtures.planned.value}",
 ).performClick()
@@ -6089,10 +6154,16 @@ OutlinedButton(
 ```
 
 Thread the same callback through both workbench paths and `BoardTaskCard`.
-Inside the existing card `DropdownMenu`, add this item without changing the
-relative order of `targets.forEach`:
+Inside the existing card `DropdownMenu`, resolve the description with the
+existing composable-scope string pattern, then add this item without changing
+the relative order of `targets.forEach`:
 
 ```kotlin
+val duplicateTaskDescription = stringResource(
+    R.string.board_duplicate_task_description,
+    task.title,
+)
+
 DropdownMenuItem(
     text = { Text(stringResource(R.string.board_duplicate_task)) },
     onClick = {
@@ -6101,11 +6172,11 @@ DropdownMenuItem(
     },
     modifier = Modifier
         .heightIn(min = 48.dp)
+        .semantics { contentDescription = duplicateTaskDescription }
         .testTag("board-duplicate-${task.id.value}"),
 )
 ```
 
-Use `board_duplicate_task_description` for the item's accessibility label.
 Do not touch drag state, move targets, or board ordering.
 
 - [ ] **Step 5: Dispatch the command at the root**
