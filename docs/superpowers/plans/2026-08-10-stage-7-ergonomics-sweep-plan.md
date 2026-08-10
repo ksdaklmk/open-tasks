@@ -2440,7 +2440,7 @@ private fun SearchResult.id() = when (this) {
         tasks = listOf(
             task("task-prefix", "alpha beta"),
             task("task-word", "go-alpha"),
-            task("task-unicode-substring", "éalpha"),
+            task("task-unicode-substring", "βalpha"),
             task("task-substring", "go2alpha"),
             task("task-exact", "ALPHA"),
         ),
@@ -2449,7 +2449,7 @@ private fun SearchResult.id() = when (this) {
     assertEquals(
         listOf(
             "task-exact", "project-exact", "task-prefix", "task-word",
-            "task-unicode-substring", "task-substring",
+            "task-substring", "task-unicode-substring",
         ),
         searchWorkspace(input, SearchQuery("alpha"), clock).map { it.id() },
     )
