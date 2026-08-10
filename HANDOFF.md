@@ -1,5 +1,58 @@
 # Open Tasks Handoff
 
+## Current resume point — paused by user, 10 August 2026
+
+This section is authoritative. Older chronological notes below are retained
+for context; any conflicting billing prerequisite, live-backlog label, or
+pre-execution status is superseded here.
+
+- Stage 7 implementation is local on `main`. The last implementation/planning
+  checkpoint is `5a81e3fc8bdb3dfd0ece06deb81bee109cb74877`
+  (`docs: harden stage 7 board and saved view plans`); the pause handoff is a
+  docs-only commit on top. Nothing has been pushed during this execution.
+- Stage 7 Tasks 1–5 are complete and independently review-clean:
+  `7638037` (date buckets), `ddc3f16` (arrangement authority), `65242f1`
+  (device-local arrangement store), `141e7a0..62f003f` (Tasks arrangement),
+  and `b5ff894..1ff4a3c` (workbench arrangement). Plan-hardening commits are
+  intentionally interleaved with those implementation commits.
+- Task 6 is safely parked at the TDD RED boundary. These four task-owned test
+  files are modified and unstaged:
+  `core/domain/src/test/kotlin/app/opentasks/core/domain/TaskArrangementRulesTest.kt`,
+  `feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/BoardViewInstrumentedTest.kt`,
+  `feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/ProjectWorkbenchInstrumentedTest.kt`,
+  and
+  `feature/projects/src/test/kotlin/app/opentasks/feature/projects/BoardColumnsTest.kt`.
+  No Task 6 production, resource, or app file has changed, and the index is
+  empty.
+- The recorded RED command is
+  `./gradlew :feature:projects:compileDebugAndroidTestKotlin`. It fails for the
+  intended reasons: the old feature `BoardColumn` conflicts with the model
+  type, and `ProjectsScreen` does not yet expose `selectedBoardColumns`,
+  `boardSort`, or `onBoardSortChange`.
+- Resume by reading
+  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/task-6-brief.md`
+  and continuing at Step 4 without discarding the four RED edits. Complete
+  its focused checks, exact eight-path staging audit, commit, and independent
+  review before starting Task 7.
+- Task 7's saved-view v2 brief is preflight-clean. Task 8's brief was generated,
+  but its two audits were interrupted for this pause; rerun Task 8 preflight
+  before implementation. Tasks 9–18 remain pending.
+- Verification so far: the execution baseline and Task 3 full local
+  `testDebugUnitTest lintDebug :app:assembleDebug` gates passed; Tasks 4–5
+  passed their focused compile gates. No Stage 7 device suite has run; that is
+  deliberately reserved for Task 18.
+- **GitHub Free only.** Do not add a payment method, enable metered spend, use
+  larger runners, Codespaces, Copilot, paid Marketplace products, or any other
+  paid GitHub service. Continue Tasks 6–17 locally. At Task 18, use remote CI
+  only if the included free allowance is available; otherwise pause at that
+  gate. The old paid-billing prerequisite is cancelled.
+- Preserve the user-owned modified Stage 3 plan and untracked `.kotlin/` and
+  `artifacts/` paths. They are unrelated to Stage 7. The ignored execution
+  ledger is
+  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
+
+## Historical context
+
 - Last updated: 10 August 2026
 - Branch: `main` at Stage 7 Phase 0 commit `7638037`, with the implementation
   plan checkpoint at `2049581`, planning pause at `80ec470`, and approved
@@ -22,7 +75,7 @@
   qualification record is `docs/qualification/stage6-daily-flow.md`; the
   ignored execution ledger remains
   `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-- Remaining and planned work, in order (the live backlog):
+- Historical Phase-0 backlog (superseded; retained for context):
   1. **Restore GitHub Actions execution.** Push run
      [`31344561176`](https://github.com/ksdaklmk/open-tasks/actions/runs/31344561176)
      assigned no runner and executed zero steps for verify, compact API 36,
