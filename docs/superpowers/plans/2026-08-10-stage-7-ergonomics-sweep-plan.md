@@ -1353,6 +1353,17 @@ are localised resource text; the unlabelled group renders no header. Then
 select each existing date chip and prove filtering happens within every group,
 empty groups disappear, and surviving group/task order remains unchanged.
 
+Render one PROJECT group for `ProjectId("inbox")` beside the null-project
+Inbox group, and give one task an id equal to an unprefixed header key. Assert
+all headings and rows render without duplicate-key failure. Project and task
+ids are opaque, so header/row key namespaces—not input parsing—must prevent
+collisions.
+
+Render non-default `taskSort = UPDATED` and `taskGroupBy = PROJECT`. Assert the
+two controls announce the current resource-backed selection; open each menu
+and assert the matching option has selected semantics. The controls are
+stateless: only their supplied parameters determine these semantics.
+
 - [ ] **Step 2: Run the RED compilation**
 
 ```bash
@@ -1373,7 +1384,23 @@ the fallback for a missing id is the resource-backed generic Project label.
 
 Add two 48 dp menu controls in the list header. Sort offers DUE, PRIORITY,
 TITLE, UPDATED; group offers null, DUE_BUCKET, PROJECT, PRIORITY. Controls emit
-callbacks only and never remember their own selected value.
+callbacks only and never remember their own selected value. Their content
+descriptions are `tasks_sort_control` / `tasks_group_control` formatted with
+the current option label, and every menu item sets `selected` semantics from
+`taskSort` / `taskGroupBy`. Add and use these exact resource-backed strings:
+
+```text
+tasks_sort_control = Sort tasks: %1$s
+tasks_group_control = Group tasks: %1$s
+tasks_sort_due_label = Due
+tasks_sort_priority_label = Priority
+tasks_sort_title_label = Title
+tasks_sort_updated_label = Updated
+tasks_group_none_label = None
+tasks_group_due_label = Due
+tasks_group_project_label = Project
+tasks_group_priority_label = Priority
+```
 
 Use this transformation before `TaskListPane`; it preserves supplied group and
 task order and removes only empty groups:
@@ -1397,15 +1424,17 @@ val visibleTaskGroups = taskGroups.mapNotNull { group ->
 ```
 
 Pass `visibleTaskGroups` into `TaskListPane`; in its existing `LazyColumn`, use
-one keyed header `item` for each non-null semantic value followed by
-`items(group.tasks, key = { it.id.value })`. Add these exhaustive helpers; add
-the referenced resource names to this module's `strings.xml`:
+one `item(key = "header:${group.value.stableKey()}")` for each non-null
+semantic value followed by
+`items(group.tasks, key = { "task:${it.id.value}" })`. Add these exhaustive
+helpers; add the referenced resource names to this module's `strings.xml`:
 
 ```kotlin
 private fun TaskGroupValue.stableKey(): String = when (this) {
-    is TaskGroupValue.Due -> "due-${bucket.name}"
-    is TaskGroupValue.Project -> "project-${projectId?.value ?: "inbox"}"
-    is TaskGroupValue.PriorityValue -> "priority-${priority.name}"
+    is TaskGroupValue.Due -> "due:${bucket.name}"
+    is TaskGroupValue.Project -> projectId?.let { "project:id:${it.value}" }
+        ?: "project:inbox"
+    is TaskGroupValue.PriorityValue -> "priority:${priority.name}"
 }
 
 @Composable
@@ -1439,26 +1468,53 @@ private fun taskGroupLabel(
 
 - [ ] **Step 4: Project in `OpenTasksApp` and persist callbacks**
 
-Collect `viewModel.viewArrangement`. For the Tasks route, derive and pass these
-exact values:
+Collect `viewModel.viewArrangement`. Replace Task 1's standalone bucket-map
+projection with one remembered projection that samples the injected clock
+once. This keeps date-chip membership and due-group labels on the same instant
+even if the live clock advances between recompositions; reuse the existing
+`projectNames` map instead of rebuilding it:
 
 ```kotlin
 val tasksArrangement = viewArrangement.tasks
-val taskGroups = arrangeTasks(
-    tasks = snapshot.tasks,
-    arrangement = tasksArrangement,
-    projectNames = snapshot.projects.associate { it.id to it.name },
-    clock = clock,
-)
+val (dueBucketsByTaskId, taskGroups) = remember(
+    snapshot.tasks,
+    projectNames,
+    tasksArrangement,
+    clock,
+) {
+    val projectionClock = Clock.fixed(clock.instant(), clock.zone)
+    snapshot.tasks.associate { task ->
+        task.id to classifyDueBucket(task.due, projectionClock)
+    } to arrangeTasks(
+        tasks = snapshot.tasks,
+        arrangement = tasksArrangement,
+        projectNames = projectNames,
+        clock = projectionClock,
+    )
+}
 ```
 
 At the existing `TasksScreen` call add `taskGroups`,
 `taskSort = tasksArrangement.sort`, and
-`taskGroupBy = tasksArrangement.groupBy`. Add callbacks that call
-`setTasksArrangement(tasksArrangement.copy(sort = sort))` and
-`setTasksArrangement(tasksArrangement.copy(groupBy = groupBy))` respectively.
-Leave every existing argument unchanged. Reuse Task 1's root clock. Do not put
-this choice in `rememberSaveable` or `SavedStateHandle`.
+`taskGroupBy = tasksArrangement.groupBy`. Each callback must copy from the
+store's latest value at invocation, not the composition-captured arrangement,
+so back-to-back sort/group events cannot overwrite each other:
+
+```kotlin
+onTaskSortChange = { sort ->
+    viewModel.setTasksArrangement(
+        viewModel.viewArrangement.value.tasks.copy(sort = sort),
+    )
+}
+onTaskGroupChange = { groupBy ->
+    viewModel.setTasksArrangement(
+        viewModel.viewArrangement.value.tasks.copy(groupBy = groupBy),
+    )
+}
+```
+
+Leave every existing argument unchanged. Do not put this choice in
+`rememberSaveable` or `SavedStateHandle`.
 
 - [ ] **Step 5: Run focused verification**
 
