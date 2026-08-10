@@ -4242,11 +4242,29 @@ ZoneId.of("Asia/Bangkok"))`, `listOf(OpenTasksFixtures.studioProject)`, and
    due remains `2026-08-11T10:00:00Z` instead of changing to the implicit
    Monday anchor `2026-08-10T10:00:00Z`. This behaviorally witnesses the
    `dueExplicit` key.
-2. Confirm `every monday` from `Weekday every monday`, restore, submit, and
-   assert title `Weekday` plus exactly
+2. Give the implicit-weekday case a same-file, test-only restoration host in
+   `ProcessRestorationInstrumentedTest.kt`; do not add a production observer.
+   The host stores `QuickAddDraft("Weekday every monday")` with
+   `rememberSaveable(stateSaver = QuickAddDraftSaver)`, publishes the current
+   draft to an `AtomicReference<QuickAddDraft>` from `SideEffect`, renders an
+   `OutlinedTextField` tagged `restored-weekday-title`, and renders a confirm
+   button tagged `restored-weekday-confirm`. The button must compute the full
+   unfiltered current list with
+   `parseQuickAdd(draft.title, clock.instant(), clock.zone, projects, tags)`,
+   select its single RECURRENCE match, and call
+   `draft.confirm(recurrence, matches)` with that same list. Confirm Monday,
+   assert due `ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"),
+   "Asia/Bangkok")`, exact weekly-Monday recurrence, and
+   `dueIsExplicit == false`, then emulate saved-state restoration. After the
+   restore, replace the field text with `Weekday every tuesday`, click the
+   confirm button, and assert the observed draft converts exactly to title
+   `Weekday`, due
+   `ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "Asia/Bangkok")`,
    `RecurrenceRule(RecurrenceFrequency.WEEKLY,
-   weekdays = setOf(DayOfWeek.MONDAY))`. This separately witnesses the
-   `weekdays` key without conflating a weekday rule with the interval case.
+   weekdays = setOf(DayOfWeek.TUESDAY))`, and `dueIsExplicit == false`.
+   This separately witnesses `weekdays` and fails if Saver restore incorrectly
+   promotes every valid implicit due to explicit. Keep item 1 as the separate
+   explicit-due restoration witness.
 3. Dismiss `@Admin`, restore, and assert its suggestion is still absent. This
    witnesses the `dismissed` key as suppression behavior, not merely a saved
    collection value.
