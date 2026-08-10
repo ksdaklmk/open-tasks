@@ -3897,11 +3897,26 @@ class QuickAddDraftTest {
     private val projects = listOf(OpenTasksFixtures.studioProject)
     private val tags = OpenTasksFixtures.tags
 
-    private fun match(text: String, kind: QuickAddTokenKind) =
-        parseQuickAdd(text, now, zone, projects, tags).single { it.kind == kind }
+    private fun parsed(text: String) = parseQuickAdd(text, now, zone, projects, tags)
 
-    private fun QuickAddDraft.confirmCurrent(kind: QuickAddTokenKind) =
-        confirm(match(title, kind))
+    private fun match(
+        text: String,
+        kind: QuickAddTokenKind,
+        occurrence: Int = 0,
+    ) = parsed(text).filter { it.kind == kind }[occurrence]
+
+    private fun QuickAddDraft.confirmCurrent(
+        kind: QuickAddTokenKind,
+        occurrence: Int = 0,
+    ): QuickAddDraft {
+        val matches = parsed(title)
+        return confirm(matches.filter { it.kind == kind }[occurrence], matches)
+    }
+
+    private fun QuickAddDraft.confirmValue(value: QuickAddTokenValue): QuickAddDraft {
+        val match = QuickAddTokenMatch(0, 0, value)
+        return confirm(match, listOf(match))
+    }
 
     @Test fun rightToLeftConfirmationProducesTheExactGrammarFreeCommand() {
         val original = "Plan #stu @Admin !1 every monday ~45m tomorrow"
@@ -3933,8 +3948,12 @@ class QuickAddDraftTest {
             ),
             draft.toCommand(),
         )
-        assertNull(draft.clear(QuickAddTokenKind.DATE).toCommand().recurrence)
-        assertEquals(expectedDue, draft.clear(QuickAddTokenKind.RECURRENCE).toCommand().due)
+        val dateCleared = draft.clear(QuickAddTokenKind.DATE)
+        assertNull(dateCleared.toCommand().recurrence)
+        assertFalse(dateCleared.dueIsExplicit)
+        val recurrenceCleared = draft.clear(QuickAddTokenKind.RECURRENCE)
+        assertEquals(expectedDue, recurrenceCleared.toCommand().due)
+        assertTrue(recurrenceCleared.dueIsExplicit)
     }
 
     @Test fun recurrenceConfirmedAfterDateKeepsTheExplicitAppliedDue() {
@@ -3946,10 +3965,11 @@ class QuickAddDraftTest {
         assertEquals(ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id), explicitDue)
         assertNotEquals(explicitDue, implicitDue)
 
-        draft = draft.confirm(reparsedRecurrence)
+        draft = draft.confirm(reparsedRecurrence, parsed(draft.title))
 
         assertEquals("Plan", draft.toCommand().title)
         assertEquals(explicitDue, draft.toCommand().due)
+        assertTrue(draft.dueIsExplicit)
         assertEquals(
             RecurrenceRule(
                 frequency = RecurrenceFrequency.WEEKLY,
@@ -3959,27 +3979,121 @@ class QuickAddDraftTest {
         )
     }
 
+    @Test fun laterRecurrenceReplacesRuleAndImplicitAnchorInEitherOrder() {
+        val original = "Plan every monday every tuesday"
+        val mondayDue = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id)
+        val tuesdayDue = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id)
+
+        var mondayThenTuesday = QuickAddDraft(original)
+            .confirmCurrent(QuickAddTokenKind.RECURRENCE, occurrence = 0)
+        assertEquals(mondayDue, mondayThenTuesday.toCommand().due)
+        assertFalse(mondayThenTuesday.dueIsExplicit)
+        mondayThenTuesday = mondayThenTuesday
+            .confirmCurrent(QuickAddTokenKind.RECURRENCE, occurrence = 0)
+        assertEquals("Plan", mondayThenTuesday.toCommand().title)
+        assertEquals(tuesdayDue, mondayThenTuesday.toCommand().due)
+        assertEquals(
+            RecurrenceRule(
+                frequency = RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.TUESDAY),
+            ),
+            mondayThenTuesday.toCommand().recurrence,
+        )
+        assertFalse(mondayThenTuesday.dueIsExplicit)
+
+        var tuesdayThenMonday = QuickAddDraft(original)
+            .confirmCurrent(QuickAddTokenKind.RECURRENCE, occurrence = 1)
+        assertEquals(tuesdayDue, tuesdayThenMonday.toCommand().due)
+        tuesdayThenMonday = tuesdayThenMonday
+            .confirmCurrent(QuickAddTokenKind.RECURRENCE, occurrence = 0)
+        assertEquals("Plan", tuesdayThenMonday.toCommand().title)
+        assertEquals(mondayDue, tuesdayThenMonday.toCommand().due)
+        assertEquals(
+            RecurrenceRule(
+                frequency = RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.MONDAY),
+            ),
+            tuesdayThenMonday.toCommand().recurrence,
+        )
+        assertFalse(tuesdayThenMonday.dueIsExplicit)
+    }
+
+    @Test fun clearingRecurrenceMakesItsRetainedDueExplicit() {
+        var draft = QuickAddDraft("Plan every monday")
+            .confirmCurrent(QuickAddTokenKind.RECURRENCE)
+            .clear(QuickAddTokenKind.RECURRENCE)
+            .editTitle("Plan every tuesday")
+        assertTrue(draft.dueIsExplicit)
+
+        draft = draft.confirmCurrent(QuickAddTokenKind.RECURRENCE)
+
+        assertEquals(ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id), draft.toCommand().due)
+        assertEquals(
+            RecurrenceRule(
+                frequency = RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.TUESDAY),
+            ),
+            draft.toCommand().recurrence,
+        )
+        assertTrue(draft.dueIsExplicit)
+    }
+
     @Test fun dismissedTokenSurvivesEarlierConfirmationAndReparse() {
         val original = "Plan #stu @Admin"
-        val project = match(original, QuickAddTokenKind.PROJECT)
-        val tag = match(original, QuickAddTokenKind.TAG)
-        var draft = QuickAddDraft(original).dismiss(tag)
-        assertEquals(setOf("tag:@admin"), draft.dismissedTokenKeys)
+        val matches = parsed(original)
+        val project = matches.single { it.kind == QuickAddTokenKind.PROJECT }
+        val tag = matches.single { it.kind == QuickAddTokenKind.TAG }
+        var draft = QuickAddDraft(original).dismiss(tag, matches)
+        assertEquals(setOf("tag:@admin:0"), draft.dismissedTokenKeys)
 
-        draft = draft.confirm(project)
-        val reparsedTag = match(draft.title, QuickAddTokenKind.TAG)
+        draft = draft.confirm(project, matches)
+        val reparsed = parsed(draft.title)
+        val reparsedTag = reparsed.single { it.kind == QuickAddTokenKind.TAG }
 
         assertEquals("Plan @Admin", draft.title)
-        assertTrue(reparsedTag.tokenKey(draft.title) in draft.dismissedTokenKeys)
+        assertTrue(reparsedTag.tokenKey(draft.title, reparsed) in draft.dismissedTokenKeys)
         assertTrue(draft.editTitle(draft.title + " now").dismissedTokenKeys.isEmpty())
+    }
+
+    @Test fun identicalTokensRemainIndividuallyDismissible() {
+        val title = "@Admin @Admin"
+        val matches = parsed(title)
+        val draft = QuickAddDraft(title).dismiss(matches.last(), matches)
+        val visible = matches.filterNot {
+            it.tokenKey(title, matches) in draft.dismissedTokenKeys
+        }
+
+        assertEquals(setOf("tag:@admin:1"), draft.dismissedTokenKeys)
+        assertEquals(listOf(matches.first()), visible)
+    }
+
+    @Test fun identicalDismissalOrdinalRebasesWhenEitherSideIsConfirmed() {
+        listOf(
+            1 to 0, // dismiss right, confirm left
+            0 to 1, // dismiss left, confirm right
+        ).forEach { (dismissedIndex, confirmedIndex) ->
+            val title = "@Admin @Admin"
+            val matches = parsed(title)
+            val draft = QuickAddDraft(title)
+                .dismiss(matches[dismissedIndex], matches)
+                .confirm(matches[confirmedIndex], matches)
+            val reparsed = parsed(draft.title)
+
+            assertEquals("@Admin", draft.title)
+            assertEquals(setOf("tag:@admin:0"), draft.dismissedTokenKeys)
+            assertTrue(
+                reparsed.single().tokenKey(draft.title, reparsed) in
+                    draft.dismissedTokenKeys,
+            )
+        }
     }
 
     @Test fun tagsAccumulateCaseInsensitivelyAndSingleValuesReplace() {
         val first = QuickAddDraft("Task")
-            .confirm(QuickAddTokenMatch(0, 1, QuickAddTokenValue.TagValue("Focus", null)))
-            .confirm(QuickAddTokenMatch(0, 1, QuickAddTokenValue.TagValue("FOCUS", null)))
-            .confirm(QuickAddTokenMatch(0, 1, QuickAddTokenValue.PriorityValue(Priority.LOW)))
-            .confirm(QuickAddTokenMatch(0, 1, QuickAddTokenValue.PriorityValue(Priority.URGENT)))
+            .confirmValue(QuickAddTokenValue.TagValue("Focus", null))
+            .confirmValue(QuickAddTokenValue.TagValue("FOCUS", null))
+            .confirmValue(QuickAddTokenValue.PriorityValue(Priority.LOW))
+            .confirmValue(QuickAddTokenValue.PriorityValue(Priority.URGENT))
         assertEquals(listOf("Focus"), first.toCommand().tagNames)
         assertEquals(Priority.URGENT, first.toCommand().priority)
     }
@@ -3987,12 +4101,13 @@ class QuickAddDraftTest {
     @Test fun malformedSaverValuesRestoreFailClosed() {
         val restored = requireNotNull(
             QuickAddDraftSaver.restore(
-                mapOf(
-                    "title" to "Malformed",
-                    "priority" to "INVALID",
-                    "frequency" to "INVALID",
-                    "interval" to 0,
-                    "weekdays" to arrayListOf("FUNDAY"),
+                arrayListOf<Any?>(
+                    "title", "Malformed",
+                    "priority", "INVALID",
+                    "frequency", "INVALID",
+                    "interval", 0,
+                    "weekdays", arrayListOf("FUNDAY"),
+                    "dueExplicit", true,
                 ),
             ),
         )
@@ -4000,6 +4115,7 @@ class QuickAddDraftTest {
         assertNull(restored.recurrenceFrequency)
         assertEquals(1, restored.recurrenceInterval)
         assertTrue(restored.recurrenceWeekdays.isEmpty())
+        assertFalse(restored.dueIsExplicit)
         assertEquals(DomainCommand.CreateTask("Malformed"), restored.toCommand())
     }
 }
@@ -4020,9 +4136,21 @@ exist.
 Use these exact test-tag functions in production and tests:
 
 ```kotlin
-internal fun QuickAddTokenMatch.tokenKey(text: String): String =
-    "${kind.name.lowercase(Locale.ROOT)}:" +
-        SearchNormalizer.normalize(text.substring(startIndex, endIndex))
+internal fun QuickAddTokenMatch.tokenKey(
+    text: String,
+    matches: List<QuickAddTokenMatch>,
+): String {
+    val claimed = SearchNormalizer.normalize(text.substring(startIndex, endIndex))
+    val peers = matches.filter { peer ->
+        peer.kind == kind &&
+            SearchNormalizer.normalize(
+                text.substring(peer.startIndex, peer.endIndex),
+            ) == claimed
+    }
+    val ordinal = peers.indexOf(this)
+    require(ordinal >= 0) { "Quick Add token is absent from the current parse" }
+    return "${kind.name.lowercase(Locale.ROOT)}:$claimed:$ordinal"
+}
 internal fun suggestionTag(match: QuickAddTokenMatch) =
     "quick-add-suggestion-${match.kind.name.lowercase(Locale.ROOT)}-" +
         "${match.startIndex}-${match.endIndex}"
@@ -4081,6 +4209,11 @@ Make every UI contract observable with individual cases:
   edit the title to append ` now`, then assert the current reparsed suggestion
   tag exists again. Also dismiss `@Admin`, confirm the earlier `#stu`, and
   assert the reparsed `@Admin` suggestion stays absent.
+- Enter `@Admin @Admin`, dismiss the second suggestion, and assert exactly one
+  suggestion remains. In separate host cases, confirm the first while the
+  second is dismissed and confirm the second while the first is dismissed;
+  after each reparse the sole remaining occurrence must still be suppressed
+  under key `tag:@admin:0`.
 - Parse `@Roadmap` with no matching tag and assert the chip text is exactly
   `New tag: Roadmap`; parse fixture tag `@Admin` and assert `Tag: Admin`.
 - For `!1`, `!2`, `!3`, and `!4`, assert visible chip labels exactly
@@ -4103,7 +4236,12 @@ ZoneId.of("Asia/Bangkok"))`, `listOf(OpenTasksFixtures.studioProject)`, and
    `Asia/Bangkok`, tags `listOf("Admin")`, estimate 45 minutes, and recurrence
    `RecurrenceRule(RecurrenceFrequency.WEEKLY, interval = 2)`. This witnesses
    Saver keys `title`, `project`, `priority`, `dueEpoch`, `dueZone`, `tags`,
-   `estimate`, `frequency`, and the non-default `interval`.
+   `estimate`, `frequency`, and the non-default `interval`. Confirm RECURRENCE
+   before DATE so DATE leaves the saved `dueExplicit` value `true`; after the
+   restore, append and confirm `every monday` and assert the restored explicit
+   due remains `2026-08-11T10:00:00Z` instead of changing to the implicit
+   Monday anchor `2026-08-10T10:00:00Z`. This behaviorally witnesses the
+   `dueExplicit` key.
 2. Confirm `every monday` from `Weekday every monday`, restore, submit, and
    assert title `Weekday` plus exactly
    `RecurrenceRule(RecurrenceFrequency.WEEKLY,
@@ -4112,6 +4250,11 @@ ZoneId.of("Asia/Bangkok"))`, `listOf(OpenTasksFixtures.studioProject)`, and
 3. Dismiss `@Admin`, restore, and assert its suggestion is still absent. This
    witnesses the `dismissed` key as suppression behavior, not merely a saved
    collection value.
+
+The complete primitive Saver-key inventory is therefore `title`, `project`,
+`priority`, `dueEpoch`, `dueZone`, `dueExplicit`, `tags`, `estimate`,
+`frequency`, `interval`, `weekdays`, and `dismissed`; do not omit any key from
+save, restore, or restoration coverage.
 
 In `QuickAddPrefillRootWiringInstrumentedTest`, extend
 `QuickAddPrefillReplica` to accept `onAdd: (DomainCommand.CreateTask) -> Unit`,
@@ -4172,6 +4315,7 @@ internal data class QuickAddDraft(
     val priority: String = Priority.NONE.name,
     val dueEpochMillis: Long? = null,
     val dueZoneId: String? = null,
+    val dueIsExplicit: Boolean = false,
     val tagNames: List<String> = emptyList(),
     val estimateSeconds: Long? = null,
     val recurrenceFrequency: String? = null,
@@ -4180,40 +4324,66 @@ internal data class QuickAddDraft(
     val dismissedTokenKeys: Set<String> = emptySet(),
 ) {
     fun editTitle(value: String) = copy(title = value, dismissedTokenKeys = emptySet())
-    fun dismiss(match: QuickAddTokenMatch) =
-        copy(dismissedTokenKeys = dismissedTokenKeys + match.tokenKey(title))
+    fun dismiss(
+        match: QuickAddTokenMatch,
+        matches: List<QuickAddTokenMatch>,
+    ): QuickAddDraft {
+        require(match in matches)
+        return copy(
+            dismissedTokenKeys = dismissedTokenKeys + match.tokenKey(title, matches),
+        )
+    }
 
-    fun confirm(match: QuickAddTokenMatch): QuickAddDraft {
-        val stripped = stripQuickAddToken(title, match)
+    fun confirm(
+        match: QuickAddTokenMatch,
+        matches: List<QuickAddTokenMatch>,
+    ): QuickAddDraft {
+        require(match in matches)
+        val dismissedMatches = matches.filter {
+            it.tokenKey(title, matches) in dismissedTokenKeys
+        }
+        val matchedDismissedKeys = dismissedMatches.mapTo(mutableSetOf()) {
+            it.tokenKey(title, matches)
+        }
+        val remainingMatches = matches.filterNot { it == match }
+        val rebasedDismissed = (dismissedTokenKeys - matchedDismissedKeys) +
+            dismissedMatches
+                .filterNot { it == match }
+                .map { it.tokenKey(title, remainingMatches) }
+        val base = copy(
+            title = stripQuickAddToken(title, match),
+            dismissedTokenKeys = rebasedDismissed.toSet(),
+        )
         return when (val value = match.value) {
-            is QuickAddTokenValue.ProjectValue -> copy(
-                title = stripped, projectId = value.projectId.value,
-            )
-            is QuickAddTokenValue.TagValue -> copy(
-                title = stripped,
+            is QuickAddTokenValue.ProjectValue -> base.copy(projectId = value.projectId.value)
+            is QuickAddTokenValue.TagValue -> base.copy(
                 tagNames = (tagNames + value.name).distinctBy { it.lowercase(Locale.ROOT) }.take(50),
             )
-            is QuickAddTokenValue.PriorityValue -> copy(
-                title = stripped, priority = value.priority.name,
-            )
-            is QuickAddTokenValue.DueValue -> copy(
-                title = stripped,
+            is QuickAddTokenValue.PriorityValue -> base.copy(priority = value.priority.name)
+            is QuickAddTokenValue.DueValue -> base.copy(
                 dueEpochMillis = value.due.instant.toEpochMilli(),
                 dueZoneId = value.due.zoneId,
+                dueIsExplicit = true,
             )
-            is QuickAddTokenValue.RecurrenceValue -> copy(
-                title = stripped,
-                // A confirmed DATE is explicit user state and wins over a
-                // recurrence match reparsed later with an implicit anchor.
-                dueEpochMillis = dueEpochMillis ?: value.due.instant.toEpochMilli(),
-                dueZoneId = dueZoneId ?: value.due.zoneId,
-                recurrenceFrequency = value.rule.frequency.name,
-                recurrenceInterval = value.rule.interval,
-                recurrenceWeekdays = value.rule.weekdays.map(DayOfWeek::name).sorted(),
-            )
-            is QuickAddTokenValue.EstimateValue -> copy(
-                title = stripped, estimateSeconds = value.duration.seconds,
-            )
+            is QuickAddTokenValue.RecurrenceValue -> {
+                val preserveDue = dueIsExplicit &&
+                    dueEpochMillis != null &&
+                    dueZoneId?.let { runCatching { ZoneId.of(it) }.isSuccess } == true
+                base.copy(
+                    dueEpochMillis = if (preserveDue) {
+                        dueEpochMillis
+                    } else {
+                        value.due.instant.toEpochMilli()
+                    },
+                    dueZoneId = if (preserveDue) dueZoneId else value.due.zoneId,
+                    dueIsExplicit = preserveDue,
+                    recurrenceFrequency = value.rule.frequency.name,
+                    recurrenceInterval = value.rule.interval,
+                    recurrenceWeekdays = value.rule.weekdays.map(DayOfWeek::name).sorted(),
+                )
+            }
+            is QuickAddTokenValue.EstimateValue ->
+                base.copy(estimateSeconds = value.duration.seconds)
         }
     }
 
@@ -4224,12 +4394,15 @@ internal data class QuickAddDraft(
         )
         QuickAddTokenKind.PRIORITY -> copy(priority = Priority.NONE.name)
         QuickAddTokenKind.DATE -> copy(
-            dueEpochMillis = null, dueZoneId = null, recurrenceFrequency = null,
+            dueEpochMillis = null, dueZoneId = null, dueIsExplicit = false,
+            recurrenceFrequency = null,
             recurrenceInterval = 1, recurrenceWeekdays = emptyList(),
         )
         QuickAddTokenKind.RECURRENCE -> copy(
             recurrenceFrequency = null, recurrenceInterval = 1,
             recurrenceWeekdays = emptyList(),
+            dueIsExplicit = dueEpochMillis != null &&
+                dueZoneId?.let { runCatching { ZoneId.of(it) }.isSuccess } == true,
         )
         QuickAddTokenKind.ESTIMATE -> copy(estimateSeconds = null)
     }
@@ -4265,6 +4438,7 @@ internal val QuickAddDraftSaver = mapSaver(
             "priority" to draft.priority,
             "dueEpoch" to draft.dueEpochMillis,
             "dueZone" to draft.dueZoneId,
+            "dueExplicit" to draft.dueIsExplicit,
             "tags" to ArrayList(draft.tagNames),
             "estimate" to draft.estimateSeconds,
             "frequency" to draft.recurrenceFrequency,
@@ -4279,12 +4453,17 @@ internal val QuickAddDraftSaver = mapSaver(
             ?.name ?: Priority.NONE.name
         val frequency = (saved["frequency"] as? String)
             ?.takeIf { raw -> RecurrenceFrequency.entries.any { it.name == raw } }
+        val dueEpoch = saved["dueEpoch"] as? Long
+        val dueZone = saved["dueZone"] as? String
         QuickAddDraft(
             title = saved["title"] as? String ?: "",
             projectId = saved["project"] as? String,
             priority = priority,
-            dueEpochMillis = saved["dueEpoch"] as? Long,
-            dueZoneId = saved["dueZone"] as? String,
+            dueEpochMillis = dueEpoch,
+            dueZoneId = dueZone,
+            dueIsExplicit = (saved["dueExplicit"] as? Boolean) == true &&
+                dueEpoch != null &&
+                dueZone?.let { runCatching { ZoneId.of(it) }.isSuccess } == true,
             tagNames = (saved["tags"] as? ArrayList<*>)
                 ?.filterIsInstance<String>().orEmpty(),
             estimateSeconds = saved["estimate"] as? Long,
@@ -4303,21 +4482,42 @@ internal val QuickAddDraftSaver = mapSaver(
 ```
 
 The package-internal `QuickAddDraftSaver` value is the entire host-test seam;
-do not add a wrapper, mapper, or production restore API. The stable dismissal
-identity is only kind plus `SearchNormalizer`-normalised claimed token text as
-shown in Step 3. Positional indices remain only in Compose test tags. Two
-identical suggestions may intentionally share a dismissal key because they are
-semantically redundant.
+do not add a wrapper, mapper, or production restore API. Its malformed host
+test must pass the `arrayListOf<Any?>(key, value, ...)` representation shown in
+Step 1 because `mapSaver` is implemented on top of `listSaver`; passing a Map
+does not exercise its restore contract.
+
+The occurrence-aware dismissal identity is exactly kind, normalised claimed
+text, and zero-based peer ordinal. `dismiss` and `confirm` always receive the
+same complete, unfiltered current parse. `confirm` identifies dismissed old
+matches, removes the confirmed match from that peer list, and recomputes keys
+for the surviving dismissed occurrences; unmatched restored keys are retained.
+No position is persisted, positional indices remain only in Compose test tags,
+and no mapping class or other production abstraction is added.
 
 - [ ] **Step 6: Parse once per stable clock and render exact controls**
 
 Capture `val parseNow = remember(clock) { clock.instant() }` once per sheet and
 call `parseQuickAdd(draft.title, parseNow, clock.zone, projects, tags)`. Store
-the draft with `rememberSaveable(stateSaver = QuickAddDraftSaver)`. Render every
-non-dismissed match as a 48 dp `AssistChip` plus a separate 48 dp dismiss
-`IconButton`, using the exact tags in Step 3. Render one clearable applied chip
-for every populated field. All labels/descriptions use these exact new resource
-keys: `quick_add_project_suggestion`, `quick_add_existing_tag_suggestion`,
+the draft with `rememberSaveable(stateSaver = QuickAddDraftSaver)`. Keep that
+complete parse in `matches`; derive visible suggestions without changing the
+list passed to reducer calls:
+
+```kotlin
+val visibleMatches = matches.filterNot {
+    it.tokenKey(draft.title, matches) in draft.dismissedTokenKeys
+}
+// Confirm chip:
+draft = draft.confirm(match, matches)
+// Separate dismiss IconButton:
+draft = draft.dismiss(match, matches)
+```
+
+Render every visible match as a 48 dp `AssistChip` plus a separate 48 dp
+dismiss `IconButton`, using the exact positional tags in Step 3. Render one
+clearable applied chip for every populated field. All labels/descriptions use
+these exact new resource keys: `quick_add_project_suggestion`,
+`quick_add_existing_tag_suggestion`,
 `quick_add_new_tag_suggestion`, `quick_add_priority_suggestion`,
 `quick_add_recurrence_suggestion`, `quick_add_estimate_suggestion`,
 `quick_add_dismiss_suggestion`, and `quick_add_clear_applied`.
