@@ -24,16 +24,36 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.withKeyDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.QuickAddSheet
 import app.opentasks.SearchSurface
+import app.opentasks.suggestionTag
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.parseQuickAdd
+import app.opentasks.core.domain.stripQuickAddToken
+import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.Priority
+import app.opentasks.core.model.RecurrenceFrequency
+import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.ZonedMoment
+import java.time.Clock
+import java.time.DayOfWeek
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -112,6 +132,96 @@ class ShortcutRootWiringInstrumentedTest {
         }
         composeRule.onNodeWithTag("workspace-search-query").assertIsFocused()
     }
+
+    @Test
+    fun ctrlNOpensQuickAddAndSubmitsEveryConfirmedField() {
+        val rootFocused = CountDownLatch(1)
+        val submitted = AtomicReference<DomainCommand.CreateTask?>()
+        val zone = ZoneId.of("Asia/Bangkok")
+        val clock = Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), zone)
+        val projects = listOf(OpenTasksFixtures.studioProject)
+        val tags = OpenTasksFixtures.tags
+        composeRule.setContent {
+            val rootFocusRequester = remember { FocusRequester() }
+            var showQuickAdd by remember { mutableStateOf(false) }
+            var editableFocused by remember { mutableStateOf(false) }
+            OpenTasksTheme {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("shortcut-root")
+                        .focusRequester(rootFocusRequester)
+                        .onFocusEvent { focusState ->
+                            editableFocused = focusState.hasFocus
+                            if (focusState.isFocused) rootFocused.countDown()
+                        }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
+                                return@onPreviewKeyEvent false
+                            }
+                            val action = shortcutActionFor(
+                                key = event.key,
+                                isCtrlPressed = true,
+                                isShiftPressed = event.isShiftPressed,
+                                inProjectsRoute = false,
+                                editableFocused = editableFocused,
+                            )
+                            if (action == ShortcutAction.QUICK_ADD) showQuickAdd = true
+                            action == ShortcutAction.QUICK_ADD
+                        }
+                        .focusable(),
+                ) {
+                    if (showQuickAdd) {
+                        QuickAddSheet(
+                            onDismiss = { showQuickAdd = false },
+                            onAdd = { command ->
+                                submitted.set(command)
+                                showQuickAdd = false
+                            },
+                            projects = projects,
+                            tags = tags,
+                            clock = clock,
+                        )
+                    }
+                }
+            }
+            LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
+        }
+
+        assertTrue(
+            "The shortcut root never received Compose focus",
+            rootFocused.await(10, TimeUnit.SECONDS),
+        )
+        composeRule.onNodeWithTag("shortcut-root").performKeyInput {
+            withKeyDown(Key.CtrlLeft) { pressKey(Key.N) }
+        }
+
+        var text = "Shortcut #stu @Admin !2 every monday tomorrow ~45m"
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+        while (true) {
+            val matches = parseQuickAdd(text, clock.instant(), clock.zone, projects, tags)
+            val match = matches.lastOrNull() ?: break
+            composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+            text = stripQuickAddToken(text, match)
+        }
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Shortcut",
+                projectId = OpenTasksFixtures.studioProject.id,
+                priority = Priority.HIGH,
+                due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id),
+                tagNames = listOf("Admin"),
+                estimate = Duration.ofMinutes(45),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.MONDAY),
+                ),
+            ),
+            submitted.get(),
+        )
+    }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -147,7 +257,7 @@ class ShortcutRootEscapeInstrumentedTest {
                         .focusable(),
                 ) {
                     if (showQuickAdd) {
-                        QuickAddSheet(onDismiss = { showQuickAdd = false }, onAdd = { _, _ -> })
+                        QuickAddSheet(onDismiss = { showQuickAdd = false }, onAdd = {})
                     }
                 }
             }

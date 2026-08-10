@@ -3,7 +3,15 @@ package app.opentasks
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -14,6 +22,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
@@ -21,9 +30,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.QuickAddTokenKind
+import app.opentasks.core.domain.parseQuickAdd
+import app.opentasks.core.domain.stripQuickAddToken
 import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
+import app.opentasks.core.model.RecurrenceFrequency
+import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.SavedView
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchQuery
@@ -31,7 +46,10 @@ import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.lock.AppLockSettings
-import java.time.LocalDate
+import java.time.Clock
+import java.time.DayOfWeek
+import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -45,6 +63,20 @@ import java.util.concurrent.atomic.AtomicReference
 class ProcessRestorationInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    private val zone = ZoneId.of("Asia/Bangkok")
+    private val clock = Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), zone)
+    private val projects = listOf(OpenTasksFixtures.studioProject)
+    private val tags = OpenTasksFixtures.tags
+
+    private fun parsed(text: String) =
+        parseQuickAdd(text, clock.instant(), clock.zone, projects, tags)
+
+    private fun confirm(text: String, kind: QuickAddTokenKind): String {
+        val match = parsed(text).single { it.kind == kind }
+        composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+        return stripQuickAddToken(text, match)
+    }
 
     @Test
     fun workspaceRouteRestoresAfterSavedInstanceStateRecreation() {
@@ -80,50 +112,155 @@ class ProcessRestorationInstrumentedTest {
     }
 
     @Test
-    fun quickAddDraftRestoresAfterSavedInstanceStateRecreation() {
-        val restorationTester = StateRestorationTester(composeRule)
-        restorationTester.setContent {
-            OpenTasksTheme {
-                QuickAddSheet(onDismiss = {}, onAdd = { _, _ -> })
-            }
-        }
-
-        composeRule.onNodeWithTag("quick-add-title")
-            .performTextReplacement("Restored quick-add draft")
-
-        restorationTester.emulateSavedInstanceStateRestore()
-
-        composeRule.onNodeWithTag("quick-add-title")
-            .assertTextContains("Restored quick-add draft", substring = true)
-    }
-
-    @Test
-    fun quickAddAppliedDueRestoresAfterSavedInstanceStateRecreation() {
-        val zone = ZoneId.systemDefault()
-        val expectedDue = ZonedMoment(
-            instant = LocalDate.now(zone).plusDays(1).atTime(16, 0).atZone(zone).toInstant(),
-            zoneId = zone.id,
-        )
-        val submitted = AtomicReference<Pair<String, ZonedMoment?>>()
+    fun enrichedQuickAddDraftAndExplicitDueRestoreBeforeSubmission() {
+        val submitted = AtomicReference<DomainCommand.CreateTask?>()
+        val original = "Restore #stu @Admin !2 tomorrow ~45m every 2 weeks"
         val restorationTester = StateRestorationTester(composeRule)
         restorationTester.setContent {
             OpenTasksTheme {
                 QuickAddSheet(
                     onDismiss = {},
-                    onAdd = { title, due -> submitted.set(title to due) },
+                    onAdd = submitted::set,
+                    projects = projects,
+                    tags = tags,
+                    clock = clock,
                 )
             }
         }
 
-        composeRule.onNodeWithTag("quick-add-title")
-            .performTextReplacement("Restored due tomorrow 4pm")
-        composeRule.onNodeWithTag("quick-add-date-chip").performClick()
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(original)
+        var text = confirm(original, QuickAddTokenKind.RECURRENCE)
+        text = confirm(text, QuickAddTokenKind.DATE)
+        text = confirm(text, QuickAddTokenKind.ESTIMATE)
+        text = confirm(text, QuickAddTokenKind.PRIORITY)
+        text = confirm(text, QuickAddTokenKind.TAG)
+        confirm(text, QuickAddTokenKind.PROJECT)
 
         restorationTester.emulateSavedInstanceStateRestore()
-        composeRule.onNodeWithText("Add task").performClick()
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
 
-        assertEquals("Restored due", submitted.get().first)
-        assertEquals(expectedDue, submitted.get().second)
+        val expectedDue = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id)
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Restore",
+                projectId = OpenTasksFixtures.studioProject.id,
+                priority = Priority.HIGH,
+                due = expectedDue,
+                tagNames = listOf("Admin"),
+                estimate = Duration.ofMinutes(45),
+                recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY, interval = 2),
+            ),
+            submitted.get(),
+        )
+
+        val mondayText = "Restore every monday"
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(mondayText)
+        confirm(mondayText, QuickAddTokenKind.RECURRENCE)
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        assertEquals(expectedDue, submitted.get()?.due)
+        assertEquals(
+            RecurrenceRule(
+                RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.MONDAY),
+            ),
+            submitted.get()?.recurrence,
+        )
+    }
+
+    @Test
+    fun implicitWeekdayDueRemainsImplicitAcrossRestoration() {
+        val observed = AtomicReference<QuickAddDraft>()
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            OpenTasksTheme {
+                var draft by rememberSaveable(stateSaver = QuickAddDraftSaver) {
+                    mutableStateOf(QuickAddDraft("Weekday every monday"))
+                }
+                SideEffect { observed.set(draft) }
+                Column {
+                    OutlinedTextField(
+                        value = draft.title,
+                        onValueChange = { draft = draft.editTitle(it) },
+                        modifier = Modifier.testTag("restored-weekday-title"),
+                    )
+                    Button(
+                        onClick = {
+                            val matches = parseQuickAdd(
+                                draft.title,
+                                clock.instant(),
+                                clock.zone,
+                                projects,
+                                tags,
+                            )
+                            val recurrence = matches.single {
+                                it.kind == QuickAddTokenKind.RECURRENCE
+                            }
+                            draft = draft.confirm(recurrence, matches)
+                        },
+                        modifier = Modifier.testTag("restored-weekday-confirm"),
+                    ) { Text("Confirm recurrence") }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("restored-weekday-confirm").performClick()
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Weekday",
+                due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.MONDAY),
+                ),
+            ),
+            observed.get().toCommand(),
+        )
+        assertEquals(false, observed.get().dueIsExplicit)
+
+        restorationTester.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithTag("restored-weekday-title")
+            .performTextReplacement("Weekday every tuesday")
+        composeRule.onNodeWithTag("restored-weekday-confirm").performClick()
+
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Weekday",
+                due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.TUESDAY),
+                ),
+            ),
+            observed.get().toCommand(),
+        )
+        assertEquals(false, observed.get().dueIsExplicit)
+    }
+
+    @Test
+    fun dismissedSuggestionRemainsSuppressedAcrossRestoration() {
+        val submitted = AtomicReference<DomainCommand.CreateTask?>()
+        val text = "Dismiss @Admin"
+        val match = parsed(text).single()
+        val restorationTester = StateRestorationTester(composeRule)
+        restorationTester.setContent {
+            OpenTasksTheme {
+                QuickAddSheet(
+                    onDismiss = {},
+                    onAdd = submitted::set,
+                    projects = projects,
+                    tags = tags,
+                    clock = clock,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+        composeRule.onNodeWithTag(dismissTag(match)).performClick()
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithTag(suggestionTag(match)).assertDoesNotExist()
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        assertEquals(DomainCommand.CreateTask(text), submitted.get())
     }
 
     @Test

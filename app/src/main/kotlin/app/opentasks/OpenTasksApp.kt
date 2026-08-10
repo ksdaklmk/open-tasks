@@ -1630,12 +1630,15 @@ fun OpenTasksApp(
                         showQuickAdd = false
                         quickAddSheetTitle = ""
                     },
-                    onAdd = { title, due ->
-                        viewModel.addTask(title, due)
+                    onAdd = { command ->
+                        viewModel.execute(command)
                         showQuickAdd = false
                         quickAddSheetTitle = ""
                     },
                     initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
+                    projects = snapshot.projects.filter { it.archivedAt == null },
+                    tags = snapshot.tags,
+                    clock = clock,
                 )
             }
         }

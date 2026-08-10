@@ -23,7 +23,6 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
-import app.opentasks.core.model.ZonedMoment
 import app.opentasks.focus.FocusCoordinator
 import app.opentasks.focus.FocusPreset
 import app.opentasks.focus.FocusSession
@@ -213,10 +212,6 @@ class WorkspaceViewModel @Inject constructor(
 
     fun setInsightsForegrounded(foregrounded: Boolean) {
         workspaceInsightsState.setForegrounded(foregrounded)
-    }
-
-    fun addTask(title: String, due: ZonedMoment? = null) {
-        execute(DomainCommand.CreateTask(title, due = due))
     }
 
     fun addProject(name: String, summary: String) {

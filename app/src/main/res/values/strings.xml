@@ -7,7 +7,14 @@
     <string name="quick_add">Quick add</string>
     <string name="quick_add_shortcut">Capture a task</string>
     <string name="quick_add_date_suggestion">Due %1$s</string>
-    <string name="quick_add_date_suggestion_clear">Clear suggested date</string>
+    <string name="quick_add_project_suggestion">Project: %1$s</string>
+    <string name="quick_add_existing_tag_suggestion">Tag: %1$s</string>
+    <string name="quick_add_new_tag_suggestion">New tag: %1$s</string>
+    <string name="quick_add_priority_suggestion">Priority: %1$s</string>
+    <string name="quick_add_recurrence_suggestion">Repeat: %1$s</string>
+    <string name="quick_add_estimate_suggestion">Estimate: %1$s</string>
+    <string name="quick_add_dismiss_suggestion">Dismiss %1$s suggestion</string>
+    <string name="quick_add_clear_applied">Clear %1$s</string>
     <string name="reminder_channel_name">Task reminders</string>
     <string name="reminder_channel_description">Due-time reminders chosen in task planning</string>
     <string name="reminder_public_title">Task reminder</string>

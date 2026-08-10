@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -19,8 +21,26 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.AnnotatedString
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.parseQuickAdd
+import app.opentasks.core.domain.stripQuickAddToken
+import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.Priority
+import app.opentasks.core.model.Project
+import app.opentasks.core.model.RecurrenceFrequency
+import app.opentasks.core.model.RecurrenceRule
+import app.opentasks.core.model.Tag
+import app.opentasks.core.model.ZonedMoment
+import java.time.Clock
+import java.time.DayOfWeek
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicReference
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -58,6 +78,11 @@ class QuickAddPrefillRootWiringInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    private val clock = Clock.fixed(
+        Instant.parse("2026-08-10T03:00:00Z"),
+        ZoneId.of("Asia/Bangkok"),
+    )
+
     @Test
     fun secondShareWhileTheSheetIsOpenReplacesTheStaleTitle() {
         composeRule.setContent {
@@ -81,6 +106,10 @@ class QuickAddPrefillRootWiringInstrumentedTest {
                         quickAddSignal = signal,
                         quickAddPrefillText = prefillText,
                         onQuickAddConsumed = { prefillText = null },
+                        onAdd = {},
+                        projects = emptyList(),
+                        tags = emptyList(),
+                        clock = clock,
                     )
                 }
             }
@@ -126,6 +155,10 @@ class QuickAddPrefillRootWiringInstrumentedTest {
                         quickAddSignal = signal,
                         quickAddPrefillText = prefillText,
                         onQuickAddConsumed = { prefillText = null },
+                        onAdd = {},
+                        projects = emptyList(),
+                        tags = emptyList(),
+                        clock = clock,
                     )
                 }
             }
@@ -165,6 +198,10 @@ class QuickAddPrefillRootWiringInstrumentedTest {
                         quickAddSignal = signal,
                         quickAddPrefillText = prefillText,
                         onQuickAddConsumed = { prefillText = null },
+                        onAdd = {},
+                        projects = emptyList(),
+                        tags = emptyList(),
+                        clock = clock,
                     )
                 }
             }
@@ -177,6 +214,72 @@ class QuickAddPrefillRootWiringInstrumentedTest {
         // The sheet is still open, showing the share's title, when an
         // explicit no-prefill trigger arrives.
         composeRule.onNodeWithText("Quick add trigger").performClick()
+        composeRule.onNodeWithTag("quick-add-title").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")),
+        )
+    }
+
+    @Test
+    fun enrichedPrefillSubmitsAtomicallyThenReopensWithAnEmptyTitle() {
+        val submitted = AtomicReference<DomainCommand.CreateTask?>()
+        val projects = listOf(OpenTasksFixtures.studioProject)
+        val tags = OpenTasksFixtures.tags
+        val original = "Root #stu @Admin !2 every monday tomorrow ~45m"
+        composeRule.setContent {
+            var signal by remember { mutableIntStateOf(0) }
+            var prefillText by remember { mutableStateOf<String?>(null) }
+            OpenTasksTheme {
+                Column {
+                    Button(
+                        onClick = {
+                            prefillText = original
+                            signal++
+                        },
+                    ) { Text("Open enriched prefill") }
+                    QuickAddPrefillReplica(
+                        quickAddSignal = signal,
+                        quickAddPrefillText = prefillText,
+                        onQuickAddConsumed = { prefillText = null },
+                        onAdd = submitted::set,
+                        projects = projects,
+                        tags = tags,
+                        clock = clock,
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Open enriched prefill").performClick()
+        var text = original
+        while (true) {
+            val matches = parseQuickAdd(text, clock.instant(), clock.zone, projects, tags)
+            val match = matches.lastOrNull() ?: break
+            composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+            text = stripQuickAddToken(text, match)
+        }
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+
+        assertEquals(
+            DomainCommand.CreateTask(
+                title = "Root",
+                projectId = OpenTasksFixtures.studioProject.id,
+                priority = Priority.HIGH,
+                due = ZonedMoment(
+                    Instant.parse("2026-08-11T10:00:00Z"),
+                    "Asia/Bangkok",
+                ),
+                tagNames = listOf("Admin"),
+                estimate = Duration.ofMinutes(45),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.WEEKLY,
+                    weekdays = setOf(DayOfWeek.MONDAY),
+                ),
+            ),
+            submitted.get(),
+        )
+        composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("quick-add-reopen").performClick()
         composeRule.onNodeWithTag("quick-add-title").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")),
         )
@@ -198,6 +301,10 @@ private fun QuickAddPrefillReplica(
     quickAddSignal: Int,
     quickAddPrefillText: String?,
     onQuickAddConsumed: () -> Unit,
+    onAdd: (DomainCommand.CreateTask) -> Unit,
+    projects: List<Project>,
+    tags: List<Tag>,
+    clock: Clock,
 ) {
     var showQuickAdd by remember { mutableStateOf(false) }
     var quickAddSheetTitle by remember { mutableStateOf("") }
@@ -208,19 +315,29 @@ private fun QuickAddPrefillReplica(
             onQuickAddConsumed()
         }
     }
-    if (showQuickAdd) {
-        key(quickAddSignal) {
-            QuickAddSheet(
-                onDismiss = {
-                    showQuickAdd = false
-                    quickAddSheetTitle = ""
-                },
-                onAdd = { _, _ ->
-                    showQuickAdd = false
-                    quickAddSheetTitle = ""
-                },
-                initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
-            )
+    Column {
+        Button(
+            onClick = { showQuickAdd = true },
+            modifier = Modifier.testTag("quick-add-reopen"),
+        ) { Text("Open quick add") }
+        if (showQuickAdd) {
+            key(quickAddSignal) {
+                QuickAddSheet(
+                    onDismiss = {
+                        showQuickAdd = false
+                        quickAddSheetTitle = ""
+                    },
+                    onAdd = { command ->
+                        onAdd(command)
+                        showQuickAdd = false
+                        quickAddSheetTitle = ""
+                    },
+                    initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
+                    projects = projects,
+                    tags = tags,
+                    clock = clock,
+                )
+            }
         }
     }
 }
