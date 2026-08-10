@@ -46,7 +46,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ProjectTemplatePlanner
-import app.opentasks.core.domain.SearchNormalizer
+import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
@@ -117,6 +117,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -283,60 +284,7 @@ class RoomVaultRepository(
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
         ready.await()
-        val needle = SearchNormalizer.normalize(query.text)
-        if (needle.isBlank()) return emptyList()
-        val snapshot = mutableWorkspace.value
-        val projectNames = snapshot.projects.associate { it.id to it.name }
-        val tagNames = snapshot.tags.associate { it.id to it.name }
-        val notesByTask = snapshot.notes.filter { it.taskId != null }.groupBy { it.taskId }
-            .mapValues { (_, notes) ->
-                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
-            }
-        val notesByProject = snapshot.notes.filter { it.projectId != null }.groupBy { it.projectId }
-            .mapValues { (_, notes) ->
-                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
-            }
-        val attachmentNamesByTask = snapshot.attachments
-            .filter { it.deletedAt == null }
-            .groupBy { it.taskId }
-
-        val taskResults = snapshot.tasks
-            .asSequence()
-            .filter { query.includeTrash || it.deletedAt == null }
-            .filter { query.includeCompleted || !it.isCompleted }
-            .filter { query.projectIds.isEmpty() || it.projectId in query.projectIds }
-            .filter { query.tagIds.isEmpty() || it.tagIds.any(query.tagIds::contains) }
-            .filter { task ->
-                needle in SearchNormalizer.normalize(
-                    listOfNotNull(
-                        task.title,
-                        task.description,
-                        projectNames[task.projectId],
-                        task.checklist.joinToString(" ", transform = ChecklistItem::text),
-                        task.tagIds.mapNotNull(tagNames::get).joinToString(" "),
-                        notesByTask[task.id].orEmpty().joinToString(" ") { it.body },
-                        attachmentNamesByTask[task.id]
-                            .orEmpty()
-                            .joinToString(" ") { it.displayName },
-                    ).joinToString(" "),
-                )
-            }
-            .map { task ->
-                SearchResult.TaskResult(task, projectNames[task.projectId] ?: "Inbox")
-            }
-
-        val projectResults = snapshot.projects
-            .asSequence()
-            .filter { it.archivedAt == null }
-            .filter { project ->
-                needle in SearchNormalizer.normalize(
-                    "${project.name} ${project.summary} " +
-                        notesByProject[project.id].orEmpty().joinToString(" ") { it.body },
-                )
-            }
-            .map { project -> SearchResult.ProjectResult(project, "Project") }
-
-        return (taskResults + projectResults).take(MAX_SEARCH_RESULTS).toList()
+        return searchWorkspace(mutableWorkspace.value, query, Clock.fixed(now(), zoneId()))
     }
 
     private suspend fun importTasks(command: DomainCommand.ImportTasks): CommandResult {
@@ -4211,7 +4159,6 @@ class RoomVaultRepository(
     internal companion object {
         const val OWNER_ID = "member-owner"
         const val HOME_TASK_LIMIT = 3
-        const val MAX_SEARCH_RESULTS = 50
         const val MAX_TASK_TITLE_LENGTH = 240
         const val MAX_TASK_DESCRIPTION_LENGTH = 20_000
         const val MAX_PROJECT_NAME_LENGTH = 120

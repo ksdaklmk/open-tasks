@@ -4,19 +4,40 @@ import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
+import app.opentasks.core.model.ZonedMoment
+import app.opentasks.core.domain.DomainCommand
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.ZoneId
 
 class SearchExtensionTest {
+
+    @Test
+    fun blankDueBucketSearchUsesTheInjectedClock() = runBlocking {
+        val instant = Instant.parse("2026-08-10T03:00:00Z")
+        val zone = ZoneId.of("Asia/Bangkok")
+        val due = ZonedMoment(instant.plusSeconds(3_600), zone.id)
+        val local = InMemoryVaultRepository(
+            now = { instant },
+            zoneId = { zone },
+        )
+        local.execute(DomainCommand.CreateTask("Today adapter", due = due))
+        assertEquals(
+            listOf("Today adapter"),
+            local.search(SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)))
+                .map(SearchResult::title),
+        )
+    }
 
     @Test
     fun taskNoteBodyMatchReturnsOwningTask() = runBlocking {

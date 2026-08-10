@@ -17,7 +17,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ProjectTemplatePlanner
-import app.opentasks.core.domain.SearchNormalizer
+import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.VaultRepository
@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -85,6 +86,7 @@ class InMemoryVaultRepository internal constructor(
     private val now: () -> Instant = Instant::now,
     private val backupJournal: InMemoryBackupJournal = InMemoryBackupJournal(),
     sourceDeviceId: DeviceId? = null,
+    private val zoneId: () -> ZoneId = ZoneId::systemDefault,
 ) : VaultRepository {
     private val writeMutex = Mutex()
     private val sourceDeviceId = sourceDeviceId
@@ -262,66 +264,8 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.RestoreSavedView -> restoreSavedView(command)
         }
 
-    override suspend fun search(query: SearchQuery): List<SearchResult> {
-        val needle = SearchNormalizer.normalize(query.text)
-        if (needle.isBlank()) return emptyList()
-        val snapshot = mutableWorkspace.value
-        val projectNames = snapshot.projects.associate { it.id to it.name }
-        val tagNames = snapshot.tags.associate { it.id to it.name }
-        val notesByTask = snapshot.notes.filter { it.taskId != null }.groupBy { it.taskId }
-            .mapValues { (_, notes) ->
-                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
-            }
-        val notesByProject = snapshot.notes.filter { it.projectId != null }.groupBy { it.projectId }
-            .mapValues { (_, notes) ->
-                notes.sortedWith(compareBy<Note> { it.createdAt }.thenBy { it.id.value })
-            }
-        val attachmentNamesByTask = snapshot.attachments
-            .filter { it.deletedAt == null }
-            .groupBy { it.taskId }
-
-        val taskResults = snapshot.tasks
-            .asSequence()
-            .filter { query.includeTrash || it.deletedAt == null }
-            .filter { query.includeCompleted || !it.isCompleted }
-            .filter { query.projectIds.isEmpty() || it.projectId in query.projectIds }
-            .filter { query.tagIds.isEmpty() || it.tagIds.any(query.tagIds::contains) }
-            .filter { task ->
-                val searchable = SearchNormalizer.normalize(
-                    listOfNotNull(
-                        task.title,
-                        task.description,
-                        projectNames[task.projectId],
-                        task.checklist.joinToString(" ", transform = ChecklistItem::text),
-                        task.tagIds.mapNotNull(tagNames::get).joinToString(" "),
-                        notesByTask[task.id].orEmpty().joinToString(" ") { it.body },
-                        attachmentNamesByTask[task.id]
-                            .orEmpty()
-                            .joinToString(" ") { it.displayName },
-                    ).joinToString(" "),
-                )
-                needle in searchable
-            }
-            .map { task ->
-                SearchResult.TaskResult(
-                    task,
-                    projectNames[task.projectId] ?: "Inbox",
-                )
-            }
-
-        val projectResults = snapshot.projects
-            .asSequence()
-            .filter { it.archivedAt == null }
-            .filter { project ->
-                needle in SearchNormalizer.normalize(
-                    "${project.name} ${project.summary} " +
-                        notesByProject[project.id].orEmpty().joinToString(" ") { it.body },
-                )
-            }
-            .map { project -> SearchResult.ProjectResult(project, "Project") }
-
-        return (taskResults + projectResults).take(50).toList()
-    }
+    override suspend fun search(query: SearchQuery): List<SearchResult> =
+        searchWorkspace(mutableWorkspace.value, query, Clock.fixed(now(), zoneId()))
 
     private fun importTasks(command: DomainCommand.ImportTasks): CommandResult {
         val current = mutableWorkspace.value

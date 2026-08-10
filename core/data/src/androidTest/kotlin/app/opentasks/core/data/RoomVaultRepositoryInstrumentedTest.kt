@@ -20,6 +20,7 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
@@ -29,6 +30,7 @@ import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SearchQuery
+import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
@@ -53,6 +55,7 @@ import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
@@ -176,6 +179,26 @@ class RoomVaultRepositoryInstrumentedTest {
         }
 
         assertEquals(due, created.due)
+    }
+
+    @Test
+    fun blankDueBucketSearchUsesTheInjectedClock() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val instant = Instant.parse("2026-08-10T03:00:00Z")
+            val zone = ZoneId.of("Asia/Bangkok")
+            openRepository(now = { instant }, zoneId = { zone })
+            repository!!.execute(
+                DomainCommand.CreateTask(
+                    "Today adapter",
+                    due = ZonedMoment(instant.plusSeconds(3_600), zone.id),
+                ),
+            )
+            assertEquals(
+                listOf("Today adapter"),
+                repository!!.search(SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)))
+                    .map(SearchResult::title),
+            )
+        }
     }
 
     @Test
@@ -2352,7 +2375,8 @@ class RoomVaultRepositoryInstrumentedTest {
         }
 
     private fun openRepository(
-        now: () -> Instant = { Instant.now() },
+        now: () -> Instant = Instant::now,
+        zoneId: () -> ZoneId = ZoneId::systemDefault,
         appendBoundary: BackupJournalAppendBoundary = BackupJournalAppendBoundary { dao, entity ->
             dao.insert(entity)
         },
@@ -2362,6 +2386,7 @@ class RoomVaultRepositoryInstrumentedTest {
             database = database!!,
             deviceId = DeviceId("instrumented-test-device"),
             now = now,
+            zoneId = zoneId,
             backupJournalAppendBoundary = appendBoundary,
         )
     }
