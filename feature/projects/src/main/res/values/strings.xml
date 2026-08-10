@@ -2,6 +2,26 @@
 <resources>
     <string name="workbench_view_list">List</string>
     <string name="workbench_view_board">Board</string>
+    <string name="workbench_sort_control">Sort project tasks: %1$s</string>
+    <string name="workbench_group_control">Group project tasks: %1$s</string>
+    <string name="workbench_sort_due_label">Due</string>
+    <string name="workbench_sort_priority_label">Priority</string>
+    <string name="workbench_sort_title_label">Title</string>
+    <string name="workbench_sort_updated_label">Updated</string>
+    <string name="workbench_group_none_label">None</string>
+    <string name="workbench_group_due_label">Due</string>
+    <string name="workbench_group_priority_label">Priority</string>
+    <string name="workbench_group_due_overdue">Overdue</string>
+    <string name="workbench_group_due_today">Today</string>
+    <string name="workbench_group_due_this_week">This week</string>
+    <string name="workbench_group_due_later">Later</string>
+    <string name="workbench_group_due_no_date">No date</string>
+    <string name="workbench_group_project">Project</string>
+    <string name="workbench_group_priority_urgent">Urgent</string>
+    <string name="workbench_group_priority_high">High</string>
+    <string name="workbench_group_priority_medium">Medium</string>
+    <string name="workbench_group_priority_low">Low</string>
+    <string name="workbench_group_priority_none">None</string>
     <plurals name="board_open_task_count">
         <item quantity="one">%1$d open task</item>
         <item quantity="other">%1$d open tasks</item>

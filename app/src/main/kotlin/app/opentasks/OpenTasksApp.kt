@@ -123,6 +123,7 @@ import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskArrangement
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
@@ -485,6 +486,7 @@ fun OpenTasksApp(
         val selectedTaskId = selectedTaskValue?.let(::TaskId)
         val selectedProjectId = selectedProjectValue?.let(::ProjectId)
         val projectNames = snapshot.projects.associate { it.id to it.name }
+        val selectedProject = snapshot.projects.firstOrNull { it.id == selectedProjectId }
         val tasksArrangement = viewArrangement.tasks
         val (dueBucketsByTaskId, taskGroups) = remember(
             snapshot.tasks,
@@ -501,6 +503,28 @@ fun OpenTasksApp(
                 projectNames = projectNames,
                 clock = projectionClock,
             )
+        }
+        val workbenchArrangement = selectedProject?.let {
+            viewArrangement.workbenchFor(it.id)
+        } ?: TaskArrangement()
+        val workbenchTaskGroups = remember(
+            snapshot.tasks,
+            selectedProject,
+            projectNames,
+            workbenchArrangement,
+            clock,
+        ) {
+            selectedProject?.let { project ->
+                val projectionClock = Clock.fixed(clock.instant(), clock.zone)
+                arrangeTasks(
+                    tasks = snapshot.tasks.filter {
+                        it.projectId == project.id && it.deletedAt == null
+                    },
+                    arrangement = workbenchArrangement,
+                    projectNames = projectNames,
+                    clock = projectionClock,
+                )
+            }.orEmpty()
         }
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
@@ -1181,9 +1205,32 @@ fun OpenTasksApp(
                                     listPaneFraction = listPaneFraction,
                                     boardMode = selectedProjectId in boardModeProjectIds,
                                     boardColumnWidth = boardColumnWidth,
+                                    workbenchTaskGroups = workbenchTaskGroups,
+                                    workbenchSort = workbenchArrangement.sort,
+                                    workbenchGroupBy = workbenchArrangement.groupBy,
                                     onBoardModeChange = { enabled ->
                                         selectedProjectId?.let {
                                             viewModel.setBoardMode(it, enabled)
+                                        }
+                                    },
+                                    onWorkbenchSortChange = { sort ->
+                                        selectedProject?.let { project ->
+                                            viewModel.setWorkbenchArrangement(
+                                                project.id,
+                                                viewModel.viewArrangement.value
+                                                    .workbenchFor(project.id)
+                                                    .copy(sort = sort),
+                                            )
+                                        }
+                                    },
+                                    onWorkbenchGroupChange = { groupBy ->
+                                        selectedProject?.let { project ->
+                                            viewModel.setWorkbenchArrangement(
+                                                project.id,
+                                                viewModel.viewArrangement.value
+                                                    .workbenchFor(project.id)
+                                                    .copy(groupBy = groupBy),
+                                            )
                                         }
                                     },
                                     onChangeTaskStatus = { taskId, statusId ->

@@ -1,9 +1,15 @@
 package app.opentasks.feature.projects
 
+import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -16,14 +22,23 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskGroup
+import app.opentasks.core.model.TaskGroupKey
+import app.opentasks.core.model.TaskGroupValue
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.WorkflowStatusId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +50,129 @@ import java.util.concurrent.atomic.AtomicReference
 class ProjectWorkbenchInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun suppliedWorkbenchGroupsKeepTheirOrderAndListControlsStayStateless() {
+        val project = OpenTasksFixtures.studioProject
+        val base = OpenTasksFixtures.tasks.first { it.projectId == project.id }.copy(
+            completedAt = null,
+            deletedAt = null,
+        )
+        val rawFirst = base.copy(id = TaskId("raw-first"), title = "Raw first")
+        val groupedFirst = base.copy(id = TaskId("grouped-first"), title = "Grouped first")
+        val flat = base.copy(id = TaskId("flat"), title = "Flat task")
+        val selectedSort = AtomicReference<TaskSortKey?>()
+        val selectedGroup = AtomicReference<TaskGroupKey?>()
+
+        setWorkbenchContent(
+            project = project,
+            tasks = listOf(rawFirst, groupedFirst, flat),
+            groups = listOf(
+                TaskGroup(TaskGroupValue.Due(DueBucket.TODAY), listOf(groupedFirst)),
+                TaskGroup(TaskGroupValue.PriorityValue(Priority.HIGH), listOf(rawFirst)),
+                TaskGroup(null, listOf(flat)),
+            ),
+            sort = TaskSortKey.UPDATED,
+            groupBy = TaskGroupKey.PRIORITY,
+            onSortChange = selectedSort::set,
+            onGroupChange = selectedGroup::set,
+        )
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasText(groupedFirst.title))
+        val groupedFirstTop = composeRule.onNodeWithText(groupedFirst.title)
+            .getUnclippedBoundsInRoot().top
+        val rawFirstTop = composeRule.onNodeWithText(rawFirst.title).getUnclippedBoundsInRoot().top
+        assertTrue(groupedFirstTop < rawFirstTop)
+        composeRule.onNodeWithText(context.getString(R.string.workbench_group_due_today))
+            .assert(isHeading())
+        composeRule.onNodeWithText(context.getString(R.string.workbench_group_priority_high))
+            .assert(isHeading())
+        composeRule.onNodeWithText("null").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("workbench-sort-control")
+            .assertContentDescriptionEquals("Sort project tasks: Updated")
+            .performClick()
+        composeRule.onNodeWithTag("workbench-sort-option-updated").assertIsSelected()
+        composeRule.onNodeWithTag("workbench-sort-option-due").assertIsNotSelected().performClick()
+        assertEquals(TaskSortKey.DUE, selectedSort.get())
+        composeRule.onNodeWithTag("workbench-sort-control").performClick()
+        composeRule.onNodeWithTag("workbench-sort-option-priority").performClick()
+        assertEquals(TaskSortKey.PRIORITY, selectedSort.get())
+        composeRule.onNodeWithTag("workbench-sort-control").performClick()
+        composeRule.onNodeWithTag("workbench-sort-option-title").performClick()
+        assertEquals(TaskSortKey.TITLE, selectedSort.get())
+        composeRule.onNodeWithTag("workbench-sort-control").performClick()
+        composeRule.onNodeWithTag("workbench-sort-option-updated").performClick()
+        assertEquals(TaskSortKey.UPDATED, selectedSort.get())
+
+        composeRule.onNodeWithTag("workbench-group-control")
+            .assertContentDescriptionEquals("Group project tasks: Priority")
+            .performClick()
+        composeRule.onNodeWithTag("workbench-group-option-priority").assertIsSelected()
+        composeRule.onNodeWithTag("workbench-group-option-none").assertIsNotSelected().performClick()
+        assertEquals(null, selectedGroup.get())
+        composeRule.onNodeWithTag("workbench-group-control").performClick()
+        composeRule.onNodeWithTag("workbench-group-option-due_bucket").performClick()
+        assertEquals(TaskGroupKey.DUE_BUCKET, selectedGroup.get())
+        composeRule.onNodeWithTag("workbench-group-control").performClick()
+        composeRule.onNodeWithTag("workbench-group-option-priority").performClick()
+        assertEquals(TaskGroupKey.PRIORITY, selectedGroup.get())
+        composeRule.onNodeWithTag("workbench-group-control").performClick()
+        composeRule.onNodeWithTag("workbench-group-option-project").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("workbench-view-board"))
+        composeRule.onNodeWithTag("workbench-view-board").performClick()
+        composeRule.onNodeWithTag("workbench-task-${groupedFirst.id.value}").assertDoesNotExist()
+        composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
+    }
+
+    @Test
+    fun workbenchUsesOpaqueLazyKeysForMilestonesGroupsAndTasks() {
+        val project = OpenTasksFixtures.studioProject
+        val base = OpenTasksFixtures.tasks.first { it.projectId == project.id }.copy(
+            completedAt = null,
+            deletedAt = null,
+        )
+        val sharedIdTask = base.copy(id = TaskId("shared-id"), title = "Shared id task")
+        val headerIdTask = base.copy(id = TaskId("due:TODAY"), title = "Header id task")
+        val inboxProjectTask = base.copy(id = TaskId("inbox-project"), title = "Inbox project task")
+        val milestone = OpenTasksFixtures.milestones.first { it.projectId == project.id }.copy(
+            id = MilestoneId(sharedIdTask.id.value),
+            name = "Shared id milestone",
+        )
+
+        setWorkbenchContent(
+            project = project,
+            tasks = listOf(sharedIdTask, headerIdTask, inboxProjectTask),
+            milestones = listOf(milestone),
+            groups = listOf(
+                TaskGroup(TaskGroupValue.Due(DueBucket.TODAY), listOf(headerIdTask)),
+                TaskGroup(TaskGroupValue.Project(null), listOf(sharedIdTask)),
+                TaskGroup(
+                    TaskGroupValue.Project(ProjectId("inbox")),
+                    listOf(inboxProjectTask),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText(milestone.name).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.workbench_group_due_today))
+            .assert(isHeading())
+        assertEquals(
+            2,
+            composeRule.onAllNodes(hasText(context.getString(R.string.workbench_group_project)) and isHeading())
+                .fetchSemanticsNodes().size,
+        )
+        listOf(sharedIdTask, headerIdTask, inboxProjectTask).forEach { task ->
+            composeRule.onNodeWithTag("workbench-task-${task.id.value}")
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+    }
 
     @Test
     fun compactWorkbenchAutoSavesAndOpensItsTask() {
@@ -395,6 +533,41 @@ class ProjectWorkbenchInstrumentedTest {
             .performScrollToNode(hasTestTag("project-name-field"))
         composeRule.onNodeWithTag("project-name-field")
             .assertTextContains(draft, substring = true)
+    }
+
+    private fun setWorkbenchContent(
+        project: app.opentasks.core.model.Project,
+        tasks: List<Task>,
+        milestones: List<app.opentasks.core.model.Milestone> =
+            OpenTasksFixtures.milestones.filter { it.projectId == project.id },
+        groups: List<TaskGroup> = listOf(TaskGroup(null, tasks)),
+        sort: TaskSortKey = TaskSortKey.DUE,
+        groupBy: TaskGroupKey? = null,
+        onSortChange: (TaskSortKey) -> Unit = {},
+        onGroupChange: (TaskGroupKey?) -> Unit = {},
+    ) {
+        composeRule.setContent {
+            OpenTasksTheme {
+                ProjectsScreen(
+                    projects = OpenTasksFixtures.snapshot.projects,
+                    tasks = tasks,
+                    milestones = milestones,
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    selectedProjectId = project.id,
+                    showDetailPane = false,
+                    workbenchTaskGroups = groups,
+                    workbenchSort = sort,
+                    workbenchGroupBy = groupBy,
+                    onWorkbenchSortChange = onSortChange,
+                    onWorkbenchGroupChange = onGroupChange,
+                    onSelectProject = {},
+                    onCloseDetail = {},
+                    onUpdateProject = { _, _ -> },
+                    onArchiveProject = {},
+                    onOpenTask = {},
+                )
+            }
+        }
     }
 
     private data class MilestoneUpdate(

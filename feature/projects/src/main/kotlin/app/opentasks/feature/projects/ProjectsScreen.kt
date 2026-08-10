@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -40,6 +42,8 @@ import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,8 +82,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
@@ -94,6 +100,7 @@ import app.opentasks.core.designsystem.readableName
 import app.opentasks.core.designsystem.sortedTimelineItems
 import app.opentasks.core.designsystem.timelineTimestampLabel
 import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Note
@@ -101,9 +108,14 @@ import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskGroup
+import app.opentasks.core.model.TaskGroupKey
+import app.opentasks.core.model.TaskGroupValue
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import kotlinx.coroutines.delay
@@ -137,7 +149,12 @@ fun ProjectsScreen(
     listPaneFraction: Float = 0.42f,
     boardMode: Boolean = false,
     boardColumnWidth: Dp = 272.dp,
+    workbenchTaskGroups: List<TaskGroup> = emptyList(),
+    workbenchSort: TaskSortKey = TaskSortKey.DUE,
+    workbenchGroupBy: TaskGroupKey? = null,
     onBoardModeChange: (Boolean) -> Unit = {},
+    onWorkbenchSortChange: (TaskSortKey) -> Unit = {},
+    onWorkbenchGroupChange: (TaskGroupKey?) -> Unit = {},
     onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit = { _, _ -> },
     onSelectProject: (ProjectId) -> Unit,
     onCloseDetail: () -> Unit,
@@ -180,7 +197,12 @@ fun ProjectsScreen(
             workflowStatuses = workflowStatuses,
             boardMode = boardMode,
             boardColumnWidth = boardColumnWidth,
+            workbenchTaskGroups = workbenchTaskGroups,
+            workbenchSort = workbenchSort,
+            workbenchGroupBy = workbenchGroupBy,
             onBoardModeChange = onBoardModeChange,
+            onWorkbenchSortChange = onWorkbenchSortChange,
+            onWorkbenchGroupChange = onWorkbenchGroupChange,
             onChangeTaskStatus = onChangeTaskStatus,
             onBack = onCloseDetail,
             onUpdate = { onUpdateProject(selectedProject.id, it) },
@@ -245,7 +267,12 @@ fun ProjectsScreen(
                     workflowStatuses = workflowStatuses,
                     boardMode = boardMode,
                     boardColumnWidth = boardColumnWidth,
+                    workbenchTaskGroups = workbenchTaskGroups,
+                    workbenchSort = workbenchSort,
+                    workbenchGroupBy = workbenchGroupBy,
                     onBoardModeChange = onBoardModeChange,
+                    onWorkbenchSortChange = onWorkbenchSortChange,
+                    onWorkbenchGroupChange = onWorkbenchGroupChange,
                     onChangeTaskStatus = onChangeTaskStatus,
                     onBack = null,
                     onUpdate = { onUpdateProject(selectedProject.id, it) },
@@ -375,7 +402,12 @@ private fun ProjectWorkbench(
     workflowStatuses: List<WorkflowStatus>,
     boardMode: Boolean,
     boardColumnWidth: Dp,
+    workbenchTaskGroups: List<TaskGroup>,
+    workbenchSort: TaskSortKey,
+    workbenchGroupBy: TaskGroupKey?,
     onBoardModeChange: (Boolean) -> Unit,
+    onWorkbenchSortChange: (TaskSortKey) -> Unit,
+    onWorkbenchGroupChange: (TaskGroupKey?) -> Unit,
     onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit,
     onBack: (() -> Unit)?,
     onUpdate: (ProjectEdit) -> Unit,
@@ -437,6 +469,9 @@ private fun ProjectWorkbench(
     val completedCount = projectTasks.count(Task::isCompleted)
     val openCount = projectTasks.size - completedCount
     val blockedCount = projectTasks.count(Task::isBlocked)
+    val renderedGroups = workbenchTaskGroups.ifEmpty {
+        listOf(TaskGroup(value = null, tasks = projectTasks))
+    }
 
     LaunchedEffect(persistedValue) {
         if (skipInitialRepositorySync) {
@@ -726,7 +761,7 @@ private fun ProjectWorkbench(
             Spacer(Modifier.height(8.dp))
         }
 
-        items(projectMilestones, key = { it.id.value }) { milestone ->
+        items(projectMilestones, key = { "workbench:milestone:${it.id.value}" }) { milestone ->
             MilestoneRow(
                 milestone = milestone,
                 projectName = project.name,
@@ -744,12 +779,31 @@ private fun ProjectWorkbench(
                     } else {
                         "${projectTasks.size} active tasks"
                     },
+                    action = {
+                        WorkbenchArrangementControls(
+                            workbenchSort = workbenchSort,
+                            workbenchGroupBy = workbenchGroupBy,
+                            onWorkbenchSortChange = onWorkbenchSortChange,
+                            onWorkbenchGroupChange = onWorkbenchGroupChange,
+                        )
+                    },
                 )
                 Spacer(Modifier.height(8.dp))
             }
 
-            items(projectTasks, key = { it.id.value }) { task ->
-                ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+            renderedGroups.forEach { group ->
+                group.value?.let { value ->
+                    item(key = "workbench:group:${value.stableKey()}") {
+                        Text(
+                            workbenchGroupLabel(value),
+                            modifier = Modifier.semantics { heading() },
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                }
+                items(group.tasks, key = { "workbench:task:${it.id.value}" }) { task ->
+                    ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+                }
             }
         }
 
@@ -881,6 +935,138 @@ private fun ProjectWorkbench(
             },
         )
     }
+}
+
+@Composable
+private fun WorkbenchArrangementControls(
+    workbenchSort: TaskSortKey,
+    workbenchGroupBy: TaskGroupKey?,
+    onWorkbenchSortChange: (TaskSortKey) -> Unit,
+    onWorkbenchGroupChange: (TaskGroupKey?) -> Unit,
+) {
+    var sortExpanded by remember { mutableStateOf(false) }
+    var groupExpanded by remember { mutableStateOf(false) }
+    val sortControlDescription = stringResource(
+        R.string.workbench_sort_control,
+        workbenchSortLabel(workbenchSort),
+    )
+    val groupControlDescription = stringResource(
+        R.string.workbench_group_control,
+        workbenchGroupLabel(workbenchGroupBy),
+    )
+
+    Row {
+        Box {
+            IconButton(
+                onClick = { sortExpanded = true },
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("workbench-sort-control")
+                    .semantics { contentDescription = sortControlDescription },
+            ) {
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = sortExpanded,
+                onDismissRequest = { sortExpanded = false },
+            ) {
+                TaskSortKey.entries.forEach { candidate ->
+                    DropdownMenuItem(
+                        text = { Text(workbenchSortLabel(candidate)) },
+                        onClick = {
+                            sortExpanded = false
+                            onWorkbenchSortChange(candidate)
+                        },
+                        modifier = Modifier
+                            .semantics { selected = workbenchSort == candidate }
+                            .testTag(
+                                "workbench-sort-option-${candidate.name.lowercase(Locale.ROOT)}",
+                            ),
+                    )
+                }
+            }
+        }
+        Box {
+            IconButton(
+                onClick = { groupExpanded = true },
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("workbench-group-control")
+                    .semantics { contentDescription = groupControlDescription },
+            ) {
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = groupExpanded,
+                onDismissRequest = { groupExpanded = false },
+            ) {
+                listOf(null, TaskGroupKey.DUE_BUCKET, TaskGroupKey.PRIORITY).forEach { candidate ->
+                    DropdownMenuItem(
+                        text = { Text(workbenchGroupLabel(candidate)) },
+                        onClick = {
+                            groupExpanded = false
+                            onWorkbenchGroupChange(candidate)
+                        },
+                        modifier = Modifier
+                            .semantics { selected = workbenchGroupBy == candidate }
+                            .testTag(
+                                "workbench-group-option-" +
+                                    (candidate?.name?.lowercase(Locale.ROOT) ?: "none"),
+                            ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun workbenchSortLabel(value: TaskSortKey): String = stringResource(
+    when (value) {
+        TaskSortKey.DUE -> R.string.workbench_sort_due_label
+        TaskSortKey.PRIORITY -> R.string.workbench_sort_priority_label
+        TaskSortKey.TITLE -> R.string.workbench_sort_title_label
+        TaskSortKey.UPDATED -> R.string.workbench_sort_updated_label
+    },
+)
+
+@Composable
+private fun workbenchGroupLabel(value: TaskGroupKey?): String = stringResource(
+    when (value) {
+        null -> R.string.workbench_group_none_label
+        TaskGroupKey.DUE_BUCKET -> R.string.workbench_group_due_label
+        TaskGroupKey.PROJECT -> R.string.workbench_group_project
+        TaskGroupKey.PRIORITY -> R.string.workbench_group_priority_label
+    },
+)
+
+private fun TaskGroupValue.stableKey(): String = when (this) {
+    is TaskGroupValue.Due -> "due:${bucket.name}"
+    is TaskGroupValue.Project -> projectId?.let { "project:id:${it.value}" } ?: "project:inbox"
+    is TaskGroupValue.PriorityValue -> "priority:${priority.name}"
+}
+
+@Composable
+private fun workbenchGroupLabel(value: TaskGroupValue): String = when (value) {
+    is TaskGroupValue.Due -> stringResource(
+        when (value.bucket) {
+            DueBucket.OVERDUE -> R.string.workbench_group_due_overdue
+            DueBucket.TODAY -> R.string.workbench_group_due_today
+            DueBucket.THIS_WEEK -> R.string.workbench_group_due_this_week
+            DueBucket.LATER -> R.string.workbench_group_due_later
+            DueBucket.NO_DATE -> R.string.workbench_group_due_no_date
+        },
+    )
+    is TaskGroupValue.Project -> stringResource(R.string.workbench_group_project)
+    is TaskGroupValue.PriorityValue -> stringResource(
+        when (value.priority) {
+            Priority.URGENT -> R.string.workbench_group_priority_urgent
+            Priority.HIGH -> R.string.workbench_group_priority_high
+            Priority.MEDIUM -> R.string.workbench_group_priority_medium
+            Priority.LOW -> R.string.workbench_group_priority_low
+            Priority.NONE -> R.string.workbench_group_priority_none
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1652,7 +1838,9 @@ private fun ProjectTaskRow(
     onOpen: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("workbench-task-${task.id.value}"),
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
     ) {
