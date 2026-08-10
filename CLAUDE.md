@@ -89,6 +89,20 @@ race KSP while release Hilt sources are generated.
   `retired_blob_sets` index and its `RETIRED_BLOB_SET` backup family
   (Stage 5); any further durable schema change requires a later migration
   and exported schema.
+- Keep Stage 6 bounds: at most 20 saved views, 200 distinct task IDs per bulk
+  command, 5,000 rows and 5 MiB per Tasks CSV import, and 14 days for weekly
+  review staleness. CSV import accepts only the exact app-exported Tasks schema
+  and creates new records; it never matches or merges existing records.
+- Focus cycles have exactly two presets, 25/5 and 50/10. Start, boundary,
+  reconcile, banner Stop, and timer Stop stay serialized through the existing
+  focus coordinator gate. Stopping the focus-owned task must clear the
+  session/alarm before `StopTimerIfOwned` and must not allow foreground
+  reconciliation to create a replacement time entry; stopping another task
+  retains ordinary `StopTimer` behaviour.
+- `SAVED_VIEW` backup identity remains the saved-view ID, but its journal
+  fingerprint must remain content-based over the complete encoded backup
+  record. Never revert it to identity-only: a rename or query update must
+  journal an upsert without a Room or backup-format change.
 - `AttachmentBlobCoordinator.resume()` has exactly one product caller: the
   silent auto-resume in `AttachmentRuntime.resumeInterruptedSessions()`,
   which runs strictly after session expiry on runtime start and re-arms

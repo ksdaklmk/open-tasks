@@ -457,6 +457,47 @@ utilities but do not define product behaviour. Future journal segments carry
 local backup continuity for one active writer. Normal operation never
 downloads or merges structured records.
 
+## Stage 6 daily-flow command boundary
+
+Stage 6 activates the existing Room v9 `saved_views` table without a schema or
+backup-format change. `WorkspaceSnapshot.savedViews` is now live workspace
+state. Search creates, renames, updates, deletes, and restores saved views only
+through `DomainCommand`; the query payload has a strict codec and remains
+encrypted workspace content. The existing `SAVED_VIEW` backup family keeps ID
+as its record identity, but backup-journal comparison uses the complete encoded
+record as its fingerprint so a rename or query edit journals an upsert.
+
+Bulk mutations and task CSV import are repository-owned composite commands.
+Bulk commands accept distinct task IDs, validate the complete batch before
+writing, commit at most 200 task changes atomically, and return one
+repository-produced `UndoBatch`. Room applies the batch in one transaction;
+the in-memory engine uses a scratch snapshot and publishes once. `ImportTasks`
+accepts only validated rows from the app's own Tasks CSV schema, creates new
+records without matching or merging existing ones, and returns a receipt whose
+`RemoveImportedRecords` undo removes exactly those created records. Parser and
+repository limits independently cap an import at 5,000 task rows.
+
+Weekly review is derived UI state over overdue tasks, tasks not reviewed for
+14 days, unscheduled tasks, and project health. Completing a review row sends
+`MarkReviewed` for exactly one task or project and appends an immutable
+`ActivityKind.REVIEWED` entry; reviewed progress itself is not a parallel
+mutable store.
+
+Focus-cycle state is app-managed alarm/session state, while time entries remain
+Room authority. The 25/5 and 50/10 presets serialize start, boundary,
+reconciliation, banner Stop, and task-detail timer Stop through one coordinator
+gate. A manual Stop for the focus-owned task clears the session and alarm before
+`StopTimerIfOwned`; a Stop for another task retains ordinary `StopTimer`
+behaviour. The repository owner check and stop occur in the same transaction,
+so a stale boundary cannot stop a newly started task.
+
+Markdown export and Tasks CSV export/import are explicit Storage Access
+Framework boundaries. Markdown and CSV output are plaintext outside the vault;
+partial documents are deleted on failure. CSV parsing is bounded before
+repository dispatch, and parse buffers are cleared when the preview is no
+longer needed. These interop paths do not change the encrypted Room, create-only
+Drive, or snapshot-only `.otvault` authority boundaries.
+
 Google authorisation is explicit and the Drive backup transport requests only
 `drive.appdata`; it lists/reads encrypted lineage objects and creates immutable
 objects without a PATCH/update path. Backup and attachment namespaces remain

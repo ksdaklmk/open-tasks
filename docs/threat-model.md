@@ -137,7 +137,7 @@ fails safely where practical and must not weaken platform protections.
 | T08 | Android backup leaks live vault, keys, or blobs | Packaged extraction rules include only the `file`-domain application-relative path `android_backup/open_tasks_portable_v1.otb`; database, preferences, root, cache, local staging, keys, credentials, and attachment paths remain excluded | Real encrypted Google-account transport inclusion and restore remain an external qualification gate |
 | T09 | Portable package includes excluded data or grows beyond safe platform bounds | The publisher builds from a consistent snapshot, verifies the authenticated container, caps it at 24 MiB, withdraws ineligible generations, and publishes atomically | Future format changes require the same exact-file and bounded-package audit |
 | T10 | Logs or telemetry leak private fields | Architecture prohibits private content and sensitive routing data; current review found no application logging calls | Any telemetry requires a separate field allow-list review |
-| T11 | Exported component mutates or leaks data | Only launcher activity is exported; reminder receivers and pending intents are private/immutable; `FileProvider` is private and constrained | Sharesheet/import and attachment paths require explicit validation, grants, and cleanup tests |
+| T11 | Exported component mutates or leaks data | `MainActivity` is exported for the launcher, the existing QUICK_ADD action, and exact `text/plain` SEND and PROCESS_TEXT filters; `QuickAddTileService` is exported only behind `BIND_QUICK_SETTINGS_TILE`; reminder/focus receivers are private, pending intents are immutable, and `FileProvider` is private and constrained | Every later exported surface requires a separate manifest, permission, input-validation, and cleanup review |
 | T12 | Provider reads backup or attachment content | Backup and attachment objects are encrypted locally through the provider-independent authenticated codec; explicit authorization requests only `drive.appdata`; create-only transport has no update/PATCH path. A one-shot credentialed attachment gate proved exact-ID chunk create/occupied rejection, byte-identical readback, manifest create/readback/single lookup, and cleanup. | This is not broader live-provider or two-installation coverage. |
 | T13 | Backup corruption, truncation, or incompatible format activates bad state | Strict bounded frames and payloads, checksum-before-AEAD, complete identity authentication, typed failures, staged full-vault verification, atomic activation, truthful transient-provider guidance, and genuine Activity recovery-route recreation evidence fail closed | A destructive live two-installation recovery was not claimed by this Stage 4 gate. |
 | T14 | Stale writer overwrites a recovered lineage or mutates blob state | Writer epochs, conditional create-only control succession, ownership-loss handling, and explicit account-bound takeover are implemented | Additional live two-installation and prior-device reconnect coverage remains outside this qualification. |
@@ -155,6 +155,10 @@ fails safely where practical and must not weaken platform protections.
 | T26 | A widget host, launcher preview, or app-drawer surface exposes a concealed task title | Glance title writes are gated by `titlesPermitted`, which is false whenever title privacy or lock concealment is engaged (exact predicate in the Stage 5 addendum below), enforced through the mutex-gated `StopGatedWriter` so no title write can land after a stop-time clear; title privacy is a dedicated always-on control independent of the lock feature; widget state sits outside the Android Auto Backup allow-list | Task titles remain plaintext at rest in the Glance state file until concealment engages; `locked` flips only on a qualifying foreground transition (cold start locked when the lock is enabled, or a background span at or beyond the chosen delay), not at the instant the lock toggle is turned on |
 | T27 | The `.otvault` archive is stolen, intercepted, or its custody is compromised | The export passphrase is the same recovery passphrase; the archive envelope is a real recovery envelope (Argon2id 64 MiB, three iterations, parallelism one, random 16-byte salt), identical to the live vault's recovery envelope | Anyone who learns the export passphrase and obtains the archive gains the same access as a full recovery takeover; archive custody is equivalent to recovery-credential custody and must be protected with the same care as the passphrase itself |
 | T28 | Plaintext CSV export discloses workspace content outside the vault, including formula injection against the opening spreadsheet application | A mandatory, undismissable-without-choice disclosure dialog explains the file is unencrypted before any write begins; cell values beginning `=`, `+`, `-`, or `@` are neutralised with a leading `'` | The exported file itself is permanently plaintext once created; this is a disclosed boundary-crossing control, not a confidentiality guarantee, and the exporting person is responsible for the file's custody thereafter |
+| T29 | Another app sends private, oversized, or malformed text into Quick Add | Only `text/plain` SEND and PROCESS_TEXT are accepted; prefill uses the first trimmed line, caps it at 240 characters, keeps it as transient sheet state, and replaces an already-open prefill when a new intent arrives; no shared text is logged | The sending app and Android share UI can already read the source text; it becomes encrypted workspace content only after the person confirms Add |
+| T30 | A third-party app invokes the Quick Settings capture surface | The exported tile requires the platform-only `BIND_QUICK_SETTINGS_TILE` permission and launches the existing lock-gated Quick Add route with no task-text extra | A compromised System UI is within the compromised-OS assumption; the tile deliberately reveals that Open Tasks is installed |
+| T31 | A hostile CSV exhausts memory or corrupts existing records | Import caps input at 5 MiB and 5,000 rows, requires strict UTF-8 and the exact own-schema header, validates every row and relation before dispatch, previews create counts, creates only new records atomically, and returns exact Undo | CSV import deliberately duplicates matching records; it never attempts identity matching or third-party format recovery |
+| T32 | Markdown export discloses project content outside the vault | Export is a user-selected, project-scoped SAF write; the product labels the format plain Markdown and deletes a partial document on every non-success path | The completed Markdown file is permanently plaintext and its custody belongs to the person who exported it |
 
 ## Cryptographic invariants
 
@@ -242,6 +246,36 @@ that later opens the file. This is a disclosed boundary-crossing control:
 it protects the opening application from a hostile cell value, not the
 exported content's confidentiality, which the disclosure already
 surrenders by design.
+
+## Stage 6 addendum
+
+Stage 6 adds four bounded platform or plaintext boundaries; see T29–T32.
+
+**(a) Share and text-selection intake.** SEND and PROCESS_TEXT accept only
+`text/plain`. The prefill is the first trimmed line, capped at the task-title
+limit, and remains transient until Add executes the ordinary encrypted
+repository command. A second incoming intent replaces the current prefill
+instead of appending or preserving stale shared content. Intent extras and
+saved-search text are excluded from logs and telemetry.
+
+**(b) Quick Settings capture.** The tile is not a general exported service.
+Android alone can bind it through `BIND_QUICK_SETTINGS_TILE`; tapping it sends
+only the existing boolean Quick Add route and still passes through app-lock
+authority before content is composed.
+
+**(c) Tasks CSV import.** Import is a bounded, create-only parser boundary:
+5 MiB maximum source bytes, strict UTF-8, the exact Tasks export header, at
+most 5,000 rows, validation before repository dispatch, and one atomic receipt
+for Undo. Existing tasks, projects, and tags are never updated or merged. The
+ViewModel releases and clears source bytes after parsing and clears the parsed
+preview after completion, cancellation, or failure.
+
+**(d) Markdown export is plaintext.** Project Markdown intentionally leaves
+the encrypted vault through a person-selected SAF document. It contains the
+selected project's summary, milestones, and tasks in readable text. This is an
+interop feature rather than a confidentiality claim; completed-file custody
+belongs to the person, while all partial-output failure paths delete the
+document.
 
 ## Security acceptance gates
 

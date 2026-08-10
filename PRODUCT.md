@@ -79,6 +79,23 @@ nothing beyond a snapshot-only `.otvault` export, and no stored calendar
 event identifier: calendar insertion is a one-way, fire-and-forget
 hand-off to the device calendar app with no result handling.
 
+Stage 6 reduces daily friction without changing the Room v9 or backup format.
+It adds natural-language due dates, browser share and selected-text Quick Add,
+a lock-gated Quick Settings tile, interactive Today-widget completion, 25/5
+and 50/10 focus cycles, live saved searches, atomic bulk actions, a
+drag-and-accessible Kanban board, four-part weekly review, plaintext project
+Markdown, and create-only round-trip import for the app's own Tasks CSV. Manual
+Stop ends a focus cycle only when the stopped timer owns that cycle; stale
+alarms cannot stop another task. The installed identity is the approved
+adaptive Ember/card icon, including its normal, round, and monochrome launcher
+resources; the supplied 512 px store listing asset remains outside the
+sideload-only product boundary.
+
+Stage 6 adds no cloud surface, runtime permission, third-party CSV format,
+record merge, wearable surface, location reminder, or durable schema change.
+Markdown and CSV deliberately leave the encrypted vault as plaintext through
+person-selected Storage Access Framework documents.
+
 ## Approved future contract
 
 - Structured workspace data remains local in Room during normal use.

@@ -1,51 +1,36 @@
 # Open Tasks Handoff
 
-- Last updated: 9 August 2026
-- Branch: `main` at `2254cb1` plus this checkpoint docs commit. Local is
-  ahead of `origin/main` (`8c08570`) by 41 commits, not
+- Last updated: 10 August 2026
+- Branch: `main` at `6b55f87` plus this closure docs commit. Local is
+  ahead of `origin/main` (`8c08570`) by 47 commits after this commit, not
   yet pushed (matching the established Stage 6 practice; a push triggers
   a CI run).
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
   completed run at `c74a435` confirmed the expected post-F6 shape —
   `verify`, compact API 36, and `release` green, only expanded API 37.0
   red. No open PRs or issues.
+- **Stage 6 is complete and qualified.** Tasks 1–14, the whole-stage
+  review, its six-finding consolidated fix wave, the focus-aware manual-Stop
+  amendment, the connected-gate fix, all repository/release/privacy gates,
+  and the documented disposable-device checklist are closed. Authority:
+  `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`,
+  `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`, and
+  `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`. The
+  qualification record is `docs/qualification/stage6-daily-flow.md`; the
+  ignored execution ledger remains
+  `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
 - Remaining and planned work, in order (the live backlog):
-  1. **Stage 6 execution — Tasks 1–13, the whole-stage review, and its
-     single consolidated final-fix wave are COMPLETE. The open Task 6
-     product decision and controller-owned Task 14 remain.**
-     Authority spec:
-     `docs/superpowers/specs/2026-08-08-stage-6-daily-flow-design.md`;
-     launcher-icon authority:
-     `docs/superpowers/specs/2026-08-09-ember-launcher-icon-design.md`;
-     plan: `docs/superpowers/plans/2026-08-08-stage-6-daily-flow-plan.md`
-     (audited revisions committed in `fc4aad8`, the recorded Stage 6
-     implementation-base SHA). Execution ledger with full per-task
-     review/fix history:
-     `.superpowers/sdd/2026-08-08-stage-6-daily-flow-plan/progress.md`.
-     See the Stage 6 final-review fix closure checkpoint below for the six
-     discharged findings, scoped re-review ruling, one open user decision,
-     and exact resume instructions.
-     Execution mode (user
-     ruling, recorded in the plan header): Tasks 2–11 and Task 12 phase 1 via
-     `superpowers:subagent-driven-development` — fresh implementer per
-     task; Task 12 phase 2 completed inline on the fresh go; independent
-     task review per boundary, no-subagent/no-fork clause in every
-     implementer dispatch, Task 14 controller-owned; no task before Task 14
-     runs a device suite. Task 13, the complete `fc4aad8..ade3634`
-     whole-stage review, and its final-fix wave are complete;
-     controller-owned Task 14 has not started.
-  2. **F6 observe-only** (ruling, 7 August 2026): the expanded API
+  1. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
      it self-restores. Green signal = API 36 + verify + release. No
      action, just observe on natural runs.
-  3. **Ctrl+K CI blind spot** — parked: CI cannot prove the search
-     query field takes focus on the headless API 36 runner (no Dialog
-     window focus); focus-capable device runs execute the original
-     assertion. Revisit only if the runner or assertion strategy
-     changes.
-  4. **Play Console** — externally pending and out of scope by the
-     sideload-only ruling; revisit only with backlog item 1.
+  2. **Ctrl+K production-window blind spot** — parked: the deterministic
+     Compose root wiring now passes without a skip, but CI still cannot prove
+     that a real headless `MainActivity` Dialog window receives OS focus.
+     Revisit only if the runner or assertion strategy changes.
+  3. **Play Console** — externally pending and out of scope by the
+     sideload-only ruling; revisit only if that distribution ruling changes.
   Future releases follow `RELEASING.md`'s per-release loop (bump
   `versionCode` by exactly 1, gate, build, verify, smoke on the
   disposable AVD, record, tag).
@@ -171,11 +156,12 @@
   slice, Stage 3, Stage 2,
   Train 1 Tasks 1.1–1.5, and Stage 1 remain complete and independently
   reviewed.**
-- Current product source implementation point: `4f42dfe` (`fix: close stage 6
-  final review gaps`), with `2254cb1` only removing its accidentally tracked
-  ignored execution report while preserving the local file. Stage 6
-  starts from the recorded `fc4aad8` implementation base; its complete task,
-  review, and fix history is in the ignored execution ledger named above.
+- Current product source implementation point: `c5c5e11` (`fix: clear
+  stage 6 device qualification gate`), on the focus-aware manual-Stop commit
+  `8742a84` and recorded Stage 6 implementation base `fc4aad8`. This
+  closure docs commit completes Task 14; test-only qualification proof is at
+  `6b55f87`. The complete task, review, fix, and qualification history is in
+  the ignored Stage 6 execution ledger and `docs/qualification/stage6-daily-flow.md`.
   The prior Stage 5 implementation point is `6bfafa8` (`fix: wipe
   export passphrase when the output stream cannot be opened`), Task
   13's Part 1 fix, on top of the Task 13 six-module connected-gate fix
@@ -234,6 +220,59 @@
 This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
+
+## Stage 6 closure — 10 August 2026
+
+Stage 6 is complete at product source `c5c5e11`, from implementation base
+`fc4aad8`, with focus-aware manual Stop at `8742a84`. The six-finding
+whole-stage fix wave is closed, and both the manual-Stop review and the final
+connected-gate fix review returned Approved with zero Critical or Important
+findings. The gate-fix review left one harmless Minor: Board drag keeps a
+second callback-freshness wrapper that is redundant with the card-level
+wrapper. Leave it until that code is otherwise edited.
+
+The first Task 14 connected run exposed 14 failures and one extra skip across
+332 tests. `c5c5e11` fixed three small product defects (48 dp Quick Add
+clear, fresh board drop callback/semantics, and high-scale template-sheet
+scrolling) and corrected test timing, scrolling, and the environment-dependent
+Ctrl+K harness. The exact six-module rerun passed in 6m52s: 332 tests, zero
+failures/errors, and exactly two expected skips (the preserved credentialed
+Drive qualification and FoldContinuity cross-display exception). The sole
+`Fold8_Acceptance` AVD was verified before use, booted read-only without
+snapshots, and killed after the final checklist; ADB and emulator-process
+audits were empty.
+
+Forced-fresh `testDebugUnitTest lintDebug :app:assembleDebug` passed all
+550 tasks in 1m23s, including 1,179 JVM tests with zero failures.
+Forced-fresh `:app:assembleRelease` passed all 442 tasks in 1m02s. Schema
+v9 drift, all four frozen fixture generators, workflow pinning, release
+manifest/scope, production logging, privacy, and diff-hygiene gates passed.
+Stage 6's release additions are the approved `text/plain` SEND and
+PROCESS_TEXT filters, bind-permission tile service, and private focus alarm
+receiver; `drive.appdata` remains the sole Drive scope.
+
+The post-check accessibility proof at `6b55f87` invokes the exact Kanban
+custom move action. It also closes the existing workflow-editor IME before
+coordinate clicks and scrolls those controls into view. The affected focused
+scenario passed, then the complete projects connected suite passed 19/19.
+
+Disposable-device evidence covered two-value browser sharing, PROCESS_TEXT,
+the Quick Settings tile, widget open/complete/reopen, app-lock concealment and
+unlock routing, focus-owned manual Stop across background/foreground, bulk
+complete/Undo, weekly review, Markdown export/open, CSV export/import/preview/
+duplicate Undo, Kanban drag, and installed Ember artwork under the launcher
+mask and minimal icon treatment. The headless harness cannot honestly perform
+a 25-minute boundary wait, a TalkBack custom-action gesture, production
+Ctrl+K Dialog focus, or a complete SAF `.otvault` saved-view round-trip by
+hand. Those exact contracts are covered by connected/JVM suites and are marked
+as deterministic substitutions, not manual observations, in the qualification
+record.
+
+Standing residuals are unchanged: F6 remains observe-only; real
+`MainActivity` Ctrl+K Dialog focus remains a headless CI blind spot; Play
+Console remains outside the sideload-only boundary. The protected
+`Pixel_10_Pro_Fold`, the user-modified Stage 3 plan, `.kotlin/`, and
+`artifacts/` were not changed.
 
 ## Stage 6 final-review fix closure + Task 6 decision pause — 9 August 2026
 

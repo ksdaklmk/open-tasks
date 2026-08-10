@@ -273,3 +273,44 @@ State transitions last 150–250 ms using Material easing. Animate navigation
 selection, list/detail state, completion, and snackbar feedback only when motion
 helps explain a change. If system animator duration is zero, use an instant
 change or a short crossfade. Do not choreograph page-load entrances.
+
+## Stage 6 daily flow
+
+Search presents saved views as named, editable chips above results. Applying a
+view restores its text, project, tag, status, and date filters together; Save,
+Rename, and Delete use compact dialogs and preserve repository Undo.
+
+Tasks enters multi-select from a long press, checkbox, keyboard, or accessible
+action. A persistent selection bar states the exact count and offers Complete,
+Reschedule, Move, Tag, Delete, and Clear with 48 dp targets. Blocked completion
+requires one explicit confirmation; successful batch actions leave through a
+single snackbar Undo.
+
+The project workbench offers List and Board as a two-option control. Board
+columns use the project's workflow order, state a visible open count, and keep
+cards legible at high font scale. Every card supports long-press drag with
+drop-target highlight and edge auto-scroll, plus a complete three-dot
+tap-to-move menu and equivalent TalkBack custom actions. Invalid drops leave the
+task in its original column.
+
+Weekly review is a linear, resumable sheet over Overdue, Stale, Unscheduled,
+and Project health. Each step states section progress, shows one task or project
+with enough context to decide, and offers Review or Skip; empty sections advance
+without ceremony. Back is consumed while a review write is pending.
+
+The active focus banner names the 25/5 or 50/10 cycle, current Focus or Break
+phase, remaining time, and Stop. Task-detail Stop for the focus-owned task ends
+the complete cycle, so the banner must remain gone after background/foreground
+reconciliation. Boundary notifications use generic text and expose no private
+task content.
+
+The Today widget retains canonical open and complete actions with count-first
+locked/title-private states. Quick Add can also arrive from browser sharing,
+selected text, the Quick Settings tile, and the existing launcher/widget
+routes; every route converges on the same lock-gated sheet.
+
+The installed adaptive launcher icon uses the Ember background with the
+approved white card, coral status bars, and dark cursor foreground. Normal and
+round launcher resources share that adaptive artwork; the monochrome layer
+keeps the card, bars, and cursor distinct for themed or minimal icon treatment.
+The artwork stays centred with safe inset under Android launcher's round mask.
