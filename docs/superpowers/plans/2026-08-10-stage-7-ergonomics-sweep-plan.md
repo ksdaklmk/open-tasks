@@ -1602,7 +1602,19 @@ workbench-group-option-priority
 
 Assert no Project grouping option exists. Assert the flat group has no heading,
 Due/Priority groups use resource-backed headings, and switching to board mode
-continues to hide the workbench task rows.
+continues to hide exact `workbench-task-${task.id.value}` nodes while exact
+`board-card-${task.id.value}` nodes appear.
+
+Render non-default `workbenchSort = UPDATED` and `workbenchGroupBy = PRIORITY`.
+Assert the controls announce those resource-backed current choices and the
+matching open-menu options have selected semantics; menu-expanded state is the
+only UI state the controls may remember.
+
+Add a fixture where a task id equals a milestone id and another task id equals
+an unprefixed group-header key. Also supply both `Project(null)` and
+`Project(ProjectId("inbox"))` group values. Assert every milestone, group
+heading, and task row renders: opaque ids require disjoint LazyColumn key
+namespaces. Assert each non-flat group label has heading semantics.
 
 - [ ] **Step 2: Run the RED compilation**
 
@@ -1620,6 +1632,22 @@ header, only in list mode. Render group headers and task rows in supplied order.
 Keep raw `projectTasks` for counts, progress, milestones, and workflow totals.
 Never expose PROJECT grouping in this surface.
 
+The controls format `workbench_sort_control` / `workbench_group_control` with
+the supplied current option, and each menu item sets `selected` semantics from
+`workbenchSort` / `workbenchGroupBy`. Add and use these exact resources:
+
+```text
+workbench_sort_control = Sort project tasks: %1$s
+workbench_group_control = Group project tasks: %1$s
+workbench_sort_due_label = Due
+workbench_sort_priority_label = Priority
+workbench_sort_title_label = Title
+workbench_sort_updated_label = Updated
+workbench_group_none_label = None
+workbench_group_due_label = Due
+workbench_group_priority_label = Priority
+```
+
 Use one compatibility normalisation and feed the result straight to the
 existing row loop:
 
@@ -1630,24 +1658,33 @@ val renderedGroups = workbenchTaskGroups.ifEmpty {
 
 renderedGroups.forEach { group ->
     group.value?.let { value ->
-        item(key = "workbench-group-${value.stableKey()}") {
-            Text(workbenchGroupLabel(value))
+        item(key = "workbench:group:${value.stableKey()}") {
+            Text(
+                workbenchGroupLabel(value),
+                modifier = Modifier.semantics { heading() },
+            )
         }
     }
-    items(group.tasks, key = { it.id.value }) { task ->
+    items(group.tasks, key = { "workbench:task:${it.id.value}" }) { task ->
         ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
     }
 }
 ```
+
+Namespace the existing milestone rows as
+`items(projectMilestones, key = { "workbench:milestone:${it.id.value}" })` and
+tag the `ProjectTaskRow` root as `workbench-task-${task.id.value}`. Do not
+validate or rewrite ids.
 
 Add these exhaustive helpers and their referenced strings to
 `feature/projects`:
 
 ```kotlin
 private fun TaskGroupValue.stableKey(): String = when (this) {
-    is TaskGroupValue.Due -> "due-${bucket.name}"
-    is TaskGroupValue.Project -> "project-${projectId?.value ?: "inbox"}"
-    is TaskGroupValue.PriorityValue -> "priority-${priority.name}"
+    is TaskGroupValue.Due -> "due:${bucket.name}"
+    is TaskGroupValue.Project -> projectId?.let { "project:id:${it.value}" }
+        ?: "project:inbox"
+    is TaskGroupValue.PriorityValue -> "priority:${priority.name}"
 }
 
 @Composable
@@ -1679,30 +1716,62 @@ normalises it away before state or disk.
 
 - [ ] **Step 4: Wire per-project projection and persistence**
 
-In `OpenTasksApp`, derive the projection once:
+In `OpenTasksApp`, derive one remembered projection. Sample the injected clock
+once so one group pass cannot straddle a date boundary, and reuse the existing
+root `projectNames` map:
 
 ```kotlin
 val selectedProject = snapshot.projects.firstOrNull { it.id == selectedProjectId }
 val workbenchArrangement = selectedProject?.let {
     viewArrangement.workbenchFor(it.id)
 } ?: TaskArrangement()
-val workbenchTaskGroups = selectedProject?.let { project ->
-    arrangeTasks(
-        tasks = snapshot.tasks.filter { it.projectId == project.id && it.deletedAt == null },
-        arrangement = workbenchArrangement,
-        projectNames = mapOf(project.id to project.name),
-        clock = clock,
-    )
-}.orEmpty()
+val workbenchTaskGroups = remember(
+    snapshot.tasks,
+    selectedProject,
+    projectNames,
+    workbenchArrangement,
+    clock,
+) {
+    selectedProject?.let { project ->
+        val projectionClock = Clock.fixed(clock.instant(), clock.zone)
+        arrangeTasks(
+            tasks = snapshot.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null
+            },
+            arrangement = workbenchArrangement,
+            projectNames = projectNames,
+            clock = projectionClock,
+        )
+    }.orEmpty()
+}
 ```
 
 At the existing `ProjectsScreen` call add `workbenchTaskGroups`,
 `workbenchSort = workbenchArrangement.sort`, and
 `workbenchGroupBy = workbenchArrangement.groupBy`. Add callbacks that no-op
-when `selectedProject` is null; otherwise call
-`setWorkbenchArrangement(project.id, workbenchArrangement.copy(sort = sort))`
-or `.copy(groupBy = groupBy)` respectively. Leave all existing arguments
-unchanged.
+when `selectedProject` is null and copy the store's latest per-project value at
+invocation, so back-to-back sort/group events cannot overwrite each other:
+
+```kotlin
+onWorkbenchSortChange = { sort ->
+    selectedProject?.let { project ->
+        viewModel.setWorkbenchArrangement(
+            project.id,
+            viewModel.viewArrangement.value.workbenchFor(project.id).copy(sort = sort),
+        )
+    }
+}
+onWorkbenchGroupChange = { groupBy ->
+    selectedProject?.let { project ->
+        viewModel.setWorkbenchArrangement(
+            project.id,
+            viewModel.viewArrangement.value.workbenchFor(project.id).copy(groupBy = groupBy),
+        )
+    }
+}
+```
+
+Leave all existing arguments unchanged.
 
 - [ ] **Step 5: Run focused verification**
 
