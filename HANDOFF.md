@@ -1,47 +1,43 @@
 # Open Tasks Handoff
 
-## Current resume point — paused by user, 10 August 2026
+## Current resume point — Task 16 pause, 10 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; any conflicting billing prerequisite, live-backlog label, or
 pre-execution status is superseded here.
 
-- Stage 7 implementation is local on `main`. The current product/test HEAD is
-  `3d5f1f548838da1156a470d476256550c1b1e8ea`
-  (`test: repair focus repository fixture`), on Task 9 implementation commit
-  `fc91c45`. Unrelated Pinfo design commit `1541570` and this pause handoff's
-  docs-only commits sit on top. Nothing has been pushed during this execution.
-- Stage 7 Tasks 1–9 are complete and independently review-clean. Tasks 1–5 are:
-  `7638037` (date buckets), `ddc3f16` (arrangement authority), `65242f1`
-  (device-local arrangement store), `141e7a0..62f003f` (Tasks arrangement),
-  and `b5ff894..1ff4a3c` (workbench arrangement). Plan-hardening commits are
-  intentionally interleaved with those implementation commits.
-- Tasks 6–9 are `cd76122` (board projection/sort), `b372e31` (strict saved-view
-  payload v2), `5a35563` (central ranked search), and `fc91c45` (saved-view v2
-  controls/identity-safe refinement). Task 8's preflight corrections are
-  `d98c515` plus `fe1d8e3`. Task 9's required app host gate exposed Task 8's
-  stale reflective constructor fixture; the focused RED reproduced, the sole
-  caller was repaired at `3d5f1f5`, its focused 11-test and complete app gates
-  passed, and both fix and Task 9 re-reviews approved with no open finding.
-- Resume with Task 10 by reading
-  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/task-10-brief.md`
-  and starting at Step 1. No Task 10 production or test file has changed.
-  Tasks 10–18 remain pending.
-- Verification so far: the execution baseline and Task 3 full local
-  `testDebugUnitTest lintDebug :app:assembleDebug` gates passed; Tasks 4–8
-  passed their focused unit/compile/schema gates. Task 9's
-  `:app:compileDebugAndroidTestKotlin :app:testDebugUnitTest` gate and
-  `git diff --check` passed after the fixture repair. No Stage 7 device suite
-  has run; that is deliberately reserved for Task 18.
+- Stage 7 remains local on `main`. The current product/test HEAD is
+  `95d73d04e8396da9cd55606fe43838b6349a22ee` (`feat: render insights with
+  dot matrices`), the Task 16 implementation commit. Nothing from this Stage 7
+  execution has been pushed.
+- Tasks 1–16 are complete and independently review-clean. Tasks 1–9 remain
+  recorded in the ignored execution ledger.
+- Task 10 is `9903d8a` (Quick Add parser). Task 11 is preflight
+  `23331a0`/`e0b6dc1`, implementation `2824126`. Task 12 is preflight
+  `f507a4e`/`d7848a2`/`8dbe347`, implementation/fix `2fd5faf`/`bd55fa4`.
+  Task 13 is preflight `6aa8276`, implementation `aa6dd0b`.
+- Task 14 is preflight `c59c3e0`/`67fcab4`, implementation `10ad470`.
+  Task 15 is preflight `272a337`/`16f9611`, implementation `8ad052e`.
+  Task 16 is preflight `210f337`, implementation `95d73d0`; its focused
+  design-system JVM test, feature Android-test Kotlin compile, exact five-path
+  scope, and `git diff --check` passed both implementation and controller
+  verification. Its independent review approved with no finding.
+- Task 17's preflight was hardened and independently re-audited clean at
+  `ab10995`. Task 17 implementation is untouched. Resume by reading
+  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/task-17-brief.md`
+  and starting at Step 1. Task 18 remains pending.
+- No Stage 7 device suite, remote GitHub Actions run, or paid-service run has
+  occurred. Device and eligible free remote qualification remain Task 18 work.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
-  paid GitHub service. Continue Tasks 10–17 locally. At Task 18, use remote CI
+  paid GitHub service. Continue Task 17 locally. At Task 18, use remote CI
   only if the included free allowance is available; otherwise pause at that
   gate. The old paid-billing prerequisite is cancelled.
-- The index is empty. Preserve the user-owned modified Stage 3 plan and
-  untracked `.kotlin/` and `artifacts/` paths; they are unrelated to Stage 7.
-  The separate Pinfo design is committed at `1541570` and is also unrelated.
-  The ignored execution ledger is
+- The index is empty. Preserve the exact unrelated dirty state: modified
+  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+  deleted user-owned
+  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
+  untracked `.kotlin/` and `artifacts/`. The ignored execution ledger is
   `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
 
 ## Historical context
