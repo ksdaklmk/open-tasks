@@ -114,6 +114,7 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.domain.arrangeTasks
+import app.opentasks.core.domain.boardColumns
 import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.model.Attachment
@@ -125,6 +126,7 @@ import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskArrangement
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
@@ -526,6 +528,17 @@ fun OpenTasksApp(
                 )
             }.orEmpty()
         }
+        val boardSort = selectedProject?.let { project ->
+            viewArrangement.boardSortFor(project.id)
+        } ?: TaskSortKey.PRIORITY
+        val selectedBoardColumns = selectedProject?.let { project ->
+            boardColumns(
+                project = project,
+                statuses = snapshot.workflowStatuses,
+                tasks = snapshot.tasks,
+                sort = boardSort,
+            )
+        }.orEmpty()
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
         // case is keyed on a null project name, and `projectNames` has no Inbox entry.
@@ -1208,6 +1221,8 @@ fun OpenTasksApp(
                                     workbenchTaskGroups = workbenchTaskGroups,
                                     workbenchSort = workbenchArrangement.sort,
                                     workbenchGroupBy = workbenchArrangement.groupBy,
+                                    selectedBoardColumns = selectedBoardColumns,
+                                    boardSort = boardSort,
                                     onBoardModeChange = { enabled ->
                                         selectedProjectId?.let {
                                             viewModel.setBoardMode(it, enabled)
@@ -1231,6 +1246,11 @@ fun OpenTasksApp(
                                                     .workbenchFor(project.id)
                                                     .copy(groupBy = groupBy),
                                             )
+                                        }
+                                    },
+                                    onBoardSortChange = { sort ->
+                                        selectedProject?.let { project ->
+                                            viewModel.setBoardSort(project.id, sort)
                                         }
                                     },
                                     onChangeTaskStatus = { taskId, statusId ->

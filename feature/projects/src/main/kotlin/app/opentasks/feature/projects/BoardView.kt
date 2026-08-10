@@ -67,7 +67,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import app.opentasks.core.model.Priority
-import app.opentasks.core.model.Project
+import app.opentasks.core.model.BoardColumn
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkflowStatus
@@ -75,11 +75,6 @@ import app.opentasks.core.model.WorkflowStatusId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlin.math.roundToInt
-
-data class BoardColumn(
-    val status: WorkflowStatus,
-    val tasks: List<Task>,
-)
 
 private data class BoardDragState(
     val task: Task,
@@ -94,30 +89,6 @@ private data class BoardDragState(
     val positionInRoot: Offset
         get() = startInRoot + accumulatedOffset
 }
-
-fun boardColumns(
-    project: Project,
-    statuses: List<WorkflowStatus>,
-    tasks: List<Task>,
-): List<BoardColumn> = statuses
-    .filter { it.projectId == project.id && it.archivedAt == null }
-    .sortedBy(WorkflowStatus::rank)
-    .map { status ->
-        BoardColumn(
-            status = status,
-            tasks = tasks
-                .filter {
-                    it.projectId == project.id &&
-                        it.statusId == status.id &&
-                        it.deletedAt == null &&
-                        !it.isCompleted
-                }
-                .sortedWith(
-                    compareByDescending<Task> { it.priority.ordinal }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
-                ),
-        )
-    }
 
 fun moveTargets(
     columns: List<BoardColumn>,

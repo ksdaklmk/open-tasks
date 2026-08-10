@@ -13,9 +13,12 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.BoardColumn
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
@@ -42,11 +45,7 @@ class BoardViewInstrumentedTest {
         composeRule.setContent {
             OpenTasksTheme {
                 BoardView(
-                    columns = boardColumns(
-                        project = OpenTasksFixtures.studioProject,
-                        statuses = OpenTasksFixtures.workflowStatuses,
-                        tasks = listOf(task),
-                    ),
+                    columns = columnsFor(task),
                     columnWidth = 272.dp,
                     onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
                     onOpenTask = {},
@@ -76,11 +75,7 @@ class BoardViewInstrumentedTest {
         composeRule.setContent {
             OpenTasksTheme {
                 BoardView(
-                    columns = boardColumns(
-                        project = OpenTasksFixtures.studioProject,
-                        statuses = OpenTasksFixtures.workflowStatuses,
-                        tasks = listOf(task),
-                    ),
+                    columns = columnsFor(task),
                     columnWidth = 272.dp,
                     onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
                     onOpenTask = {},
@@ -113,11 +108,7 @@ class BoardViewInstrumentedTest {
         composeRule.setContent {
             OpenTasksTheme {
                 BoardView(
-                    columns = boardColumns(
-                        project = OpenTasksFixtures.studioProject,
-                        statuses = OpenTasksFixtures.workflowStatuses,
-                        tasks = listOf(task),
-                    ),
+                    columns = columnsFor(task),
                     columnWidth = 160.dp,
                     onMoveTask = onMoveTask.value,
                     onOpenTask = {},
@@ -151,4 +142,17 @@ class BoardViewInstrumentedTest {
         assertNull(staleMove.get())
         assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
     }
+
+    private fun columnsFor(task: Task): List<BoardColumn> =
+        OpenTasksFixtures.workflowStatuses
+            .filter {
+                it.projectId == OpenTasksFixtures.studioProject.id && it.archivedAt == null
+            }
+            .sortedBy(WorkflowStatus::rank)
+            .map { status ->
+                BoardColumn(
+                    status = status,
+                    tasks = listOf(task).filter { it.statusId == status.id },
+                )
+            }
 }

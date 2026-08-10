@@ -3,6 +3,7 @@
     <string name="workbench_view_list">List</string>
     <string name="workbench_view_board">Board</string>
     <string name="workbench_sort_control">Sort project tasks: %1$s</string>
+    <string name="board_sort_control">Sort board cards: %1$s</string>
     <string name="workbench_group_control">Group project tasks: %1$s</string>
     <string name="workbench_sort_due_label">Due</string>
     <string name="workbench_sort_priority_label">Priority</string>

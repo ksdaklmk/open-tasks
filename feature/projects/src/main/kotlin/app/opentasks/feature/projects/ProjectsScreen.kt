@@ -100,6 +100,7 @@ import app.opentasks.core.designsystem.readableName
 import app.opentasks.core.designsystem.sortedTimelineItems
 import app.opentasks.core.designsystem.timelineTimestampLabel
 import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.BoardColumn
 import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
@@ -152,9 +153,12 @@ fun ProjectsScreen(
     workbenchTaskGroups: List<TaskGroup> = emptyList(),
     workbenchSort: TaskSortKey = TaskSortKey.DUE,
     workbenchGroupBy: TaskGroupKey? = null,
+    selectedBoardColumns: List<BoardColumn> = emptyList(),
+    boardSort: TaskSortKey = TaskSortKey.PRIORITY,
     onBoardModeChange: (Boolean) -> Unit = {},
     onWorkbenchSortChange: (TaskSortKey) -> Unit = {},
     onWorkbenchGroupChange: (TaskGroupKey?) -> Unit = {},
+    onBoardSortChange: (TaskSortKey) -> Unit = {},
     onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit = { _, _ -> },
     onSelectProject: (ProjectId) -> Unit,
     onCloseDetail: () -> Unit,
@@ -200,9 +204,12 @@ fun ProjectsScreen(
             workbenchTaskGroups = workbenchTaskGroups,
             workbenchSort = workbenchSort,
             workbenchGroupBy = workbenchGroupBy,
+            selectedBoardColumns = selectedBoardColumns,
+            boardSort = boardSort,
             onBoardModeChange = onBoardModeChange,
             onWorkbenchSortChange = onWorkbenchSortChange,
             onWorkbenchGroupChange = onWorkbenchGroupChange,
+            onBoardSortChange = onBoardSortChange,
             onChangeTaskStatus = onChangeTaskStatus,
             onBack = onCloseDetail,
             onUpdate = { onUpdateProject(selectedProject.id, it) },
@@ -270,9 +277,12 @@ fun ProjectsScreen(
                     workbenchTaskGroups = workbenchTaskGroups,
                     workbenchSort = workbenchSort,
                     workbenchGroupBy = workbenchGroupBy,
+                    selectedBoardColumns = selectedBoardColumns,
+                    boardSort = boardSort,
                     onBoardModeChange = onBoardModeChange,
                     onWorkbenchSortChange = onWorkbenchSortChange,
                     onWorkbenchGroupChange = onWorkbenchGroupChange,
+                    onBoardSortChange = onBoardSortChange,
                     onChangeTaskStatus = onChangeTaskStatus,
                     onBack = null,
                     onUpdate = { onUpdateProject(selectedProject.id, it) },
@@ -405,9 +415,12 @@ private fun ProjectWorkbench(
     workbenchTaskGroups: List<TaskGroup>,
     workbenchSort: TaskSortKey,
     workbenchGroupBy: TaskGroupKey?,
+    selectedBoardColumns: List<BoardColumn>,
+    boardSort: TaskSortKey,
     onBoardModeChange: (Boolean) -> Unit,
     onWorkbenchSortChange: (TaskSortKey) -> Unit,
     onWorkbenchGroupChange: (TaskGroupKey?) -> Unit,
+    onBoardSortChange: (TaskSortKey) -> Unit,
     onChangeTaskStatus: (TaskId, WorkflowStatusId) -> Unit,
     onBack: (() -> Unit)?,
     onUpdate: (ProjectEdit) -> Unit,
@@ -677,32 +690,40 @@ private fun ProjectWorkbench(
                 },
             )
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow {
-                SegmentedButton(
-                    selected = !boardMode,
-                    onClick = { onBoardModeChange(false) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag("workbench-view-list"),
-                ) {
-                    Text(stringResource(R.string.workbench_view_list))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SingleChoiceSegmentedButtonRow {
+                    SegmentedButton(
+                        selected = !boardMode,
+                        onClick = { onBoardModeChange(false) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("workbench-view-list"),
+                    ) {
+                        Text(stringResource(R.string.workbench_view_list))
+                    }
+                    SegmentedButton(
+                        selected = boardMode,
+                        onClick = { onBoardModeChange(true) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("workbench-view-board"),
+                    ) {
+                        Text(stringResource(R.string.workbench_view_board))
+                    }
                 }
-                SegmentedButton(
-                    selected = boardMode,
-                    onClick = { onBoardModeChange(true) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag("workbench-view-board"),
-                ) {
-                    Text(stringResource(R.string.workbench_view_board))
+                if (boardMode) {
+                    BoardSortControl(
+                        boardSort = boardSort,
+                        onBoardSortChange = onBoardSortChange,
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
             if (boardMode) {
                 BoardView(
-                    columns = boardColumns(project, workflowStatuses, tasks),
+                    columns = selectedBoardColumns,
                     columnWidth = boardColumnWidth,
                     onMoveTask = onChangeTaskStatus,
                     onOpenTask = onOpenTask,
@@ -1015,6 +1036,47 @@ private fun WorkbenchArrangementControls(
                             ),
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BoardSortControl(
+    boardSort: TaskSortKey,
+    onBoardSortChange: (TaskSortKey) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val controlDescription = stringResource(
+        R.string.board_sort_control,
+        workbenchSortLabel(boardSort),
+    )
+
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("board-sort-control")
+                .semantics { contentDescription = controlDescription },
+        ) {
+            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            listOf(TaskSortKey.PRIORITY, TaskSortKey.DUE, TaskSortKey.TITLE).forEach { candidate ->
+                DropdownMenuItem(
+                    text = { Text(workbenchSortLabel(candidate)) },
+                    onClick = {
+                        expanded = false
+                        onBoardSortChange(candidate)
+                    },
+                    modifier = Modifier
+                        .semantics { selected = boardSort == candidate }
+                        .testTag("board-sort-option-${candidate.name.lowercase(Locale.ROOT)}"),
+                )
             }
         }
     }

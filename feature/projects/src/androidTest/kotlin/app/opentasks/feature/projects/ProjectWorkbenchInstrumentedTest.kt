@@ -26,6 +26,7 @@ import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.model.BoardColumn
 import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
@@ -80,6 +81,7 @@ class ProjectWorkbenchInstrumentedTest {
             groupBy = TaskGroupKey.PRIORITY,
             onSortChange = selectedSort::set,
             onGroupChange = selectedGroup::set,
+            boardColumns = boardColumnsFor(project, listOf(rawFirst, groupedFirst, flat)),
         )
 
         composeRule.onNodeWithTag("project-workbench-list")
@@ -138,6 +140,55 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("workbench-view-board").performClick()
         composeRule.onNodeWithTag("workbench-task-${groupedFirst.id.value}").assertDoesNotExist()
         composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
+    }
+
+    @Test
+    fun suppliedBoardColumnsKeepCardOrderAndBoardSortControlStaysStateless() {
+        val project = OpenTasksFixtures.studioProject
+        val base = OpenTasksFixtures.tasks.first { it.projectId == project.id }.copy(
+            completedAt = null,
+            deletedAt = null,
+        )
+        val first = base.copy(id = TaskId("board-first"), title = "Zulu")
+        val second = base.copy(id = TaskId("board-second"), title = "Alpha")
+        val selectedSort = AtomicReference<TaskSortKey?>()
+        val columns = boardColumnsFor(project, listOf(first, second))
+        val selectedColumn = columns.map { column ->
+            if (column.status.id == first.statusId) column.copy(tasks = listOf(first, second)) else column
+        }
+
+        setWorkbenchContent(
+            project = project,
+            tasks = listOf(first, second),
+            boardColumns = selectedColumn,
+            boardSort = TaskSortKey.TITLE,
+            onBoardSortChange = selectedSort::set,
+            initialBoardMode = true,
+        )
+
+        val firstTop = composeRule.onNodeWithTag("board-card-${first.id.value}")
+            .getUnclippedBoundsInRoot().top
+        val secondTop = composeRule.onNodeWithTag("board-card-${second.id.value}")
+            .getUnclippedBoundsInRoot().top
+        assertTrue(firstTop < secondTop)
+
+        composeRule.onNodeWithTag("board-sort-control")
+            .assertContentDescriptionEquals("Sort board cards: Title")
+            .performClick()
+        composeRule.onNodeWithTag("board-sort-option-title").assertIsSelected()
+        composeRule.onNodeWithTag("board-sort-option-updated").assertDoesNotExist()
+        composeRule.onNodeWithTag("workbench-group-control").assertDoesNotExist()
+        composeRule.onNodeWithTag("workbench-sort-control").assertDoesNotExist()
+        composeRule.onNodeWithTag("board-sort-option-priority").assertIsNotSelected().performClick()
+        assertEquals(TaskSortKey.PRIORITY, selectedSort.get())
+        composeRule.onNodeWithTag("board-sort-control").performClick()
+        composeRule.onNodeWithTag("board-sort-option-due").assertIsNotSelected().performClick()
+        assertEquals(TaskSortKey.DUE, selectedSort.get())
+        composeRule.onNodeWithTag("board-sort-control")
+            .assertContentDescriptionEquals("Sort board cards: Title")
+            .performClick()
+        composeRule.onNodeWithTag("board-sort-option-title").assertIsSelected().performClick()
+        assertEquals(TaskSortKey.TITLE, selectedSort.get())
     }
 
     @Test
@@ -555,9 +606,13 @@ class ProjectWorkbenchInstrumentedTest {
         groupBy: TaskGroupKey? = null,
         onSortChange: (TaskSortKey) -> Unit = {},
         onGroupChange: (TaskGroupKey?) -> Unit = {},
+        boardColumns: List<BoardColumn> = emptyList(),
+        boardSort: TaskSortKey = TaskSortKey.PRIORITY,
+        onBoardSortChange: (TaskSortKey) -> Unit = {},
+        initialBoardMode: Boolean = false,
     ) {
         composeRule.setContent {
-            val boardMode = remember { mutableStateOf(false) }
+            val boardMode = remember { mutableStateOf(initialBoardMode) }
             OpenTasksTheme {
                 ProjectsScreen(
                     projects = OpenTasksFixtures.snapshot.projects,
@@ -570,8 +625,11 @@ class ProjectWorkbenchInstrumentedTest {
                     workbenchTaskGroups = groups,
                     workbenchSort = sort,
                     workbenchGroupBy = groupBy,
+                    selectedBoardColumns = boardColumns,
+                    boardSort = boardSort,
                     onWorkbenchSortChange = onSortChange,
                     onWorkbenchGroupChange = onGroupChange,
+                    onBoardSortChange = onBoardSortChange,
                     onBoardModeChange = { boardMode.value = it },
                     onSelectProject = {},
                     onCloseDetail = {},
@@ -582,6 +640,17 @@ class ProjectWorkbenchInstrumentedTest {
             }
         }
     }
+
+    private fun boardColumnsFor(project: app.opentasks.core.model.Project, tasks: List<Task>) =
+        OpenTasksFixtures.workflowStatuses
+            .filter { it.projectId == project.id && it.archivedAt == null }
+            .sortedBy { it.rank }
+            .map { status ->
+                BoardColumn(
+                    status = status,
+                    tasks = tasks.filter { it.statusId == status.id },
+                )
+            }
 
     private data class MilestoneUpdate(
         val id: MilestoneId,

@@ -153,32 +153,71 @@ class TaskArrangementRulesTest {
         val project = OpenTasksFixtures.studioProject
         val statuses = OpenTasksFixtures.workflowStatuses
         val backlog = statuses.single { it.id == OpenTasksFixtures.backlog }
-        val alpha = alphaA.copy(projectId = project.id, statusId = backlog.id)
-        val beta = betaB.copy(projectId = project.id, statusId = backlog.id)
-        val completed = beta.copy(
+        val titleFirst = alphaA.copy(projectId = project.id, statusId = backlog.id)
+        val titleLast = betaB.copy(projectId = project.id, statusId = backlog.id)
+        val priorityFirst = titleLast.copy(id = TaskId("priority-first"), priority = Priority.URGENT)
+        val priorityLast = titleFirst.copy(id = TaskId("priority-last"), priority = Priority.NONE)
+        val dueFirst = titleLast.copy(
+            id = TaskId("due-first"),
+            due = ZonedMoment(Instant.parse("2026-08-10T04:00:00Z"), "Asia/Bangkok"),
+        )
+        val dueLast = titleFirst.copy(
+            id = TaskId("due-last"),
+            due = ZonedMoment(Instant.parse("2026-08-12T04:00:00Z"), "Asia/Bangkok"),
+        )
+        val updatedFirst = titleLast.copy(
+            id = TaskId("updated-first"),
+            revision = titleLast.revision.copy(wallTimeMillis = 110L),
+        )
+        val updatedLast = titleFirst.copy(
+            id = TaskId("updated-last"),
+            revision = titleFirst.revision.copy(wallTimeMillis = 90L),
+        )
+        val completed = titleLast.copy(
             id = TaskId("completed"),
             semanticStatus = SemanticStatus.COMPLETED,
             completedAt = clock.instant(),
         )
-        val deleted = beta.copy(id = TaskId("deleted"), deletedAt = clock.instant())
-
-        val priorityColumns = boardColumns(project, statuses, listOf(beta, alpha, completed, deleted))
-        val titleColumns = boardColumns(
+        val deleted = titleLast.copy(id = TaskId("deleted"), deletedAt = clock.instant())
+        val cards = listOf(
+            titleLast,
+            titleFirst,
+            priorityFirst,
+            priorityLast,
+            dueFirst,
+            dueLast,
+            updatedFirst,
+            updatedLast,
+            completed,
+            deleted,
+        )
+        fun cardIds(sort: TaskSortKey) = boardColumns(
             project,
             statuses,
-            listOf(beta, alpha, completed, deleted),
-            TaskSortKey.TITLE,
-        )
+            cards,
+            sort,
+        ).single { it.status == backlog }.tasks.map(Task::id)
 
         assertEquals(
             statuses.filter { it.projectId == project.id && it.archivedAt == null }
                 .sortedBy(WorkflowStatus::rank).map(WorkflowStatus::id),
-            titleColumns.map { it.status.id },
+            boardColumns(project, statuses, cards, TaskSortKey.TITLE).map { it.status.id },
         )
-        assertEquals(listOf(alpha.id, beta.id), titleColumns.single { it.status == backlog }.tasks.map(Task::id))
         assertEquals(
-            listOf(alpha.id, beta.id),
-            priorityColumns.single { it.status == backlog }.tasks.map(Task::id),
+            listOf(titleFirst.id, dueLast.id, priorityLast.id, updatedLast.id, titleLast.id, dueFirst.id, priorityFirst.id, updatedFirst.id),
+            cardIds(TaskSortKey.TITLE),
+        )
+        assertEquals(
+            listOf(priorityFirst.id, titleFirst.id, dueLast.id, updatedLast.id, titleLast.id, dueFirst.id, updatedFirst.id, priorityLast.id),
+            cardIds(TaskSortKey.PRIORITY),
+        )
+        assertEquals(
+            listOf(dueFirst.id, titleFirst.id, priorityLast.id, updatedLast.id, titleLast.id, priorityFirst.id, updatedFirst.id, dueLast.id),
+            cardIds(TaskSortKey.DUE),
+        )
+        assertEquals(
+            listOf(updatedFirst.id, titleFirst.id, dueLast.id, priorityLast.id, titleLast.id, dueFirst.id, priorityFirst.id, updatedLast.id),
+            cardIds(TaskSortKey.UPDATED),
         )
     }
 }
