@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
+import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
@@ -250,16 +251,19 @@ class ProjectWorkbenchInstrumentedTest {
 
         composeRule.onNodeWithTag("workflow-name-${OpenTasksFixtures.planned.value}")
             .performTextReplacement("Ready next")
+        closeSoftKeyboard()
         composeRule.onNodeWithTag("save-workflow-name-${OpenTasksFixtures.planned.value}")
             .performScrollTo()
             .performClick()
         assertEquals(OpenTasksFixtures.planned to "Ready next", renamed.get())
 
         composeRule.onNodeWithTag("move-workflow-later-${OpenTasksFixtures.planned.value}")
+            .performScrollTo()
             .performClick()
         assertEquals(OpenTasksFixtures.planned to WorkflowMove.LATER, moved.get())
 
         composeRule.onNodeWithTag("archive-workflow-${OpenTasksFixtures.planned.value}")
+            .performScrollTo()
             .performClick()
         composeRule.onNodeWithText("Archive").performClick()
         assertEquals(OpenTasksFixtures.planned, archived.get())
