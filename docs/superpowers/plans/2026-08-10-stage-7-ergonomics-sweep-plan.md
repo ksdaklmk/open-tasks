@@ -6067,7 +6067,6 @@ This pins `enabled = valid && !dirty` and prevents stale-state copies.
 - [ ] **Step 2: Write board-menu RED coverage**
 
 Add `androidx.compose.ui.test.assertContentDescriptionEquals`,
-`androidx.compose.ui.test.assertDoesNotExist`, and
 `androidx.compose.ui.test.assertHeightIsAtLeast`. Extend the existing board
 fixture with both captures and assert the menu contract:
 
