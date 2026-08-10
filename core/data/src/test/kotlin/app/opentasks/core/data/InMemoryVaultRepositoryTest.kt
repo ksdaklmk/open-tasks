@@ -7,8 +7,14 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
+import app.opentasks.core.model.Attachment
+import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.BlobSetId
+import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.Note
+import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
@@ -21,13 +27,19 @@ import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.TimeEntry
 import app.opentasks.core.model.TimeEntryId
+import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.core.model.WorkflowStatusId
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Duration
@@ -84,6 +96,134 @@ class InMemoryVaultRepositoryTest {
                 ),
             ) to RejectionReason.INVALID_STATE,
         )
+
+    @Test
+    fun duplicateTaskKeepsAnArchivedOpenStatus() = runBlocking {
+        val fixedNow = Instant.parse("2026-08-10T10:00:00Z")
+        val journal = InMemoryBackupJournal()
+        val repository = InMemoryVaultRepository(
+            initial = duplicationSnapshot(),
+            now = { fixedNow },
+            backupJournal = journal,
+        )
+        val before = repository.observeWorkspace().value
+        val source = before.tasks.single { it.id == TaskId("duplicate-source") }
+        val incomingBefore = before.tasks.single { it.id == TaskId("duplicate-incoming") }
+        val result = repository.execute(DomainCommand.DuplicateTask(source.id))
+            as CommandResult.Success
+        val after = repository.observeWorkspace().value
+        val duplicate = after.tasks.single {
+            it.id != source.id && it.title == "${source.title} (copy)"
+        }
+
+        assertEquals(source.statusId, duplicate.statusId)
+        assertEquals(source.semanticStatus, duplicate.semanticStatus)
+        assertFalse(duplicate.isCompleted)
+        assertEquals("${source.title} (copy)", duplicate.title)
+        assertEquals(source.workspaceId, duplicate.workspaceId)
+        assertEquals(source.projectId, duplicate.projectId)
+        assertEquals(source.parentTaskId, duplicate.parentTaskId)
+        assertEquals(source.description, duplicate.description)
+        assertEquals(source.priority, duplicate.priority)
+        assertEquals(source.start, duplicate.start)
+        assertEquals(source.due, duplicate.due)
+        assertEquals(source.estimate, duplicate.estimate)
+        assertEquals(source.milestoneId, duplicate.milestoneId)
+        assertEquals(source.tagIds, duplicate.tagIds)
+        assertEquals(source.dependencyIds, duplicate.dependencyIds)
+        assertEquals(setOf(TaskId("duplicate-dependency-active")), duplicate.blockedBy)
+        assertEquals(source.checklist.size, duplicate.checklist.size)
+        assertEquals(source.checklist.map { it.text }, duplicate.checklist.map { it.text })
+        assertEquals(source.checklist.map { it.rank }, duplicate.checklist.map { it.rank })
+        assertTrue(duplicate.checklist.none { it.completed })
+        assertTrue(
+            duplicate.checklist.map { it.id }
+                .intersect(source.checklist.map { it.id }.toSet())
+                .isEmpty(),
+        )
+        assertNull(duplicate.recurrence)
+        assertDuplicateIsolation(before, after, source, duplicate)
+        assertEquals(
+            incomingBefore,
+            after.tasks.single { it.id == TaskId("duplicate-incoming") },
+        )
+
+        repository.execute(checkNotNull(result.undo))
+        val undone = repository.observeWorkspace().value
+        assertNotNull(undone.tasks.single { it.id == duplicate.id }.deletedAt)
+        assertEquals(source, undone.tasks.single { it.id == source.id })
+        assertEquals(
+            incomingBefore,
+            undone.tasks.single { it.id == TaskId("duplicate-incoming") },
+        )
+    }
+
+    @Test
+    fun duplicateTaskMovesACompletedSourceToTheFirstActiveBacklog() = runBlocking {
+        val repository = InMemoryVaultRepository(
+            initial = duplicationSnapshot(),
+            now = { Instant.parse("2026-08-10T10:00:00Z") },
+        )
+        val before = repository.observeWorkspace().value
+        val completedSource = before.tasks.single {
+            it.id == TaskId("duplicate-source-completed")
+        }
+        val success = repository.execute(
+            DomainCommand.DuplicateTask(completedSource.id),
+        ) as CommandResult.Success
+        val duplicateId = (checkNotNull(success.undo) as DomainCommand.DeleteTask).taskId
+        val duplicate = repository.observeWorkspace().value.tasks.single {
+            it.id == duplicateId
+        }
+        assertEquals(WorkflowStatusId("duplicate-status-backlog-first"), duplicate.statusId)
+        assertEquals(SemanticStatus.BACKLOG, duplicate.semanticStatus)
+        assertFalse(duplicate.isCompleted)
+    }
+
+    @Test
+    fun duplicateTaskRejectionsAreMutationFree() = runBlocking {
+        val journal = InMemoryBackupJournal()
+        val repository = InMemoryVaultRepository(
+            initial = duplicationSnapshot(),
+            now = { Instant.parse("2026-08-10T10:00:00Z") },
+            backupJournal = journal,
+        )
+        assertTrue(
+            repository.execute(
+                DomainCommand.RenameTask(
+                    TaskId("duplicate-dependency-active"),
+                    "Primed unrelated task",
+                ),
+            ) is CommandResult.Success,
+        )
+        assertTrue(journal.currentGeneration > 0)
+        assertTrue(journal.entries.isNotEmpty())
+        val payloadSentinel = ByteArray(0)
+        listOf(
+            DomainCommand.DuplicateTask(TaskId("missing")) to RejectionReason.NOT_FOUND,
+            DomainCommand.DuplicateTask(TaskId("duplicate-source-deleted")) to
+                RejectionReason.INVALID_STATE,
+            DomainCommand.DuplicateTask(TaskId("duplicate-source-missing-status")) to
+                RejectionReason.INVALID_STATE,
+        ).forEach { (command, expectedReason) ->
+            val before = repository.observeWorkspace().value
+            val generationBefore = journal.currentGeneration
+            val journalBefore = journal.entries
+            val result = repository.execute(command) as CommandResult.Rejected
+            assertEquals(expectedReason, result.reason)
+            assertEquals(before, repository.observeWorkspace().value)
+            assertEquals(generationBefore, journal.currentGeneration)
+            val journalAfter = journal.entries
+            assertEquals(journalBefore.size, journalAfter.size)
+            assertEquals(
+                journalBefore.map { it.copy(payload = payloadSentinel) },
+                journalAfter.map { it.copy(payload = payloadSentinel) },
+            )
+            journalBefore.zip(journalAfter).forEach { (expected, actual) ->
+                assertArrayEquals(expected.payload, actual.payload)
+            }
+        }
+    }
 
     @Test
     fun everyTaskPublicationSortsOnlySnapshotTasksById() = runBlocking {
@@ -1485,6 +1625,267 @@ class InMemoryVaultRepositoryTest {
             DomainCommand.RestoreTemplate(template),
         )
         assertEquals(template.name, repository.observeWorkspace().value.templates.single().name)
+    }
+
+    private fun duplicationSnapshot(): WorkspaceSnapshot {
+        val seed = OpenTasksFixtures.snapshot
+        val project = OpenTasksFixtures.studioProject
+        val sourceTemplate = OpenTasksFixtures.tasks.first { it.checklist.isNotEmpty() }
+        val revision = sourceTemplate.revision
+        val archivedAt = Instant.parse("2026-08-01T00:00:00Z")
+        val relationAt = Instant.parse("2026-08-09T09:00:00Z")
+        val anchor = ZonedMoment(Instant.parse("2026-08-12T09:00:00Z"), "UTC")
+        val archivedOpen = WorkflowStatus(
+            WorkflowStatusId("duplicate-status-archived-open"),
+            project.id,
+            "Archived in progress",
+            SemanticStatus.STARTED,
+            "m0",
+            archivedAt,
+        )
+        val archivedBacklog = WorkflowStatus(
+            WorkflowStatusId("duplicate-status-backlog-archived"),
+            project.id,
+            "Old backlog",
+            SemanticStatus.BACKLOG,
+            "a0",
+            archivedAt,
+        )
+        val firstActiveBacklog = WorkflowStatus(
+            WorkflowStatusId("duplicate-status-backlog-first"),
+            project.id,
+            "Backlog first",
+            SemanticStatus.BACKLOG,
+            "b0",
+        )
+        val laterActiveBacklog = WorkflowStatus(
+            WorkflowStatusId("duplicate-status-backlog-later"),
+            project.id,
+            "Backlog later",
+            SemanticStatus.BACKLOG,
+            "z0",
+        )
+        val completedStatus = WorkflowStatus(
+            WorkflowStatusId("duplicate-status-completed"),
+            project.id,
+            "Done",
+            SemanticStatus.COMPLETED,
+            "zz",
+        )
+        val activeDependency = sourceTemplate.copy(
+            id = TaskId("duplicate-dependency-active"),
+            statusId = firstActiveBacklog.id,
+            semanticStatus = SemanticStatus.BACKLOG,
+            title = "Active dependency",
+            checklist = emptyList(),
+            tagIds = emptySet(),
+            dependencyIds = emptySet(),
+            blockedBy = emptySet(),
+            completedAt = null,
+            deletedAt = null,
+        )
+        val completedDependency = activeDependency.copy(
+            id = TaskId("duplicate-dependency-completed"),
+            statusId = completedStatus.id,
+            semanticStatus = SemanticStatus.COMPLETED,
+            title = "Completed dependency",
+            completedAt = relationAt,
+        )
+        val deletedDependency = activeDependency.copy(
+            id = TaskId("duplicate-dependency-deleted"),
+            title = "Deleted dependency",
+            deletedAt = relationAt,
+        )
+        val source = sourceTemplate.copy(
+            id = TaskId("duplicate-source"),
+            projectId = project.id,
+            parentTaskId = TaskId("duplicate-parent"),
+            statusId = archivedOpen.id,
+            semanticStatus = SemanticStatus.STARTED,
+            title = "Duplicate source",
+            start = anchor,
+            due = anchor,
+            recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY),
+            recurrenceSeriesId = TaskId("duplicate-series"),
+            recurrenceAnchor = anchor,
+            recurrenceOccurrenceIndex = 4,
+            milestoneId = OpenTasksFixtures.milestones.first {
+                it.projectId == project.id
+            }.id,
+            dependencyIds = linkedSetOf(
+                activeDependency.id,
+                completedDependency.id,
+                deletedDependency.id,
+            ),
+            blockedBy = linkedSetOf(
+                activeDependency.id,
+                completedDependency.id,
+                deletedDependency.id,
+            ),
+            completedAt = null,
+            deletedAt = null,
+        )
+        val incoming = activeDependency.copy(
+            id = TaskId("duplicate-incoming"),
+            title = "Incoming dependency owner",
+            dependencyIds = setOf(source.id),
+            blockedBy = setOf(source.id),
+        )
+        val completedSource = source.copy(
+            id = TaskId("duplicate-source-completed"),
+            statusId = completedStatus.id,
+            semanticStatus = SemanticStatus.COMPLETED,
+            title = "Completed source",
+            checklist = emptyList(),
+            tagIds = emptySet(),
+            dependencyIds = emptySet(),
+            blockedBy = emptySet(),
+            completedAt = relationAt,
+        )
+        val deletedSource = source.copy(
+            id = TaskId("duplicate-source-deleted"),
+            title = "Deleted source",
+            checklist = emptyList(),
+            tagIds = emptySet(),
+            dependencyIds = emptySet(),
+            blockedBy = emptySet(),
+            deletedAt = relationAt,
+        )
+        val sourceWithoutRequiredStatus = source.copy(
+            id = TaskId("duplicate-source-missing-status"),
+            statusId = WorkflowStatusId("duplicate-status-missing"),
+            title = "Missing-status source",
+            checklist = emptyList(),
+            tagIds = emptySet(),
+            dependencyIds = emptySet(),
+            blockedBy = emptySet(),
+        )
+        val tasks = listOf(
+            source,
+            activeDependency,
+            completedDependency,
+            deletedDependency,
+            incoming,
+            completedSource,
+            deletedSource,
+            sourceWithoutRequiredStatus,
+        )
+        return seed.copy(
+            home = seed.home.copy(
+                focusTasks = emptyList(),
+                upcomingTasks = emptyList(),
+                projects = listOf(project),
+                activeTimer = null,
+            ),
+            tasks = tasks,
+            projects = listOf(project),
+            workflowStatuses = listOf(
+                archivedOpen,
+                archivedBacklog,
+                firstActiveBacklog,
+                laterActiveBacklog,
+                completedStatus,
+            ),
+            milestones = seed.milestones.filter { it.projectId == project.id },
+            tags = seed.tags.filter { it.id in source.tagIds },
+            reminders = listOf(
+                Reminder(
+                    Reminder.primaryId(source.id),
+                    source.id,
+                    ZonedMoment(Instant.parse("2026-08-11T09:00:00Z"), "UTC"),
+                    precise = true,
+                ),
+            ),
+            templates = emptyList(),
+            timeEntries = listOf(
+                TimeEntry(
+                    TimeEntryId("duplicate-source-time"),
+                    source.id,
+                    DeviceId("duplicate-fixture-device"),
+                    relationAt.minusSeconds(600),
+                    relationAt,
+                    "Source time",
+                ),
+            ),
+            timeEntryConflicts = emptyList(),
+            notes = listOf(
+                Note(
+                    NoteId("duplicate-source-note"),
+                    source.id,
+                    null,
+                    "Source note",
+                    relationAt,
+                    null,
+                    revision,
+                ),
+            ),
+            attachments = listOf(
+                Attachment(
+                    AttachmentId("duplicate-source-attachment"),
+                    source.id,
+                    "source.txt",
+                    "text/plain",
+                    6,
+                    "a".repeat(64),
+                    BlobSetId("duplicate-source-blob"),
+                    1,
+                    null,
+                    revision,
+                ),
+            ),
+            activityEntries = listOf(
+                ActivityEntry(
+                    "duplicate-source-prior-activity",
+                    source.id,
+                    source.projectId,
+                    ActivityKind.STATUS_CHANGED,
+                    "Prior source activity",
+                    relationAt,
+                ),
+            ),
+            retiredBlobSets = emptyList(),
+            savedViews = emptyList(),
+        )
+    }
+
+    private fun assertDuplicateIsolation(
+        before: WorkspaceSnapshot,
+        after: WorkspaceSnapshot,
+        source: Task,
+        duplicate: Task,
+    ) {
+        assertEquals(source, after.tasks.single { it.id == source.id })
+        assertEquals(
+            before.reminders.filter { it.taskId == source.id },
+            after.reminders.filter { it.taskId == source.id },
+        )
+        assertEquals(
+            before.notes.filter { it.taskId == source.id },
+            after.notes.filter { it.taskId == source.id },
+        )
+        assertEquals(
+            before.activityEntries.filter { it.taskId == source.id },
+            after.activityEntries.filter { it.taskId == source.id },
+        )
+        assertEquals(
+            before.timeEntries.filter { it.taskId == source.id },
+            after.timeEntries.filter { it.taskId == source.id },
+        )
+        assertEquals(
+            before.attachments.filter { it.taskId == source.id },
+            after.attachments.filter { it.taskId == source.id },
+        )
+        assertTrue(after.tasks.filter { it.id != duplicate.id }.none {
+            duplicate.id in it.dependencyIds
+        })
+        assertFalse(after.reminders.any { it.taskId == duplicate.id })
+        assertFalse(after.notes.any { it.taskId == duplicate.id })
+        assertFalse(after.timeEntries.any { it.taskId == duplicate.id })
+        assertFalse(after.attachments.any { it.taskId == duplicate.id })
+        assertEquals(
+            listOf(ActivityKind.RECORD_CREATED),
+            after.activityEntries.filter { it.taskId == duplicate.id }.map { it.kind },
+        )
     }
 
     private fun ZonedMoment.localDateString(): String =

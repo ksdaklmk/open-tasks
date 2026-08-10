@@ -17,6 +17,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ProjectTemplatePlanner
+import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
@@ -215,6 +216,7 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.DeleteTemplate -> deleteTemplate(command)
             is DomainCommand.RestoreTemplate -> restoreTemplate(command)
             is DomainCommand.CreateTask -> createTask(command)
+            is DomainCommand.DuplicateTask -> duplicateTask(command)
             is DomainCommand.RenameTask -> renameTask(command)
             is DomainCommand.UpdateTask -> updateTaskDetails(command)
             is DomainCommand.SetTaskReminder -> setTaskReminder(command)
@@ -1326,6 +1328,54 @@ class InMemoryVaultRepository internal constructor(
         return CommandResult.Success(
             message = "Task added",
             undo = DomainCommand.DeleteTask(task.id, createdAt),
+        )
+    }
+
+    private fun duplicateTask(command: DomainCommand.DuplicateTask): CommandResult {
+        val current = mutableWorkspace.value
+        val source = current.tasks.firstOrNull { it.id == command.taskId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val statuses = current.workflowStatuses.filter { it.projectId == source.projectId }
+        if (source.deletedAt != null) {
+            return CommandResult.Rejected(RejectionReason.INVALID_STATE, "Restore that task first.")
+        }
+        val targetStatus = if (!source.isCompleted) {
+            statuses.firstOrNull { it.id == source.statusId }
+        } else {
+            statuses.asSequence()
+                .filter {
+                    it.projectId == source.projectId &&
+                        it.semanticStatus == SemanticStatus.BACKLOG &&
+                        it.archivedAt == null
+                }
+                .minByOrNull { it.rank }
+        } ?: return CommandResult.Rejected(
+            RejectionReason.INVALID_STATE,
+            "This task has no available destination status.",
+        )
+
+        val createdAt = now()
+        val duplicate = planTaskDuplicate(
+            source = source,
+            targetStatus = targetStatus,
+            duplicateId = TaskId.new(),
+            checklistItemIds = source.checklist.map { UUID.randomUUID().toString() },
+            revision = Revision(DeviceId("local-device"), createdAt.toEpochMilli(), 0),
+        )
+        publish(
+            tasks = current.tasks + duplicate,
+            activityEntries = current.activityEntries.appendedActivity(
+                taskId = duplicate.id,
+                projectId = duplicate.projectId,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = createdAt,
+            ),
+            at = createdAt,
+        )
+        return CommandResult.Success(
+            message = "Task duplicated",
+            undo = DomainCommand.DeleteTask(duplicate.id, createdAt),
         )
     }
 
@@ -3857,7 +3907,7 @@ private fun resolveDependencyState(tasks: List<Task>): List<Task> {
         task.copy(
             dependencyIds = existingDependencies,
             blockedBy = existingDependencies.filterTo(linkedSetOf()) { dependencyId ->
-                tasksById[dependencyId]?.isCompleted != true
+                tasksById[dependencyId]?.let { !it.isCompleted && it.deletedAt == null } == true
             },
         )
     }

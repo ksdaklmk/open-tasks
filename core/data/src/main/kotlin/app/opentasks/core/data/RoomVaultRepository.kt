@@ -46,6 +46,7 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ProjectTemplatePlanner
+import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
@@ -225,6 +226,7 @@ class RoomVaultRepository(
                 is DomainCommand.DeleteTemplate -> deleteTemplate(command)
                 is DomainCommand.RestoreTemplate -> restoreTemplate(command)
                 is DomainCommand.CreateTask -> createTask(command)
+                is DomainCommand.DuplicateTask -> duplicateTask(command)
                 is DomainCommand.RenameTask -> updateTask(command.taskId) { task ->
                     val title = command.title.trim()
                     if (title.isEmpty()) return@updateTask null
@@ -1413,6 +1415,55 @@ class RoomVaultRepository(
         return CommandResult.Success(
             message = "Task added",
             undo = DomainCommand.DeleteTask(task.id, createdAt),
+        )
+    }
+
+    private suspend fun duplicateTask(command: DomainCommand.DuplicateTask): CommandResult {
+        val source = currentTask(command.taskId)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val statuses = database.workspaceDao()
+            .getWorkflowStatuses(source.projectId?.value)
+            .map(WorkflowStatusEntity::toModel)
+        if (source.deletedAt != null) {
+            return CommandResult.Rejected(RejectionReason.INVALID_STATE, "Restore that task first.")
+        }
+        val targetStatus = if (!source.isCompleted) {
+            statuses.firstOrNull { it.id == source.statusId }
+        } else {
+            statuses.asSequence()
+                .filter {
+                    it.projectId == source.projectId &&
+                        it.semanticStatus == SemanticStatus.BACKLOG &&
+                        it.archivedAt == null
+                }
+                .minByOrNull { it.rank }
+        } ?: return CommandResult.Rejected(
+            RejectionReason.INVALID_STATE,
+            "This task has no available destination status.",
+        )
+
+        val createdAt = now()
+        val duplicate = planTaskDuplicate(
+            source = source,
+            targetStatus = targetStatus,
+            duplicateId = TaskId.new(),
+            checklistItemIds = source.checklist.map { UUID.randomUUID().toString() },
+            revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
+        )
+        database.taskDao().upsert(duplicate.toEntity())
+        duplicate.checklistEntities().forEach { database.workspaceDao().upsertChecklistItem(it) }
+        duplicate.tagEntities().forEach { database.workspaceDao().upsertTaskTag(it) }
+        duplicate.dependencyEntities().forEach { database.workspaceDao().upsertDependency(it) }
+        recordActivity(
+            taskId = duplicate.id,
+            projectId = duplicate.projectId,
+            kind = ActivityKind.RECORD_CREATED,
+            body = "Created",
+            at = createdAt,
+        )
+        return CommandResult.Success(
+            message = "Task duplicated",
+            undo = DomainCommand.DeleteTask(duplicate.id, createdAt),
         )
     }
 
@@ -2830,13 +2881,17 @@ class RoomVaultRepository(
         } else {
             task.dependencyIds - dependency.id
         }
-        val completedDependencyIds = database.taskDao()
+        val dependencyEntities = database.taskDao()
             .getByIds(updatedDependencyIds.map(TaskId::value))
-            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+        val blockingDependencyIds = dependencyEntities
+            .filter {
+                it.semanticStatus != SemanticStatus.COMPLETED.name &&
+                    it.deletedAtEpochMillis == null
+            }
             .mapTo(hashSetOf()) { TaskId(it.id) }
         val updated = task.copy(
             dependencyIds = updatedDependencyIds,
-            blockedBy = updatedDependencyIds - completedDependencyIds,
+            blockedBy = blockingDependencyIds,
             revision = revision,
         )
         database.withTransaction {
@@ -2895,8 +2950,11 @@ class RoomVaultRepository(
             .getByIds(storedDependencyIds.map(TaskId::value))
         val dependencyIds = dependencyEntities
             .mapTo(linkedSetOf()) { TaskId(it.id) }
-        val completedDependencyIds = dependencyEntities
-            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+        val blockingDependencyIds = dependencyEntities
+            .filter {
+                it.semanticStatus != SemanticStatus.COMPLETED.name &&
+                    it.deletedAtEpochMillis == null
+            }
             .mapTo(hashSetOf()) { TaskId(it.id) }
         return database.taskDao().getById(taskId.value)?.toModel(
             tagIds = workspaceDao.getTaskTags(taskId.value)
@@ -2904,7 +2962,7 @@ class RoomVaultRepository(
             checklist = workspaceDao.getChecklistItems(taskId.value)
                 .map(ChecklistItemEntity::toModel),
             dependencyIds = dependencyIds,
-            blockedBy = dependencyIds - completedDependencyIds,
+            blockedBy = blockingDependencyIds,
         )
     }
 
@@ -4033,8 +4091,11 @@ class RoomVaultRepository(
             .groupBy(TaskDependencyEntity::taskId)
             .mapValues { (_, values) -> values.mapTo(linkedSetOf()) { TaskId(it.dependsOnTaskId) } }
         val taskIds = base.tasks.mapTo(hashSetOf()) { TaskId(it.id) }
-        val completedTaskIds = base.tasks
-            .filter { it.semanticStatus == SemanticStatus.COMPLETED.name }
+        val blockingTaskIds = base.tasks
+            .filter {
+                it.semanticStatus != SemanticStatus.COMPLETED.name &&
+                    it.deletedAtEpochMillis == null
+            }
             .mapTo(hashSetOf()) { TaskId(it.id) }
         val tasks = base.tasks.map { entity ->
             val dependencyIds = dependencies[entity.id].orEmpty().filterTo(linkedSetOf()) {
@@ -4044,7 +4105,7 @@ class RoomVaultRepository(
                 tagIds = tagIds[entity.id].orEmpty(),
                 checklist = checklist[entity.id].orEmpty(),
                 dependencyIds = dependencyIds,
-                blockedBy = dependencyIds - completedTaskIds,
+                blockedBy = dependencyIds.filterTo(linkedSetOf()) { it in blockingTaskIds },
             )
         }
         val projects = base.projects.map(ProjectEntity::toModel)
@@ -4161,6 +4222,9 @@ class RoomVaultRepository(
             workspaceDao.insertChecklistItems(seedSnapshot.tasks.flatMap(Task::checklistEntities))
             seedSnapshot.reminders.forEach { reminder ->
                 workspaceDao.upsertReminder(reminder.toEntity())
+            }
+            seedSnapshot.notes.forEach { note ->
+                workspaceDao.upsertNote(note.toEntity())
             }
             seedSnapshot.timeEntries.forEach { entry ->
                 workspaceDao.insertTimeEntry(entry.toEntity())

@@ -203,6 +203,8 @@ sealed interface DomainCommand {
         val recurrence: RecurrenceRule? = null,
     ) : DomainCommand
 
+    data class DuplicateTask(val taskId: TaskId) : DomainCommand
+
     data class RenameTask(
         val taskId: TaskId,
         val title: String,
