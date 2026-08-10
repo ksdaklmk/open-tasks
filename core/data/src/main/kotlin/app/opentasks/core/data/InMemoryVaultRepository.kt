@@ -1202,13 +1202,10 @@ class InMemoryVaultRepository internal constructor(
     }
 
     private fun createTask(command: DomainCommand.CreateTask): CommandResult {
-        val title = command.title.trim()
-        if (title.isEmpty()) {
-            return CommandResult.Rejected(RejectionReason.EMPTY_TITLE, "A task needs a title.")
-        }
+        val current = mutableWorkspace.value
         if (
             command.projectId != null &&
-            mutableWorkspace.value.projects.none {
+            current.projects.none {
                 it.id == command.projectId && it.archivedAt == null
             }
         ) {
@@ -1217,7 +1214,7 @@ class InMemoryVaultRepository internal constructor(
                 "Restore that project before assigning new tasks to it.",
             )
         }
-        val initialStatus = mutableWorkspace.value.workflowStatuses.firstOrNull {
+        val initialStatus = current.workflowStatuses.firstOrNull {
             it.projectId == command.projectId &&
                 it.semanticStatus == SemanticStatus.BACKLOG &&
                 it.archivedAt == null
@@ -1225,8 +1222,77 @@ class InMemoryVaultRepository internal constructor(
             RejectionReason.INVALID_STATE,
             "This project has no active Backlog status.",
         )
-        val task = Task(
-            id = TaskId.new(),
+        val title = command.title.trim()
+        when {
+            title.isEmpty() -> return CommandResult.Rejected(
+                RejectionReason.EMPTY_TITLE,
+                "A task needs a title.",
+            )
+            title.length > MAX_TASK_TITLE_LENGTH -> return CommandResult.Rejected(
+                RejectionReason.TITLE_TOO_LONG,
+                "Keep the task title under $MAX_TASK_TITLE_LENGTH characters.",
+            )
+        }
+        val uniqueTagNames = linkedMapOf<String, String>()
+        for (rawName in command.tagNames) {
+            val name = rawName.trim()
+            validateTagName(name)?.let { return it }
+            uniqueTagNames.putIfAbsent(name.lowercase(Locale.ROOT), name)
+        }
+        if (uniqueTagNames.size > MAX_TASK_TAGS) {
+            return CommandResult.Rejected(
+                RejectionReason.TAG_LIMIT_REACHED,
+                "A task can contain up to $MAX_TASK_TAGS tags.",
+            )
+        }
+        val recurrence = command.recurrence
+        val dueLocalDate = command.due?.let { due ->
+            due.instant.atZone(ZoneId.of(due.zoneId)).toLocalDate()
+        }
+        when {
+            command.estimate?.let { it.isZero || it.isNegative } == true ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Estimate must be greater than zero.",
+                )
+            recurrence != null && command.due == null ->
+                return CommandResult.Rejected(
+                    RejectionReason.RECURRENCE_REQUIRES_DUE,
+                    "Add a due date before repeating this task.",
+                )
+            recurrence != null && recurrence.interval > MAX_RECURRENCE_INTERVAL ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Repeat interval is too large.",
+                )
+            recurrence?.count != null && recurrence.endDate != null ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Choose either an occurrence count or an end date.",
+                )
+            recurrence?.endDate?.let { endDate ->
+                dueLocalDate != null && endDate.isBefore(dueLocalDate)
+            } == true ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "The repeat end date cannot be before the due date.",
+                )
+        }
+        val tagsByName = current.tags.associateBy { tag -> tag.name.lowercase(Locale.ROOT) }
+        val existingTags = uniqueTagNames.keys.mapNotNull(tagsByName::get)
+        val missingTagNames = uniqueTagNames
+            .filterKeys { key -> key !in tagsByName }
+            .values
+            .toList()
+
+        // No TaskId.new/UUID.randomUUID call is permitted above this line.
+        val createdAt = now()
+        val taskId = TaskId.new()
+        val freshTags = missingTagNames.map { name ->
+            Tag(TagId(UUID.randomUUID().toString()), OpenTasksFixtures.workspaceId, name)
+        }
+        val base = Task(
+            id = taskId,
             workspaceId = OpenTasksFixtures.workspaceId,
             projectId = command.projectId,
             statusId = initialStatus.id,
@@ -1234,20 +1300,32 @@ class InMemoryVaultRepository internal constructor(
             title = title,
             priority = command.priority,
             due = command.due,
-            revision = Revision(DeviceId("local-device"), now().toEpochMilli(), 0),
+            estimate = command.estimate,
+            recurrence = command.recurrence,
+            tagIds = (existingTags.map(Tag::id) + freshTags.map(Tag::id)).toSet(),
+            revision = Revision(DeviceId("local-device"), createdAt.toEpochMilli(), 0),
         )
-        val current = mutableWorkspace.value
-        publish(current.tasks + task)
-        recordActivity(
-            taskId = task.id,
-            projectId = task.projectId,
-            kind = ActivityKind.RECORD_CREATED,
-            body = "Created",
-            at = now(),
+        val metadata = RecurringTaskPlanner.metadataForUpdate(base, base.due, base.recurrence)
+        val task = base.copy(
+            recurrenceSeriesId = metadata?.seriesId,
+            recurrenceAnchor = metadata?.anchor,
+            recurrenceOccurrenceIndex = metadata?.occurrenceIndex,
+        )
+        publish(
+            tasks = current.tasks + task,
+            tags = current.tags + freshTags,
+            activityEntries = current.activityEntries.appendedActivity(
+                taskId = task.id,
+                projectId = task.projectId,
+                kind = ActivityKind.RECORD_CREATED,
+                body = "Created",
+                at = createdAt,
+            ),
+            at = createdAt,
         )
         return CommandResult.Success(
             message = "Task added",
-            undo = DomainCommand.DeleteTask(task.id, now()),
+            undo = DomainCommand.DeleteTask(task.id, createdAt),
         )
     }
 
@@ -3663,6 +3741,7 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_CHECKLIST_ITEMS = 200
         const val MAX_TAG_NAME_LENGTH = 64
         const val MAX_TASK_TAGS = 50
+        const val MAX_RECURRENCE_INTERVAL = 999
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_BULK_TASKS = 200
         const val MAX_IMPORT_ROWS = 5_000

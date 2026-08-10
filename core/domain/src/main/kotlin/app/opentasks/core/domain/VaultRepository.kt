@@ -198,6 +198,9 @@ sealed interface DomainCommand {
         val projectId: ProjectId? = null,
         val priority: Priority = Priority.NONE,
         val due: ZonedMoment? = null,
+        val tagNames: List<String> = emptyList(),
+        val estimate: Duration? = null,
+        val recurrence: RecurrenceRule? = null,
     ) : DomainCommand
 
     data class RenameTask(
@@ -513,6 +516,7 @@ enum class RejectionReason {
     TIMER_OWNERSHIP_CHANGED,
     TIME_ENTRY_NOTE_TOO_LONG,
     TIME_ENTRY_LIMIT_REACHED,
+    RECURRENCE_REQUIRES_DUE,
     INVALID_STATE,
     REMINDER_IN_PAST,
     EMPTY_NOTE,

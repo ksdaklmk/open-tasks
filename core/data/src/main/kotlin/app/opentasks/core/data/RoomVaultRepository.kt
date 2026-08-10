@@ -1290,10 +1290,6 @@ class RoomVaultRepository(
     }
 
     private suspend fun createTask(command: DomainCommand.CreateTask): CommandResult {
-        val title = command.title.trim()
-        if (title.isEmpty()) {
-            return CommandResult.Rejected(RejectionReason.EMPTY_TITLE, "A task needs a title.")
-        }
         command.projectId?.let { projectId ->
             val project = database.workspaceDao().getProjectById(projectId.value)
             if (project == null || project.archivedAtEpochMillis != null) {
@@ -1303,7 +1299,6 @@ class RoomVaultRepository(
                 )
             }
         }
-        val createdAt = now()
         val initialStatus = database.workspaceDao()
             .getWorkflowStatuses(command.projectId?.value)
             .firstOrNull {
@@ -1314,8 +1309,79 @@ class RoomVaultRepository(
             RejectionReason.INVALID_STATE,
             "This project has no active Backlog status.",
         )
-        val task = Task(
-            id = TaskId.new(),
+        val title = command.title.trim()
+        when {
+            title.isEmpty() -> return CommandResult.Rejected(
+                RejectionReason.EMPTY_TITLE,
+                "A task needs a title.",
+            )
+            title.length > MAX_TASK_TITLE_LENGTH -> return CommandResult.Rejected(
+                RejectionReason.TITLE_TOO_LONG,
+                "Keep the task title under $MAX_TASK_TITLE_LENGTH characters.",
+            )
+        }
+        val uniqueTagNames = linkedMapOf<String, String>()
+        for (rawName in command.tagNames) {
+            val name = rawName.trim()
+            validateTagName(name)?.let { return it }
+            uniqueTagNames.putIfAbsent(name.lowercase(Locale.ROOT), name)
+        }
+        if (uniqueTagNames.size > MAX_TASK_TAGS) {
+            return CommandResult.Rejected(
+                RejectionReason.TAG_LIMIT_REACHED,
+                "A task can contain up to $MAX_TASK_TAGS tags.",
+            )
+        }
+        val recurrence = command.recurrence
+        val dueLocalDate = command.due?.let { due ->
+            due.instant.atZone(ZoneId.of(due.zoneId)).toLocalDate()
+        }
+        when {
+            command.estimate?.let { it.isZero || it.isNegative } == true ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Estimate must be greater than zero.",
+                )
+            recurrence != null && command.due == null ->
+                return CommandResult.Rejected(
+                    RejectionReason.RECURRENCE_REQUIRES_DUE,
+                    "Add a due date before repeating this task.",
+                )
+            recurrence != null && recurrence.interval > MAX_RECURRENCE_INTERVAL ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Repeat interval is too large.",
+                )
+            recurrence?.count != null && recurrence.endDate != null ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Choose either an occurrence count or an end date.",
+                )
+            recurrence?.endDate?.let { endDate ->
+                dueLocalDate != null && endDate.isBefore(dueLocalDate)
+            } == true ->
+                return CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "The repeat end date cannot be before the due date.",
+                )
+        }
+        val existingTags = mutableListOf<Tag>()
+        val missingTagNames = mutableListOf<String>()
+        for (name in uniqueTagNames.values) {
+            val existing = database.workspaceDao()
+                .findTagByName(OpenTasksFixtures.workspaceId.value, name)
+                ?.toModel()
+            if (existing == null) missingTagNames += name else existingTags += existing
+        }
+
+        // No TaskId.new/UUID.randomUUID call is permitted above this line.
+        val createdAt = now()
+        val taskId = TaskId.new()
+        val freshTags = missingTagNames.map { name ->
+            Tag(TagId(UUID.randomUUID().toString()), OpenTasksFixtures.workspaceId, name)
+        }
+        val base = Task(
+            id = taskId,
             workspaceId = OpenTasksFixtures.workspaceId,
             projectId = command.projectId,
             statusId = initialStatus.id,
@@ -1323,9 +1389,20 @@ class RoomVaultRepository(
             title = title,
             priority = command.priority,
             due = command.due,
+            estimate = command.estimate,
+            recurrence = command.recurrence,
+            tagIds = (existingTags.map(Tag::id) + freshTags.map(Tag::id)).toSet(),
             revision = Revision(deviceId, createdAt.toEpochMilli(), 0),
         )
+        val metadata = RecurringTaskPlanner.metadataForUpdate(base, base.due, base.recurrence)
+        val task = base.copy(
+            recurrenceSeriesId = metadata?.seriesId,
+            recurrenceAnchor = metadata?.anchor,
+            recurrenceOccurrenceIndex = metadata?.occurrenceIndex,
+        )
+        freshTags.forEach { database.workspaceDao().upsertTag(it.toEntity()) }
         persistTask(task, "create")
+        task.tagEntities().forEach { database.workspaceDao().upsertTaskTag(it) }
         recordActivity(
             taskId = task.id,
             projectId = task.projectId,
@@ -4173,6 +4250,7 @@ class RoomVaultRepository(
         const val MAX_CHECKLIST_ITEMS = 200
         const val MAX_TAG_NAME_LENGTH = 64
         const val MAX_TASK_TAGS = 50
+        const val MAX_RECURRENCE_INTERVAL = 999
         const val MAX_TASK_DEPENDENCIES = 100
         const val MAX_BULK_TASKS = 200
         const val MAX_IMPORT_ROWS = 5_000

@@ -16,6 +16,8 @@ import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.model.ActivityEntry
+import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.BlobSetId
@@ -32,6 +34,7 @@ import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.VaultId
@@ -65,6 +68,50 @@ class RoomVaultRepositoryInstrumentedTest {
     private lateinit var databaseKey: ByteArray
     private var database: VaultDatabase? = null
     private var repository: RoomVaultRepository? = null
+
+    private fun invalidCreates(
+        due: ZonedMoment,
+    ): List<Pair<DomainCommand.CreateTask, RejectionReason>> =
+        listOf(
+            DomainCommand.CreateTask("   ") to RejectionReason.EMPTY_TITLE,
+            DomainCommand.CreateTask("x".repeat(241)) to RejectionReason.TITLE_TOO_LONG,
+            DomainCommand.CreateTask("Task", tagNames = listOf("   ")) to
+                RejectionReason.EMPTY_TAG_NAME,
+            DomainCommand.CreateTask("Task", tagNames = listOf("x".repeat(65))) to
+                RejectionReason.TAG_NAME_TOO_LONG,
+            DomainCommand.CreateTask("Task", tagNames = List(51) { "tag-$it" }) to
+                RejectionReason.TAG_LIMIT_REACHED,
+            DomainCommand.CreateTask("Task", estimate = Duration.ZERO) to
+                RejectionReason.INVALID_STATE,
+            DomainCommand.CreateTask("Task", estimate = Duration.ofMinutes(-1)) to
+                RejectionReason.INVALID_STATE,
+            DomainCommand.CreateTask(
+                "Task",
+                recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
+            ) to RejectionReason.RECURRENCE_REQUIRES_DUE,
+            DomainCommand.CreateTask(
+                "Task",
+                due = due,
+                recurrence = RecurrenceRule(RecurrenceFrequency.DAILY, interval = 1_000),
+            ) to RejectionReason.INVALID_STATE,
+            DomainCommand.CreateTask(
+                "Task",
+                due = due,
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    count = 2,
+                    endDate = LocalDate.of(2026, 8, 12),
+                ),
+            ) to RejectionReason.INVALID_STATE,
+            DomainCommand.CreateTask(
+                "Task",
+                due = due,
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    endDate = LocalDate.of(2026, 8, 9),
+                ),
+            ) to RejectionReason.INVALID_STATE,
+        )
 
     @Before
     fun setUp() {
@@ -179,6 +226,150 @@ class RoomVaultRepositoryInstrumentedTest {
         }
 
         assertEquals(due, created.due)
+    }
+
+    @Test
+    fun createTaskRejectsTheWholeCommandBeforeRoomMutation() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            openRepository(now = { Instant.parse("2026-08-10T09:00:00Z") })
+            val due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "UTC")
+            invalidCreates(due).forEach { (command, reason) ->
+                val before = repository!!.currentWorkspace()
+                val generation =
+                    database!!.backupStateDao().require("vault-primary").currentGeneration
+                val result = repository!!.execute(command) as CommandResult.Rejected
+                assertEquals(reason, result.reason)
+                assertEquals(before, repository!!.currentWorkspace())
+                assertEquals(
+                    generation,
+                    database!!.backupStateDao().require("vault-primary").currentGeneration,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun createTaskCreatesEnrichedTaskAtomicallyAndSurvivesRestart() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val fixedNow = Instant.parse("2026-07-26T10:00:00Z")
+            openRepository(now = { fixedNow })
+            assertTrue(
+                repository!!.execute(
+                    DomainCommand.CreateTask(
+                        "Deduped tags",
+                        tagNames = List(51) { " deep WORK " },
+                    ),
+                ) is CommandResult.Success,
+            )
+            val before = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    val task = snapshot.tasks.singleOrNull { it.title == "Deduped tags" }
+                        ?: return@first false
+                    task.tagIds == setOf(TagId("tag-deep-work")) &&
+                        snapshot.activityEntries.any {
+                            it.taskId == task.id && it.kind == ActivityKind.RECORD_CREATED
+                        }
+                }
+            }
+
+            // This is 2026-08-09 in America/Los_Angeles but 2026-08-10 in UTC.
+            val due = ZonedMoment(
+                Instant.parse("2026-08-10T00:30:00Z"),
+                "America/Los_Angeles",
+            )
+            val rule = RecurrenceRule(
+                RecurrenceFrequency.WEEKLY,
+                endDate = LocalDate.of(2026, 8, 9),
+            )
+            val command = DomainCommand.CreateTask(
+                title = "Enriched",
+                tagNames = listOf("deep WORK", "New tag", "NEW TAG"),
+                estimate = Duration.ofMinutes(45),
+                due = due,
+                recurrence = rule,
+            )
+            val beforeActivityIds = before.activityEntries.mapTo(hashSetOf(), ActivityEntry::id)
+            val generationBefore =
+                database!!.backupStateDao().require("vault-primary").currentGeneration
+            val success = repository!!.execute(command) as CommandResult.Success
+            val generationAfter =
+                database!!.backupStateDao().require("vault-primary").currentGeneration
+            val rows = journalRows(generationAfter)
+            val mutations = rows.map { BackupMutationCodec.decode(it.payload) }
+            assertEquals(generationBefore + 1, generationAfter)
+            assertEquals(rows.indices.toList(), rows.map { it.sequence })
+            assertEquals(5, mutations.size)
+            assertTrue(mutations.all { it.record != null && it.deletedFamily == null })
+            assertEquals(1, mutations.count { it.record!!.family == BackupRecordFamily.TASK })
+            assertEquals(1, mutations.count { it.record!!.family == BackupRecordFamily.TAG })
+            assertEquals(2, mutations.count { it.record!!.family == BackupRecordFamily.TASK_TAG })
+            assertEquals(
+                1,
+                mutations.count { it.record!!.family == BackupRecordFamily.ACTIVITY_ENTRY },
+            )
+            val after = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    val created = snapshot.tasks.singleOrNull {
+                        it.title == "Enriched" && it.recurrenceAnchor == due
+                    } ?: return@first false
+                    created.tagIds.size == 2 &&
+                        TagId("tag-deep-work") in created.tagIds &&
+                        snapshot.tags.size == before.tags.size + 1 &&
+                        snapshot.tags.any { it.id in created.tagIds && it.name == "New tag" } &&
+                        snapshot.activityEntries.count {
+                            it.taskId == created.id && it.kind == ActivityKind.RECORD_CREATED
+                        } == 1
+                }
+            }
+            val created = after.tasks.single {
+                it.title == "Enriched" && it.recurrenceAnchor == due
+            }
+            assertEquals(before.tags.size + 1, after.tags.size)
+            val beforeTagIds = before.tags.mapTo(hashSetOf()) { tag -> tag.id }
+            val newTag = after.tags.single { it.id !in beforeTagIds }
+            assertEquals("New tag", newTag.name)
+            assertEquals(setOf(TagId("tag-deep-work"), newTag.id), created.tagIds)
+            assertEquals(Duration.ofMinutes(45), created.estimate)
+            assertEquals(rule, created.recurrence)
+            assertEquals(created.id, created.recurrenceSeriesId)
+            assertEquals(due, created.recurrenceAnchor)
+            assertEquals(0, created.recurrenceOccurrenceIndex)
+            val newActivities = after.activityEntries.filter { it.id !in beforeActivityIds }
+            assertEquals(1, newActivities.size)
+            assertEquals(ActivityKind.RECORD_CREATED, newActivities.single().kind)
+            assertEquals(created.id, newActivities.single().taskId)
+            assertEquals(DomainCommand.DeleteTask(created.id, fixedNow), success.undo)
+
+            repository!!.close()
+            database!!.close()
+            repository = null
+            database = null
+            openRepository(now = { fixedNow })
+            val reopened = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.tasks.any {
+                        it.id == created.id &&
+                            it.recurrenceAnchor == due &&
+                            it.tagIds == created.tagIds
+                    }
+                }
+            }
+            val reopenedTask = reopened.tasks.single { it.id == created.id }
+            assertEquals(Duration.ofMinutes(45), reopenedTask.estimate)
+            assertEquals(rule, reopenedTask.recurrence)
+            assertEquals(created.id, reopenedTask.recurrenceSeriesId)
+            assertEquals(due, reopenedTask.recurrenceAnchor)
+            assertEquals(0, reopenedTask.recurrenceOccurrenceIndex)
+            assertEquals(created.tagIds, reopenedTask.tagIds)
+
+            repository!!.execute(checkNotNull(success.undo))
+            val undone = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.tasks.single { it.id == created.id }.deletedAt == fixedNow
+                }
+            }
+            assertEquals(fixedNow, undone.tasks.single { it.id == created.id }.deletedAt)
+        }
     }
 
     @Test
