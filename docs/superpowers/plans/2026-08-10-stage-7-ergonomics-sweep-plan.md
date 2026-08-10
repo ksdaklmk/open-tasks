@@ -1829,6 +1829,9 @@ git commit -m "feat: arrange project workbench tasks"
 - Modify:
   `feature/projects/src/test/kotlin/app/opentasks/feature/projects/BoardColumnsTest.kt:19-114`
   (`BoardColumnsTest`)
+- Modify:
+  `core/domain/src/test/kotlin/app/opentasks/core/domain/TaskArrangementRulesTest.kt:145-190`
+  (`boardColumnsFilterCardsAndUseTheRequestedSharedComparator`)
 - Modify: `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt:255-278`
   (root collected state) and `:1137-1260` (`entry<ProjectsRoute>`)
 
@@ -1870,9 +1873,13 @@ private fun columnsFor(task: Task): List<BoardColumn> =
         }
 ```
 
-In `BoardColumnsTest`, delete the projection-order test now owned (with all sort
-keys) by Task 2's domain suite; import model `BoardColumn` and retain the
-`moveTargets` order/exclusion test.
+In `BoardColumnsTest`, delete the projection-order test now owned by the domain
+suite; import model `BoardColumn` and retain the `moveTargets` order/exclusion
+test. Delete the orphaned project/task fixtures, helpers, and imports left by
+that removal. Extend `TaskArrangementRulesTest` with DUE and UPDATED board-column
+assertions as well as its existing PRIORITY/TITLE assertions. Choose primary
+values whose expected order contradicts title order so an implementation that
+ignores the requested sort fails; keep completed/deleted filtering pinned.
 
 - [ ] **Step 2: Write the board-sort UI RED test**
 
@@ -1882,6 +1889,17 @@ ordered `selectedBoardColumns`. Assert cards follow the supplied order. Open
 `board-sort-option-priority`, `board-sort-option-due`, and
 `board-sort-option-title`, and assert the corresponding callback value.
 Assert Updated and group controls are absent in board mode.
+
+Update Task 5's existing list→board assertion to pass explicit model
+`BoardColumn` fixtures; after the feature projection is removed, an omitted
+`selectedBoardColumns` correctly means an empty board and cannot satisfy that
+existing card assertion.
+
+Supply non-default `boardSort = TITLE`; assert the control announces the
+resource-backed current choice and the Title option has selected semantics.
+Click Due, capture the callback, then reopen and prove the description and
+selected option remain Title until the supplied parameter changes. This pins a
+stateless control rather than a second arrangement authority.
 
 - [ ] **Step 3: Run the RED compilation**
 
@@ -1897,8 +1915,19 @@ contract have not replaced the feature declarations yet.
 Delete `BoardColumn` and `boardColumns` from `BoardView.kt`; import only the
 model type. Thread `selectedBoardColumns` through both workbench call paths and
 pass it to `BoardView`. Add one stateless 48 dp board-sort menu beside the
-List/Board toggle. It exposes PRIORITY, DUE, TITLE only and emits
-`onBoardSortChange`.
+List/Board toggle only when `boardMode` is true. It exposes PRIORITY, DUE, TITLE
+only and emits `onBoardSortChange`. Its description formats the current value,
+and every item sets `selected` semantics from `boardSort`. Derive option tags
+with `candidate.name.lowercase(Locale.ROOT)`. Add the exact control string and
+reuse Task 5's existing resource-backed workbench sort labels for the three
+shared option names:
+
+```text
+board_sort_control = Sort board cards: %1$s
+workbench_sort_priority_label = Priority
+workbench_sort_due_label = Due
+workbench_sort_title_label = Title
+```
 
 Replace the current feature projection call with the supplied value:
 
@@ -1944,6 +1973,8 @@ feature.
 ```bash
 ./gradlew :core:domain:testDebugUnitTest \
   --tests "app.opentasks.core.domain.TaskArrangementRulesTest"
+./gradlew :feature:projects:testDebugUnitTest \
+  --tests "app.opentasks.feature.projects.BoardColumnsTest"
 ./gradlew :feature:projects:compileDebugAndroidTestKotlin \
   :app:compileDebugKotlin
 ```
@@ -1966,11 +1997,12 @@ git add feature/projects/src/main/kotlin/app/opentasks/feature/projects/BoardVie
   feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/BoardViewInstrumentedTest.kt \
   feature/projects/src/androidTest/kotlin/app/opentasks/feature/projects/ProjectWorkbenchInstrumentedTest.kt \
   feature/projects/src/test/kotlin/app/opentasks/feature/projects/BoardColumnsTest.kt \
+  core/domain/src/test/kotlin/app/opentasks/core/domain/TaskArrangementRulesTest.kt \
   app/src/main/kotlin/app/opentasks/OpenTasksApp.kt
 git diff --cached --name-only
 ```
 
-Expected: exactly the seven paths in this task's **Files** block.
+Expected: exactly the eight paths in this task's **Files** block.
 
 - [ ] **Step 9: Commit**
 
@@ -2159,41 +2191,47 @@ Add the restart equivalent to `RoomSavedViewCommandInstrumentedTest`:
 ```
 
 Add this importer test using its existing `completeVaultSnapshot()`, `request`,
-and `staging()` helpers. It proves recovery visibility and raw future-payload
-retention without changing the backup codec:
+`staging()`, and `TIMEOUT_MILLIS` helpers. It proves recovery visibility and
+byte-for-byte v1/v2/v3 row retention without changing the backup codec:
 
 ```kotlin
 @Test fun recoveryImportsV1V2AndRetainsFutureSavedViewBytes() = runBlocking {
-    val v1Bytes =
-        """{"formatVersion":1,"text":"legacy","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false}""".encodeToByteArray()
-    val v2Json =
-        """{"formatVersion":2,"text":"","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false,"dueBuckets":["TODAY"],"priorities":[],"statuses":[],"sort":null}"""
-    val v2Bytes = v2Json.encodeToByteArray()
-    val v3Bytes = v2Json.replace("\"formatVersion\":2", "\"formatVersion\":3")
-        .encodeToByteArray()
-    val records = completeVaultSnapshot().records
-        .filterNot { it.family == BackupRecordFamily.SAVED_VIEW } +
-        listOf(
-            SavedViewEntity("view-v1", WORKSPACE_ID, "V1", v1Bytes).toBackupRecordV1(),
-            SavedViewEntity("view-v2", WORKSPACE_ID, "V2", v2Bytes).toBackupRecordV1(),
-            SavedViewEntity("view-v3", WORKSPACE_ID, "V3", v3Bytes).toBackupRecordV1(),
-        )
-    importer.importInto(staging(), request(completeVaultSnapshot().copy(records = records)))
-    val room = RoomVaultRepository(staging(), DeviceId("recovery-codec-test"))
-    try {
-        assertEquals(
-            listOf("view-v1", "view-v2"),
-            room.currentWorkspace().savedViews.map { it.id.value }.sorted(),
-        )
-        val recaptured = RoomBackupCaptureSource(staging(), VaultId(VAULT_ID)).capture()
-        assertEquals(
-            records.single { it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf("view-v3") },
-            recaptured.records.single {
-                it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf("view-v3")
-            },
-        )
-    } finally {
-        room.close()
+    withTimeout(TIMEOUT_MILLIS) {
+        val v1Bytes =
+            """{"formatVersion":1,"text":"legacy","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false}""".encodeToByteArray()
+        val v2Json =
+            """{"formatVersion":2,"text":"","projectIds":[],"tagIds":[],"includeCompleted":true,"includeTrash":false,"dueBuckets":["TODAY"],"priorities":[],"statuses":[],"sort":null}"""
+        val v2Bytes = v2Json.encodeToByteArray()
+        val v3Bytes = v2Json.replace("\"formatVersion\":2", "\"formatVersion\":3")
+            .encodeToByteArray()
+        val records = completeVaultSnapshot().records
+            .filterNot { it.family == BackupRecordFamily.SAVED_VIEW } +
+            listOf(
+                SavedViewEntity("view-v1", WORKSPACE_ID, "V1", v1Bytes).toBackupRecordV1(),
+                SavedViewEntity("view-v2", WORKSPACE_ID, "V2", v2Bytes).toBackupRecordV1(),
+                SavedViewEntity("view-v3", WORKSPACE_ID, "V3", v3Bytes).toBackupRecordV1(),
+            )
+        importer.importInto(staging(), request(completeVaultSnapshot().copy(records = records)))
+        val room = RoomVaultRepository(staging(), DeviceId("recovery-codec-test"))
+        try {
+            assertEquals(
+                listOf("view-v1", "view-v2"),
+                room.currentWorkspace().savedViews.map { it.id.value }.sorted(),
+            )
+            val recaptured = RoomBackupCaptureSource(staging(), VaultId(VAULT_ID)).capture()
+            listOf("view-v1", "view-v2", "view-v3").forEach { id ->
+                assertEquals(
+                    records.single {
+                        it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf(id)
+                    },
+                    recaptured.records.single {
+                        it.family == BackupRecordFamily.SAVED_VIEW && it.identity == listOf(id)
+                    },
+                )
+            }
+        } finally {
+            room.close()
+        }
     }
 }
 ```
