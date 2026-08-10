@@ -9,8 +9,8 @@ pre-execution status is superseded here.
 - Stage 7 implementation is local on `main`. The current product/test HEAD is
   `3d5f1f548838da1156a470d476256550c1b1e8ea`
   (`test: repair focus repository fixture`), on Task 9 implementation commit
-  `fc91c45`; this pause handoff is a docs-only commit on top. Nothing has been
-  pushed during this execution.
+  `fc91c45`. Unrelated Pinfo design commit `1541570` and this pause handoff's
+  docs-only commits sit on top. Nothing has been pushed during this execution.
 - Stage 7 Tasks 1–9 are complete and independently review-clean. Tasks 1–5 are:
   `7638037` (date buckets), `ddc3f16` (arrangement authority), `65242f1`
   (device-local arrangement store), `141e7a0..62f003f` (Tasks arrangement),
@@ -39,9 +39,9 @@ pre-execution status is superseded here.
   only if the included free allowance is available; otherwise pause at that
   gate. The old paid-billing prerequisite is cancelled.
 - The index is empty. Preserve the user-owned modified Stage 3 plan and
-  untracked `.kotlin/`, `artifacts/`, and
-  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md` paths;
-  they are unrelated to Stage 7. The ignored execution ledger is
+  untracked `.kotlin/` and `artifacts/` paths; they are unrelated to Stage 7.
+  The separate Pinfo design is committed at `1541570` and is also unrelated.
+  The ignored execution ledger is
   `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
 
 ## Historical context
