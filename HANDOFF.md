@@ -1,13 +1,12 @@
 # Open Tasks Handoff
 
 - Last updated: 10 August 2026
-- Branch: `main` at the Stage 7 planning-pause commit `80ec470`, with the
-  approved Stage 7 design at `3b1a3c4`. Both commits are local and unpushed;
-  `main` is ahead of `origin/main` by two. Pushing while the standing
-  zero-runner billing block remains will not produce usable CI signal. This
-  planning turn adds only the uncommitted Stage 7 implementation plan and
-  this HANDOFF checkpoint; no product source has changed. Preserve the
-  pre-existing user-owned Stage 3 plan edit, `.kotlin/`, and `artifacts/`.
+- Branch: `main` at Stage 7 Phase 0 commit `7638037`, with the implementation
+  plan checkpoint at `2049581`, planning pause at `80ec470`, and approved
+  design at `3b1a3c4`. All four are local and unpushed; `main` is ahead of
+  `origin/main` by four. Task 1 changed only its six ruled model/domain/
+  Tasks/app paths. Preserve the pre-existing user-owned Stage 3 plan edit,
+  `.kotlin/`, and `artifacts/`.
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
   completed run at `c74a435` confirmed the expected post-F6 shape —
   `verify`, compact API 36, and `release` green, only expanded API 37.0
@@ -350,7 +349,7 @@ approved the roadmap spec, and the Stage 7 detailed design was
 brainstormed and committed the same day. See the Stage 7 checkpoint
 immediately below. Nothing from the roadmap has been implemented.
 
-## Stage 7 plan written — execution NOT started — 10 August 2026
+## Stage 7 Phase 0 complete — Stage 7 execution gated — 10 August 2026
 
 The Stage 7 detailed design is brainstormed, self-reviewed, committed at
 `3b1a3c4` (unpushed), and **approved by the user**:
@@ -359,8 +358,14 @@ It is the Stage 7 authority under the roadmap spec. After reading all six
 research maps below in full, `superpowers:writing-plans` produced the
 implementation plan at
 `docs/superpowers/plans/2026-08-10-stage-7-ergonomics-sweep-plan.md`.
-No product code was changed, no product test or device suite was run, and
-execution has not started.
+The plan is now executing with `superpowers:subagent-driven-development`.
+Phase 0 Task 1 is committed at `7638037` and passed its independent
+spec-and-quality review with no findings. The shared `DueBucket` vocabulary,
+zone-aware classifier, corrected Tasks chips, and app-owned projection are in
+place. The non-device baseline
+`./gradlew testDebugUnitTest lintDebug :app:assembleDebug` passed before the
+task; the focused classifier test and affected instrumentation/app compilation
+passed after it. No device or connected test ran.
 
 Five user rulings resolved the roadmap's open Stage 7 decisions:
 
@@ -425,13 +430,15 @@ than re-derived. Load-bearing facts already established:
 - Insights has no `Canvas` anywhere; every chart is a
   `LinearProgressIndicator` via `MetricBar`.
 
-**PLANNING CHECKPOINT:** the implementation plan is written and
-self-reviewed; execution is intentionally not started. On resume, choose
-Subagent-Driven Development (recommended) or Inline Execution. Before the
-Stage 7 implementation base is recorded, complete the date-chip prerequisite,
-restore Actions billing, and resolve the Dependabot queue with fresh green
-checks as directed by the plan. The protected Stage 3 plan amendment,
-`.kotlin/`, and `artifacts/` were not touched.
+**BLOCKED before Task 2 by the approved external gate.** Latest `main` run
+`31352167676` has zero executed steps for verify, compact API 36, and expanded
+API 37.0; release is skipped. Dependabot PRs #14–#19 remain open. The user must
+restore Actions billing first. Then rerun/review and resolve the six PRs with
+fresh green verify, compact API 36, and release checks (expanded API 37.0 keeps
+its documented F6 observe-only ruling). Only after that gate is green: record
+the then-current full HEAD as the first full SHA in this plan's ignored SDD
+ledger and dispatch Task 2. The protected Stage 3 plan amendment, `.kotlin/`,
+and `artifacts/` were not touched.
 
 ## Stage 6 closure — 10 August 2026
 
