@@ -96,6 +96,13 @@ class NaturalDateParserTest {
     }
 
     @Test
+    fun publicParserStillReturnsTheRightmostDate() {
+        val text = "today then tomorrow"
+        val match = parseNaturalDate(text, now, zone)!!
+        assertEquals("tomorrow", text.substring(match.startIndex, match.endIndex))
+    }
+
+    @Test
     fun embeddedTokensPlainTextAndInvalidValuesDoNotMatch() {
         assertNull(parseNaturalDate("buy milk friday-market", now, zone))
         assertNull(parseNaturalDate("no dates here", now, zone))

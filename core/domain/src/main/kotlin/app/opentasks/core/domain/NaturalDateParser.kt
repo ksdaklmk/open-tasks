@@ -23,17 +23,18 @@ data class NaturalDateMatch(
  * library dependency.
  */
 fun parseNaturalDate(text: String, now: Instant, zone: ZoneId): NaturalDateMatch? {
-    var best: NaturalDateMatch? = null
-    for (matchResult in NATURAL_DATE_REGEX.findAll(text)) {
-        val due = resolve(matchResult, now, zone) ?: continue
-        best = NaturalDateMatch(
+    return parseNaturalDates(text, now, zone).lastOrNull()
+}
+
+internal fun parseNaturalDates(text: String, now: Instant, zone: ZoneId): List<NaturalDateMatch> =
+    NATURAL_DATE_REGEX.findAll(text).mapNotNull { matchResult ->
+        val due = resolve(matchResult, now, zone) ?: return@mapNotNull null
+        NaturalDateMatch(
             startIndex = matchResult.range.first,
             endIndex = matchResult.range.last + 1,
             due = due,
         )
-    }
-    return best
-}
+    }.toList()
 
 private val WEEKDAY_ALIASES: Map<String, DayOfWeek> = mapOf(
     "monday" to DayOfWeek.MONDAY,
