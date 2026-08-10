@@ -733,16 +733,10 @@ class InMemoryVaultRepository internal constructor(
             }
             task.copy(tagIds = tagIds)
         }
-        val resolvedTasks = resolveDependencyState(current.tasks + tasks)
         val projects = current.projects + created.project
-        val activeTasks = resolvedTasks.filter { it.deletedAt == null }
         mutableWorkspace.value = current.copy(
             home = current.home.copy(
                 projects = projects.filter { it.archivedAt == null },
-                focusTasks = activeTasks.filterNot(Task::isCompleted).take(3),
-                upcomingTasks = activeTasks
-                    .filter { it.start != null || it.due != null }
-                    .take(3),
             ),
             projects = projects,
             workflowStatuses = (current.workflowStatuses + created.workflowStatuses)
@@ -756,10 +750,10 @@ class InMemoryVaultRepository internal constructor(
                     .thenBy(Milestone::dueDate)
                     .thenBy(Milestone::name),
             ),
-            tasks = resolvedTasks,
+            tasks = current.tasks + tasks,
             tags = (current.tags + createdTags)
                 .sortedBy { it.name.lowercase(Locale.ROOT) },
-        )
+        ).withResolvedDependencyState(rebuildHomeTaskLists = true)
         return CommandResult.Success("Project created from template")
     }
 
@@ -3580,16 +3574,12 @@ class InMemoryVaultRepository internal constructor(
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
-        val resolvedTasks = resolveDependencyState(tasks)
-        val activeTasks = resolvedTasks.filter { it.deletedAt == null }
         val home = current.home.copy(
-            focusTasks = activeTasks.filterNot(Task::isCompleted).take(3),
-            upcomingTasks = activeTasks.filter { it.start != null || it.due != null }.take(3),
             projects = projects.filter { it.archivedAt == null },
         )
         mutableWorkspace.value = current.copy(
             home = home,
-            tasks = resolvedTasks,
+            tasks = tasks,
             projects = projects,
             workflowStatuses = workflowStatuses.sortedWith(
                 compareBy<WorkflowStatus> { it.projectId?.value.orEmpty() }
@@ -3612,7 +3602,8 @@ class InMemoryVaultRepository internal constructor(
             savedViews = savedViews.sortedWith(
                 compareBy<SavedView> { it.name }.thenBy { it.id.value },
             ),
-        ).withReconciledTimeState(at = at, entries = timeEntries)
+        ).withResolvedDependencyState(rebuildHomeTaskLists = true)
+            .withReconciledTimeState(at = at, entries = timeEntries)
     }
 
     private fun recordActivity(
@@ -3750,15 +3741,26 @@ class InMemoryVaultRepository internal constructor(
     }
 }
 
-private fun WorkspaceSnapshot.withResolvedDependencyState(): WorkspaceSnapshot {
+private fun WorkspaceSnapshot.withResolvedDependencyState(
+    rebuildHomeTaskLists: Boolean = false,
+): WorkspaceSnapshot {
     val resolvedTasks = resolveDependencyState(tasks)
     val tasksById = resolvedTasks.associateBy(Task::id)
-    return copy(
-        tasks = resolvedTasks,
-        home = home.copy(
+    val resolvedHome = if (rebuildHomeTaskLists) {
+        val activeTasks = resolvedTasks.filter { it.deletedAt == null }
+        home.copy(
+            focusTasks = activeTasks.filterNot(Task::isCompleted).take(3),
+            upcomingTasks = activeTasks.filter { it.start != null || it.due != null }.take(3),
+        )
+    } else {
+        home.copy(
             focusTasks = home.focusTasks.mapNotNull { tasksById[it.id] },
             upcomingTasks = home.upcomingTasks.mapNotNull { tasksById[it.id] },
-        ),
+        )
+    }
+    return copy(
+        home = resolvedHome,
+        tasks = resolvedTasks.sortedBy { it.id.value },
     )
 }
 

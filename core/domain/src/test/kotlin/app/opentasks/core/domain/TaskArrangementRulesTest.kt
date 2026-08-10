@@ -1,0 +1,184 @@
+package app.opentasks.core.domain
+
+import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.Priority
+import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.Revision
+import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.Task
+import app.opentasks.core.model.TaskArrangement
+import app.opentasks.core.model.TaskGroup
+import app.opentasks.core.model.TaskGroupKey
+import app.opentasks.core.model.TaskGroupValue
+import app.opentasks.core.model.TaskId
+import app.opentasks.core.model.TaskSortKey
+import app.opentasks.core.model.WorkflowStatus
+import app.opentasks.core.model.ZonedMoment
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class TaskArrangementRulesTest {
+    private val clock = Clock.fixed(
+        Instant.parse("2026-08-10T03:00:00Z"),
+        ZoneId.of("Asia/Bangkok"),
+    )
+    private val base = OpenTasksFixtures.tasks.first().copy(
+        due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), "Asia/Bangkok"),
+        priority = Priority.HIGH,
+        revision = Revision(DeviceId("arrangement-test"), 100L, 0),
+    )
+    private val alphaA = base.copy(id = TaskId("a"), title = "Alpha")
+    private val alphaB = base.copy(id = TaskId("b"), title = "alpha")
+    private val betaB = base.copy(id = TaskId("c"), title = "Beta")
+
+    @Test
+    fun everyComparatorFallsBackToTitleThenId() {
+        TaskSortKey.entries.forEach { sort ->
+            val actual = listOf(betaB, alphaB, alphaA).sortedWith(taskComparator(sort))
+            assertEquals(listOf(alphaA.id, alphaB.id, betaB.id), actual.map(Task::id))
+        }
+    }
+
+    @Test
+    fun comparatorsUseFixedPrimaryDirectionsAndPlaceNullDueLast() {
+        val early = alphaA.copy(due = ZonedMoment(Instant.parse("2026-08-10T04:00:00Z"), "Asia/Bangkok"))
+        val late = alphaB.copy(due = ZonedMoment(Instant.parse("2026-08-12T04:00:00Z"), "Asia/Bangkok"))
+        val noDue = betaB.copy(due = null)
+        assertEquals(listOf(early.id, late.id, noDue.id), listOf(noDue, late, early).sortedWith(taskComparator(TaskSortKey.DUE)).map(Task::id))
+
+        val urgent = alphaA.copy(priority = Priority.URGENT)
+        val high = alphaB.copy(priority = Priority.HIGH)
+        val none = betaB.copy(priority = Priority.NONE)
+        assertEquals(listOf(urgent.id, high.id, none.id), listOf(none, high, urgent).sortedWith(taskComparator(TaskSortKey.PRIORITY)).map(Task::id))
+
+        val older = alphaA.copy(revision = base.revision.copy(wallTimeMillis = 90L))
+        val newer = alphaB.copy(revision = base.revision.copy(wallTimeMillis = 110L))
+        assertEquals(listOf(newer.id, older.id), listOf(older, newer).sortedWith(taskComparator(TaskSortKey.UPDATED)).map(Task::id))
+    }
+
+    @Test
+    fun flatArrangementReturnsOneSortedGroupEvenWhenEmpty() {
+        assertEquals(
+            listOf(TaskGroup(null, emptyList())),
+            arrangeTasks(emptyList(), TaskArrangement(TaskSortKey.TITLE), emptyMap(), clock),
+        )
+        assertEquals(
+            listOf(alphaA.id, alphaB.id, betaB.id),
+            arrangeTasks(
+                listOf(betaB, alphaB, alphaA),
+                TaskArrangement(TaskSortKey.TITLE),
+                emptyMap(),
+                clock,
+            ).single().tasks.map(Task::id),
+        )
+    }
+
+    @Test
+    fun dueGroupsFollowBucketOrder() {
+        val groups = arrangeTasks(
+            listOf(
+                alphaA.copy(due = null),
+                alphaB.copy(due = ZonedMoment(Instant.parse("2026-08-17T00:00:00Z"), "Asia/Bangkok")),
+                betaB.copy(due = ZonedMoment(Instant.parse("2026-08-12T10:00:00Z"), "Asia/Bangkok")),
+                base.copy(id = TaskId("today"), due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "Asia/Bangkok")),
+                base.copy(id = TaskId("overdue"), due = ZonedMoment(Instant.parse("2026-08-10T02:00:00Z"), "Asia/Bangkok")),
+            ),
+            TaskArrangement(TaskSortKey.TITLE, TaskGroupKey.DUE_BUCKET),
+            emptyMap(),
+            clock,
+        )
+        assertEquals(
+            listOf(
+                TaskGroupValue.Due(app.opentasks.core.model.DueBucket.OVERDUE),
+                TaskGroupValue.Due(app.opentasks.core.model.DueBucket.TODAY),
+                TaskGroupValue.Due(app.opentasks.core.model.DueBucket.THIS_WEEK),
+                TaskGroupValue.Due(app.opentasks.core.model.DueBucket.LATER),
+                TaskGroupValue.Due(app.opentasks.core.model.DueBucket.NO_DATE),
+            ),
+            groups.map(TaskGroup::value),
+        )
+    }
+
+    @Test
+    fun projectGroupsPutInboxThenKnownNamesThenMissingIds() {
+        val alphaId = ProjectId("project-alpha")
+        val zuluId = ProjectId("project-zulu")
+        val missingA = ProjectId("missing-a")
+        val missingZ = ProjectId("missing-z")
+        val groups = arrangeTasks(
+            listOf(
+                base.copy(id = TaskId("zulu"), projectId = zuluId),
+                base.copy(id = TaskId("inbox"), projectId = null),
+                base.copy(id = TaskId("alpha"), projectId = alphaId),
+                base.copy(id = TaskId("missing-z-task"), projectId = missingZ),
+                base.copy(id = TaskId("missing-a-task"), projectId = missingA),
+            ),
+            TaskArrangement(TaskSortKey.TITLE, TaskGroupKey.PROJECT),
+            mapOf(zuluId to "Zulu", alphaId to "alpha"),
+            clock,
+        )
+        assertEquals(
+            listOf(
+                TaskGroupValue.Project(null),
+                TaskGroupValue.Project(alphaId),
+                TaskGroupValue.Project(zuluId),
+                TaskGroupValue.Project(missingA),
+                TaskGroupValue.Project(missingZ),
+            ),
+            groups.map(TaskGroup::value),
+        )
+    }
+
+    @Test
+    fun priorityGroupsRunFromUrgentToNone() {
+        val groups = arrangeTasks(
+            Priority.entries.map { priority -> base.copy(id = TaskId(priority.name), priority = priority) },
+            TaskArrangement(TaskSortKey.TITLE, TaskGroupKey.PRIORITY),
+            emptyMap(),
+            clock,
+        )
+        assertEquals(
+            listOf(Priority.URGENT, Priority.HIGH, Priority.MEDIUM, Priority.LOW, Priority.NONE)
+                .map(TaskGroupValue::PriorityValue),
+            groups.map(TaskGroup::value),
+        )
+    }
+
+    @Test
+    fun boardColumnsFilterCardsAndUseTheRequestedSharedComparator() {
+        val project = OpenTasksFixtures.studioProject
+        val statuses = OpenTasksFixtures.workflowStatuses
+        val backlog = statuses.single { it.id == OpenTasksFixtures.backlog }
+        val alpha = alphaA.copy(projectId = project.id, statusId = backlog.id)
+        val beta = betaB.copy(projectId = project.id, statusId = backlog.id)
+        val completed = beta.copy(
+            id = TaskId("completed"),
+            semanticStatus = SemanticStatus.COMPLETED,
+            completedAt = clock.instant(),
+        )
+        val deleted = beta.copy(id = TaskId("deleted"), deletedAt = clock.instant())
+
+        val priorityColumns = boardColumns(project, statuses, listOf(beta, alpha, completed, deleted))
+        val titleColumns = boardColumns(
+            project,
+            statuses,
+            listOf(beta, alpha, completed, deleted),
+            TaskSortKey.TITLE,
+        )
+
+        assertEquals(
+            statuses.filter { it.projectId == project.id && it.archivedAt == null }
+                .sortedBy(WorkflowStatus::rank).map(WorkflowStatus::id),
+            titleColumns.map { it.status.id },
+        )
+        assertEquals(listOf(alpha.id, beta.id), titleColumns.single { it.status == backlog }.tasks.map(Task::id))
+        assertEquals(
+            listOf(alpha.id, beta.id),
+            priorityColumns.single { it.status == backlog }.tasks.map(Task::id),
+        )
+    }
+}

@@ -39,6 +39,38 @@ class InMemoryVaultRepositoryTest {
     )
 
     @Test
+    fun everyTaskPublicationSortsOnlySnapshotTasksById() = runBlocking {
+        withTimeout(5_000) {
+            val source = OpenTasksFixtures.tasks.first().copy(
+                projectId = null,
+                completedAt = null,
+                deletedAt = null,
+                checklist = emptyList(),
+            )
+            val z = source.copy(id = TaskId("z"), title = "Zulu")
+            val a = source.copy(id = TaskId("a"), title = "Alpha")
+            val m = source.copy(id = TaskId("m"), title = "Mike")
+            val initial = OpenTasksFixtures.snapshot.copy(
+                tasks = listOf(z, a, m),
+                home = OpenTasksFixtures.snapshot.home.copy(
+                    focusTasks = listOf(z, m, a),
+                    upcomingTasks = listOf(m, z),
+                ),
+            )
+            val local = InMemoryVaultRepository(initial = initial)
+
+            assertEquals(listOf("a", "m", "z"), local.currentWorkspace().tasks.map { it.id.value })
+            assertEquals(listOf("z", "m", "a"), local.currentWorkspace().home.focusTasks.map { it.id.value })
+            assertEquals(listOf("m", "z"), local.currentWorkspace().home.upcomingTasks.map { it.id.value })
+
+            local.execute(DomainCommand.DeleteTask(m.id, Instant.parse("2026-08-10T04:00:00Z")))
+            val mutated = local.currentWorkspace()
+            assertEquals(listOf("a", "m", "z"), mutated.tasks.map { it.id.value })
+            assertEquals(m.id, mutated.tasks.single { it.id == m.id }.id)
+        }
+    }
+
+    @Test
     fun blockedCompletionRequiresExplicitAcknowledgement() = runBlocking {
         val blocked = OpenTasksFixtures.tasks.first { it.isBlocked }
 
@@ -1313,6 +1345,10 @@ class InMemoryVaultRepositoryTest {
             ),
         )
         val snapshot = repository.observeWorkspace().value
+        assertEquals(
+            snapshot.tasks.map { it.id.value }.sorted(),
+            snapshot.tasks.map { it.id.value },
+        )
         val createdTasks = snapshot.tasks.filter { it.projectId == createdProjectId }
         assertEquals(template.tasks.size, createdTasks.size)
         assertTrue(createdTasks.none(Task::isCompleted))

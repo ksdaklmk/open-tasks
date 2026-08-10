@@ -35,7 +35,9 @@ class InMemoryActivityGenerationTest {
     fun statusChangeRecordsOldAndNewNames() = runBlocking {
         withTimeout(5_000) {
             val repository = InMemoryVaultRepository()
-            val task = repository.currentWorkspace().tasks.first()
+            val task = repository.currentWorkspace().tasks.first {
+                it.semanticStatus == SemanticStatus.STARTED
+            }
             val planned = repository.currentWorkspace().workflowStatuses.first {
                 it.projectId == task.projectId && it.semanticStatus == SemanticStatus.PLANNED
             }
@@ -58,7 +60,9 @@ class InMemoryActivityGenerationTest {
     fun generated501EntriesKeepNewest500WithOldestEviction() = runBlocking {
         withTimeout(5_000) {
             val repository = InMemoryVaultRepository()
-            val task = repository.currentWorkspace().tasks.first()
+            val task = repository.currentWorkspace().tasks.first {
+                it.semanticStatus == SemanticStatus.STARTED
+            }
             val started = task.statusId
             val planned = repository.currentWorkspace().workflowStatuses.first {
                 it.projectId == task.projectId && it.semanticStatus == SemanticStatus.PLANNED
