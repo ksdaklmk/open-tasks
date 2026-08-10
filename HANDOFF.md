@@ -1,10 +1,14 @@
 # Open Tasks Handoff
 
 - Last updated: 10 August 2026
-- Branch: `main` with the Stage 7–9 roadmap spec committed at `a80a9d6`;
-  this docs-only status update commits on top and both are pushed. After
-  that commit the working tree holds only the pre-existing user-owned
-  Stage 3 plan edit, `.kotlin/`, and `artifacts/`.
+- Branch: `main` with the Stage 7–9 roadmap spec at `a80a9d6`, its status
+  update at `0199611` (both pushed), and the user-approved **Stage 7
+  design spec at `3b1a3c4`, which is committed but NOT yet pushed**
+  (`main` is ahead of `origin/main` by exactly that one docs-only
+  commit; pushing it will fail with the standing zero-runner billing
+  block, so it is left for the user to push when convenient). The
+  working tree holds only the pre-existing user-owned Stage 3 plan edit,
+  `.kotlin/`, and `artifacts/`.
   **Release 1.0.0 is shipped**: tag `v1.0.0` sits on `57703d2`. The
   completed run at `c74a435` confirmed the expected post-F6 shape —
   `verify`, compact API 36, and `release` green, only expanded API 37.0
@@ -33,15 +37,20 @@
      SQLCipher, KSP, and coroutines updates. Review them only after Actions can
      execute; reruns cannot provide a fresh signal while the billing block
      remains.
-  3. **Tasks date-chip defect.** `TasksScreen.kt:255`: the Overdue chip
-     filters by `priority >= HIGH`, Today matches any task with a due
-     date, and Upcoming matches any task with a start date, so the Tasks
-     tab has no genuine overdue view (widget, Home, Insights, and Weekly
-     review compute overdue correctly). Fix is pure view-code date
-     predicates — a shared date-bucket rule in `core:domain` — plus unit
-     tests; no command, schema, or backup change. Found by the 10 August
-     competitive audit; it is also the opening move of the paused Stage
-     7–9 roadmap checkpoint below.
+  3. **Tasks date-chip defect — now a hard Stage 7 prerequisite.**
+     `TasksScreen.kt:255`: the Overdue chip filters by
+     `priority >= HIGH`, Today matches any task with a due date, and
+     Upcoming matches any task with a start date, so the Tasks tab has
+     no genuine overdue view (widget, Home, Insights, and Weekly review
+     compute overdue correctly). Fix is pure view-code date predicates —
+     a shared date-bucket rule in `core:domain` — plus unit tests; no
+     command, schema, or backup change. The approved Stage 7 spec
+     requires this fix to expose buckets OVERDUE, TODAY, THIS_WEEK,
+     LATER, NO_DATE (half-open, zone-aware, injected clock) with the
+     **`DueBucket` enum in `:core:model`** (feature modules and
+     `SearchQuery` must reference it) and only the classifier function
+     in `core:domain`. Stage 7 consumes it; Stage 8's month view reuses
+     it. Executable at any time, independent of the roadmap.
   4. **F6 observe-only** (ruling, 7 August 2026): the expanded API
      37.0 canary lane stays in the matrix and stays red until a healed
      canary image appears; the runner fetches the current canary, so
@@ -243,7 +252,7 @@ This is the only live project handoff and ordered backlog. Update it whenever
 work changes scope, priority, dependencies, architecture, security assumptions
 or verification status.
 
-## Stage 7–9 roadmap — spec written, awaiting user review — 10 August 2026
+## Stage 7–9 roadmap — spec written and user-approved — 10 August 2026
 
 A competitive feature analysis (Asana, Jira, monday.com, ClickUp, Todoist,
 Notion) produced a published reference report
@@ -337,13 +346,96 @@ design-time decisions left to stage specs (dark-theme promotion,
 duplication-recurrence copy, drag-to-reschedule drop-time and due-only
 semantics, exact rule menu).
 
-**PAUSED by user instruction after the spec commit.** On resume: get the
-user's review of the written spec; on approval, brainstorm the detailed
-Stage 7 design (superpowers:brainstorming) feeding
-superpowers:writing-plans. Backlog item 3 (the chip fix) may be executed
-at any time independent of the roadmap. Nothing from the roadmap has
-been implemented; after this status commit the working tree holds only
-the protected Stage 3 plan amendment, `.kotlin/`, and `artifacts/`.
+**Resume instruction discharged, 10 August 2026:** the user reviewed and
+approved the roadmap spec, and the Stage 7 detailed design was
+brainstormed and committed the same day. See the Stage 7 checkpoint
+immediately below. Nothing from the roadmap has been implemented.
+
+## Stage 7 design approved — plan NOT started — 10 August 2026
+
+The Stage 7 detailed design is brainstormed, self-reviewed, committed at
+`3b1a3c4` (unpushed), and **approved by the user**:
+`docs/superpowers/specs/2026-08-10-stage-7-ergonomics-sweep-design.md`.
+It is the Stage 7 authority under the roadmap spec. No product code was
+changed in this session; no plan file exists yet.
+
+Five user rulings resolved the roadmap's open Stage 7 decisions:
+
+1. Task duplication does **not** copy recurrence.
+2. **The app is light-theme only.** The roadmap's System/Light/Dark
+   preference item is replaced by pinning the light scheme
+   unconditionally — `OpenTasksTheme` loses its `darkTheme` parameter
+   and `DarkColorScheme` plus the dark OKLCH constants are deleted. No
+   preference UI, no storage. This supersedes DESIGN.md's "dark retained
+   as best-effort" wording (lines 13–14 and the "### Dark (best-effort)"
+   section), which the stage amends.
+3. Sort/group choices persist **durably device-local** on the
+   `AppLockSettings` SharedPreferences pattern (new `view_prefs` file);
+   Stage 6's session-only board/list mode is left untouched.
+4. Group-by dimensions are **due bucket, project, priority** only
+   (workbench status grouping and tag grouping excluded).
+5. Insights gets the dot-matrix restyle **plus one new trend surface**:
+   completions per day across the selected range.
+
+Batch approvals additionally pinned: semantic-status and relative
+due-bucket filtering in saved views (both flagged deviations from the
+roadmap's "workflow status" / "due-range" wording), fixed sort
+directions with no toggle, the saved-view chip identity fix, `!1` =
+Urgent, recurrence phrases auto-anchoring a due date, an additive
+`CreateTask` widening (`tagNames`/`estimate`/`recurrence`), the
+duplication field set including reminder exclusion, and the dot-matrix
+primitives living in `:core:designsystem` for Stage 8 reuse.
+
+A three-lens adversarial spec review (consistency, roadmap/CLAUDE.md
+conformance, code-fact checking) ran before the commit; every factual
+claim about existing code verified clean. Seven findings were fixed
+inline, three of them substantive: the saved-view `sort` and search
+ranking had competing ordering authorities (now pinned, and the fix
+surfaced that a filter-only saved view with blank text would hit the
+existing blank-needle short-circuit and return nothing — blank-text
+filter views are now specified); recurrence anchoring was defined only
+for weekdays (now one uniform rule); and `parentTaskId` was in neither
+the duplication copy nor exclude list (now copied).
+
+Six read-only research agents then mapped the exact implementation
+seams for the plan. Their durable maps are the six files in the ignored
+`.superpowers/brainstorm/2026-08-10-stage-7-plan-research/`
+(`task-detail`, `board-workbench`, `command-layer`, `app-wiring`,
+`recurrence-parser`, `insights-designsystem`). They pin signatures and
+`file:line` anchors and should be read before writing the plan rather
+than re-derived. Load-bearing facts already established:
+
+- `CreateTask(title, projectId, priority, due)` already carries
+  `projectId` and `priority`, so `#project` and `!priority` need no
+  command change; tags, estimate, and recurrence do.
+- Snapshot tasks are served `ORDER BY id` (UUIDs) by Room while the
+  in-memory engine publishes insertion order — the two must be aligned
+  and all visible ordering must come from the new arrangement layer.
+- Search has no ranking today (snapshot order, tasks then projects) and
+  the in-memory engine hardcodes `.take(50)` while Room uses
+  `MAX_SEARCH_RESULTS`.
+- `SavedViewPayloadCodec` v1 rejects unknown keys *before* checking
+  `formatVersion`, and an omitted `formatVersion` silently decodes as
+  v1; v2 must become version-first and fail closed on both.
+- The saved-view chip keeps filters only while typed text exactly
+  equals the stored text — the identity fix keys on view id instead.
+- Insights has no `Canvas` anywhere; every chart is a
+  `LinearProgressIndicator` via `MetricBar`.
+
+**PAUSED by user instruction (running low on usage tokens) before the
+implementation plan was written.** On resume: invoke
+superpowers:writing-plans against the approved Stage 7 spec, reading the
+six research maps above first. The intended shape was roughly 15 tasks —
+date-bucket classifier + chip fix, arrangement rule, the three surface
+integrations, codec v2, search hoist + ranking, saved-view filter UI,
+grammar parser, `CreateTask` widening, Quick Add chips, light-theme pin,
+duplication, two Insights tasks, and a controller-owned qualification
+and release task — but that decomposition is not authoritative and the
+plan author should derive it from the spec. Sequencing gates from the
+roadmap are unchanged: the chip fix seeds the stage, and the Actions
+billing restore plus the Dependabot queue precede stage *execution*
+(not planning). The protected Stage 3 plan amendment, `.kotlin/`, and
+`artifacts/` were not touched.
 
 ## Stage 6 closure — 10 August 2026
 
