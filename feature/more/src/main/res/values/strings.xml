@@ -56,6 +56,15 @@
         <item quantity="other">%1$d fewer completed tasks than the previous range.</item>
     </plurals>
     <string name="insights_completed_same">The same number of completed tasks as the previous range.</string>
+    <string name="insights_completion_trend_heading">Completions per day</string>
+    <plurals name="insights_completion_trend_summary">
+        <item quantity="one">%1$d completion from %2$s to %3$s</item>
+        <item quantity="other">%1$d completions from %2$s to %3$s</item>
+    </plurals>
+    <plurals name="insights_completion_day_count">
+        <item quantity="one">%1$d task</item>
+        <item quantity="other">%1$d tasks</item>
+    </plurals>
     <string name="insights_overdue_heading">Overdue tasks</string>
     <string name="insights_no_overdue">No overdue tasks.</string>
     <string name="insights_overdue_1_7">1–7 days overdue</string>

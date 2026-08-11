@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -28,8 +29,10 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -45,6 +48,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.DurationQuality
 import app.opentasks.core.model.EstimateActual
+import app.opentasks.core.model.CompletionTrendPoint
 import app.opentasks.core.model.InsightsQuality
 import app.opentasks.core.model.InsightsRange
 import app.opentasks.core.model.InsightsSelection
@@ -69,11 +73,20 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 
 @RunWith(AndroidJUnit4::class)
 class InsightsScreenInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    private val hasCompletionTrendDayTag = SemanticsMatcher(
+        "has completion trend day test tag",
+    ) { node ->
+        SemanticsProperties.TestTag in node.config &&
+            node.config[SemanticsProperties.TestTag]
+                .startsWith("insights-completion-day-")
+    }
 
     @Test
     fun moreOpensInsightsAndOnScreenAndSystemBackReturnToOverview() {
@@ -855,6 +868,58 @@ class InsightsScreenInstrumentedTest {
         }
     }
 
+    @Test
+    fun defaultEmptyCompletionTrendRendersExistingFixturesWithoutATrendSection() {
+        composeRule.setContent { OpenTasksTheme { TestInsightsScreen(populatedState()) } }
+        composeRule.onNodeWithTag("insights-completion-trend-scroll").assertDoesNotExist()
+    }
+
+    @Test
+    fun sevenDayTrendChartHasOneExactSummary() {
+        composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendState(7)) } }
+
+        composeRule.onAllNodesWithContentDescription(
+            "7 completions from 4 Aug 2026 to 10 Aug 2026",
+        ).assertCountEquals(1)
+    }
+
+    @Test
+    fun sevenDayTrendTableHasExactlyOneRowPerPoint() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                TestInsightsScreen(
+                    trendState(7).copy(presentation = InsightsPresentation.TABLE),
+                )
+            }
+        }
+
+        composeRule.onAllNodes(hasCompletionTrendDayTag).assertCountEquals(7)
+        listOf(
+            Triple("2026-08-04", "4 Aug 2026", "0 tasks"),
+            Triple("2026-08-05", "5 Aug 2026", "1 task"),
+            Triple("2026-08-06", "6 Aug 2026", "0 tasks"),
+            Triple("2026-08-07", "7 Aug 2026", "2 tasks"),
+            Triple("2026-08-08", "8 Aug 2026", "1 task"),
+            Triple("2026-08-09", "9 Aug 2026", "0 tasks"),
+            Triple("2026-08-10", "10 Aug 2026", "3 tasks"),
+        ).forEach { (date, label, value) ->
+            composeRule.onNodeWithTag("insights-completion-day-$date")
+                .assertExists()
+                .assertTextContains(label)
+                .assertTextContains(value)
+        }
+    }
+
+    @Test
+    fun ninetyDayTrendScrollsAndKeepsDotsDecorative() {
+        composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendState(90)) } }
+        composeRule.onNodeWithTag(
+            "insights-completion-trend-scroll",
+            useUnmergedTree = true,
+        ).assert(hasScrollAction())
+        composeRule.onNodeWithTag("dotted-area-chart", useUnmergedTree = true).assertExists()
+    }
+
     @androidx.compose.runtime.Composable
     private fun TestInsightsScreen(state: InsightsUiState) {
         InsightsScreen(
@@ -944,6 +1009,26 @@ class InsightsScreenInstrumentedTest {
                 InsightsTagOption(TagId("focus"), "Focus"),
                 InsightsTagOption(TagId("urgent"), "Urgent"),
             ),
+        )
+    }
+
+    private fun trendState(dayCount: Int): InsightsUiState {
+        require(dayCount > 0)
+        val counts = if (dayCount == 7) {
+            listOf(0L, 1L, 0L, 2L, 1L, 0L, 3L)
+        } else {
+            List(dayCount) { index -> if (index % 10 == 0) 1L else 0L }
+        }
+        val lastDate = LocalDate.of(2026, 8, 10)
+        val points = counts.mapIndexed { index, completed ->
+            CompletionTrendPoint(
+                date = lastDate.minusDays((counts.lastIndex - index).toLong()),
+                completed = completed,
+            )
+        }
+        val base = populatedState()
+        return base.copy(
+            snapshot = base.snapshot.copy(completionTrend = points),
         )
     }
 

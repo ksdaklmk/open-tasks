@@ -2,6 +2,7 @@ package app.opentasks.core.domain
 
 import app.opentasks.core.model.DurationQuality
 import app.opentasks.core.model.EstimateActual
+import app.opentasks.core.model.CompletionTrendPoint
 import app.opentasks.core.model.InsightsQuality
 import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.InsightsSnapshot
@@ -157,6 +158,16 @@ class DefaultInsightsEngine : InsightsEngine {
         val currentCompletedTasks = selectedTasks.filter { task ->
             task.completedAt?.let(interval::contains) == true
         }
+        val completionCounts = selectedTasks.asSequence()
+            .mapNotNull(Task::completedAt)
+            .filter(interval::contains)
+            .groupingBy { it.atZone(zoneId).toLocalDate() }
+            .eachCount()
+        val completionTrend = generateSequence(startDate) { date ->
+            date.plusDays(1).takeUnless { it.isAfter(currentDate) }
+        }.map { date ->
+            CompletionTrendPoint(date, completionCounts[date]?.toLong() ?: 0L)
+        }.toList()
         val currentCompletedTaskIds = currentCompletedTasks
             .asSequence()
             .map(Task::id)
@@ -227,6 +238,7 @@ class DefaultInsightsEngine : InsightsEngine {
             tagTime = tagTime,
             milestoneHealth = milestoneHealth,
             quality = InsightsQuality(recordedTime = recordedTime),
+            completionTrend = completionTrend,
         )
     }
 

@@ -2,6 +2,7 @@ package app.opentasks.core.model
 
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 
 enum class InsightsRange(val dayCount: Long) {
     SEVEN_DAYS(7),
@@ -84,6 +85,11 @@ data class InsightsQuality(
     val recordedTime: DurationQuality,
 )
 
+data class CompletionTrendPoint(
+    val date: LocalDate,
+    val completed: Long,
+)
+
 data class InsightsSnapshot(
     val interval: InstantRange,
     val comparisonInterval: InstantRange,
@@ -94,4 +100,5 @@ data class InsightsSnapshot(
     val tagTime: List<TagTimeRow>,
     val milestoneHealth: List<MilestoneHealthRow>,
     val quality: InsightsQuality,
+    val completionTrend: List<CompletionTrendPoint> = emptyList(),
 )

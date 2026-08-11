@@ -27,6 +27,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class InsightsEngineTest {
     private val engine: InsightsEngine = DefaultInsightsEngine()
@@ -792,6 +793,112 @@ class InsightsEngineTest {
             result.projectTime.map { it.projectId }.toSet(),
         )
         assertEquals(setOf(tagA.id, tagB.id), result.tagTime.map { it.tagId }.toSet())
+    }
+
+    @Test
+    fun completionTrendContainsEverySelectedLocalDay() {
+        val now = Instant.parse("2026-08-10T12:00:00Z")
+        InsightsRange.entries.forEach { range ->
+            val snapshot = engine.calculate(
+                OpenTasksFixtures.snapshot.copy(tasks = emptyList()),
+                InsightsSelection(range = range),
+                now,
+                ZoneId.of("UTC"),
+            )
+            assertEquals(range.dayCount.toInt(), snapshot.completionTrend.size)
+            assertEquals(LocalDate.of(2026, 8, 10), snapshot.completionTrend.last().date)
+            assertTrue(snapshot.completionTrend.zipWithNext().all { (a, b) ->
+                b.date == a.date.plusDays(1)
+            })
+            assertTrue(snapshot.completionTrend.all { it.completed == 0L })
+        }
+    }
+
+    @Test
+    fun completionTrendUsesHalfOpenZoneAwareDaysAcrossDst() {
+        val zone = ZoneId.of("America/New_York")
+        val now = ZonedDateTime.of(2026, 3, 9, 12, 0, 0, 0, zone).toInstant()
+        val start = LocalDate.of(2026, 3, 3).atStartOfDay(zone).toInstant()
+        val end = LocalDate.of(2026, 3, 10).atStartOfDay(zone).toInstant()
+        val moments = listOf(
+            start.minusNanos(1),
+            start,
+            LocalDate.of(2026, 3, 8).atTime(23, 30).atZone(zone).toInstant(),
+            end.minusNanos(1),
+            end,
+        )
+        val tasks = moments.mapIndexed { index, instant ->
+            OpenTasksFixtures.tasks.first().copy(
+                id = TaskId("trend-$index"),
+                completedAt = instant,
+            )
+        }
+        val trend = engine.calculate(
+            OpenTasksFixtures.snapshot.copy(tasks = tasks),
+            InsightsSelection(InsightsRange.SEVEN_DAYS),
+            now,
+            zone,
+        ).completionTrend
+
+        assertEquals(3L, trend.sumOf { it.completed })
+        assertEquals(1L, trend.single { it.date == LocalDate.of(2026, 3, 8) }.completed)
+        assertEquals(1L, trend.first().completed)
+        assertEquals(1L, trend.last().completed)
+    }
+
+    @Test
+    fun completionTrendMatchesFilteredCompletedCountIncludingBinHistory() {
+        val now = Instant.parse("2026-08-10T12:00:00Z")
+        val projectId = OpenTasksFixtures.studioProject.id
+        val otherProjectId = OpenTasksFixtures.taxProject.id
+        val tagId = TagId("tag-deep-work")
+        val otherTagId = TagId("tag-admin")
+        val matching = completedTask(
+            id = "matching",
+            completedAt = Instant.parse("2026-08-04T00:00:00Z"),
+        ).copy(projectId = projectId, tagIds = setOf(tagId))
+        val matchingDeleted = completedTask(
+            id = "matching-deleted",
+            completedAt = Instant.parse("2026-08-10T11:00:00Z"),
+        ).copy(
+            projectId = projectId,
+            tagIds = setOf(tagId),
+            deletedAt = Instant.parse("2026-08-10T11:30:00Z"),
+        )
+        val wrongProject = completedTask(
+            id = "wrong-project",
+            completedAt = Instant.parse("2026-08-05T12:00:00Z"),
+        ).copy(projectId = otherProjectId, tagIds = setOf(tagId))
+        val wrongTag = completedTask(
+            id = "wrong-tag",
+            completedAt = Instant.parse("2026-08-06T12:00:00Z"),
+        ).copy(projectId = projectId, tagIds = setOf(otherTagId))
+        val outOfRange = completedTask(
+            id = "out-of-range",
+            completedAt = Instant.parse("2026-08-03T23:59:59.999999999Z"),
+        ).copy(projectId = projectId, tagIds = setOf(tagId))
+
+        val snapshot = engine.calculate(
+            OpenTasksFixtures.snapshot.copy(
+                tasks = listOf(
+                    matching,
+                    matchingDeleted,
+                    wrongProject,
+                    wrongTag,
+                    outOfRange,
+                ),
+            ),
+            InsightsSelection(
+                range = InsightsRange.SEVEN_DAYS,
+                projectIds = setOf(projectId),
+                tagIds = setOf(tagId),
+            ),
+            now,
+            ZoneId.of("UTC"),
+        )
+
+        assertEquals(2L, snapshot.completed.current)
+        assertEquals(2L, snapshot.completionTrend.sumOf { it.completed })
     }
 
     private fun calculate(

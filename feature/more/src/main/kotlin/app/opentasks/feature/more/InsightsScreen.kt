@@ -1,6 +1,7 @@
 package app.opentasks.feature.more
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,7 +44,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.DotRunBar
+import app.opentasks.core.designsystem.DottedAreaChart
 import app.opentasks.core.designsystem.SectionHeader
+import app.opentasks.core.model.CompletionTrendPoint
 import app.opentasks.core.model.DurationQuality
 import app.opentasks.core.model.EstimateActual
 import app.opentasks.core.model.InsightsQuality
@@ -61,6 +65,7 @@ import app.opentasks.core.model.TagId
 import app.opentasks.core.model.TagTimeRow
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -568,6 +573,10 @@ private fun InsightsChart(snapshot: InsightsSnapshot) {
         )
 
         Spacer(Modifier.height(24.dp))
+        if (snapshot.completionTrend.isNotEmpty()) {
+            CompletionTrendChart(snapshot.completionTrend)
+            Spacer(Modifier.height(24.dp))
+        }
         EstimateChart(snapshot)
         Spacer(Modifier.height(24.dp))
         DurationChartSection(
@@ -576,6 +585,41 @@ private fun InsightsChart(snapshot: InsightsSnapshot) {
         )
         Spacer(Modifier.height(24.dp))
         TagDurationChart(snapshot.tagTime)
+    }
+}
+
+@Composable
+private fun CompletionTrendChart(points: List<CompletionTrendPoint>) {
+    if (points.isEmpty()) return
+    val total = points.sumOf(CompletionTrendPoint::completed)
+    val firstDate = formatInsightsDate(points.first().date)
+    val lastDate = formatInsightsDate(points.last().date)
+    val summary = pluralStringResource(
+        R.plurals.insights_completion_trend_summary,
+        total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+        total,
+        firstDate,
+        lastDate,
+    )
+    Column(
+        Modifier.semantics(mergeDescendants = true) {
+            contentDescription = summary
+        },
+    ) {
+        Text(stringResource(R.string.insights_completion_trend_heading))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .testTag("insights-completion-trend-scroll"),
+        ) {
+            DottedAreaChart(
+                values = points.map { it.completed.toFloat() },
+                modifier = Modifier
+                    .width((points.size * 20).dp)
+                    .height(160.dp),
+            )
+        }
     }
 }
 
@@ -723,6 +767,21 @@ private fun InsightsTable(snapshot: InsightsSnapshot) {
                 snapshot.completed.previous,
             ),
         )
+        if (snapshot.completionTrend.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            TableSectionHeader(stringResource(R.string.insights_completion_trend_heading))
+            snapshot.completionTrend.forEach { point ->
+                DataRow(
+                    label = formatInsightsDate(point.date),
+                    value = pluralStringResource(
+                        R.plurals.insights_completion_day_count,
+                        point.completed.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+                        point.completed,
+                    ),
+                    modifier = Modifier.testTag("insights-completion-day-${point.date}"),
+                )
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
         TableSectionHeader(stringResource(R.string.insights_estimate_heading))
@@ -962,6 +1021,9 @@ private fun projectHealthText(health: ProjectHealth): String = stringResource(
 
 private fun formatInsightsDate(instant: Instant): String =
     INSIGHTS_DATE_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
+
+private fun formatInsightsDate(date: LocalDate): String =
+    INSIGHTS_DATE_FORMAT.format(date)
 
 private fun InsightsSnapshot.hasData(): Boolean =
     completed.current > 0 ||
