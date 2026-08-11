@@ -875,6 +875,14 @@ class InsightsScreenInstrumentedTest {
     }
 
     @Test
+    fun completionTrendIsDataForAnOtherwiseEmptySnapshot() {
+        composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendOnlyState()) } }
+
+        composeRule.onNodeWithText("No insight data for these 7 days.").assertDoesNotExist()
+        composeRule.onNodeWithTag("insights-completion-trend-scroll").assertExists()
+    }
+
+    @Test
     fun sevenDayTrendChartHasOneExactSummary() {
         composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendState(7)) } }
 
@@ -1029,6 +1037,13 @@ class InsightsScreenInstrumentedTest {
         val base = populatedState()
         return base.copy(
             snapshot = base.snapshot.copy(completionTrend = points),
+        )
+    }
+
+    private fun trendOnlyState(): InsightsUiState {
+        val points = trendState(7).snapshot.completionTrend
+        return emptyState().copy(
+            snapshot = emptySnapshot().copy(completionTrend = points),
         )
     }
 

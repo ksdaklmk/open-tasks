@@ -1035,7 +1035,8 @@ private fun InsightsSnapshot.hasData(): Boolean =
         !quality.recordedTime.conflicted.isZero ||
         projectTime.isNotEmpty() ||
         tagTime.isNotEmpty() ||
-        milestoneHealth.isNotEmpty()
+        milestoneHealth.isNotEmpty() ||
+        completionTrend.isNotEmpty()
 
 internal fun emptyInsightsUiState(): InsightsUiState {
     val zeroDuration = DurationQuality(
