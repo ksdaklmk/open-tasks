@@ -1,39 +1,64 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 16 pause, 10 August 2026
+## Current resume point — Task 18 connected-gate pause, 12 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; any conflicting billing prerequisite, live-backlog label, or
 pre-execution status is superseded here.
 
-- Stage 7 remains local on `main`. The current product/test HEAD is
-  `95d73d04e8396da9cd55606fe43838b6349a22ee` (`feat: render insights with
-  dot matrices`), the Task 16 implementation commit. Nothing from this Stage 7
-  execution has been pushed.
-- Tasks 1–16 are complete and independently review-clean. Tasks 1–9 remain
-  recorded in the ignored execution ledger.
-- Task 10 is `9903d8a` (Quick Add parser). Task 11 is preflight
-  `23331a0`/`e0b6dc1`, implementation `2824126`. Task 12 is preflight
-  `f507a4e`/`d7848a2`/`8dbe347`, implementation/fix `2fd5faf`/`bd55fa4`.
-  Task 13 is preflight `6aa8276`, implementation `aa6dd0b`.
-- Task 14 is preflight `c59c3e0`/`67fcab4`, implementation `10ad470`.
-  Task 15 is preflight `272a337`/`16f9611`, implementation `8ad052e`.
-  Task 16 is preflight `210f337`, implementation `95d73d0`; its focused
-  design-system JVM test, feature Android-test Kotlin compile, exact five-path
-  scope, and `git diff --check` passed both implementation and controller
-  verification. Its independent review approved with no finding.
-- Task 17's preflight was hardened and independently re-audited clean at
-  `ab10995`. Task 17 implementation is untouched. Resume by reading
-  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/task-17-brief.md`
-  and starting at Step 1. Task 18 remains pending.
-- No Stage 7 device suite, remote GitHub Actions run, or paid-service run has
-  occurred. Device and eligible free remote qualification remain Task 18 work.
+- Stage 7 remains local and unpushed on `main`. Tasks 1–17 are complete and
+  independently review-clean. The version bump is `8cecbcc`; the whole-stage
+  review fix and clean scoped re-review end at
+  `e33bd09ddb9c67826b3b4930df582673a50e4b5b`. At that reviewed head, the
+  forced 442-action release build and APK verifier, schema/fixture/workflow
+  checks, and exact privacy/release-scope audit all passed.
+- The current product/test head is
+  `5a466198e9ff712c31154acbe2e2a3a4aecfbf75` (`fix: clear stage 7 connected
+  qualification gate`). It is one bounded post-review connected-gate fix,
+  not a second whole-stage review fix wave. It changes the shared Quick Add
+  Escape handler and six narrow synchronization/viewport/readiness/semantics/
+  clock-settling test paths. Its five-module Android-test compilation passed
+  with 213 actions (2 executed, 211 up-to-date), and `git diff --check` was
+  clean. It has **not** received its independent scoped review.
+- The first Step 11 six-module connected run planned 392 tests. App ran 81
+  (76 pass, 2 known skips, 3 fail), schedule 2/2, projects 23 (20 pass,
+  3 fail), data 179 (177 pass, 2 fail), and more 64 (63 pass, 1 fail). Tasks
+  reached 29/43 with no reported failure, then
+  `duplicateActionRequiresValidPersistedTask` stopped making terminal progress
+  for more than six minutes; only that Gradle session was interrupted.
+  Unchanged isolated runs established the root causes recorded in the four
+  connected triage reports.
+- After `5a46619`, the targeted app discriminator ran three tests: restoration
+  and Ctrl+K passed, but
+  `QuickAddPrefillRootWiringInstrumentedTest.escapeAfterPrefillDoesNotResurrectTheConsumedTitleOnReopen`
+  still failed because `quick-add-title` existed after Escape. The run exited
+  with 2/3 passing and 289 actions (9 executed, 280 up-to-date). The new
+  `QuickAddSheet` `Column.onPreviewKeyEvent` therefore does not yet handle an
+  Escape originating in the title field. Do not guess at another handler;
+  resume with an unchanged discriminator and trace the actual key path first.
+- No post-fix device rerun has yet covered the three project cases, two Room
+  cases, Insights case, or task-editor hang. The full six-module Step 11 gate
+  has not been rerun. Steps 12–14 and 16–21 remain pending, as do an independent
+  review of the final connected fix and fresh current-head local/release/
+  privacy gates. No candidate push, Actions run, tag, or other remote mutation
+  has occurred.
+- Resume in this order: read `progress.md`, `task-18-brief.md`,
+  `task-18-connected-fix-brief.md`, the connected triage reports, and
+  `task-18-connected-fix-report.md`; systematically RED/GREEN the one remaining
+  Quick Add Escape path; rerun all ten connected discriminators; append exact
+  device evidence and obtain an independent scoped review; rerun the required
+  current-head local/release/privacy gates; then boot and re-audit a fresh sole
+  disposable `Fold8_Acceptance` overlay for the full Step 11 gate and continue
+  the manual, signed-release, documentation, and eligible remote steps.
+- Safe stop is complete. The exact audited `Fold8_Acceptance` overlay was
+  killed with emulator snapshots disabled/ignored; fresh checks found zero ADB
+  targets and zero matching Fold8/Pixel emulator processes. The protected
+  `Pixel_10_Pro_Fold` was never touched.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
-  paid GitHub service. Continue Task 17 locally. At Task 18, use remote CI
-  only if the included free allowance is available; otherwise pause at that
-  gate. The old paid-billing prerequisite is cancelled.
-- The index is empty. Preserve the exact unrelated dirty state: modified
+  paid GitHub service. Use remote CI only if the included free allowance is
+  available; otherwise pause at that gate.
+- Preserve the exact unrelated dirty state: modified
   `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
   deleted user-owned
   `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
