@@ -4,11 +4,16 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.AnnotatedString
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -48,11 +53,13 @@ class MainActivityQuickAddInstrumentedTest {
         }
         var scenario: ActivityScenario<MainActivity>? = null
         val first = AtomicReference<MainActivity>()
+        val scenarioIntent = Intent(context, MainActivity::class.java)
         application.registerActivityLifecycleCallbacks(callbacks)
         try {
-            scenario = ActivityScenario.launch(Intent(context, MainActivity::class.java))
+            scenario = ActivityScenario.launch(scenarioIntent)
             scenario.onActivity(first::set)
             waitForWorkspace()
+            composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
 
             scenario.onActivity { activity ->
                 activity.startActivity(
@@ -65,13 +72,26 @@ class MainActivityQuickAddInstrumentedTest {
                 composeRule.onAllNodesWithTag("quick-add-title")
                     .fetchSemanticsNodes().isNotEmpty()
             }
+            composeRule.onNodeWithTag("quick-add-title").assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.InputText,
+                    AnnotatedString(""),
+                ),
+            )
             assertEquals(1, created.get())
             assertSame(first.get(), resumed.get())
         } finally {
-            InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                resumed.get()?.finish()
+            try {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                    resumed.get()?.takeUnless { it === first.get() }?.finish()
+                    // onNewIntent replaces the activity's intent; restore the
+                    // launch token so ActivityScenario observes final teardown.
+                    first.get()?.intent = scenarioIntent
+                }
+                scenario?.close()
+            } finally {
+                application.unregisterActivityLifecycleCallbacks(callbacks)
             }
-            application.unregisterActivityLifecycleCallbacks(callbacks)
         }
     }
 
