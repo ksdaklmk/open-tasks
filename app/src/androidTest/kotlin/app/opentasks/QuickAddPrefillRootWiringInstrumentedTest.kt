@@ -21,7 +21,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -319,7 +322,14 @@ class QuickAddPrefillRootWiringInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Open Escape prefill").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule
+                .onAllNodes(hasTestTag("quick-add-title") and isFocused())
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
         composeRule.onNodeWithTag("quick-add-title")
+            .assertIsFocused()
             .assertTextContains("Escape me", substring = true)
             .performKeyInput { pressKey(Key.Escape) }
         composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()

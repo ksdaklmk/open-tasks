@@ -473,9 +473,11 @@ fun QuickAddSheet(
         }
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-        keyboard?.show()
+    LaunchedEffect(sheetState.isVisible) {
+        if (sheetState.isVisible) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
     }
 }
 

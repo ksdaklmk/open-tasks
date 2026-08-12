@@ -114,7 +114,6 @@ class TaskEditorInstrumentedTest {
         val task = OpenTasksFixtures.tasks.first()
         val renderedTask = mutableStateOf(task)
         val duplicated = AtomicReference<TaskId?>()
-        composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
             OpenTasksTheme {
                 TasksScreen(
@@ -156,9 +155,12 @@ class TaskEditorInstrumentedTest {
         }
 
         val duplicateAction = composeRule.onNodeWithTag("duplicate-task").performScrollTo()
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("task-title-field").performTextReplacement("Updated title")
+        composeRule.mainClock.advanceTimeByFrame()
         duplicateAction.assertIsNotEnabled()
         composeRule.mainClock.advanceTimeBy(650)
+        composeRule.mainClock.autoAdvance = true
         duplicateAction.assertIsEnabled()
         composeRule.onNodeWithTag("task-title-field").performTextReplacement("")
         duplicateAction.assertIsNotEnabled()

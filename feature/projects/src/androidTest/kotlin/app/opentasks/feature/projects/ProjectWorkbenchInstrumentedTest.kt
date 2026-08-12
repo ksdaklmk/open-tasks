@@ -139,6 +139,8 @@ class ProjectWorkbenchInstrumentedTest {
             .performScrollToNode(hasTestTag("workbench-view-board"))
         composeRule.onNodeWithTag("workbench-view-board").performClick()
         composeRule.onNodeWithTag("workbench-task-${groupedFirst.id.value}").assertDoesNotExist()
+        composeRule.onNodeWithTag("board-column-${groupedFirst.statusId.value}")
+            .performScrollTo()
         composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}")
             .performScrollTo()
             .assertIsDisplayed()
