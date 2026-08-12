@@ -879,7 +879,10 @@ class InsightsScreenInstrumentedTest {
         composeRule.setContent { OpenTasksTheme { TestInsightsScreen(trendOnlyState()) } }
 
         composeRule.onNodeWithText("No insight data for these 7 days.").assertDoesNotExist()
-        composeRule.onNodeWithTag("insights-completion-trend-scroll").assertExists()
+        composeRule.onNodeWithTag(
+            "insights-completion-trend-scroll",
+            useUnmergedTree = true,
+        ).assertExists()
     }
 
     @Test

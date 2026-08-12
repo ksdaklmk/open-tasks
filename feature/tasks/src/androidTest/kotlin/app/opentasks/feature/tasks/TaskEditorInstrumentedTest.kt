@@ -159,7 +159,6 @@ class TaskEditorInstrumentedTest {
         composeRule.onNodeWithTag("task-title-field").performTextReplacement("Updated title")
         duplicateAction.assertIsNotEnabled()
         composeRule.mainClock.advanceTimeBy(650)
-        composeRule.waitForIdle()
         duplicateAction.assertIsEnabled()
         composeRule.onNodeWithTag("task-title-field").performTextReplacement("")
         duplicateAction.assertIsNotEnabled()

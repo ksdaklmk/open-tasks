@@ -203,49 +203,44 @@ class ProcessRestorationInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithTag("restored-weekday-confirm").performClick()
-        assertEquals(
-            DomainCommand.CreateTask(
-                title = "Weekday",
-                due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id),
-                recurrence = RecurrenceRule(
-                    RecurrenceFrequency.WEEKLY,
-                    weekdays = setOf(DayOfWeek.MONDAY),
-                ),
+        val expectedMonday = DomainCommand.CreateTask(
+            title = "Weekday",
+            due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id),
+            recurrence = RecurrenceRule(
+                RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.MONDAY),
             ),
-            observed.get().toCommand(),
         )
+        composeRule.onNodeWithTag("restored-weekday-confirm").performClick()
+        composeRule.waitUntil(timeoutMillis = 2_000) {
+            observed.get()?.toCommand() == expectedMonday
+        }
+        assertEquals(expectedMonday, observed.get().toCommand())
         assertEquals(false, observed.get().dueIsExplicit)
 
+        observed.set(QuickAddDraft(""))
         restorationTester.emulateSavedInstanceStateRestore()
-        assertEquals(
-            DomainCommand.CreateTask(
-                title = "Weekday",
-                due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), zone.id),
-                recurrence = RecurrenceRule(
-                    RecurrenceFrequency.WEEKLY,
-                    weekdays = setOf(DayOfWeek.MONDAY),
-                ),
-            ),
-            observed.get().toCommand(),
-        )
+        composeRule.waitUntil(timeoutMillis = 2_000) {
+            observed.get()?.toCommand() == expectedMonday
+        }
+        assertEquals(expectedMonday, observed.get().toCommand())
         assertEquals(false, observed.get().dueIsExplicit)
 
         composeRule.onNodeWithTag("restored-weekday-title")
             .performTextReplacement("Weekday every tuesday")
         composeRule.onNodeWithTag("restored-weekday-confirm").performClick()
-
-        assertEquals(
-            DomainCommand.CreateTask(
-                title = "Weekday",
-                due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id),
-                recurrence = RecurrenceRule(
-                    RecurrenceFrequency.WEEKLY,
-                    weekdays = setOf(DayOfWeek.TUESDAY),
-                ),
+        val expectedTuesday = DomainCommand.CreateTask(
+            title = "Weekday",
+            due = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id),
+            recurrence = RecurrenceRule(
+                RecurrenceFrequency.WEEKLY,
+                weekdays = setOf(DayOfWeek.TUESDAY),
             ),
-            observed.get().toCommand(),
         )
+        composeRule.waitUntil(timeoutMillis = 2_000) {
+            observed.get()?.toCommand() == expectedTuesday
+        }
+        assertEquals(expectedTuesday, observed.get().toCommand())
         assertEquals(false, observed.get().dueIsExplicit)
     }
 

@@ -297,6 +297,13 @@ class RoomVaultRepositoryInstrumentedTest {
             now = { Instant.parse("2026-08-10T10:00:00Z") },
             seedSnapshot = duplicationSnapshot(),
         )
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                snapshot.tasks.mapTo(hashSetOf(), Task::id).containsAll(
+                    duplicationSnapshot().tasks.map(Task::id),
+                )
+            }
+        }
         val generationBeforePrime =
             database!!.backupStateDao().require("vault-primary").currentGeneration
         assertTrue(
@@ -630,6 +637,9 @@ class RoomVaultRepositoryInstrumentedTest {
                     due = ZonedMoment(instant.plusSeconds(3_600), zone.id),
                 ),
             )
+            repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                snapshot.tasks.any { it.title == "Today adapter" }
+            }
             assertEquals(
                 listOf("Today adapter"),
                 repository!!.search(SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)))

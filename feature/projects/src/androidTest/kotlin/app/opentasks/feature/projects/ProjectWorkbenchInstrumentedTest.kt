@@ -139,7 +139,9 @@ class ProjectWorkbenchInstrumentedTest {
             .performScrollToNode(hasTestTag("workbench-view-board"))
         composeRule.onNodeWithTag("workbench-view-board").performClick()
         composeRule.onNodeWithTag("workbench-task-${groupedFirst.id.value}").assertDoesNotExist()
-        composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
+        composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -172,6 +174,8 @@ class ProjectWorkbenchInstrumentedTest {
             .getUnclippedBoundsInRoot().top
         assertTrue(firstTop < secondTop)
 
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("board-sort-control"))
         composeRule.onNodeWithTag("board-sort-control")
             .assertContentDescriptionEquals("Sort board cards: Title")
             .performClick()
@@ -220,6 +224,8 @@ class ProjectWorkbenchInstrumentedTest {
             ),
         )
 
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasText(milestone.name))
         composeRule.onNodeWithText(milestone.name).assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.workbench_group_due_today))
             .assert(isHeading())
