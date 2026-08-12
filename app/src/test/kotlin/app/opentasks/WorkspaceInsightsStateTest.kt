@@ -183,10 +183,62 @@ class WorkspaceInsightsStateTest {
 
         assertTrue(state.summary.value.overdue.isEmpty())
         assertEquals(due.plusNanos(1), provider.nextScheduledRefresh())
+        val timeVersion = state.timeVersion.value
 
         provider.advanceTo(InsightsTimeContext(due.plusNanos(1), ZoneId.of("UTC")))
 
         assertEquals(listOf(task.id), state.summary.value.overdue.map { it.taskId })
+        assertEquals(timeVersion + 1, state.timeVersion.value)
+        scope.cancel()
+    }
+
+    @Test
+    fun completedTaskDueSchedulesARefreshForInclusiveSavedViews() = runBlocking {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val due = now.plusSeconds(30)
+        val task = OpenTasksFixtures.tasks.first().copy(
+            id = TaskId("completed-boundary-task"),
+            semanticStatus = SemanticStatus.COMPLETED,
+            completedAt = now.minusSeconds(60),
+            deletedAt = null,
+            due = ZonedMoment(due, "UTC"),
+        )
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val scope = testScope()
+        val state = workspaceInsightsState(
+            OpenTasksFixtures.snapshot.copy(tasks = listOf(task)),
+            provider,
+            scope = scope,
+        )
+
+        state.setForegrounded(true)
+
+        assertEquals(due.plusNanos(1), provider.nextScheduledRefresh())
+        scope.cancel()
+    }
+
+    @Test
+    fun trashedTaskDueSchedulesARefreshForInclusiveSavedViews() = runBlocking {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val due = now.plusSeconds(30)
+        val task = OpenTasksFixtures.tasks.first().copy(
+            id = TaskId("trashed-boundary-task"),
+            semanticStatus = SemanticStatus.PLANNED,
+            completedAt = null,
+            deletedAt = now.minusSeconds(60),
+            due = ZonedMoment(due, "UTC"),
+        )
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val scope = testScope()
+        val state = workspaceInsightsState(
+            OpenTasksFixtures.snapshot.copy(tasks = listOf(task)),
+            provider,
+            scope = scope,
+        )
+
+        state.setForegrounded(true)
+
+        assertEquals(due.plusNanos(1), provider.nextScheduledRefresh())
         scope.cancel()
     }
 
@@ -202,9 +254,11 @@ class WorkspaceInsightsStateTest {
         val originalStart = state.summary.value.interval.startInclusive
 
         assertEquals(midnight, provider.nextScheduledRefresh())
+        val timeVersion = state.timeVersion.value
         provider.advanceTo(InsightsTimeContext(midnight, zone))
 
         assertEquals(originalStart.plus(Duration.ofDays(1)), state.summary.value.interval.startInclusive)
+        assertEquals(timeVersion + 1, state.timeVersion.value)
         scope.cancel()
     }
 

@@ -1,5 +1,7 @@
 package app.opentasks
 
+import android.app.UiModeManager
+import android.content.Intent
 import android.content.res.Configuration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -11,11 +13,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksColors
 import app.opentasks.core.designsystem.OpenTasksTheme
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,5 +55,32 @@ class LightThemeInstrumentedTest {
             OpenTasksColors.LightBackground to OpenTasksColors.LightSurface,
             observed.get(),
         )
+    }
+
+    @Test
+    fun darkDeviceConfigurationKeepsMainActivitySystemBarIconsDark() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val uiModeManager = context.getSystemService(UiModeManager::class.java)
+        var scenario: ActivityScenario<MainActivity>? = null
+        try {
+            uiModeManager.setApplicationNightMode(UiModeManager.MODE_NIGHT_YES)
+            scenario = ActivityScenario.launch(Intent(context, MainActivity::class.java))
+
+            scenario.onActivity { activity ->
+                assertEquals(
+                    Configuration.UI_MODE_NIGHT_YES,
+                    activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK,
+                )
+                val controller = WindowInsetsControllerCompat(
+                    activity.window,
+                    activity.window.decorView,
+                )
+                assertTrue(controller.isAppearanceLightStatusBars)
+                assertTrue(controller.isAppearanceLightNavigationBars)
+            }
+        } finally {
+            scenario?.close()
+            uiModeManager.setApplicationNightMode(UiModeManager.MODE_NIGHT_AUTO)
+        }
     }
 }

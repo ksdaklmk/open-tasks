@@ -12,6 +12,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertWidthIsAtLeast
@@ -312,6 +314,28 @@ class QuickAddSheetInstrumentedTest {
     }
 
     @Test
+    fun recurrenceSuggestionShowsItsImplicitDueBeforeConfirmation() {
+        setSheet()
+        composeRule.onNodeWithTag("quick-add-title")
+            .performTextReplacement("Plan every monday")
+
+        composeRule.onNodeWithText("Repeat: every monday · due 10 Aug 17:00")
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun recurrenceSuggestionShowsThePreservedExplicitDueBeforeConfirmation() {
+        val text = "Plan tomorrow every monday"
+        setSheet()
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+
+        confirm(text, QuickAddTokenKind.DATE)
+
+        composeRule.onNodeWithText("Repeat: every monday · due 11 Aug 17:00")
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun numericPrioritySuggestionsUseExactDisplayNames() {
         setSheet()
 
@@ -375,6 +399,86 @@ class QuickAddSheetInstrumentedTest {
         composeRule.onNodeWithTag(dismissTag(match), useUnmergedTree = true)
             .assertWidthIsAtLeast(48.dp)
             .assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    fun longAppliedProjectKeepsTheClearTargetAtFortyEightDp() {
+        val longProject = OpenTasksFixtures.studioProject.copy(
+            name = "An intentionally very long applied project that must not steal clear width",
+        )
+        val text = "Task #an"
+        val match = parseQuickAdd(text, now, zone, listOf(longProject), tags).single()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 2f),
+            ) {
+                Box(Modifier.width(280.dp)) {
+                    OpenTasksTheme {
+                        QuickAddSheet(
+                            onDismiss = {},
+                            onAdd = {},
+                            projects = listOf(longProject),
+                            tags = tags,
+                            clock = clock,
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+        composeRule.onNodeWithTag(suggestionTag(match)).performClick()
+
+        composeRule.onNodeWithTag("quick-add-applied-project")
+            .assertHeightIsAtLeast(48.dp)
+        composeRule.onNodeWithTag("quick-add-clear-project", useUnmergedTree = true)
+            .assertWidthIsAtLeast(48.dp)
+            .assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    fun distinctFiftyFirstTagSuggestionStaysVisibleAndDisabled() {
+        val appliedTokens = (0 until 50).map { "@${it.toString(36).padStart(2, '0')}" }
+        var text = "Task ${appliedTokens.joinToString(" ")} @overflow"
+        setSheet()
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+
+        repeat(50) {
+            text = confirm(text, QuickAddTokenKind.TAG)
+        }
+        val overflow = parsed(text).single { it.kind == QuickAddTokenKind.TAG }
+
+        composeRule.onNodeWithTag(suggestionTag(overflow))
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithText("New tag: overflow · 50-tag limit reached")
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("quick-add-title")
+            .assertTextContains("@overflow", substring = true)
+    }
+
+    @Test
+    fun duplicateTagAtLimitStillConfirms() {
+        val submitted = AtomicReference<DomainCommand.CreateTask?>()
+        val appliedTokens = listOf("@Admin") +
+            (0 until 49).map { "@${it.toString(36).padStart(2, '0')}" }
+        var text = "Task ${appliedTokens.joinToString(" ")} @admin"
+        setSheet(submitted::set)
+        composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
+
+        repeat(50) {
+            text = confirm(text, QuickAddTokenKind.TAG)
+        }
+        val duplicate = parsed(text).single { it.kind == QuickAddTokenKind.TAG }
+        composeRule.onNodeWithTag(suggestionTag(duplicate))
+            .assertIsEnabled()
+            .performClick()
+        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+
+        assertEquals("Task", submitted.get()?.title)
+        assertEquals(50, submitted.get()?.tagNames?.size)
+        assertEquals(1, submitted.get()?.tagNames?.count { it.equals("Admin", true) })
     }
 
     @Test

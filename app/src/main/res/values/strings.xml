@@ -12,6 +12,8 @@
     <string name="quick_add_new_tag_suggestion">New tag: %1$s</string>
     <string name="quick_add_priority_suggestion">Priority: %1$s</string>
     <string name="quick_add_recurrence_suggestion">Repeat: %1$s</string>
+    <string name="quick_add_recurrence_due_suggestion">Repeat: %1$s · due %2$s</string>
+    <string name="quick_add_tag_limit_suggestion">%1$s · 50-tag limit reached</string>
     <string name="quick_add_estimate_suggestion">Estimate: %1$s</string>
     <string name="quick_add_dismiss_suggestion">Dismiss %1$s suggestion</string>
     <string name="quick_add_clear_applied">Clear %1$s</string>

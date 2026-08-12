@@ -129,6 +129,7 @@ fun SearchSurface(
     onSaveView: ((String, SearchQuery) -> Unit)? = null,
     onRenameView: (SavedViewId, String) -> Unit = { _, _ -> },
     onDeleteView: (SavedViewId) -> Unit = {},
+    timeVersion: Long = 0,
 ) {
     var query by rememberSaveable(stateSaver = SearchQuerySaver) {
         mutableStateOf(SearchQuery(""))
@@ -536,7 +537,8 @@ fun SearchSurface(
         }
     }
 
-    LaunchedEffect(query) {
+    val relativeTimeVersion = timeVersion.takeIf { query.dueBuckets.isNotEmpty() }
+    LaunchedEffect(query, relativeTimeVersion) {
         delay(150)
         onQueryChange(query)
     }

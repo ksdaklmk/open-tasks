@@ -271,6 +271,7 @@ fun OpenTasksApp(
         }
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
+        val timeVersion by viewModel.timeVersion.collectAsStateWithLifecycle()
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
@@ -495,6 +496,7 @@ fun OpenTasksApp(
             projectNames,
             tasksArrangement,
             clock,
+            timeVersion,
         ) {
             val projectionClock = Clock.fixed(clock.instant(), clock.zone)
             snapshot.tasks.associate { task ->
@@ -515,6 +517,7 @@ fun OpenTasksApp(
             projectNames,
             workbenchArrangement,
             clock,
+            timeVersion,
         ) {
             selectedProject?.let { project ->
                 val projectionClock = Clock.fixed(clock.instant(), clock.zone)
@@ -1684,6 +1687,7 @@ fun OpenTasksApp(
                     navigate(ProjectsRoute)
                 },
                 savedViews = snapshot.savedViews,
+                timeVersion = timeVersion,
                 onSaveView = { name, query ->
                     viewModel.execute(
                         DomainCommand.CreateSavedView(SavedViewId.new(), name, query),

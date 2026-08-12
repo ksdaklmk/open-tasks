@@ -140,6 +140,78 @@ class SearchSurfaceSavedViewsInstrumentedTest {
     }
 
     @Test
+    fun relativeSavedQueryRedispatchesWhenOnlyTimeChanges() {
+        val saved = focusView.copy(
+            query = SearchQuery("", dueBuckets = setOf(DueBucket.TODAY)),
+        )
+        val captured = mutableListOf<SearchQuery>()
+        val timeVersion = mutableStateOf(0L)
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            OpenTasksTheme {
+                SearchSurface(
+                    results = emptyList(),
+                    onQueryChange = captured::add,
+                    onDismiss = {},
+                    onOpenTask = {},
+                    onOpenProject = {},
+                    savedViews = listOf(saved),
+                    timeVersion = timeVersion.value,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("saved-view-chip-${saved.id.value}").performClick()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(151)
+        composeRule.waitForIdle()
+        assertEquals(listOf(saved.query), captured)
+
+        composeRule.runOnUiThread { timeVersion.value++ }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(151)
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(saved.query, saved.query), captured)
+    }
+
+    @Test
+    fun dueSortAloneDoesNotRedispatchWhenTimeChanges() {
+        val saved = focusView.copy(
+            query = SearchQuery("", sort = TaskSortKey.DUE),
+        )
+        val captured = mutableListOf<SearchQuery>()
+        val timeVersion = mutableStateOf(0L)
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            OpenTasksTheme {
+                SearchSurface(
+                    results = emptyList(),
+                    onQueryChange = captured::add,
+                    onDismiss = {},
+                    onOpenTask = {},
+                    onOpenProject = {},
+                    savedViews = listOf(saved),
+                    timeVersion = timeVersion.value,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("saved-view-chip-${saved.id.value}").performClick()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(151)
+        composeRule.waitForIdle()
+        assertEquals(listOf(saved.query), captured)
+
+        composeRule.runOnUiThread { timeVersion.value++ }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(151)
+        composeRule.waitForIdle()
+
+        assertEquals(listOf(saved.query), captured)
+    }
+
+    @Test
     fun textRefinementKeepsFiltersUntilExplicitClear() {
         val saved = focusView.copy(
             query = SearchQuery(
@@ -160,12 +232,14 @@ class SearchSurfaceSavedViewsInstrumentedTest {
 
         composeRule.onNodeWithTag("saved-view-chip-${saved.id.value}").performClick()
         composeRule.onNodeWithTag("workspace-search-query").performTextReplacement("refined")
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.mainClock.advanceTimeBy(151)
         composeRule.waitForIdle()
 
         assertEquals(saved.query.copy(text = "refined"), emitted.get())
         composeRule.onNodeWithTag("active-saved-view-${saved.id.value}").assertIsDisplayed()
         composeRule.onNodeWithTag("clear-active-saved-view").performClick()
+        composeRule.mainClock.advanceTimeByFrame()
         composeRule.mainClock.advanceTimeBy(151)
         composeRule.waitForIdle()
         assertEquals(SearchQuery("refined"), emitted.get())
@@ -204,13 +278,12 @@ class SearchSurfaceSavedViewsInstrumentedTest {
 
         composeRule.onNodeWithTag("active-saved-view-${saved.id.value}")
             .assertIsDisplayed()
-            .assertTextContains("Renamed filters", substring = true)
+        composeRule.onNodeWithText("Active view: Renamed filters").assertIsDisplayed()
     }
 
     @Test
     fun filterControlsToggleSetsAndSortUsesRelevanceForNull() {
         val emitted = AtomicReference<SearchQuery?>()
-        composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
             OpenTasksTheme {
                 SearchSurface(emptyList(), emitted::set, {}, {}, {})

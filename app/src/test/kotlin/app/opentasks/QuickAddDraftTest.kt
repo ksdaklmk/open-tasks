@@ -237,6 +237,30 @@ class QuickAddDraftTest {
     }
 
     @Test
+    fun confirmingDistinctFiftyFirstTagPreservesTheDraft() {
+        val appliedTags = (1..50).map { "tag-$it" }
+        val draft = QuickAddDraft(
+            title = "Task @overflow",
+            tagNames = appliedTags,
+        ).confirmCurrent(QuickAddTokenKind.TAG)
+
+        assertEquals("Task @overflow", draft.title)
+        assertEquals(appliedTags, draft.toCommand().tagNames)
+    }
+
+    @Test
+    fun confirmingDuplicateTagAtLimitStillStripsItsToken() {
+        val appliedTags = listOf("Admin") + (1..49).map { "tag-$it" }
+        val draft = QuickAddDraft(
+            title = "Task @admin",
+            tagNames = appliedTags,
+        ).confirmCurrent(QuickAddTokenKind.TAG)
+
+        assertEquals("Task", draft.title)
+        assertEquals(appliedTags, draft.toCommand().tagNames)
+    }
+
+    @Test
     fun malformedSaverValuesRestoreFailClosed() {
         val restored = requireNotNull(
             QuickAddDraftSaver.restore(

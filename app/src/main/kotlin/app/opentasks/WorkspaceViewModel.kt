@@ -109,6 +109,7 @@ class WorkspaceViewModel @Inject constructor(
     )
     val insightsSummary: StateFlow<InsightsSnapshot> = workspaceInsightsState.summary
     val insightsUiState: StateFlow<InsightsUiState> = workspaceInsightsState.uiState
+    val timeVersion: StateFlow<Long> = workspaceInsightsState.timeVersion
     val searchResults: StateFlow<List<SearchResult>> = mutableSearchResults.asStateFlow()
     val events = eventChannel.receiveAsFlow()
 
@@ -598,11 +599,13 @@ internal class WorkspaceInsightsState(
             context = timeContext,
         ),
     )
+    private val mutableTimeVersion = MutableStateFlow(0L)
     private var scheduleJob: Job? = null
     private var foregrounded = false
 
     val summary: StateFlow<InsightsSnapshot> = mutableSummary.asStateFlow()
     val uiState: StateFlow<InsightsUiState> = mutableUiState.asStateFlow()
+    val timeVersion: StateFlow<Long> = mutableTimeVersion.asStateFlow()
 
     init {
         scope.launch {
@@ -652,6 +655,7 @@ internal class WorkspaceInsightsState(
 
     private fun refreshInsightsTime() {
         timeContext = timeProvider.capture()
+        mutableTimeVersion.value++
         reproject()
         scheduleNextRefresh()
     }
@@ -750,10 +754,6 @@ private fun nextInsightsRefresh(
     val recheck = context.now.plus(INSIGHTS_TIME_RECHECK)
     val dueBoundary = workspace.tasks
         .asSequence()
-        .filter { task ->
-            task.deletedAt == null &&
-                task.semanticStatus != app.opentasks.core.model.SemanticStatus.COMPLETED
-        }
         .mapNotNull { task -> task.due?.instant }
         .filter { dueAt -> !dueAt.isBefore(context.now) }
         .mapNotNull { dueAt -> runCatching { dueAt.plusNanos(1L) }.getOrNull() }

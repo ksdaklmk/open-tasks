@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -97,6 +98,7 @@ internal data class QuickAddDraft(
         matches: List<QuickAddTokenMatch>,
     ): QuickAddDraft {
         require(match in matches)
+        if (!canConfirm(match)) return this
         val dismissedMatches = matches.filter {
             it.tokenKey(title, matches) in dismissedTokenKeys
         }
@@ -117,7 +119,7 @@ internal data class QuickAddDraft(
             is QuickAddTokenValue.TagValue -> base.copy(
                 tagNames = (tagNames + value.name)
                     .distinctBy { it.lowercase(Locale.ROOT) }
-                    .take(50),
+                    .take(MAX_QUICK_ADD_TAGS),
             )
             is QuickAddTokenValue.PriorityValue -> base.copy(priority = value.priority.name)
             is QuickAddTokenValue.DueValue -> base.copy(
@@ -145,6 +147,12 @@ internal data class QuickAddDraft(
             is QuickAddTokenValue.EstimateValue ->
                 base.copy(estimateSeconds = value.duration.seconds)
         }
+    }
+
+    fun canConfirm(match: QuickAddTokenMatch): Boolean {
+        val value = match.value as? QuickAddTokenValue.TagValue ?: return true
+        val applied = tagNames.mapTo(hashSetOf()) { it.lowercase(Locale.ROOT) }
+        return value.name.lowercase(Locale.ROOT) in applied || applied.size < MAX_QUICK_ADD_TAGS
     }
 
     fun clear(kind: QuickAddTokenKind, tagName: String? = null): QuickAddDraft = when (kind) {
@@ -331,11 +339,13 @@ fun QuickAddSheet(
             )
 
             visibleMatches.forEach { match ->
+                val confirmable = draft.canConfirm(match)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AssistChip(
                         onClick = { draft = draft.confirm(match, matches) },
-                        label = { Text(suggestionLabel(match, draft.title)) },
+                        label = { Text(suggestionLabel(match, draft, confirmable)) },
+                        enabled = confirmable,
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .height(48.dp)
@@ -446,20 +456,31 @@ fun QuickAddSheet(
 }
 
 @Composable
-private fun suggestionLabel(match: QuickAddTokenMatch, text: String): String =
+private fun suggestionLabel(
+    match: QuickAddTokenMatch,
+    draft: QuickAddDraft,
+    confirmable: Boolean,
+): String =
     when (val value = match.value) {
         is QuickAddTokenValue.ProjectValue -> stringResource(
             R.string.quick_add_project_suggestion,
             value.projectName,
         )
-        is QuickAddTokenValue.TagValue -> stringResource(
-            if (value.existingTagId == null) {
-                R.string.quick_add_new_tag_suggestion
+        is QuickAddTokenValue.TagValue -> {
+            val suggestion = stringResource(
+                if (value.existingTagId == null) {
+                    R.string.quick_add_new_tag_suggestion
+                } else {
+                    R.string.quick_add_existing_tag_suggestion
+                },
+                value.name,
+            )
+            if (confirmable) {
+                suggestion
             } else {
-                R.string.quick_add_existing_tag_suggestion
-            },
-            value.name,
-        )
+                stringResource(R.string.quick_add_tag_limit_suggestion, suggestion)
+            }
+        }
         is QuickAddTokenValue.PriorityValue -> stringResource(
             R.string.quick_add_priority_suggestion,
             value.priority.displayName(),
@@ -468,10 +489,16 @@ private fun suggestionLabel(match: QuickAddTokenMatch, text: String): String =
             R.string.quick_add_date_suggestion,
             DATE_SUGGESTION_FORMATTER.format(value.due.instant.atZone(value.due.zone())),
         )
-        is QuickAddTokenValue.RecurrenceValue -> stringResource(
-            R.string.quick_add_recurrence_suggestion,
-            text.substring(match.startIndex, match.endIndex),
-        )
+        is QuickAddTokenValue.RecurrenceValue -> {
+            val effectiveDue = draft.dueMoment().takeIf { draft.dueIsExplicit } ?: value.due
+            stringResource(
+                R.string.quick_add_recurrence_due_suggestion,
+                draft.title.substring(match.startIndex, match.endIndex),
+                DATE_SUGGESTION_FORMATTER.format(
+                    effectiveDue.instant.atZone(effectiveDue.zone()),
+                ),
+            )
+        }
         is QuickAddTokenValue.EstimateValue -> stringResource(
             R.string.quick_add_estimate_suggestion,
             value.duration.displayName(),
@@ -486,12 +513,16 @@ private fun AppliedQuickAddChip(
     onClear: () -> Unit,
 ) {
     Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         AssistChip(
             onClick = onClear,
             label = { Text(label) },
             modifier = Modifier
-                .height(48.dp)
+                .weight(1f, fill = false)
+                .heightIn(min = 48.dp)
                 .testTag(chipTag),
         )
         IconButton(
@@ -532,5 +563,6 @@ private fun Duration.displayName(): String {
 }
 
 private const val MAX_QUICK_ADD_TITLE_LENGTH = 240
+private const val MAX_QUICK_ADD_TAGS = 50
 private val DATE_SUGGESTION_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d MMM HH:mm", Locale.UK)
