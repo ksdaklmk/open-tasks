@@ -5,11 +5,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksTheme
@@ -93,25 +95,32 @@ class TasksArrangementInstrumentedTest {
             projectNames = mapOf(ProjectId("inbox") to "Named inbox project"),
         )
 
-        composeRule.onNodeWithText(context.getString(R.string.tasks_group_due_today))
-            .performScrollTo()
-            .assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.tasks_group_inbox))
-            .performScrollTo()
-            .assertIsDisplayed()
-        composeRule.onNodeWithText("Named inbox project").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(
-            context.getString(R.string.tasks_group_priority_high),
-        ).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(today.title).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(namedInbox.title).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(flat.title).performScrollTo().assertIsDisplayed()
+        fun assertGroupDisplayed(label: String) {
+            val matcher = hasText(label) and isHeading()
+            composeRule.onNodeWithTag("task-list").performScrollToNode(matcher)
+            composeRule.onNode(matcher).assertIsDisplayed()
+        }
+
+        assertGroupDisplayed(context.getString(R.string.tasks_group_due_today))
+        assertGroupDisplayed(context.getString(R.string.tasks_group_inbox))
+        assertGroupDisplayed("Named inbox project")
+        assertGroupDisplayed(context.getString(R.string.tasks_group_priority_high))
+        fun assertTaskDisplayed(title: String) {
+            composeRule.onNodeWithTag("task-list").performScrollToNode(hasText(title))
+            composeRule.onNodeWithText(title).assertIsDisplayed()
+        }
+
+        assertTaskDisplayed(today.title)
+        assertTaskDisplayed(namedInbox.title)
+        assertTaskDisplayed(flat.title)
         composeRule.onNodeWithText("null").assertDoesNotExist()
 
         composeRule.onNodeWithTag("task-filter-today").performClick()
         composeRule.onNodeWithText(today.title).assertIsDisplayed()
         composeRule.onNodeWithText(inbox.title).assertDoesNotExist()
-        composeRule.onNodeWithText(context.getString(R.string.tasks_group_inbox))
+        composeRule.onNode(
+            hasText(context.getString(R.string.tasks_group_inbox)) and isHeading(),
+        )
             .assertDoesNotExist()
 
         composeRule.onNodeWithTag("task-filter-upcoming").performClick()
