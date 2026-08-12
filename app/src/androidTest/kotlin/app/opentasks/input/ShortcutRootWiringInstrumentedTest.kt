@@ -21,6 +21,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isFocused
@@ -28,8 +29,10 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -209,10 +212,12 @@ class ShortcutRootWiringInstrumentedTest {
         while (true) {
             val matches = parseQuickAdd(text, clock.instant(), clock.zone, projects, tags)
             val match = matches.lastOrNull() ?: break
-            composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+            composeRule.onNodeWithTag(suggestionTag(match))
+                .performScrollTo()
+                .performSemanticsAction(SemanticsActions.OnClick)
             text = stripQuickAddToken(text, match)
         }
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(
             DomainCommand.CreateTask(

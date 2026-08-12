@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -22,7 +23,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
@@ -74,7 +77,9 @@ class ProcessRestorationInstrumentedTest {
 
     private fun confirm(text: String, kind: QuickAddTokenKind): String {
         val match = parsed(text).single { it.kind == kind }
-        composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+        composeRule.onNodeWithTag(suggestionTag(match))
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick)
         return stripQuickAddToken(text, match)
     }
 
@@ -137,7 +142,7 @@ class ProcessRestorationInstrumentedTest {
         confirm(text, QuickAddTokenKind.PROJECT)
 
         restorationTester.emulateSavedInstanceStateRestore()
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         val expectedDue = ZonedMoment(Instant.parse("2026-08-11T10:00:00Z"), zone.id)
         assertEquals(
@@ -156,7 +161,7 @@ class ProcessRestorationInstrumentedTest {
         val mondayText = "Restore every monday"
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(mondayText)
         confirm(mondayText, QuickAddTokenKind.RECURRENCE)
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
         assertEquals(expectedDue, submitted.get()?.due)
         assertEquals(
             RecurrenceRule(
@@ -263,11 +268,12 @@ class ProcessRestorationInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
-        composeRule.onNodeWithTag(dismissTag(match)).performClick()
+        composeRule.onNodeWithTag(dismissTag(match))
+            .performSemanticsAction(SemanticsActions.OnClick)
         restorationTester.emulateSavedInstanceStateRestore()
 
         composeRule.onNodeWithTag(suggestionTag(match)).assertDoesNotExist()
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
         assertEquals(DomainCommand.CreateTask(text), submitted.get())
     }
 

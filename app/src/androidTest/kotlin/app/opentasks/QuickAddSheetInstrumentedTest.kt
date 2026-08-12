@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -26,6 +27,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
@@ -74,7 +76,9 @@ class QuickAddSheetInstrumentedTest {
     ): String {
         val matches = parsed(text)
         val match = matches.filter { it.kind == kind }[occurrence]
-        composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+        composeRule.onNodeWithTag(suggestionTag(match))
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick)
         return stripQuickAddToken(text, match)
     }
 
@@ -176,7 +180,9 @@ class QuickAddSheetInstrumentedTest {
         text = confirm(text, QuickAddTokenKind.RECURRENCE)
         while (parsed(text).isNotEmpty()) {
             val match = parsed(text).last()
-            composeRule.onNodeWithTag(suggestionTag(match)).performScrollTo().performClick()
+            composeRule.onNodeWithTag(suggestionTag(match))
+                .performScrollTo()
+                .performSemanticsAction(SemanticsActions.OnClick)
             text = stripQuickAddToken(text, match)
         }
         listOf(
@@ -193,9 +199,7 @@ class QuickAddSheetInstrumentedTest {
             "quick-add-clear-estimate",
             "quick-add-clear-tag-admin",
         ).forEach { composeRule.onNodeWithTag(it).assertExists() }
-        composeRule.onNode(hasText("Add task") and hasClickAction())
-            .performScrollTo()
-            .performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(
             DomainCommand.CreateTask(
@@ -223,7 +227,7 @@ class QuickAddSheetInstrumentedTest {
 
         text = confirm(text, QuickAddTokenKind.PROJECT)
         confirm(text, QuickAddTokenKind.PROJECT)
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(OpenTasksFixtures.taxProject.id, submitted.get()?.projectId)
     }
@@ -237,7 +241,7 @@ class QuickAddSheetInstrumentedTest {
 
         text = confirm(text, QuickAddTokenKind.PRIORITY)
         confirm(text, QuickAddTokenKind.PRIORITY)
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(Priority.URGENT, submitted.get()?.priority)
     }
@@ -252,7 +256,7 @@ class QuickAddSheetInstrumentedTest {
         text = confirm(text, QuickAddTokenKind.TAG)
         text = confirm(text, QuickAddTokenKind.TAG)
         confirm(text, QuickAddTokenKind.TAG)
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(listOf("Admin", "Roadmap"), submitted.get()?.tagNames)
     }
@@ -264,7 +268,8 @@ class QuickAddSheetInstrumentedTest {
         setSheet()
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(original)
 
-        composeRule.onNodeWithTag(dismissTag(match)).performClick()
+        composeRule.onNodeWithTag(dismissTag(match))
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag(suggestionTag(match)).assertDoesNotExist()
         val edited = "$original now"
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(edited)
@@ -281,8 +286,10 @@ class QuickAddSheetInstrumentedTest {
         setSheet()
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(original)
 
-        composeRule.onNodeWithTag(dismissTag(tag)).performClick()
-        composeRule.onNodeWithTag(suggestionTag(project)).performClick()
+        composeRule.onNodeWithTag(dismissTag(tag))
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag(suggestionTag(project))
+            .performSemanticsAction(SemanticsActions.OnClick)
         val reparsed = parsed("Plan @Admin").single()
 
         composeRule.onNodeWithTag(suggestionTag(reparsed)).assertDoesNotExist()
@@ -295,7 +302,8 @@ class QuickAddSheetInstrumentedTest {
         setSheet()
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
 
-        composeRule.onNodeWithTag(dismissTag(matches.last())).performClick()
+        composeRule.onNodeWithTag(dismissTag(matches.last()))
+            .performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.onAllNodesWithText("Tag: Admin").assertCountEquals(1)
         composeRule.onNodeWithTag(suggestionTag(matches.first())).assertIsDisplayed()
@@ -427,7 +435,8 @@ class QuickAddSheetInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
-        composeRule.onNodeWithTag(suggestionTag(match)).performClick()
+        composeRule.onNodeWithTag(suggestionTag(match))
+            .performClick()
 
         composeRule.onNodeWithTag("quick-add-applied-project")
             .assertHeightIsAtLeast(48.dp)
@@ -472,8 +481,8 @@ class QuickAddSheetInstrumentedTest {
         val duplicate = parsed(text).single { it.kind == QuickAddTokenKind.TAG }
         composeRule.onNodeWithTag(suggestionTag(duplicate))
             .assertIsEnabled()
-            .performClick()
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals("Task", submitted.get()?.title)
         assertEquals(50, submitted.get()?.tagNames?.size)
@@ -489,8 +498,9 @@ class QuickAddSheetInstrumentedTest {
         text = confirm(text, QuickAddTokenKind.RECURRENCE)
         confirm(text, QuickAddTokenKind.DATE)
 
-        composeRule.onNodeWithTag("quick-add-date-clear").performClick()
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-date-clear")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(DomainCommand.CreateTask("Plan"), submitted.get())
     }
@@ -504,8 +514,9 @@ class QuickAddSheetInstrumentedTest {
         text = confirm(text, QuickAddTokenKind.DATE)
         confirm(text, QuickAddTokenKind.RECURRENCE)
 
-        composeRule.onNodeWithTag("quick-add-clear-recurrence").performClick()
-        composeRule.onNodeWithText("Add task").performScrollTo().performClick()
+        composeRule.onNodeWithTag("quick-add-clear-recurrence")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(
             DomainCommand.CreateTask(

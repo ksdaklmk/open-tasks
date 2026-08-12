@@ -26,7 +26,7 @@ class ViewArrangementStoreInstrumentedTest {
 
     @After
     fun tearDown() {
-        context.deleteSharedPreferences(PREFS_NAME)
+        prefs.edit().clear().commit()
     }
 
     @Test

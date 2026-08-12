@@ -1,5 +1,6 @@
 package app.opentasks.feature.more
 
+import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,14 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.UiController
+import androidx.test.espresso.ViewAction
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.AndroidBackupStatus
@@ -53,8 +62,10 @@ import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RestoredPackageCondition
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import org.hamcrest.Matcher
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -64,6 +75,52 @@ import org.junit.runner.RunWith
 class BackupRecoveryScreenInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    private fun observeDialogIme(
+        bottom: AtomicInteger,
+        animationRunning: AtomicBoolean,
+    ) {
+        onView(isRoot()).inRoot(isDialog()).perform(
+            object : ViewAction {
+                override fun getConstraints(): Matcher<View> = isRoot()
+
+                override fun getDescription() = "observe the dialog IME animation"
+
+                override fun perform(uiController: UiController, view: View) {
+                    bottom.set(
+                        ViewCompat.getRootWindowInsets(view)
+                            ?.getInsets(WindowInsetsCompat.Type.ime())
+                            ?.bottom ?: 0,
+                    )
+                    ViewCompat.setWindowInsetsAnimationCallback(
+                        view,
+                        object : WindowInsetsAnimationCompat.Callback(
+                            WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+                        ) {
+                            override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+                                if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) {
+                                    animationRunning.set(true)
+                                }
+                            }
+
+                            override fun onProgress(
+                                insets: WindowInsetsCompat,
+                                runningAnimations: List<WindowInsetsAnimationCompat>,
+                            ): WindowInsetsCompat = insets.also {
+                                bottom.set(it.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+                            }
+
+                            override fun onEnd(animation: WindowInsetsAnimationCompat) {
+                                if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) {
+                                    animationRunning.set(false)
+                                }
+                            }
+                        },
+                    )
+                }
+            },
+        )
+    }
 
     @Test
     fun encryptedAndAndroidBackupAreDistinctCardsWithManualRetry() {
@@ -677,6 +734,8 @@ class BackupRecoveryScreenInstrumentedTest {
     @Test
     fun compactLargeTextKeepsFocusedPassphraseSheetActionsScrollReachable() {
         val fontScale = mutableStateOf(1.3f)
+        val imeBottom = AtomicInteger()
+        val imeAnimationRunning = AtomicBoolean()
         composeRule.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(
@@ -703,10 +762,16 @@ class BackupRecoveryScreenInstrumentedTest {
                 .performScrollTo()
                 .performClick()
             val passphrase = composeRule.onNodeWithTag("backup-passphrase")
+            imeBottom.set(0)
+            imeAnimationRunning.set(false)
+            observeDialogIme(imeBottom, imeAnimationRunning)
             passphrase.performClick()
             passphrase.performTextInput("masked")
             passphrase.assertIsFocused()
                 .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                imeBottom.get() > 0 && !imeAnimationRunning.get()
+            }
             composeRule.onNodeWithTag("backup-confirmation")
                 .performScrollTo()
                 .assertIsDisplayed()
