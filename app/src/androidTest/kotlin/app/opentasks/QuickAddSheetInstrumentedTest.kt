@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -160,9 +161,7 @@ class QuickAddSheetInstrumentedTest {
         setSheet(submitted::set)
 
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
-        composeRule.onNode(hasText("Add task") and hasClickAction())
-            .performScrollTo()
-            .performClick()
+        composeRule.onNodeWithTag("quick-add-title").performImeAction()
 
         assertEquals(DomainCommand.CreateTask(text), submitted.get())
     }
