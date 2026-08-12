@@ -75,9 +75,6 @@ private val FocusIdKeys =
 private val FocusCompletableKeys =
     List(3) { index -> booleanPreferencesKey("today_focus_completable_$index") }
 
-/** Matches the extra `MainActivity.handleIntent` reads to open Quick Add. */
-private val QuickAddKey = ActionParameters.Key<Boolean>("open_quick_add")
-
 /** Carries the tapped row's task id into [CompleteFocusTaskAction]. */
 private val TaskIdKey = ActionParameters.Key<String>("today_focus_task_id")
 
@@ -203,8 +200,9 @@ private fun TodayWidgetContent() {
             modifier = GlanceModifier
                 .padding(top = 8.dp)
                 .clickable(
-                    actionStartActivity<MainActivity>(
-                        parameters = actionParametersOf(QuickAddKey to true),
+                    actionStartActivity(
+                        Intent(context, MainActivity::class.java)
+                            .setAction(MainActivity.QUICK_ADD_ACTION),
                     ),
                 ),
         )

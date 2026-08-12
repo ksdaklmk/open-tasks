@@ -341,7 +341,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         internal const val QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"
 
-        /** Matches the Today widget's Quick Add action parameter key. */
+        /** Legacy compatibility for previously generated widget actions. */
         const val EXTRA_OPEN_QUICK_ADD = "open_quick_add"
     }
 }
