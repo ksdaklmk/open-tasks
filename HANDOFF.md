@@ -1,59 +1,35 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 18 connected-gate pause, 12 August 2026
+## Current resume point — Task 18 connected qualification, 12 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; any conflicting billing prerequisite, live-backlog label, or
 pre-execution status is superseded here.
 
-- Stage 7 remains local and unpushed on `main`. Tasks 1–17 are complete and
-  independently review-clean. The version bump is `8cecbcc`; the whole-stage
-  review fix and clean scoped re-review end at
-  `e33bd09ddb9c67826b3b4930df582673a50e4b5b`. At that reviewed head, the
-  forced 442-action release build and APK verifier, schema/fixture/workflow
-  checks, and exact privacy/release-scope audit all passed.
-- The current product/test head is
-  `5a466198e9ff712c31154acbe2e2a3a4aecfbf75` (`fix: clear stage 7 connected
-  qualification gate`). It is one bounded post-review connected-gate fix,
-  not a second whole-stage review fix wave. It changes the shared Quick Add
-  Escape handler and six narrow synchronization/viewport/readiness/semantics/
-  clock-settling test paths. Its five-module Android-test compilation passed
-  with 213 actions (2 executed, 211 up-to-date), and `git diff --check` was
-  clean. It has **not** received its independent scoped review.
-- The first Step 11 six-module connected run planned 392 tests. App ran 81
-  (76 pass, 2 known skips, 3 fail), schedule 2/2, projects 23 (20 pass,
-  3 fail), data 179 (177 pass, 2 fail), and more 64 (63 pass, 1 fail). Tasks
-  reached 29/43 with no reported failure, then
-  `duplicateActionRequiresValidPersistedTask` stopped making terminal progress
-  for more than six minutes; only that Gradle session was interrupted.
-  Unchanged isolated runs established the root causes recorded in the four
-  connected triage reports.
-- After `5a46619`, the targeted app discriminator ran three tests: restoration
-  and Ctrl+K passed, but
-  `QuickAddPrefillRootWiringInstrumentedTest.escapeAfterPrefillDoesNotResurrectTheConsumedTitleOnReopen`
-  still failed because `quick-add-title` existed after Escape. The run exited
-  with 2/3 passing and 289 actions (9 executed, 280 up-to-date). The new
-  `QuickAddSheet` `Column.onPreviewKeyEvent` therefore does not yet handle an
-  Escape originating in the title field. Do not guess at another handler;
-  resume with an unchanged discriminator and trace the actual key path first.
-- No post-fix device rerun has yet covered the three project cases, two Room
-  cases, Insights case, or task-editor hang. The full six-module Step 11 gate
-  has not been rerun. Steps 12–14 and 16–21 remain pending, as do an independent
-  review of the final connected fix and fresh current-head local/release/
-  privacy gates. No candidate push, Actions run, tag, or other remote mutation
-  has occurred.
-- Resume in this order: read `progress.md`, `task-18-brief.md`,
-  `task-18-connected-fix-brief.md`, the connected triage reports, and
-  `task-18-connected-fix-report.md`; systematically RED/GREEN the one remaining
-  Quick Add Escape path; rerun all ten connected discriminators; append exact
-  device evidence and obtain an independent scoped review; rerun the required
-  current-head local/release/privacy gates; then boot and re-audit a fresh sole
-  disposable `Fold8_Acceptance` overlay for the full Step 11 gate and continue
-  the manual, signed-release, documentation, and eligible remote steps.
-- Safe stop is complete. The exact audited `Fold8_Acceptance` overlay was
-  killed with emulator snapshots disabled/ignored; fresh checks found zero ADB
-  targets and zero matching Fold8/Pixel emulator processes. The protected
+- Stage 7 remains local and unpushed on `main`. The earlier independently
+  reviewed head is `e33bd09ddb9c67826b3b4930df582673a50e4b5b`; the current
+  product/test head is `d7f097848838a60f33a1244bce6458497c17d844`. The bounded
+  connected remediation consists of `5a46619` plus `d7f0978`.
+- All ten formerly RED targeted discriminators are GREEN on the sole audited
+  `Fold8_Acceptance`: app 3/3 (Quick Add final 1/1, restoration 1/1, Ctrl+K
+  1/1), Projects 3/3, data 2/2, More 1/1, and Tasks 1/1. The repairs align
+  modal focus requests with their window lifecycle, scroll both required board
+  axes, and scope the Task Editor test clock around its synchronizing setup.
+- The initial scoped review of `e33bd09..d7f0978` approved the functional
+  remediation and found only this stale HANDOFF checkpoint as Important. This
+  one-file correction requires narrow re-review before the remaining gates.
+- The full Step 11 six-module gate has **not** been rerun. Current-head Steps
+  4/6/7, a fresh sole overlay, manual Steps 12–14, and documentation/eligible
+  free remote Steps 16–21 remain pending. No push, tag, or other remote
+  mutation has occurred.
+- The current disposable `Fold8_Acceptance` diagnostic overlay is still alive
+  and audited as the sole target. Safely destroy it after review and local gates,
+  then boot and audit a fresh sole overlay for Step 11. The protected
   `Pixel_10_Pro_Fold` was never touched.
+- Resume in this order: narrow re-review this HANDOFF correction; run
+  current-head Steps 4/6/7; safely destroy the diagnostic overlay; boot a fresh
+  sole overlay for Steps 10/11; then complete the remaining manual, release,
+  documentation, and eligible free remote steps.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
   paid GitHub service. Use remote CI only if the included free allowance is
