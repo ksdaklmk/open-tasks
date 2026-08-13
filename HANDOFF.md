@@ -1,35 +1,66 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 18 connected qualification, 12 August 2026
+## Current resume point — Task 18 safe pause, 13 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; any conflicting billing prerequisite, live-backlog label, or
 pre-execution status is superseded here.
 
-- Stage 7 remains local and unpushed on `main`. The earlier independently
-  reviewed head is `e33bd09ddb9c67826b3b4930df582673a50e4b5b`; the current
-  product/test head is `d7f097848838a60f33a1244bce6458497c17d844`. The bounded
-  connected remediation consists of `5a46619` plus `d7f0978`.
-- All ten formerly RED targeted discriminators are GREEN on the sole audited
-  `Fold8_Acceptance`: app 3/3 (Quick Add final 1/1, restoration 1/1, Ctrl+K
-  1/1), Projects 3/3, data 2/2, More 1/1, and Tasks 1/1. The repairs align
-  modal focus requests with their window lifecycle, scroll both required board
-  axes, and scope the Task Editor test clock around its synchronizing setup.
-- The initial scoped review of `e33bd09..d7f0978` approved the functional
-  remediation and found only this stale HANDOFF checkpoint as Important. This
-  one-file correction requires narrow re-review before the remaining gates.
-- The full Step 11 six-module gate has **not** been rerun. Current-head Steps
-  4/6/7, a fresh sole overlay, manual Steps 12–14, and documentation/eligible
-  free remote Steps 16–21 remain pending. No push, tag, or other remote
-  mutation has occurred.
-- The current disposable `Fold8_Acceptance` diagnostic overlay is still alive
-  and audited as the sole target. Safely destroy it after review and local gates,
-  then boot and audit a fresh sole overlay for Step 11. The protected
+- Stage 7 remains local and unpushed on `main`. The committed product/test
+  candidate head is `1b5f3a3431627cc7fc2040af72aca0d917884611`; this
+  authoritative section is its later docs-only pause checkpoint. `0578518`
+  routes the Today
+  widget through the canonical Quick Add action and makes the sole
+  `MainActivity` native `singleTop`; `1b5f3a3` hardens that boundary test.
+  No tag or other remote mutation has occurred.
+- Exact-head host, release, schema, fixture, workflow, and privacy gates are
+  green. The JVM/lint/debug gate executed 553/553 actions; all six Android-test
+  sources compiled; the signed release executed 442/442 actions and passed
+  `verify-release-apk.sh`; Room remains v9, all five fixture families are
+  byte-identical, and the manifest/privacy audit found only the intentional
+  `singleTop` delta. The verified APK SHA-256 is
+  `0f6d2861c824a74efb3935d80d7d9309f624e6788b9e683b3dc4f7e394d16ddc`.
+- The final six-module Step 11 run at that head is **RED**, not waived. Data
+  passed 179/179, Tasks 43/43, Schedule 2/2, and More 64/64. Projects passed
+  22/23; App ran 80 tests with its two established skips and two failures. The
+  run took 1h21m14s. The three failures are diagnosed as test-boundary races:
+  workflow Add was tapped while Gboard settled; the large-text Quick Add test
+  observed the activity window although its sheet owns a dialog window; and
+  the new activity test created a durable vault that polluted the immediately
+  following recovery class in the same process.
+- Three **uncommitted work-in-progress test files** must be treated as one
+  unfinished remediation, not as qualified code:
+  `MainActivityQuickAddInstrumentedTest.kt`,
+  `QuickAddSheetInstrumentedTest.kt`, and
+  `ProjectWorkbenchInstrumentedTest.kt`. Projects adds the already-used
+  `closeSoftKeyboard()` before its physical Add tap and passed focused 1/1.
+  The activity draft no longer creates a vault; it splits proof between native
+  `singleTop`/intent delivery and the existing real-sheet root-wiring test. Its
+  paired activity/recovery run passed 2/2 before a final bounded cold-start wait
+  was added; recompile and rerun that pair. The current Quick Add draft passed
+  focused 1/1, but independent review found its live-IME observer can attach
+  after animation preparation, so **do not commit it as-is**.
+- Resume the Quick Add correction by intercepting platform text input only in
+  `largeTextActionsCanBeReachedWithImeVisible`, dispatching a synthetic visible
+  IME inset to the actual Espresso `isDialog()` root, and retaining the exact
+  title, enabled, displayed, 48 dp, physical-click, and callback assertions.
+  Then compile, rerun the Quick Add test and the two activity classes, obtain a
+  zero-Critical/Important re-review of all three files, and commit only those
+  paths. Do not add Android Test Orchestrator or a destructive production/test
+  vault-reset API for this one boundary test.
+- After that commit, rerun the complete six-module Step 11 gate. If green,
+  rebuild/verify the signed candidate as required, repeat the actual signed
+  widget-host smoke, finish the remaining release checklist, destroy only the
+  disposable overlay, write the eight Task 18 qualification/contract docs,
+  and proceed with GitHub Free-only push/CI/tag steps. `RELEASING.md` still has
+  stale first-launch wording: production offers `Start without restoring`, not
+  initial vault-passphrase creation. Correct that wording under explicit docs
+  scope before claiming a literal 7/7 smoke pass.
+- The sole audited read-only `Fold8_Acceptance` overlay is still alive; no
+  Gradle or instrumentation process is running. Focused tests most recently
+  installed the debug package. Keep the overlay untouched until work resumes,
+  then revalidate sole-target identity before any command. The protected
   `Pixel_10_Pro_Fold` was never touched.
-- Resume in this order: narrow re-review this HANDOFF correction; run
-  current-head Steps 4/6/7; safely destroy the diagnostic overlay; boot a fresh
-  sole overlay for Steps 10/11; then complete the remaining manual, release,
-  documentation, and eligible free remote steps.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
   paid GitHub service. Use remote CI only if the included free allowance is
