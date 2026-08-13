@@ -11,7 +11,8 @@ filled-action colour.
 The primary usage scene is a solo professional moving between a foldable cover
 screen in daylight, the unfolded workbench at a desk, and a tablet in lower
 evening light. Light mode is the required and release-gated colour scheme.
-Existing dark support is retained as best-effort but is not an acceptance gate.
+The app renders that light scheme unconditionally, including when Android uses
+a dark device configuration; there is no theme preference.
 
 ## Colour
 
@@ -30,19 +31,6 @@ This preserves the design contract without scattering raw hexadecimal colours.
 - Pale ember: `oklch(0.930 0.035 32)`.
 - Error: `oklch(0.520 0.190 25)`.
 - Success: `oklch(0.480 0.100 150)`.
-
-### Dark (best-effort)
-
-- Background: `oklch(0.150 0.006 29)`.
-- Surface: `oklch(0.190 0.007 29)`.
-- Surface bright: `oklch(0.250 0.009 29)`.
-- Ink: `oklch(0.940 0.004 29)`.
-- Muted ink: `oklch(0.720 0.008 29)`.
-- Outline: `oklch(0.420 0.010 29)`.
-- Ember: `oklch(0.720 0.150 32)`.
-- Deep ember container: `oklch(0.300 0.065 32)`.
-- Error: `oklch(0.720 0.150 25)`.
-- Success: `oklch(0.720 0.100 150)`.
 
 Text on a saturated ember fill is white. Status also uses icon, label, and
 container shape; colour never carries meaning alone. Dynamic Colour is disabled.
@@ -171,10 +159,10 @@ for floating controls and temporary surfaces.
   never rely on colour alone.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
-- Today widget: a Home-screen Glance widget shows today and overdue counts
-  plus up to three focus task titles. Titles conceal to a generic
-  count-only state whenever title privacy or app lock is engaged; widget
-  state never appears in a backup.
+- Today widget: the minimum 2×1 Glance layout keeps both counts and Quick Add
+  usable in one compact row. Resizing it taller adds up to three focus task
+  titles and their actions; title privacy or app lock replaces those expanded
+  details with a generic label. Widget state never appears in a backup.
 - App-lock overlay: an unlock screen replaces all content, with no
   workspace data composed behind it, using one platform biometric prompt
   with device-credential fallback. It takes precedence over the recovery
@@ -314,3 +302,27 @@ approved white card, coral status bars, and dark cursor foreground. Normal and
 round launcher resources share that adaptive artwork; the monochrome layer
 keeps the card, bars, and cursor distinct for themed or minimal icon treatment.
 The artwork stays centred with safe inset under Android launcher's round mask.
+
+## Stage 7 ergonomics
+
+Tasks and project-workbench lists expose compact sort and group controls. Sort
+directions are fixed: due soonest, priority highest, title A–Z, or most recently
+updated. Grouping is limited to due bucket, project where applicable, and
+priority. Board columns retain workflow grouping and expose only in-column due,
+priority, or title sorting.
+
+Saved filters appear as identity-stable chips. Typing may refine an active
+filter without discarding its due-bucket, priority, semantic-status, or sort
+choices; the active chip remains visible with an explicit clear action.
+
+Quick Add presents each detected project, tag, priority, recurrence, estimate,
+or date phrase as a suggestion chip. A token applies only after its own chip is
+confirmed, may be dismissed independently, and never silently rewrites the
+title. Task detail exposes Duplicate and board-card menus do likewise;
+successful duplication offers the ordinary snackbar Undo.
+
+Insights replaces solid progress bars with ember dot runs and adds a dotted
+completion-per-day trend for the selected range. Chart and table presentations
+remain equivalent. Dots and charts are decorative beneath merged label-and-value
+semantics, so density, shape, text, and accessibility names carry the signal
+rather than colour alone.

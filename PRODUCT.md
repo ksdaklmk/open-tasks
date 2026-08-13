@@ -69,11 +69,11 @@ silent attachment-intake auto-resume. It adds a frozen whole-vault archive
 format (`.otvault`) with an independent Node fixture generator, encrypted
 export through the Storage Access Framework, and encrypted import with a
 confirmable preview, staged activation, and rollback until first unlock.
-It adds disclosed, formula-safe CSV export; a Home-screen Today widget;
-app lock with title privacy and a unified Quick Add reachable from a
-launcher shortcut, the widget, and the app itself; keyboard, mouse, and
-accessible-action shortcuts with a help dialog; and one-way calendar
-insertion from the task editor and Schedule. Stage 5 explicitly ships no
+It adds disclosed, formula-safe CSV export; a Home-screen Today widget; app
+lock with title privacy and a unified Quick Add reachable from a launcher
+shortcut, the widget, and the app itself; keyboard, mouse, and
+accessible-action shortcuts with a help dialog; and one-way calendar insertion
+from the task editor and Schedule. Stage 5 explicitly ships no
 bidirectional sync path, no in-row attachment transfer-progress display,
 nothing beyond a snapshot-only `.otvault` export, and no stored calendar
 event identifier: calendar insertion is a one-way, fire-and-forget
@@ -95,6 +95,25 @@ Stage 6 adds no cloud surface, runtime permission, third-party CSV format,
 record merge, wearable surface, location reminder, or durable schema change.
 Markdown and CSV deliberately leave the encrypted vault as plaintext through
 person-selected Storage Access Framework documents.
+
+Stage 7's visible ergonomics changes give Tasks and project workbenches
+fixed-direction sort and bounded grouping, saved filters gain due-bucket,
+priority, semantic-status, and sort choices, and search uses one relevance
+ranking. Quick Add offers confirm-only project, tag, priority, recurrence, and
+estimate grammar; task detail and board cards can duplicate a task; Insights
+uses accessible dot runs and a completion-per-day trend; the app is light-only.
+The responsive Today widget keeps counts and Quick Add in its compact 2×1
+layout and adds focus-task actions at expanded height. Room remains v9 and the
+authenticated backup object format remains v1.
+
+The deliberate ceilings are equally visible. There is no sort-direction toggle
+or manual board rank; grouping is limited to due bucket, project, and priority;
+Quick Add does not express multi-word tags or weekday lists and never applies a
+token without confirmation. Arrangement preferences are device-local, deleted
+project entries may remain as bounded enum-and-ID residue, and Schedule and Home
+keep their existing comparators. Duplication omits reminders, recurrence,
+activity history, time entries, notes, and attachments. Stage 7 adds no external
+surface, permission, network path, cloud path, schema, or backup family.
 
 ## Approved future contract
 

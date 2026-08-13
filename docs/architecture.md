@@ -282,7 +282,9 @@ republishes only while a vault is active, and stops when that slot is
 replaced or the runtime tears down. Every title write passes through the
 mutex-gated `StopGatedWriter`, which exposes one `titlesPermitted` seam
 consulted at write time, so no write can land after a stop-time title
-clear.
+clear. Responsive Glance layouts keep both counts and Quick Add in the compact
+2×1 surface; only a taller layout reads the optional title rows and exposes
+their open/complete actions.
 
 Time entries are first-class records in `WorkspaceSnapshot`. Starting a timer
 inserts an open entry; stopping it closes that same entry, and elapsed time is
@@ -505,3 +507,28 @@ separate `BackupObjectStore` and `AttachmentBlobStore` boundaries. Their shared
 codec is provider-independent, and only `RecoveryCoordinator` may use decoded
 backup data to construct a staged replacement Room vault. Live structured data
 is never synchronized or merged from Drive during normal operation.
+
+## Stage 7 ergonomics boundary
+
+Stage 7 keeps the existing module direction. `core:model` owns the shared
+due-bucket, sort, group, and saved-filter vocabulary. `core:domain` is the one
+authority for task arrangement, search filtering and ranking, Quick Add token
+parsing, task-duplication planning, and the zone-aware Insights completion
+trend. `app` applies those rules, owns command dispatch, and persists only
+arrangement enum names and project IDs in the device-local `view_prefs` file.
+Stateless Tasks, Projects, and More features render the resulting plain data
+and emit choices through callbacks.
+
+Saved-view payloads use strict version-first decoding: existing v1 rows remain
+readable, new or updated rows encode deterministic v2 payloads, and malformed or
+future versions remain stored but invisible. The v2 due-bucket, priority,
+semantic-status, and sort fields stay inside the existing encrypted saved-view
+record and its content-based journal fingerprint.
+
+Quick Add widens the existing `CreateTask` command so confirmed tags, estimate,
+and recurrence are validated and written atomically with the task and one Undo.
+`DuplicateTask` is likewise one repository command in both engines: it writes
+the ruled task fields, fresh unticked checklist rows, activity, and journal state
+atomically, while excluding reminder, recurrence, time-entry, note, attachment,
+and prior-activity state. Room remains v9 and the authenticated backup object
+format remains v1; Stage 7 adds no schema, backup family, or external data path.

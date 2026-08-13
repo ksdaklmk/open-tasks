@@ -1,71 +1,87 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 18 safe pause, 13 August 2026
+## Current resume point — Task 18 safe pause after exact-head gate RED, 13 August 2026
 
 This section is authoritative. Older chronological notes below are retained
-for context; any conflicting billing prerequisite, live-backlog label, or
-pre-execution status is superseded here.
+for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
+status are superseded here.
 
-- Stage 7 remains local and unpushed on `main`. The committed product/test
-  candidate head is `1b5f3a3431627cc7fc2040af72aca0d917884611`; this
-  authoritative section is its later docs-only pause checkpoint. `0578518`
-  routes the Today
-  widget through the canonical Quick Add action and makes the sole
-  `MainActivity` native `singleTop`; `1b5f3a3` hardens that boundary test.
-  No tag or other remote mutation has occurred.
-- Exact-head host, release, schema, fixture, workflow, and privacy gates are
-  green. The JVM/lint/debug gate executed 553/553 actions; all six Android-test
-  sources compiled; the signed release executed 442/442 actions and passed
-  `verify-release-apk.sh`; Room remains v9, all five fixture families are
-  byte-identical, and the manifest/privacy audit found only the intentional
-  `singleTop` delta. The verified APK SHA-256 is
-  `0f6d2861c824a74efb3935d80d7d9309f624e6788b9e683b3dc4f7e394d16ddc`.
-- The final six-module Step 11 run at that head is **RED**, not waived. Data
-  passed 179/179, Tasks 43/43, Schedule 2/2, and More 64/64. Projects passed
-  22/23; App ran 80 tests with its two established skips and two failures. The
-  run took 1h21m14s. The three failures are diagnosed as test-boundary races:
-  workflow Add was tapped while Gboard settled; the large-text Quick Add test
-  observed the activity window although its sheet owns a dialog window; and
-  the new activity test created a durable vault that polluted the immediately
-  following recovery class in the same process.
-- Three **uncommitted work-in-progress test files** must be treated as one
-  unfinished remediation, not as qualified code:
-  `MainActivityQuickAddInstrumentedTest.kt`,
-  `QuickAddSheetInstrumentedTest.kt`, and
-  `ProjectWorkbenchInstrumentedTest.kt`. Projects adds the already-used
-  `closeSoftKeyboard()` before its physical Add tap and passed focused 1/1.
-  The activity draft no longer creates a vault; it splits proof between native
-  `singleTop`/intent delivery and the existing real-sheet root-wiring test. Its
-  paired activity/recovery run passed 2/2 before a final bounded cold-start wait
-  was added; recompile and rerun that pair. The current Quick Add draft passed
-  focused 1/1, but independent review found its live-IME observer can attach
-  after animation preparation, so **do not commit it as-is**.
-- Resume the Quick Add correction by intercepting platform text input only in
-  `largeTextActionsCanBeReachedWithImeVisible`, dispatching a synthetic visible
-  IME inset to the actual Espresso `isDialog()` root, and retaining the exact
-  title, enabled, displayed, 48 dp, physical-click, and callback assertions.
-  Then compile, rerun the Quick Add test and the two activity classes, obtain a
-  zero-Critical/Important re-review of all three files, and commit only those
-  paths. Do not add Android Test Orchestrator or a destructive production/test
-  vault-reset API for this one boundary test.
-- After that commit, rerun the complete six-module Step 11 gate. If green,
-  rebuild/verify the signed candidate as required, repeat the actual signed
-  widget-host smoke, finish the remaining release checklist, destroy only the
-  disposable overlay, write the eight Task 18 qualification/contract docs,
-  and proceed with GitHub Free-only push/CI/tag steps. `RELEASING.md` still has
-  stale first-launch wording: production offers `Start without restoring`, not
-  initial vault-passphrase creation. Correct that wording under explicit docs
-  scope before claiming a literal 7/7 smoke pass.
-- The sole audited read-only `Fold8_Acceptance` overlay is still alive; no
-  Gradle or instrumentation process is running. Focused tests most recently
-  installed the debug package. Keep the overlay untouched until work resumes,
-  then revalidate sole-target identity before any command. The protected
-  `Pixel_10_Pro_Fold` was never touched.
+- Stage 7 remains local and unpushed on `main`. The implementation base is
+  `7026596d33c6430d4a05919fd1e05f174a6cefd7`; the reviewed product/test
+  candidate and recorded `implementationHeadSha` is
+  `ec09e1b1e48653e61e4ecc833c54b5962b0fef92`. It contains version 1.1.0
+  (versionCode 2), the connected-boundary repairs at `cfd7b52`, corrected
+  first-launch instructions at `d93236a`, and the responsive Today-widget
+  correction at `ec09e1b`. No remote mutation or `v1.1.0` tag has occurred.
+- The responsive widget correction is committed and independently reviewed
+  with zero Critical, Important, or Minor findings. On the actual launcher,
+  the compact widget kept counts and its 48 dp Quick Add action visible at
+  normal and 200% text; tapping the action opened an exactly empty Quick Add
+  sheet. That focused host proof remains valid, but it is not the final signed
+  release smoke.
+- Exact-head non-device gates at `ec09e1b` are green. The forced
+  `testDebugUnitTest lintDebug :app:assembleDebug` gate executed 553/553
+  actions in 5m08s; its XML records 1,235 tests with zero failures, errors, or
+  skips. All six Android-test sources compiled in the 219-action graph. Room
+  v9 drift executed 33/33 actions; all five frozen fixture families were
+  byte-identical; workflow pinning and whitespace passed. The literal Stage 7
+  privacy/release audit found no logging, endpoint, schema, or backup-family
+  drift: 12 manifests are byte-identical and the app manifest's sole semantic
+  delta is the reviewed `MainActivity` `singleTop`, with permissions, exports,
+  filters, providers, services, and receivers unchanged.
+- The final six-module connected gate at `ec09e1b` is **RED and not waived**.
+  Its first attempt passed Projects 23/23, Schedule 2/2, Tasks 43/43, Data
+  179/179, and More 64/64, but App never ran because UTP rejected its debug APK
+  with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. UTP cleanup left both app packages
+  absent; a bounded debug install/uninstall proof passed. The complete restart
+  then ran 455 actions in 1h19m57s. XML records Data 179/0/0/0, Tasks
+  43/0/0/0, Projects 23/0/0/0, Schedule 2/0/0/0, App 80/0/0/2, and More
+  64/1/0/0: 391 tests total, 388 passed, exactly the two established skips,
+  and one failure. The failing row is
+  `BackupRecoveryScreenInstrumentedTest.passphraseValidationUsesExactLengthAndMismatchGuidance`:
+  after entering a short passphrase and tapping submit, line 548 could not see
+  the exact `Use 12–128 characters.` guidance. Read-only triage found the
+  merged text-field node and exact copy present; the password IME had opened
+  with a large bottom inset and left the node outside the scroll viewport.
+  Production validation/state/copy worked. The smallest robust test correction
+  is to `performScrollTo()` before asserting each guidance node is displayed,
+  preserving reachability rather than weakening the assertion to existence.
+  No code change or focused rerun has been made.
+- Resume by applying that bounded test correction, then run its focused
+  RED/GREEN proof, the full More suite, an independent scoped review, the Step 9
+  local/compile checks, and the complete six-module connected gate from zero.
+  Only a green aggregate may proceed to a forced signed build and
+  `verify-release-apk.sh`; compute a new byte count and SHA-256 and do not reuse
+  the earlier artifact digest.
+- The final signed install and literal seven-row `RELEASING.md` smoke remain
+  pending, as do saved filter, grammar capture, duplicate/Undo, and Insights
+  chart/table extras. The provisional signed workspace/widget was erased for
+  the debug gate, so the eventual exact-head signed smoke must start fresh.
+  After all rows pass, remove temporary credential material, disable the
+  disposable screen credential, and destroy only the audited overlay.
+- Then finish the qualification records, push `main` under the GitHub Free-only
+  ruling, and qualify the exact candidate push run. Require `verify`,
+  `release`, and exactly one API 36 job green. Keep exactly one API 37.0 lane
+  observe-only; if red, record its reason exactly as
+  **credential-encrypted storage unavailable**. Only then create and push
+  annotated tag `v1.1.0`, followed by the HANDOFF-only closure commit.
+- Stage 8 remains next: month planning, drag-to-reschedule, Gantt-lite, and an
+  opt-in daily digest, with no durable schema change. Stage 9 remains the one
+  Room v10 wave for automations-lite, board WIP limits, My Day ordering, and
+  subtasks. The repository-wide Unicode tag-identity policy remains a bounded
+  deferred hardening task; do not patch only one caller.
+- Safe-pause state: no Gradle or instrumentation process is running. The sole
+  audited `Fold8_Acceptance` read-only overlay remains alive for resumption;
+  UTP cleanup left both the app and test packages absent. Its disposable
+  system credential and protected temporary credential file
+  remain in place and must never be printed. Revalidate that it is the sole
+  target before every device action. The protected `Pixel_10_Pro_Fold` was not
+  touched and must not be booted, installed to, changed, or killed.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
-  paid GitHub service. Use remote CI only if the included free allowance is
-  available; otherwise pause at that gate.
-- Preserve the exact unrelated dirty state: modified
+  paid GitHub service. If included runner allowance is unavailable, stop at
+  the remote gate without tagging.
+- Preserve the unrelated dirty state: modified
   `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
   deleted user-owned
   `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and

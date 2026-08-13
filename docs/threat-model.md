@@ -159,6 +159,7 @@ fails safely where practical and must not weaken platform protections.
 | T30 | A third-party app invokes the Quick Settings capture surface | The exported tile requires the platform-only `BIND_QUICK_SETTINGS_TILE` permission and launches the existing lock-gated Quick Add route with no task-text extra | A compromised System UI is within the compromised-OS assumption; the tile deliberately reveals that Open Tasks is installed |
 | T31 | A hostile CSV exhausts memory or corrupts existing records | Import caps input at 5 MiB and 5,000 rows, requires strict UTF-8 and the exact own-schema header, validates every row and relation before dispatch, previews create counts, creates only new records atomically, and returns exact Undo | CSV import deliberately duplicates matching records; it never attempts identity matching or third-party format recovery |
 | T32 | Markdown export discloses project content outside the vault | Export is a user-selected, project-scoped SAF write; the product labels the format plain Markdown and deletes a partial document on every non-success path | The completed Markdown file is permanently plaintext and its custody belongs to the person who exported it |
+| T33 | Hostile Quick Add text or a malformed saved-view payload causes unintended mutation or unbounded decode | Quick Add uses bounded pure parsing and confirm-only chips before repository validation; saved views cap names, text, count, and payload bytes, strictly decode only version 1 or 2, reject unknown keys and enums, and keep failed rows invisible | Quick Add deliberately recognizes a small grammar; a future payload version remains retained but unusable until a reviewed decoder exists |
 
 ## Cryptographic invariants
 
@@ -276,6 +277,28 @@ selected project's summary, milestones, and tasks in readable text. This is an
 interop feature rather than a confidentiality claim; completed-file custody
 belongs to the person, while all partial-output failure paths delete the
 document.
+
+## Stage 7 addendum
+
+Stage 7 parses Quick Add and saved-view payloads as bounded untrusted input.
+Grammar matches remain transient suggestions until individually confirmed;
+ordinary repository validation still governs the resulting atomic command.
+Saved-view decoding is version-first and strict for v1 and v2, with the existing
+20-view, 64-character name, 500-character query, and 2 MiB payload bounds.
+
+Sort and group persistence uses the private device-local `view_prefs` file. It
+contains only enum names and project IDs, never task text, query text, vault
+records, keys, or backup content, and preferences remain outside the exact-file
+Android backup allow-list. Deleted-project entries are bounded identifier-only
+residue rather than a cleanup path over vault data.
+
+`DuplicateTask` is one validated repository mutation and deliberately excludes
+the source reminder as well as recurrence, time entries, notes, attachments,
+and prior activity. It therefore cannot arm a second alarm or enter the reminder
+scheduler except through a later explicit edit. The Stage 7 changes add no
+exported component, intent filter, runtime permission, Storage Access Framework
+flow, provider scope, network request, or cloud object family. Room remains v9
+and the authenticated backup object format remains v1.
 
 ## Security acceptance gates
 

@@ -59,6 +59,10 @@ race KSP while release Hilt sources are generated.
 - Navigation is **Navigation 3** (`NavDisplay` + `rememberNavBackStack` + `entryProvider`, routes are `@Serializable data object … : NavKey`). Not `navigation-compose`, no `NavHost`.
 - Layout comes from `WorkspaceLayoutPolicy.calculate(WindowPosture)`, never
   from `WindowSizeClass` or device model.
+- `arrangeTasks` in `core:domain` is the comparator authority for Stage 7
+  Tasks, workbench, and board ordering; `searchWorkspace` is the shared filter
+  and ranking authority for both repositories. Do not recreate either rule in
+  `app` or a feature. Schedule and Home retain their separate existing order.
 
 ## Data and security
 
@@ -103,6 +107,27 @@ race KSP while release Hilt sources are generated.
   fingerprint must remain content-based over the complete encoded backup
   record. Never revert it to identity-only: a rename or query update must
   journal an upsert without a Room or backup-format change.
+- `SavedViewPayloadCodec` reads `formatVersion` first, strictly decodes only v1
+  and v2, and deterministically encodes v2. Unknown or malformed payloads stay
+  stored but invisible. Keep the 20-view, 64-character name, 500-character
+  query, and 2 MiB payload bounds; never rewrite existing v1 rows merely to
+  upgrade them.
+- `view_prefs` is device-local non-vault state. Store only arrangement enum
+  names and project IDs there—never task/query text, keys, or backup content.
+- Quick Add grammar is suggestion-only: every token requires an individual
+  confirmation before title stripping or command fields change. Keep matching
+  on `Locale.ROOT`, the 50-tags-per-task limit, positive estimates no greater
+  than 24 hours, and recurrence's required due date. Multi-word grammar tags
+  and weekday lists remain unsupported.
+- The Today widget remains responsive at a 2×1 minimum: compact layouts expose
+  both counts and Quick Add; only expanded heights render privacy-gated focus
+  titles and their open/complete actions.
+- `DuplicateTask` must exclude completion, reminders, recurrence/series state,
+  prior activity, time entries, notes, and attachments. Both repositories must
+  keep the copy and its repository-produced Undo atomic.
+- Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
+  add a schema, backup family, exported surface, permission, or network path for
+  its ergonomics state.
 - `AttachmentBlobCoordinator.resume()` has exactly one product caller: the
   silent auto-resume in `AttachmentRuntime.resumeInterruptedSessions()`,
   which runs strictly after session expiry on runtime start and re-arms
@@ -132,6 +157,8 @@ race KSP while release Hilt sources are generated.
 ## Style
 
 - Colors are authored as OKLCH via `oklch(...)` in `:core:designsystem`. Never introduce hex color literals. A `PreToolUse` hook blocks `.kt` writes containing `Color(0x` outside `core/designsystem`.
+- `OpenTasksTheme` is light-only, even under a dark device configuration. Do
+  not add a dark scheme or theme preference.
 - Spacing uses the 4 dp scale (4, 8, 12, 16, 24, 32, 48, 64). Typography uses Material roles only — no ad-hoc sizes in feature code. Dynamic Color is disabled.
 - No formatter is configured by choice; `kotlin.code.style=official` plus IDE reformat is the authority. Follow the existing conventions: trailing commas in multi-line lists, wrap near 100 chars, explicit imports (no wildcards), underscores in numeric literals, per-declaration `@OptIn`.
 - New UI copy goes in `res/values/strings.xml` and is read with `stringResource` (existing screens hardcode literals; do not follow that).
@@ -146,7 +173,9 @@ race KSP while release Hilt sources are generated.
 ## Repo
 
 - Commit straight to `main`; no branch or PR ceremony.
-- No secrets or env vars are needed for local development. There is no signing config — release builds are unsigned.
+- No secrets or env vars are needed for local development. Local release builds
+  sign only when the gitignored `keystore.properties` and external keystore are
+  present; CI release builds remain unsigned.
 - GitHub Actions `uses:` references stay SHA-pinned;
   `scripts/verify-actions-workflow.sh` enforces this and the CI matrix shape.
 
