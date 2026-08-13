@@ -69,7 +69,7 @@ session, uninstall the inherited debug build first (overlay-only):
 
 Then, by hand:
 
-1. Fresh launch → create a vault with a passphrase.
+1. Fresh launch → choose `Start without restoring` to create the local workspace.
 2. Add a project, a task with a checklist item, and a tag.
 3. Force-stop and relaunch → everything from step 2 persists.
 4. Export `.otvault`, then import it back → counts match.
@@ -106,7 +106,7 @@ first so adb has exactly one target.
 
        adb install app/build/outputs/apk/release/app-release.apk
 
-   Expect `Success`. First launch asks for a new vault passphrase.
+   Expect `Success`. On first launch, choose `Start without restoring` to create the local workspace.
 
 Troubleshooting:
 
