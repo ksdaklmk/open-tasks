@@ -8,6 +8,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle as ComposeTextStyle
 import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
@@ -16,7 +18,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.LocalContext
+import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
@@ -24,6 +29,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
@@ -34,11 +40,14 @@ import androidx.glance.appwidget.updateAll
 import androidx.glance.background
 import androidx.glance.color.ColorProvider
 import androidx.glance.currentState
+import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.semantics.contentDescription
 import androidx.glance.semantics.semantics
 import androidx.glance.text.FontWeight
@@ -86,6 +95,25 @@ private val WidgetMutedInk =
     ColorProvider(day = OpenTasksColors.LightMutedInk, night = OpenTasksColors.LightMutedInk)
 private val WidgetAccent =
     ColorProvider(day = OpenTasksColors.LightEmber, night = OpenTasksColors.LightEmber)
+private val CompactNarrowWidgetSize = DpSize(130.dp, 48.dp)
+private val CompactWideWidgetSize = DpSize(200.dp, 48.dp)
+private val ExpandedNarrowWidgetSize = DpSize(130.dp, 288.dp)
+private val ExpandedWideWidgetSize = DpSize(200.dp, 288.dp)
+private val TodayWidgetSizes = setOf(
+    CompactNarrowWidgetSize,
+    CompactWideWidgetSize,
+    ExpandedNarrowWidgetSize,
+    ExpandedWideWidgetSize,
+)
+
+internal fun todayWidgetShowsDetails(height: Dp): Boolean =
+    height >= ExpandedNarrowWidgetSize.height
+
+internal fun todayWidgetUsesWideCounts(width: Dp): Boolean =
+    width >= CompactWideWidgetSize.width
+
+internal fun todayWidgetUsesVerboseCounts(width: Dp, fontScale: Float): Boolean =
+    todayWidgetUsesWideCounts(width) && fontScale <= 1.3f
 
 // Glance (1.1.1) has no typography-role system of its own -- `glance-material3`
 // only converts a Compose Material3 `ColorScheme` to Glance `ColorProviders`,
@@ -119,6 +147,8 @@ private fun glanceTextStyle(
  * writes -- this class never opens the vault itself.
  */
 class TodayWidget : GlanceAppWidget() {
+    override val sizeMode = SizeMode.Responsive(TodayWidgetSizes)
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             TodayWidgetContent()
@@ -169,19 +199,77 @@ private fun TodayWidgetContent() {
     val openToday = prefs[OpenTodayCountKey] ?: 0
     val overdue = prefs[OverdueCountKey] ?: 0
     val titlesPermitted = prefs[TitlesPermittedKey] ?: false
-    val entries = if (titlesPermitted) prefs.readFocusEntries() else emptyList()
+    val size = LocalSize.current
+    val showsDetails = todayWidgetShowsDetails(size.height)
+    val usesVerboseCounts = todayWidgetUsesVerboseCounts(
+        width = size.width,
+        fontScale = context.resources.configuration.fontScale,
+    )
+    val counts = context.getString(R.string.today_widget_counts, openToday, overdue)
+    val quickAdd = context.getString(R.string.quick_add)
+    val entries = if (showsDetails && titlesPermitted) prefs.readFocusEntries() else emptyList()
+
+    if (!showsDetails) {
+        Row(
+            modifier = GlanceModifier
+                .fillMaxSize()
+                .background(WidgetBackground)
+                .cornerRadius(16.dp)
+                .padding(start = 4.dp, end = 4.dp)
+                .clickable(actionStartActivity<MainActivity>()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (usesVerboseCounts) {
+                    counts
+                } else {
+                    context.getString(
+                        R.string.today_widget_compact_numbers,
+                        openToday,
+                        overdue,
+                    )
+                },
+                maxLines = 1,
+                style = glanceTextStyle(MaterialTypography.labelSmall, WidgetInk),
+                modifier = GlanceModifier
+                    .defaultWeight()
+                    .semantics { contentDescription = counts },
+            )
+            Image(
+                provider = ImageProvider(R.drawable.ic_quick_add),
+                contentDescription = quickAdd,
+                modifier = GlanceModifier
+                    .size(48.dp)
+                    .clickable(quickAddAction(context)),
+            )
+        }
+        return
+    }
 
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .background(WidgetBackground)
             .cornerRadius(16.dp)
-            .padding(16.dp)
+            .padding(8.dp)
             .clickable(actionStartActivity<MainActivity>()),
     ) {
         Text(
-            text = context.getString(R.string.today_widget_counts, openToday, overdue),
-            style = glanceTextStyle(MaterialTypography.titleMedium, WidgetInk),
+            text = if (usesVerboseCounts) {
+                counts
+            } else {
+                context.getString(R.string.today_widget_compact_numbers, openToday, overdue)
+            },
+            maxLines = 1,
+            style = glanceTextStyle(
+                if (usesVerboseCounts) {
+                    MaterialTypography.titleMedium
+                } else {
+                    MaterialTypography.bodySmall
+                },
+                WidgetInk,
+            ),
+            modifier = GlanceModifier.semantics { contentDescription = counts },
         )
         if (titlesPermitted) {
             entries.forEach { entry ->
@@ -194,20 +282,27 @@ private fun TodayWidgetContent() {
                 modifier = GlanceModifier.padding(top = 4.dp),
             )
         }
-        Text(
-            text = context.getString(R.string.quick_add),
-            style = glanceTextStyle(MaterialTypography.labelLarge, WidgetAccent),
+        Row(
             modifier = GlanceModifier
-                .padding(top = 8.dp)
-                .clickable(
-                    actionStartActivity(
-                        Intent(context, MainActivity::class.java)
-                            .setAction(MainActivity.QUICK_ADD_ACTION),
-                    ),
-                ),
-        )
+                .fillMaxWidth()
+                .height(48.dp)
+                .clickable(quickAddAction(context)),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = quickAdd,
+                maxLines = 1,
+                style = glanceTextStyle(MaterialTypography.labelLarge, WidgetAccent),
+            )
+        }
     }
 }
+
+private fun quickAddAction(context: Context) =
+    actionStartActivity(
+        Intent(context, MainActivity::class.java)
+            .setAction(MainActivity.QUICK_ADD_ACTION),
+    )
 
 /**
  * One focus-task row: the title tap-opens [entry]'s task through the

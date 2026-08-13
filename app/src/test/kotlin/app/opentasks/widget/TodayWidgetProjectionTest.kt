@@ -1,5 +1,7 @@
 package app.opentasks.widget
 
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
@@ -52,6 +54,28 @@ class TodayWidgetProjectionTest {
 
     private fun momentAt(hour: Int, zoneId: ZoneId = zone): ZonedMoment =
         ZonedMoment(today.atTime(hour, 0).atZone(zoneId).toInstant(), zoneId.id)
+
+    @Test
+    fun responsiveSizesKeepCompactActionsAndExpandDetails() {
+        val sizes = TodayWidget().sizeMode.sizes
+
+        assertEquals(
+            setOf(
+                DpSize(130.dp, 48.dp),
+                DpSize(200.dp, 48.dp),
+                DpSize(130.dp, 288.dp),
+                DpSize(200.dp, 288.dp),
+            ),
+            sizes,
+        )
+        assertFalse(todayWidgetShowsDetails(48.dp))
+        assertFalse(todayWidgetShowsDetails(287.dp))
+        assertTrue(todayWidgetShowsDetails(288.dp))
+        assertFalse(todayWidgetUsesWideCounts(199.dp))
+        assertTrue(todayWidgetUsesWideCounts(200.dp))
+        assertTrue(todayWidgetUsesVerboseCounts(200.dp, 1.3f))
+        assertFalse(todayWidgetUsesVerboseCounts(200.dp, 2f))
+    }
 
     @Test
     fun todayByStartCountsAnOpenTaskStartingToday() {
