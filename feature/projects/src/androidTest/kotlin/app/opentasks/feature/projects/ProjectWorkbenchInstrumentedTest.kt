@@ -478,6 +478,7 @@ class ProjectWorkbenchInstrumentedTest {
         composeRule.onNodeWithTag("new-workflow-status-name")
             .performScrollTo()
             .performTextInput("Review queue")
+        closeSoftKeyboard()
         composeRule.onNodeWithTag("add-workflow-status")
             .performScrollTo()
             .performClick()

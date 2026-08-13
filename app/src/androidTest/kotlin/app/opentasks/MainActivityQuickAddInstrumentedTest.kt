@@ -4,16 +4,10 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.text.AnnotatedString
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,18 +25,22 @@ class MainActivityQuickAddInstrumentedTest {
     val composeRule = createEmptyComposeRule()
 
     @Test
-    fun warmQuickAddActionReusesMainActivityAndOpensSheet() {
+    fun warmQuickAddActionReusesMainActivityAndDeliversIntent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val application = context.applicationContext as Application
         val created = AtomicInteger()
         val resumed = AtomicReference<MainActivity>()
+        val resumedAction = AtomicReference<String?>()
         val callbacks = object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, state: Bundle?) {
                 if (activity is MainActivity) created.incrementAndGet()
             }
 
             override fun onActivityResumed(activity: Activity) {
-                if (activity is MainActivity) resumed.set(activity)
+                if (activity is MainActivity) {
+                    resumed.set(activity)
+                    resumedAction.set(activity.intent.action)
+                }
             }
 
             override fun onActivityStarted(activity: Activity) = Unit
@@ -58,7 +56,11 @@ class MainActivityQuickAddInstrumentedTest {
         try {
             scenario = ActivityScenario.launch(scenarioIntent)
             scenario.onActivity(first::set)
-            waitForWorkspace()
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onAllNodesWithTag("recovery-shell")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
             composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
 
             scenario.onActivity { activity ->
@@ -69,17 +71,17 @@ class MainActivityQuickAddInstrumentedTest {
             }
 
             composeRule.waitUntil(timeoutMillis = 10_000) {
-                composeRule.onAllNodesWithTag("quick-add-title")
-                    .fetchSemanticsNodes().isNotEmpty()
+                resumed.get() === first.get() &&
+                    resumedAction.get() == MainActivity.QUICK_ADD_ACTION
             }
-            composeRule.onNodeWithTag("quick-add-title").assert(
-                SemanticsMatcher.expectValue(
-                    SemanticsProperties.InputText,
-                    AnnotatedString(""),
-                ),
-            )
+            scenario.onActivity { activity ->
+                assertSame(first.get(), activity)
+                assertEquals(MainActivity.QUICK_ADD_ACTION, activity.intent.action)
+            }
             assertEquals(1, created.get())
             assertSame(first.get(), resumed.get())
+            composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
+            composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
         } finally {
             try {
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {
@@ -91,23 +93,6 @@ class MainActivityQuickAddInstrumentedTest {
                 scenario?.close()
             } finally {
                 application.unregisterActivityLifecycleCallbacks(callbacks)
-            }
-        }
-    }
-
-    private fun waitForWorkspace() {
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithContentDescription("Quick add task")
-                    .fetchSemanticsNodes().isNotEmpty()
-        }
-        if (
-            composeRule.onAllNodesWithTag("recovery-shell").fetchSemanticsNodes().isNotEmpty()
-        ) {
-            composeRule.onNodeWithText("Start without restoring").performClick()
-            composeRule.waitUntil(timeoutMillis = 10_000) {
-                composeRule.onAllNodesWithContentDescription("Quick add task")
-                    .fetchSemanticsNodes().isNotEmpty()
             }
         }
     }

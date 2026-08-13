@@ -1,15 +1,20 @@
 package app.opentasks
 
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -30,11 +35,17 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.UiController
+import androidx.test.espresso.ViewAction
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.QuickAddTokenKind
@@ -52,6 +63,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.awaitCancellation
+import org.hamcrest.Matcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -66,6 +79,27 @@ class QuickAddSheetInstrumentedTest {
     private val clock = Clock.fixed(now, zone)
     private val projects = listOf(OpenTasksFixtures.studioProject, OpenTasksFixtures.taxProject)
     private val tags = OpenTasksFixtures.tags
+
+    private fun dispatchDialogIme() {
+        onView(isRoot()).inRoot(isDialog()).perform(
+            object : ViewAction {
+                override fun getConstraints(): Matcher<View> = isRoot()
+
+                override fun getDescription() = "dispatch a visible 300 dp dialog IME inset"
+
+                override fun perform(uiController: UiController, view: View) {
+                    val bottom = (300 * view.resources.displayMetrics.density).toInt()
+                    ViewCompat.dispatchApplyWindowInsets(
+                        view,
+                        WindowInsetsCompat.Builder()
+                            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, bottom))
+                            .setVisible(WindowInsetsCompat.Type.ime(), true)
+                            .build(),
+                    )
+                }
+            },
+        )
+    }
 
     private fun parsed(text: String) = parseQuickAdd(text, now, zone, projects, tags)
 
@@ -96,52 +130,40 @@ class QuickAddSheetInstrumentedTest {
         }
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     @Test
     fun largeTextActionsCanBeReachedWithImeVisible() {
-        val imeVisible = AtomicBoolean(false)
         val submittedTitle = AtomicReference<String?>()
 
         composeRule.setContent {
             val density = LocalDensity.current
-            val imeBottom = WindowInsets.ime.getBottom(density)
-            SideEffect { imeVisible.set(imeBottom > 0) }
-
             CompositionLocalProvider(
                 LocalDensity provides Density(density.density, fontScale = 2f),
             ) {
                 OpenTasksTheme {
-                    QuickAddSheet(
-                        onDismiss = {},
-                        onAdd = { command -> submittedTitle.set(command.title) },
-                    )
+                    InterceptPlatformTextInput(
+                        interceptor = remember {
+                            PlatformTextInputInterceptor { _, _ -> awaitCancellation() }
+                        },
+                    ) {
+                        QuickAddSheet(
+                            onDismiss = {},
+                            onAdd = { command -> submittedTitle.set(command.title) },
+                        )
+                    }
                 }
             }
         }
 
-        composeRule.onNodeWithTag("quick-add-title").performTextInput("Reachable task")
-
-        // Whether a stock CI emulator image has a software keyboard
-        // registered at all is an environment property this test cannot
-        // control -- waiting on the real platform IME to attach makes the
-        // test's outcome depend on that availability rather than on the
-        // app's own `Modifier.imePadding()` layout, which is what this
-        // test is actually meant to prove. Drive the same window-inset
-        // dispatch a real keyboard would produce directly, so the
-        // assertions below exercise that layout path deterministically
-        // regardless of the host's IME.
-        composeRule.runOnUiThread {
-            val decorView = composeRule.activity.window.decorView
-            val simulatedImeInsetPx =
-                (300 * composeRule.activity.resources.displayMetrics.density).toInt()
-            val current = ViewCompat.getRootWindowInsets(decorView)
-                ?: WindowInsetsCompat.CONSUMED
-            val simulated = WindowInsetsCompat.Builder(current)
-                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, simulatedImeInsetPx))
-                .setVisible(WindowInsetsCompat.Type.ime(), true)
-                .build()
-            ViewCompat.dispatchApplyWindowInsets(decorView, simulated)
-        }
-        composeRule.waitUntil(timeoutMillis = 5_000) { imeVisible.get() }
+        dispatchDialogIme()
+        val title = composeRule.onNodeWithTag("quick-add-title")
+        title.performTextInput("Reachable task")
+        title.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.InputText,
+                AnnotatedString("Reachable task"),
+            ),
+        )
 
         composeRule.onNode(hasText("Cancel") and hasClickAction())
             .performScrollTo()
@@ -150,11 +172,12 @@ class QuickAddSheetInstrumentedTest {
             .assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNode(hasText("Add task") and hasClickAction())
             .assertIsDisplayed()
+            .assertIsEnabled()
             .assertWidthIsAtLeast(48.dp)
             .assertTouchHeightIsEqualTo(48.dp)
             .performClick()
 
-        assertTrue(imeVisible.get())
+        composeRule.waitUntil(timeoutMillis = 5_000) { submittedTitle.get() != null }
         assertEquals("Reachable task", submittedTitle.get())
     }
 
