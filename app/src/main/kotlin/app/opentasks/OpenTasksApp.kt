@@ -126,6 +126,7 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
@@ -315,7 +316,8 @@ fun OpenTasksApp(
         val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
         val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
         val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
-        val boardModeProjectIds by viewModel.boardModeProjectIds.collectAsStateWithLifecycle()
+        val projectWorkbenchViewState by
+            viewModel.projectWorkbenchViewState.collectAsStateWithLifecycle()
         val viewArrangement by viewModel.viewArrangement.collectAsStateWithLifecycle()
         val reviewActionPending by viewModel.reviewActionPending.collectAsStateWithLifecycle()
         val pendingBlockedBulk by
@@ -1304,7 +1306,9 @@ fun OpenTasksApp(
                                     selectedProjectId = selectedProjectId,
                                     showDetailPane = showDetailPane,
                                     listPaneFraction = listPaneFraction,
-                                    boardMode = selectedProjectId in boardModeProjectIds,
+                                    boardMode = selectedProjectId?.let {
+                                        projectWorkbenchViewState.presentationByProject[it]
+                                    } == ProjectPresentation.BOARD,
                                     boardColumnWidth = boardColumnWidth,
                                     workbenchTaskGroups = workbenchTaskGroups,
                                     workbenchSort = workbenchArrangement.sort,
@@ -1313,7 +1317,14 @@ fun OpenTasksApp(
                                     boardSort = boardSort,
                                     onBoardModeChange = { enabled ->
                                         selectedProjectId?.let {
-                                            viewModel.setBoardMode(it, enabled)
+                                            viewModel.setProjectPresentation(
+                                                it,
+                                                if (enabled) {
+                                                    ProjectPresentation.BOARD
+                                                } else {
+                                                    ProjectPresentation.LIST
+                                                },
+                                            )
                                         }
                                     },
                                     onWorkbenchSortChange = { sort ->

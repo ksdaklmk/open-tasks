@@ -13,6 +13,7 @@ import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.TagId
@@ -48,6 +49,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.DateTimeException
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -92,7 +95,7 @@ class WorkspaceViewModel @Inject constructor(
     private val selectionState = WorkspaceSelectionState(savedStateHandle)
     private val bulkSelectionState = WorkspaceBulkSelectionState(savedStateHandle)
     private val reviewProgressState = WorkspaceReviewProgressState(savedStateHandle)
-    private val boardViewState = WorkspaceBoardViewState(savedStateHandle)
+    private val projectViewState = WorkspaceProjectViewState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val pendingBlockedBulk = MutableStateFlow(false)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
@@ -123,7 +126,7 @@ class WorkspaceViewModel @Inject constructor(
 
     val reviewedProjectIds: StateFlow<Set<ProjectId>> = reviewProgressState.reviewedProjectIds
 
-    val boardModeProjectIds: StateFlow<Set<ProjectId>> = boardViewState.projectIds
+    val projectWorkbenchViewState: StateFlow<ProjectWorkbenchViewState> = projectViewState.state
 
     val reviewActionPending: StateFlow<Boolean> = reviewProgressState.actionPending
 
@@ -177,8 +180,16 @@ class WorkspaceViewModel @Inject constructor(
         selectionState.closeProject()
     }
 
-    fun setBoardMode(projectId: ProjectId, enabled: Boolean) {
-        boardViewState.setBoardMode(projectId, enabled)
+    fun setProjectPresentation(projectId: ProjectId, value: ProjectPresentation) {
+        projectViewState.setProjectPresentation(projectId, value)
+    }
+
+    fun setProjectTimelineFirstDate(projectId: ProjectId, value: LocalDate) {
+        projectViewState.setProjectTimelineFirstDate(projectId, value)
+    }
+
+    fun setProjectTimelineSelection(projectId: ProjectId, taskId: TaskId?) {
+        projectViewState.setProjectTimelineSelection(projectId, taskId)
     }
 
     fun setTasksArrangement(value: TaskArrangement) = viewArrangementStore.saveTasks(value)
@@ -941,34 +952,147 @@ internal class WorkspaceReviewProgressState(
     }
 }
 
-internal class WorkspaceBoardViewState(
+data class ProjectWorkbenchViewState(
+    val presentationByProject: Map<ProjectId, ProjectPresentation> = emptyMap(),
+    val timelineFirstDateByProject: Map<ProjectId, LocalDate> = emptyMap(),
+    val selectedTimelineTaskByProject: Map<ProjectId, TaskId> = emptyMap(),
+)
+
+/**
+ * Per-project planning state: presentation (LIST/BOARD/TIMELINE), the Timeline
+ * window anchor, and the Timeline dependency selection. `presentationByProject`
+ * carries only non-default (BOARD/TIMELINE) entries; an absent project is LIST.
+ * [PROJECT_BOARD_MODE_IDS] is retained verbatim so state saved before Timeline
+ * existed keeps restoring as BOARD.
+ */
+internal class WorkspaceProjectViewState(
     private val savedStateHandle: SavedStateHandle,
 ) {
-    private val mutableProjectIds = MutableStateFlow(restoredProjectIds())
+    private val mutableState = MutableStateFlow(restoredState())
 
-    val projectIds: StateFlow<Set<ProjectId>> = mutableProjectIds.asStateFlow()
+    val state: StateFlow<ProjectWorkbenchViewState> = mutableState.asStateFlow()
 
-    fun setBoardMode(projectId: ProjectId, enabled: Boolean) {
-        val ids = if (enabled) {
-            mutableProjectIds.value + projectId
+    fun setProjectPresentation(projectId: ProjectId, value: ProjectPresentation) {
+        val presentationByProject = if (value == ProjectPresentation.LIST) {
+            mutableState.value.presentationByProject - projectId
         } else {
-            mutableProjectIds.value - projectId
+            mutableState.value.presentationByProject + (projectId to value)
         }
-        mutableProjectIds.value = ids
-        savedStateHandle[PROJECT_BOARD_MODE_IDS] = ids
+        replace(mutableState.value.copy(presentationByProject = presentationByProject))
+    }
+
+    fun setProjectTimelineFirstDate(projectId: ProjectId, value: LocalDate) {
+        if (value.dayOfWeek != DayOfWeek.MONDAY) return
+        replace(
+            mutableState.value.copy(
+                timelineFirstDateByProject =
+                    mutableState.value.timelineFirstDateByProject + (projectId to value),
+            ),
+        )
+    }
+
+    fun setProjectTimelineSelection(projectId: ProjectId, taskId: TaskId?) {
+        val selectedTimelineTaskByProject = if (taskId == null) {
+            mutableState.value.selectedTimelineTaskByProject - projectId
+        } else {
+            mutableState.value.selectedTimelineTaskByProject + (projectId to taskId)
+        }
+        replace(
+            mutableState.value.copy(selectedTimelineTaskByProject = selectedTimelineTaskByProject),
+        )
+    }
+
+    private fun replace(value: ProjectWorkbenchViewState) {
+        mutableState.value = value
+        savedStateHandle[PROJECT_BOARD_MODE_IDS] = value.presentationByProject
+            .filterValues { it == ProjectPresentation.BOARD }
+            .keys
             .map(ProjectId::value)
+            .toCollection(ArrayList())
+        savedStateHandle[PROJECT_TIMELINE_MODE_IDS] = value.presentationByProject
+            .filterValues { it == ProjectPresentation.TIMELINE }
+            .keys
+            .map(ProjectId::value)
+            .toCollection(ArrayList())
+        savedStateHandle[PROJECT_TIMELINE_ANCHORS] = value.timelineFirstDateByProject
+            .flatMap { (projectId, date) -> listOf(projectId.value, date.toEpochDay().toString()) }
+            .toCollection(ArrayList())
+        savedStateHandle[PROJECT_TIMELINE_SELECTIONS] = value.selectedTimelineTaskByProject
+            .flatMap { (projectId, taskId) -> listOf(projectId.value, taskId.value) }
             .toCollection(ArrayList())
     }
 
-    private fun restoredProjectIds(): Set<ProjectId> =
-        (savedStateHandle.get<Any?>(PROJECT_BOARD_MODE_IDS) as? List<*>)
+    private fun restoredState(): ProjectWorkbenchViewState {
+        val presentationByProject = linkedMapOf<ProjectId, ProjectPresentation>()
+        restoredIds(PROJECT_BOARD_MODE_IDS).forEach {
+            presentationByProject[it] = ProjectPresentation.BOARD
+        }
+        // Timeline is read second so a project corrupted into both lists lands on Timeline.
+        restoredIds(PROJECT_TIMELINE_MODE_IDS).forEach {
+            presentationByProject[it] = ProjectPresentation.TIMELINE
+        }
+        return ProjectWorkbenchViewState(
+            presentationByProject = presentationByProject,
+            timelineFirstDateByProject = restoredAnchors(),
+            selectedTimelineTaskByProject = restoredSelections(),
+        )
+    }
+
+    private fun restoredIds(key: String): List<ProjectId> =
+        (savedStateHandle.get<Any?>(key) as? List<*>)
             .orEmpty()
             .mapNotNull { (it as? String)?.takeIf(String::isNotBlank) }
             .distinct()
-            .mapTo(linkedSetOf(), ::ProjectId)
+            .map(::ProjectId)
+
+    private fun restoredAnchors(): Map<ProjectId, LocalDate> {
+        val result = linkedMapOf<ProjectId, LocalDate>()
+        restoredPairs(PROJECT_TIMELINE_ANCHORS).forEach { (projectIdValue, epochDayValue) ->
+            val projectId = ProjectId(projectIdValue)
+            if (projectId in result) return@forEach
+            val epochDay = epochDayValue.toLongOrNull() ?: return@forEach
+            val date = try {
+                LocalDate.ofEpochDay(epochDay)
+            } catch (invalid: DateTimeException) {
+                return@forEach
+            }
+            if (date.dayOfWeek != DayOfWeek.MONDAY) return@forEach
+            result[projectId] = date
+        }
+        return result
+    }
+
+    private fun restoredSelections(): Map<ProjectId, TaskId> {
+        val result = linkedMapOf<ProjectId, TaskId>()
+        restoredPairs(PROJECT_TIMELINE_SELECTIONS).forEach { (projectIdValue, taskIdValue) ->
+            val projectId = ProjectId(projectIdValue)
+            if (projectId !in result) result[projectId] = TaskId(taskIdValue)
+        }
+        return result
+    }
+
+    /**
+     * Splits an alternating `[projectId, value, projectId, value, ...]` list into
+     * pairs, dropping a non-string entry, a blank entry, or a trailing unpaired
+     * entry without throwing. Non-string entries stay in position (as `null`) so
+     * a single corrupt element does not shift the remaining pairs.
+     */
+    private fun restoredPairs(key: String): List<Pair<String, String>> =
+        (savedStateHandle.get<Any?>(key) as? List<*>)
+            .orEmpty()
+            .map { it as? String }
+            .chunked(2)
+            .mapNotNull { chunk ->
+                val id = chunk.getOrNull(0)
+                val value = chunk.getOrNull(1)
+                if (id.isNullOrBlank() || value.isNullOrBlank()) null else id to value
+            }
 
     internal companion object {
         const val PROJECT_BOARD_MODE_IDS = "projectBoardModeIds"
+        const val PROJECT_TIMELINE_MODE_IDS = "projectTimelineModeIds"
+        const val PROJECT_TIMELINE_ANCHORS = "projectTimelineAnchors"
+        const val PROJECT_TIMELINE_SELECTIONS = "projectTimelineSelections"
     }
 }
 
