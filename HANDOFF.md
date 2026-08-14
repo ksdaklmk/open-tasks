@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — release 1.1.0 tagged under explicit Task 18 waivers, 14 August 2026
+## Current resume point — Stage 8 design approved, plan pending, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
@@ -43,8 +43,10 @@ status are superseded here.
   2026. This package registration does not create a Play Store listing; the
   release remains signed-sideload distribution.
 - Remaining work after this closure:
-  1. Stage 8: month planning, drag-to-reschedule, Gantt-lite, and an opt-in
-     daily digest, with no durable schema change.
+  1. Stage 8: its detailed planning-surfaces design is approved. Complete the
+     written-spec review gate, then write the implementation plan and execute
+     month planning, drag-to-reschedule, Gantt-lite, and the opt-in daily
+     digest with no durable schema change.
   2. Stage 9: the single Room v10 wave for automations-lite, board WIP limits,
      My Day ordering, and subtasks.
   3. Repository-wide Unicode tag-identity hardening; do not patch only one
@@ -65,6 +67,42 @@ status are superseded here.
   `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
   untracked `.kotlin/` and `artifacts/`. The ignored execution ledger is
   `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
+
+## Stage 8 detailed design approved — written-spec review pending — 14 August 2026
+
+The user approved all five Stage 8 design sections. The durable authority is
+`docs/superpowers/specs/2026-08-14-stage-8-planning-surfaces-design.md` under
+the approved Stage 7–9 roadmap. No product code, schema, backup format,
+permission, dependency, route, or Drive scope changed during design.
+
+Pinned rulings:
+
+- Integrate into existing surfaces: Week/Month in Schedule,
+  List/Board/Timeline in Projects, and inline daily-digest settings in More.
+- An undated task dropped onto a day becomes due at 18:00 in the device's
+  current local zone. A due-only task stays due-only and preserves its local
+  time and stored zone.
+- Month is a Monday-first 6×7 projection with a six-dot visual cap, exact
+  text semantics, start-else-due placement, and the existing selected-day
+  agenda/tray rather than a parallel store.
+- One exact dual-engine single-task schedule command owns start/due/reminder
+  mutation and Undo. Existing bulk due-only rescheduling remains unchanged.
+- Gantt-lite is a read-only, navigable 12-week project projection with dot-run
+  spans, milestone diamonds, blocked markers, and in-project transitive
+  prerequisite/dependant highlighting; no arrows or bar drag.
+- Daily digest is device-local, off by default, defaults to 08:00 local, uses
+  one inexact alarm and its own notification channel, computes counts through
+  `computeTodayProjection(..., titlesPermitted = false)`, and always exposes
+  generic lock-screen copy.
+- Stage 8 exits as signed sideload release 1.2.0 / versionCode 3 after the
+  roadmap's complete review, connected, repository, privacy, qualification,
+  and release gates.
+
+Resume by completing the brainstorming written-spec review gate. Once the
+user approves the committed spec, invoke `superpowers:writing-plans`, derive
+the implementation plan from it, self-review the plan, update this checkpoint,
+and pause for plan approval before implementation. Preserve the unrelated
+Stage 3 plan edit, deleted pinfo spec, `.kotlin/`, and `artifacts/`.
 
 ## Historical context
 
