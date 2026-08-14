@@ -122,9 +122,15 @@ class InMemoryBulkCommandTest {
     fun rescheduleTasksAndUndo() = runBlocking {
         withTimeout(5_000) {
             val before = repository.currentWorkspace()
-            val originals = before.tasks
-                .filterNot { it.isCompleted || it.recurrence != null }
-                .take(2)
+            val startBearing = before.tasks.first {
+                it.start != null && !it.isCompleted && it.recurrence == null
+            }
+            val originals = listOf(
+                startBearing,
+                before.tasks.first {
+                    it.id != startBearing.id && !it.isCompleted && it.recurrence == null
+                },
+            )
             val ids = originals.map { it.id }
             val due = ZonedMoment(Instant.parse("2026-08-14T10:00:00Z"), "Asia/Bangkok")
 
@@ -135,6 +141,7 @@ class InMemoryBulkCommandTest {
             val rescheduled = repository.currentWorkspace().tasks.associateBy { it.id }
             originals.forEach { original ->
                 val updated = rescheduled.getValue(original.id)
+                assertEquals(original.start, updated.start)
                 assertEquals(due, updated.due)
                 assertTrue(updated.revision.logicalCounter > original.revision.logicalCounter)
                 // Only due and the revision may differ from the original task.
@@ -251,6 +258,7 @@ class InMemoryBulkCommandTest {
                         description = task.description,
                         projectId = task.projectId,
                         priority = task.priority,
+                        start = task.start,
                         due = task.due,
                         recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
                         estimate = task.estimate,

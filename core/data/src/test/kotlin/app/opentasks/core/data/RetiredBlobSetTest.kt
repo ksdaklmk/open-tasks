@@ -138,6 +138,7 @@ class RetiredBlobSetTest {
                     description = original.description,
                     projectId = original.projectId,
                     priority = original.priority,
+                    start = original.start,
                     due = due,
                     recurrence = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3),
                     estimate = original.estimate,

@@ -16,11 +16,14 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
+import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ProjectTemplatePlanner
 import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
+import app.opentasks.core.domain.toCommandRejection
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
+import app.opentasks.core.domain.validateTaskScheduleState
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.data.export.TasksImportPlan
@@ -219,6 +222,7 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.DuplicateTask -> duplicateTask(command)
             is DomainCommand.RenameTask -> renameTask(command)
             is DomainCommand.UpdateTask -> updateTaskDetails(command)
+            is DomainCommand.SetTaskSchedule -> setTaskSchedule(command)
             is DomainCommand.SetTaskReminder -> setTaskReminder(command)
             is DomainCommand.AddChecklistItem -> addChecklistItem(command)
             is DomainCommand.UpdateChecklistItem -> updateChecklistItem(command)
@@ -1307,7 +1311,12 @@ class InMemoryVaultRepository internal constructor(
             tagIds = (existingTags.map(Tag::id) + freshTags.map(Tag::id)).toSet(),
             revision = Revision(DeviceId("local-device"), createdAt.toEpochMilli(), 0),
         )
-        val metadata = RecurringTaskPlanner.metadataForUpdate(base, base.due, base.recurrence)
+        val metadata = RecurringTaskPlanner.metadataForUpdate(
+            base,
+            base.start,
+            base.due,
+            base.recurrence,
+        )
         val task = base.copy(
             recurrenceSeriesId = metadata?.seriesId,
             recurrenceAnchor = metadata?.anchor,
@@ -1791,8 +1800,9 @@ class InMemoryVaultRepository internal constructor(
      * Preflights one stored inverse against current state without writing,
      * mirroring the rejection paths of the corresponding handler. The
      * repository only ever stores [DomainCommand.RestoreTaskStatus],
-     * [DomainCommand.RestoreTask], [DomainCommand.UpdateTask], and
-     * [DomainCommand.SetTaskTag]; any other shape fails closed.
+     * [DomainCommand.RestoreTask], [DomainCommand.UpdateTask],
+     * [DomainCommand.SetTaskSchedule], and [DomainCommand.SetTaskTag]; any
+     * other shape fails closed.
      */
     private fun rejectUndoCommand(inverse: DomainCommand): CommandResult.Rejected? =
         when (inverse) {
@@ -1841,6 +1851,24 @@ class InMemoryVaultRepository internal constructor(
             }
             is DomainCommand.UpdateTask ->
                 (validateTaskUpdate(inverse) as? TaskUpdateValidation.Invalid)?.rejection
+            is DomainCommand.SetTaskSchedule -> {
+                val current = mutableWorkspace.value
+                val task = current.tasks.firstOrNull { it.id == inverse.taskId }
+                if (task == null) {
+                    CommandResult.Rejected(
+                        RejectionReason.NOT_FOUND,
+                        "Task no longer exists.",
+                    )
+                } else {
+                    rejectTaskSchedule(
+                        command = inverse,
+                        task = task,
+                        existingReminder = current.reminders.firstOrNull {
+                            it.taskId == task.id
+                        },
+                    )
+                }
+            }
             else -> CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "This undo step cannot be replayed.",
@@ -2306,52 +2334,28 @@ class InMemoryVaultRepository internal constructor(
                     RejectionReason.INVALID_STATE,
                     "Choose a milestone from the task's project.",
                 )
-            recurrence != null && command.due == null && task.start == null ->
-                return invalidTaskUpdate(
-                    RejectionReason.INVALID_STATE,
-                    "Add a due date before repeating this task.",
-                )
-            recurrence?.count != null && recurrence.endDate != null ->
-                return invalidTaskUpdate(
-                    RejectionReason.INVALID_STATE,
-                    "Choose either an occurrence count or an end date.",
-                )
-            recurrence?.endDate?.let { endDate ->
-                command.due?.let { due ->
-                    endDate.isBefore(
-                        due.instant
-                            .atZone(java.time.ZoneId.of(due.zoneId))
-                            .toLocalDate(),
-                    )
-                }
-            } == true ->
-                return invalidTaskUpdate(
-                    RejectionReason.INVALID_STATE,
-                    "The repeat end date cannot be before the due date.",
-                )
             command.estimate?.isNegative == true || command.estimate?.isZero == true ->
                 return invalidTaskUpdate(
                     RejectionReason.INVALID_STATE,
                     "Estimate must be greater than zero.",
                 )
-            requestedReminder != null && command.due == null ->
-                return invalidTaskUpdate(
-                    RejectionReason.INVALID_STATE,
-                    "Add a due date before setting a reminder.",
-                )
-            requestedReminder != existingReminder &&
-                !command.restorePastReminder &&
-                requestedReminder?.triggerAt?.instant?.isAfter(now()) == false ->
-                return invalidTaskUpdate(
-                    RejectionReason.REMINDER_IN_PAST,
-                    "Choose a reminder time in the future.",
-                )
         }
+        validateTaskScheduleState(
+            taskId = task.id,
+            start = command.start,
+            due = command.due,
+            recurrence = recurrence,
+            reminder = requestedReminder,
+            now = now(),
+            allowPastReminder = command.restorePastReminder ||
+                requestedReminder == existingReminder,
+        )?.toCommandRejection()?.let(TaskUpdateValidation::Invalid)?.let { return it }
         val recurrenceMetadata = if (recurrence == null) {
             null
         } else {
             command.recurrenceMetadata ?: RecurringTaskPlanner.metadataForUpdate(
                 task = task,
+                start = command.start,
                 due = command.due,
                 rule = recurrence,
             )
@@ -2399,6 +2403,7 @@ class InMemoryVaultRepository internal constructor(
             task.projectId == command.projectId &&
             task.statusId == targetStatus.id &&
             task.priority == command.priority &&
+            task.start == command.start &&
             task.due == command.due &&
             task.recurrence == command.recurrence &&
             task.recurrenceSeriesId == recurrenceMetadata?.seriesId &&
@@ -2417,6 +2422,7 @@ class InMemoryVaultRepository internal constructor(
             statusId = targetStatus.id,
             semanticStatus = targetStatus.semanticStatus,
             priority = command.priority,
+            start = command.start,
             due = command.due,
             recurrence = command.recurrence,
             recurrenceSeriesId = recurrenceMetadata?.seriesId,
@@ -2454,6 +2460,67 @@ class InMemoryVaultRepository internal constructor(
             message = "Changes saved",
             undo = task.toUpdateCommand(existingReminder),
         )
+    }
+
+    private fun setTaskSchedule(command: DomainCommand.SetTaskSchedule): CommandResult {
+        val current = mutableWorkspace.value
+        val task = current.tasks.firstOrNull { it.id == command.taskId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        val existingReminder = current.reminders.firstOrNull { it.taskId == task.id }
+        rejectTaskSchedule(command, task, existingReminder)?.let { return it }
+        if (
+            task.start == command.start &&
+            task.due == command.due &&
+            existingReminder == command.reminder
+        ) {
+            return CommandResult.Success("Schedule updated")
+        }
+        val updated = task.copy(
+            start = command.start,
+            due = command.due,
+            revision = nextRevision(task),
+        )
+        publish(
+            tasks = current.tasks.map { if (it.id == task.id) updated else it },
+            reminders = current.reminders.filterNot { it.taskId == task.id } +
+                listOfNotNull(command.reminder),
+        )
+        return CommandResult.Success(
+            message = "Schedule updated",
+            undo = DomainCommand.SetTaskSchedule(
+                taskId = task.id,
+                start = task.start,
+                due = task.due,
+                reminder = existingReminder,
+                restorePastReminder = true,
+            ),
+        )
+    }
+
+    private fun rejectTaskSchedule(
+        command: DomainCommand.SetTaskSchedule,
+        task: Task,
+        existingReminder: Reminder?,
+    ): CommandResult.Rejected? {
+        if (task.isCompleted || task.deletedAt != null) {
+            return ScheduleMoveFailure.TASK_NOT_MOVABLE.toCommandRejection()
+        }
+        if (
+            task.start == command.start &&
+            task.due == command.due &&
+            existingReminder == command.reminder
+        ) {
+            return null
+        }
+        return validateTaskScheduleState(
+            taskId = task.id,
+            start = command.start,
+            due = command.due,
+            recurrence = task.recurrence,
+            reminder = command.reminder,
+            now = now(),
+            allowPastReminder = command.restorePastReminder,
+        )?.toCommandRejection()
     }
 
     private fun setTaskReminder(command: DomainCommand.SetTaskReminder): CommandResult {
@@ -3737,6 +3804,7 @@ class InMemoryVaultRepository internal constructor(
         description = description,
         projectId = projectId,
         priority = priority,
+        start = start,
         due = due,
         recurrence = recurrence,
         estimate = estimate,

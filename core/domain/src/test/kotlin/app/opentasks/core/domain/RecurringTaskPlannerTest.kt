@@ -104,8 +104,71 @@ class RecurringTaskPlannerTest {
         )
     }
 
+    @Test
+    fun metadataForUpdatePreservesSeriesOnlyWhenStartDueAndRuleAreUnchanged() {
+        val start = moment("2026-07-26T01:00:00Z", "Asia/Bangkok")
+        val due = moment("2026-07-26T03:00:00Z", "Asia/Bangkok")
+        val rule = RecurrenceRule(RecurrenceFrequency.DAILY, count = 5)
+        val recurring = task(due, rule).copy(
+            start = start,
+            recurrenceSeriesId = TaskId("existing-series"),
+            recurrenceAnchor = due,
+            recurrenceOccurrenceIndex = 3,
+        )
+
+        assertEquals(
+            RecurrenceSeriesMetadata(TaskId("existing-series"), due, 3),
+            RecurringTaskPlanner.metadataForUpdate(recurring, start, due, rule),
+        )
+        listOf(
+            RecurringTaskPlanner.metadataForUpdate(
+                recurring,
+                start.copy(instant = start.instant.plusSeconds(60)),
+                due,
+                rule,
+            ),
+            RecurringTaskPlanner.metadataForUpdate(
+                recurring,
+                start,
+                due.copy(instant = due.instant.plusSeconds(60)),
+                rule,
+            ),
+            RecurringTaskPlanner.metadataForUpdate(
+                recurring,
+                start,
+                due,
+                RecurrenceRule(RecurrenceFrequency.WEEKLY),
+            ),
+        ).forEach { metadata ->
+            assertEquals(recurring.id, checkNotNull(metadata).seriesId)
+            assertEquals(0, metadata.occurrenceIndex)
+        }
+    }
+
+    @Test
+    fun metadataForUpdateUsesProvidedStartWhenDueIsMissing() {
+        val start = moment("2026-07-26T01:00:00Z", "Asia/Bangkok")
+        val rule = RecurrenceRule(RecurrenceFrequency.DAILY)
+        val recurring = task(start, rule).copy(start = start, due = null)
+
+        val metadata = checkNotNull(
+            RecurringTaskPlanner.metadataForUpdate(
+                recurring,
+                start,
+                due = null,
+                rule = rule,
+            ),
+        )
+
+        assertEquals(recurring.id, metadata.seriesId)
+        assertEquals(start, metadata.anchor)
+        assertEquals(0, metadata.occurrenceIndex)
+    }
+
     private fun Task.withSeriesMetadata(): Task {
-        val metadata = checkNotNull(RecurringTaskPlanner.metadataForUpdate(this, due, recurrence))
+        val metadata = checkNotNull(
+            RecurringTaskPlanner.metadataForUpdate(this, start, due, recurrence),
+        )
         return copy(
             recurrenceSeriesId = metadata.seriesId,
             recurrenceAnchor = metadata.anchor,

@@ -23,16 +23,18 @@ data class RecurrenceSeriesMetadata(
 object RecurringTaskPlanner {
     fun metadataForUpdate(
         task: Task,
+        start: ZonedMoment?,
         due: ZonedMoment?,
         rule: RecurrenceRule?,
     ): RecurrenceSeriesMetadata? {
         if (rule == null) return null
-        val anchor = due ?: task.start ?: return null
+        val anchor = due ?: start ?: return null
         val existingSeriesId = task.recurrenceSeriesId
         val existingAnchor = task.recurrenceAnchor
         val existingOccurrenceIndex = task.recurrenceOccurrenceIndex
         if (
             task.recurrence == rule &&
+            task.start == start &&
             task.due == due &&
             existingSeriesId != null &&
             existingAnchor != null &&

@@ -405,6 +405,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 description = PERSISTED_DESCRIPTION,
                 projectId = OpenTasksFixtures.taxProject.id,
                 priority = Priority.URGENT,
+                start = null,
                 due = due,
                 recurrence = null,
                 estimate = Duration.ofMinutes(45),
@@ -795,6 +796,10 @@ class RoomVaultRepositoryInstrumentedTest {
                 .filterNotNull()
                 .first()
         }
+        val start = ZonedMoment(
+            instant = Instant.parse("2026-08-03T08:00:00Z"),
+            zoneId = "UTC",
+        )
         val due = ZonedMoment(
             instant = Instant.ofEpochMilli(
                 Instant.now().plus(Duration.ofDays(7)).toEpochMilli(),
@@ -815,6 +820,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = start,
                 due = due,
                 recurrence = original.recurrence,
                 estimate = original.estimate,
@@ -825,7 +831,9 @@ class RoomVaultRepositoryInstrumentedTest {
 
         withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == original.id }?.due == due &&
+                snapshot.tasks.firstOrNull { it.id == original.id }?.let { task ->
+                    task.start == start && task.due == due
+                } == true &&
                     snapshot.reminders.singleOrNull { it.taskId == original.id } ==
                     expectedReminder
             }
@@ -842,12 +850,15 @@ class RoomVaultRepositoryInstrumentedTest {
                 snapshot.reminders.singleOrNull { it.taskId == original.id } == expectedReminder
             }
         }
+        assertEquals(start, restored.tasks.first { it.id == original.id }.start)
         assertEquals(due, restored.tasks.first { it.id == original.id }.due)
 
         assertTrue(repository!!.execute(checkNotNull(update.undo)) is CommandResult.Success)
         withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == original.id }?.due == original.due &&
+                snapshot.tasks.firstOrNull { it.id == original.id }?.let { task ->
+                    task.start == original.start && task.due == original.due
+                } == true &&
                     snapshot.reminders.none { it.taskId == original.id }
             }
         }
@@ -857,6 +868,464 @@ class RoomVaultRepositoryInstrumentedTest {
                     it.deletedIdentity == listOf(expectedReminder.id)
             },
         )
+    }
+
+    @Test
+    fun setTaskScheduleUpdatesExactFieldsOnceAndUndoRestoresExactValues() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-08-03T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-08-03T10:00:00Z"), "UTC"),
+            )
+        val existingReminder = Reminder(
+            Reminder.primaryId(original.id),
+            original.id,
+            ZonedMoment(Instant.parse("2026-08-03T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+        openRepository(
+            now = { SCHEDULE_NOW },
+            seedSnapshot = scheduleSnapshot(original, existingReminder),
+        )
+        val before = repository!!.currentWorkspace()
+        val beforeTask = before.tasks.single { it.id == original.id }
+        val generationBefore =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        val start = ZonedMoment(Instant.parse("2026-08-05T07:30:00Z"), "Asia/Bangkok")
+        val due = ZonedMoment(Instant.parse("2026-08-05T09:30:00Z"), "Asia/Bangkok")
+        val reminder = Reminder(
+            Reminder.primaryId(original.id),
+            original.id,
+            ZonedMoment(Instant.parse("2026-08-05T08:30:00Z"), "Asia/Bangkok"),
+            precise = true,
+        )
+
+        val result = repository!!.execute(
+            DomainCommand.SetTaskSchedule(original.id, start, due, reminder),
+        ) as CommandResult.Success
+        val updated = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.single { it.id == original.id }.let { task ->
+                    task.start == start && task.due == due
+                } && snapshot.reminders.singleOrNull { it.taskId == original.id } == reminder
+            }
+        }
+        val updatedTask = updated.tasks.single { it.id == original.id }
+        assertEquals(
+            beforeTask.copy(start = start, due = due, revision = updatedTask.revision),
+            updatedTask,
+        )
+        assertEquals(beforeTask.revision.logicalCounter + 1, updatedTask.revision.logicalCounter)
+        assertEquals(before.activityEntries, updated.activityEntries)
+        val generationAfter =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        assertEquals(generationBefore + 1, generationAfter)
+        assertEquals(
+            listOf(BackupRecordFamily.TASK, BackupRecordFamily.REMINDER),
+            journalRows(generationAfter).map { row ->
+                BackupMutationCodec.decode(row.payload).let { mutation ->
+                    mutation.record?.family ?: mutation.deletedFamily
+                }
+            },
+        )
+        assertEquals(
+            DomainCommand.SetTaskSchedule(
+                original.id,
+                beforeTask.start,
+                beforeTask.due,
+                existingReminder,
+                restorePastReminder = true,
+            ),
+            result.undo,
+        )
+
+        repository!!.close()
+        database!!.close()
+        repository = null
+        database = null
+        openRepository(now = { SCHEDULE_NOW })
+        val reopened = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.single { it.id == original.id }.let { task ->
+                    task.start == start && task.due == due
+                } && snapshot.reminders.singleOrNull { it.taskId == original.id } == reminder
+            }
+        }
+        assertEquals(start, reopened.tasks.single { it.id == original.id }.start)
+
+        repository!!.execute(checkNotNull(result.undo))
+
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.single { it.id == original.id }.let { task ->
+                    task.start == beforeTask.start && task.due == beforeTask.due
+                } && snapshot.reminders.singleOrNull { it.taskId == original.id } ==
+                    existingReminder
+            }
+        }
+        assertEquals(existingReminder, restored.reminders.single { it.taskId == original.id })
+    }
+
+    @Test
+    fun setTaskScheduleReplacesAndRemovesReminderInOneGeneration() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"))
+        val existingReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+        val replacement = existingReminder.copy(
+            triggerAt = ZonedMoment(Instant.parse("2026-08-04T08:00:00Z"), "UTC"),
+            precise = true,
+        )
+        openRepository(
+            now = { SCHEDULE_NOW },
+            seedSnapshot = scheduleSnapshot(task, existingReminder),
+        )
+        val revisionBefore = repository!!.currentWorkspace().tasks.single { it.id == task.id }.revision
+        val generationBefore =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+
+        repository!!.execute(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, replacement),
+        )
+        val replaced = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.reminders.singleOrNull { it.taskId == task.id } == replacement
+            }
+        }
+        val replacedTask = replaced.tasks.single { it.id == task.id }
+        assertEquals(revisionBefore.logicalCounter + 1, replacedTask.revision.logicalCounter)
+        val replacementGeneration =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        assertEquals(generationBefore + 1, replacementGeneration)
+        assertEquals(
+            listOf(BackupRecordFamily.TASK, BackupRecordFamily.REMINDER),
+            changedFamilies(replacementGeneration),
+        )
+
+        repository!!.execute(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, reminder = null),
+        )
+        val removed = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.reminders.none { it.taskId == task.id }
+            }
+        }
+        assertEquals(
+            replacedTask.revision.logicalCounter + 1,
+            removed.tasks.single { it.id == task.id }.revision.logicalCounter,
+        )
+        val removalGeneration =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        assertEquals(replacementGeneration + 1, removalGeneration)
+        assertEquals(
+            listOf(BackupRecordFamily.TASK, BackupRecordFamily.REMINDER),
+            changedFamilies(removalGeneration),
+        )
+    }
+
+    @Test
+    fun setTaskSchedulePreservesRecurrenceMetadata() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-08-03T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-08-03T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY, count = 8),
+                recurrenceSeriesId = TaskId("schedule-series"),
+                recurrenceAnchor = ZonedMoment(
+                    Instant.parse("2026-07-27T10:00:00Z"),
+                    "UTC",
+                ),
+                recurrenceOccurrenceIndex = 3,
+            )
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(original))
+        val start = ZonedMoment(Instant.parse("2026-08-10T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "UTC")
+
+        repository!!.execute(DomainCommand.SetTaskSchedule(original.id, start, due, null))
+
+        val updated = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.single { it.id == original.id }.start == start
+            }.tasks.single { it.id == original.id }
+        }
+        assertEquals(original.recurrence, updated.recurrence)
+        assertEquals(original.recurrenceSeriesId, updated.recurrenceSeriesId)
+        assertEquals(original.recurrenceAnchor, updated.recurrenceAnchor)
+        assertEquals(original.recurrenceOccurrenceIndex, updated.recurrenceOccurrenceIndex)
+    }
+
+    @Test
+    fun setTaskScheduleRejectsMismatchedReminderIdentityWithoutMutation() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"))
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val mismatched = Reminder(
+            "wrong-reminder",
+            TaskId("wrong-task"),
+            ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, mismatched),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That reminder does not belong to this task.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsReminderWithoutDue() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val reminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, task.start, null, reminder),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Add a due date before setting a reminder.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsRecurringTrayTarget() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
+            )
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, null, null, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "A repeating task needs a start or due time.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsCountAndEndDateWithoutMutation() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    count = 4,
+                    endDate = LocalDate.of(2026, 8, 20),
+                ),
+            )
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, task.start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Choose either an occurrence count or an end date.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsEndBeforeSchedule() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    endDate = LocalDate.of(2026, 8, 10),
+                ),
+            )
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val due = ZonedMoment(Instant.parse("2026-08-10T18:00:00Z"), "Asia/Bangkok")
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, task.start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "The repeat end date cannot be before the schedule.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsDueBeforeStart() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val start = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T09:59:59Z"), "UTC")
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Due time cannot be before start time.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsPastReminderWithoutPartialWrite() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = scheduleSnapshot(task))
+        val start = ZonedMoment(Instant.parse("2026-08-05T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+        val reminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            SCHEDULE_NOW.atZone(ZoneId.of("UTC")).let {
+                ZonedMoment(it.toInstant(), it.zone.id)
+            },
+            precise = true,
+        )
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, start, due, reminder),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.REMINDER_IN_PAST,
+                "Choose a reminder time in the future.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsCompletedAndBinnedWithoutMutation() = runBlocking {
+        val completed = OpenTasksFixtures.tasks.first { it.isCompleted }
+        val binned = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(
+            deletedAt = Instant.parse("2026-07-25T10:00:00Z"),
+        )
+        val seed = OpenTasksFixtures.snapshot.copy(
+            tasks = OpenTasksFixtures.snapshot.tasks.map {
+                if (it.id == binned.id) binned else it
+            },
+            reminders = OpenTasksFixtures.snapshot.reminders.filterNot {
+                it.taskId == completed.id || it.taskId == binned.id
+            },
+        )
+        openRepository(now = { SCHEDULE_NOW }, seedSnapshot = seed)
+        listOf(completed, binned).forEach { task ->
+            val result = executeRoomScheduleWithoutMutation(
+                DomainCommand.SetTaskSchedule(task.id, task.start, task.due, null),
+            )
+            assertEquals(
+                CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Only open tasks can be rescheduled.",
+                ),
+                result,
+            )
+        }
+    }
+
+    @Test
+    fun setTaskScheduleUndoRestoresPastReminderMetadata() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-07-25T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-07-25T10:00:00Z"), "UTC"),
+            )
+        val pastReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-07-25T09:13:00Z"), "Asia/Bangkok"),
+            precise = true,
+        )
+        openRepository(
+            now = { SCHEDULE_NOW },
+            seedSnapshot = scheduleSnapshot(task, pastReminder),
+        )
+        val start = ZonedMoment(Instant.parse("2026-08-05T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+
+        val changed = repository!!.execute(
+            DomainCommand.SetTaskSchedule(task.id, start, due, null),
+        ) as CommandResult.Success
+        val undo = checkNotNull(changed.undo)
+        assertEquals(
+            DomainCommand.SetTaskSchedule(
+                task.id,
+                task.start,
+                task.due,
+                pastReminder,
+                restorePastReminder = true,
+            ),
+            undo,
+        )
+
+        repository!!.execute(undo)
+
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.single { it.id == task.id }.let { restoredTask ->
+                    restoredTask.start == task.start && restoredTask.due == task.due
+                } && snapshot.reminders.singleOrNull { it.taskId == task.id } == pastReminder
+            }
+        }
+        assertEquals(pastReminder, restored.reminders.single { it.taskId == task.id })
+    }
+
+    @Test
+    fun setTaskSchedulePastReminderNoOpDoesNotValidateAdvanceOrJournal() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-07-25T10:00:00Z"), "UTC"))
+        val pastReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-07-25T09:00:00Z"), "UTC"),
+            precise = true,
+        )
+        openRepository(
+            now = { SCHEDULE_NOW },
+            seedSnapshot = scheduleSnapshot(task, pastReminder),
+        )
+
+        val result = executeRoomScheduleWithoutMutation(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, pastReminder),
+        ) as CommandResult.Success
+
+        assertNull(result.undo)
     }
 
     @Test
@@ -953,6 +1422,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     description = original.description,
                     projectId = original.projectId,
                     priority = original.priority,
+                    start = original.start,
                     due = due,
                     recurrence = rule,
                     estimate = original.estimate,
@@ -1084,6 +1554,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = due,
                 recurrence = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3),
                 estimate = original.estimate,
@@ -1156,6 +1627,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = due,
                 recurrence = RecurrenceRule(RecurrenceFrequency.MONTHLY, count = 3),
                 estimate = original.estimate,
@@ -1246,6 +1718,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     description = original.description,
                     projectId = original.projectId,
                     priority = original.priority,
+                    start = original.start,
                     due = anchor,
                     recurrence = monthly,
                     estimate = original.estimate,
@@ -1279,6 +1752,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 description = occurrence.description,
                 projectId = occurrence.projectId,
                 priority = occurrence.priority,
+                start = occurrence.start,
                 due = occurrence.due,
                 recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY),
                 estimate = occurrence.estimate,
@@ -2092,6 +2566,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     description = task.description,
                     projectId = task.projectId,
                     priority = task.priority,
+                    start = task.start,
                     due = task.due,
                     recurrence = task.recurrence,
                     estimate = task.estimate,
@@ -3082,6 +3557,57 @@ class RoomVaultRepositoryInstrumentedTest {
             journalRows(generation).map { BackupMutationCodec.decode(it.payload) }
         }
 
+    private suspend fun changedFamilies(generation: Long): List<BackupRecordFamily?> =
+        journalRows(generation).map { row ->
+            BackupMutationCodec.decode(row.payload).let { mutation ->
+                mutation.record?.family ?: mutation.deletedFamily
+            }
+        }
+
+    private fun scheduleSnapshot(
+        task: Task,
+        reminder: Reminder? = null,
+    ): WorkspaceSnapshot = OpenTasksFixtures.snapshot.copy(
+        tasks = OpenTasksFixtures.snapshot.tasks.map {
+            if (it.id == task.id) task else it
+        },
+        reminders = OpenTasksFixtures.snapshot.reminders
+            .filterNot { it.taskId == task.id } + listOfNotNull(reminder),
+    )
+
+    private suspend fun executeRoomScheduleWithoutMutation(
+        command: DomainCommand.SetTaskSchedule,
+    ): CommandResult {
+        val before = repository!!.currentWorkspace()
+        val revisionBefore = before.tasks.single { it.id == command.taskId }.revision
+        val generationBefore =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        val rowsBefore = database!!.backupJournalDao()
+            .between("vault-primary", 0, generationBefore)
+        val activityBefore = before.activityEntries
+
+        val result = repository!!.execute(command)
+
+        val after = repository!!.currentWorkspace()
+        val generationAfter =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        val rowsAfter = database!!.backupJournalDao()
+            .between("vault-primary", 0, generationAfter)
+        assertEquals(before, after)
+        assertEquals(revisionBefore, after.tasks.single { it.id == command.taskId }.revision)
+        assertEquals(generationBefore, generationAfter)
+        assertEquals(rowsBefore.size, rowsAfter.size)
+        assertEquals(
+            rowsBefore.map { it.copy(payload = ByteArray(0)) },
+            rowsAfter.map { it.copy(payload = ByteArray(0)) },
+        )
+        rowsBefore.zip(rowsAfter).forEach { (expected, actual) ->
+            assertArrayEquals(expected.payload, actual.payload)
+        }
+        assertEquals(activityBefore, after.activityEntries)
+        return result
+    }
+
     private fun openRepository(
         now: () -> Instant = Instant::now,
         zoneId: () -> ZoneId = ZoneId::systemDefault,
@@ -3116,6 +3642,7 @@ class RoomVaultRepositoryInstrumentedTest {
     private class InjectedAppendFailure : RuntimeException()
 
     private companion object {
+        val SCHEDULE_NOW: Instant = Instant.parse("2026-07-26T10:00:00Z")
         const val PERSISTED_TITLE = "persists-across-restart"
         const val UPDATED_TITLE = "encrypted-editor-update"
         const val PERSISTED_DESCRIPTION = "private editor details survive restart"

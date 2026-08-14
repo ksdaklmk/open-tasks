@@ -1965,6 +1965,7 @@ private fun TaskEdit.toCommand(taskId: TaskId): DomainCommand.UpdateTask =
         description = description,
         projectId = projectId,
         priority = priority,
+        start = start,
         due = due,
         recurrence = recurrence,
         estimate = estimate,

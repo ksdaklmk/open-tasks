@@ -216,6 +216,7 @@ sealed interface DomainCommand {
         val description: String,
         val projectId: ProjectId?,
         val priority: Priority,
+        val start: ZonedMoment?,
         val due: ZonedMoment?,
         val recurrence: RecurrenceRule?,
         val estimate: Duration?,
@@ -223,6 +224,20 @@ sealed interface DomainCommand {
         val recurrenceMetadata: RecurrenceSeriesMetadata? = null,
         val restoreStatusId: WorkflowStatusId? = null,
         val reminder: Reminder? = null,
+        val restorePastReminder: Boolean = false,
+    ) : DomainCommand
+
+    /**
+     * Atomically replaces one task's start, due, and reminder values.
+     *
+     * [restorePastReminder] is repository-produced Undo metadata. Normal UI
+     * code must leave it false.
+     */
+    data class SetTaskSchedule(
+        val taskId: TaskId,
+        val start: ZonedMoment?,
+        val due: ZonedMoment?,
+        val reminder: Reminder?,
         val restorePastReminder: Boolean = false,
     ) : DomainCommand
 

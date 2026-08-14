@@ -307,6 +307,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = due,
                 recurrence = original.recurrence,
                 estimate = original.estimate,
@@ -329,6 +330,428 @@ class InMemoryVaultRepositoryTest {
         val restored = repository.observeWorkspace().value
         assertEquals(original.due, restored.tasks.first { it.id == original.id }.due)
         assertFalse(restored.reminders.any { it.taskId == original.id })
+    }
+
+    @Test
+    fun setTaskScheduleUpdatesExactFieldsOnceAndUndoRestoresExactValues() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-08-03T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-08-03T10:00:00Z"), "UTC"),
+            )
+        val existingReminder = Reminder(
+            Reminder.primaryId(original.id),
+            original.id,
+            ZonedMoment(Instant.parse("2026-08-03T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(original, existingReminder, journal)
+        val before = local.currentWorkspace()
+        val beforeTask = before.tasks.single { it.id == original.id }
+        val generationBefore = journal.currentGeneration
+        val journalSizeBefore = journal.entries.size
+        val activityBefore = before.activityEntries
+        val start = ZonedMoment(Instant.parse("2026-08-05T07:30:00Z"), "Asia/Bangkok")
+        val due = ZonedMoment(Instant.parse("2026-08-05T09:30:00Z"), "Asia/Bangkok")
+        val reminder = Reminder(
+            Reminder.primaryId(original.id),
+            original.id,
+            ZonedMoment(Instant.parse("2026-08-05T08:30:00Z"), "Asia/Bangkok"),
+            precise = true,
+        )
+
+        val result = local.execute(
+            DomainCommand.SetTaskSchedule(original.id, start, due, reminder),
+        ) as CommandResult.Success
+
+        val updated = local.currentWorkspace()
+        val updatedTask = updated.tasks.single { it.id == original.id }
+        assertEquals(
+            beforeTask.copy(start = start, due = due, revision = updatedTask.revision),
+            updatedTask,
+        )
+        assertEquals(beforeTask.revision.logicalCounter + 1, updatedTask.revision.logicalCounter)
+        assertEquals(reminder, updated.reminders.single { it.taskId == original.id })
+        assertEquals(activityBefore, updated.activityEntries)
+        assertEquals(generationBefore + 1, journal.currentGeneration)
+        val entries = journal.entries.drop(journalSizeBefore)
+        assertEquals(listOf(0, 1), entries.map { it.sequence })
+        assertEquals(listOf("TASK", "REMINDER"), entries.map { it.objectType })
+        assertEquals(
+            DomainCommand.SetTaskSchedule(
+                taskId = original.id,
+                start = beforeTask.start,
+                due = beforeTask.due,
+                reminder = existingReminder,
+                restorePastReminder = true,
+            ),
+            result.undo,
+        )
+
+        local.execute(checkNotNull(result.undo))
+
+        val restored = local.currentWorkspace()
+        val restoredTask = restored.tasks.single { it.id == original.id }
+        assertEquals(beforeTask.start, restoredTask.start)
+        assertEquals(beforeTask.due, restoredTask.due)
+        assertEquals(existingReminder, restored.reminders.single { it.taskId == original.id })
+    }
+
+    @Test
+    fun setTaskScheduleReplacesAndRemovesReminderInOneGeneration() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"))
+        val existingReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+        val replacement = existingReminder.copy(
+            triggerAt = ZonedMoment(Instant.parse("2026-08-04T08:00:00Z"), "UTC"),
+            precise = true,
+        )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, existingReminder, journal)
+        val revisionBefore = local.currentWorkspace().tasks.single { it.id == task.id }.revision
+        val generationBefore = journal.currentGeneration
+        val entriesBefore = journal.entries.size
+
+        local.execute(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, replacement),
+        )
+
+        val replaced = local.currentWorkspace()
+        val replacedTask = replaced.tasks.single { it.id == task.id }
+        assertEquals(revisionBefore.logicalCounter + 1, replacedTask.revision.logicalCounter)
+        assertEquals(replacement, replaced.reminders.single { it.taskId == task.id })
+        assertEquals(generationBefore + 1, journal.currentGeneration)
+        assertEquals(
+            listOf("TASK", "REMINDER"),
+            journal.entries.drop(entriesBefore).map { it.objectType },
+        )
+        val replacementGeneration = journal.currentGeneration
+        val entriesAfterReplacement = journal.entries.size
+
+        local.execute(
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, reminder = null),
+        )
+
+        val removed = local.currentWorkspace()
+        val removedTask = removed.tasks.single { it.id == task.id }
+        assertEquals(replacedTask.revision.logicalCounter + 1, removedTask.revision.logicalCounter)
+        assertFalse(removed.reminders.any { it.taskId == task.id })
+        assertEquals(replacementGeneration + 1, journal.currentGeneration)
+        assertEquals(
+            listOf("TASK", "REMINDER"),
+            journal.entries.drop(entriesAfterReplacement).map { it.objectType },
+        )
+    }
+
+    @Test
+    fun setTaskSchedulePreservesRecurrenceMetadata() = runBlocking {
+        val original = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-08-03T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-08-03T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY, count = 8),
+                recurrenceSeriesId = TaskId("schedule-series"),
+                recurrenceAnchor = ZonedMoment(
+                    Instant.parse("2026-07-27T10:00:00Z"),
+                    "UTC",
+                ),
+                recurrenceOccurrenceIndex = 3,
+            )
+        val local = scheduleRepository(original)
+        val start = ZonedMoment(Instant.parse("2026-08-10T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "UTC")
+
+        local.execute(DomainCommand.SetTaskSchedule(original.id, start, due, null))
+
+        val updated = local.currentWorkspace().tasks.single { it.id == original.id }
+        assertEquals(original.recurrence, updated.recurrence)
+        assertEquals(original.recurrenceSeriesId, updated.recurrenceSeriesId)
+        assertEquals(original.recurrenceAnchor, updated.recurrenceAnchor)
+        assertEquals(original.recurrenceOccurrenceIndex, updated.recurrenceOccurrenceIndex)
+    }
+
+    @Test
+    fun setTaskScheduleRejectsMismatchedReminderIdentityWithoutMutation() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"))
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val mismatched = Reminder(
+            id = "wrong-reminder",
+            taskId = TaskId("wrong-task"),
+            triggerAt = ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, mismatched),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That reminder does not belong to this task.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsReminderWithoutDue() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val reminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-08-04T09:00:00Z"), "UTC"),
+            precise = false,
+        )
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, task.start, due = null, reminder),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Add a due date before setting a reminder.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsRecurringTrayTarget() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
+            )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, start = null, due = null, reminder = null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "A repeating task needs a start or due time.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsCountAndEndDateWithoutMutation() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    count = 4,
+                    endDate = LocalDate.of(2026, 8, 20),
+                ),
+            )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, task.start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Choose either an occurrence count or an end date.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsEndBeforeSchedule() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }
+            .copy(
+                due = ZonedMoment(Instant.parse("2026-08-04T10:00:00Z"), "UTC"),
+                recurrence = RecurrenceRule(
+                    RecurrenceFrequency.DAILY,
+                    endDate = LocalDate.of(2026, 8, 10),
+                ),
+            )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val due = ZonedMoment(Instant.parse("2026-08-10T18:00:00Z"), "Asia/Bangkok")
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, task.start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "The repeat end date cannot be before the schedule.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsDueBeforeStart() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val start = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T09:59:59Z"), "UTC")
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, start, due, null),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Due time cannot be before start time.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsPastReminderWithoutPartialWrite() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, journal = journal)
+        val start = ZonedMoment(Instant.parse("2026-08-05T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+        val reminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-07-26T10:00:00Z"), "UTC"),
+            precise = true,
+        )
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, start, due, reminder),
+        )
+
+        assertEquals(
+            CommandResult.Rejected(
+                RejectionReason.REMINDER_IN_PAST,
+                "Choose a reminder time in the future.",
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun setTaskScheduleRejectsCompletedAndBinnedWithoutMutation() = runBlocking {
+        val completed = OpenTasksFixtures.tasks.first { it.isCompleted }
+        val binned = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(
+            deletedAt = Instant.parse("2026-07-25T10:00:00Z"),
+        )
+        listOf(completed, binned).forEach { task ->
+            val journal = InMemoryBackupJournal()
+            val local = scheduleRepository(task, journal = journal)
+            val result = executeScheduleWithoutMutation(
+                local,
+                journal,
+                DomainCommand.SetTaskSchedule(task.id, task.start, task.due, null),
+            )
+            assertEquals(
+                CommandResult.Rejected(
+                    RejectionReason.INVALID_STATE,
+                    "Only open tasks can be rescheduled.",
+                ),
+                result,
+            )
+        }
+    }
+
+    @Test
+    fun setTaskScheduleUndoRestoresPastReminderMetadata() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(
+                start = ZonedMoment(Instant.parse("2026-07-25T08:00:00Z"), "UTC"),
+                due = ZonedMoment(Instant.parse("2026-07-25T10:00:00Z"), "UTC"),
+            )
+        val pastReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-07-25T09:13:00Z"), "Asia/Bangkok"),
+            precise = true,
+        )
+        val local = scheduleRepository(task, pastReminder)
+        val start = ZonedMoment(Instant.parse("2026-08-05T08:00:00Z"), "UTC")
+        val due = ZonedMoment(Instant.parse("2026-08-05T10:00:00Z"), "UTC")
+
+        val changed = local.execute(
+            DomainCommand.SetTaskSchedule(task.id, start, due, reminder = null),
+        ) as CommandResult.Success
+        val undo = checkNotNull(changed.undo)
+        assertEquals(
+            DomainCommand.SetTaskSchedule(
+                task.id,
+                task.start,
+                task.due,
+                pastReminder,
+                restorePastReminder = true,
+            ),
+            undo,
+        )
+
+        local.execute(undo)
+
+        val restored = local.currentWorkspace()
+        val restoredTask = restored.tasks.single { it.id == task.id }
+        assertEquals(task.start, restoredTask.start)
+        assertEquals(task.due, restoredTask.due)
+        assertEquals(pastReminder, restored.reminders.single { it.taskId == task.id })
+    }
+
+    @Test
+    fun setTaskSchedulePastReminderNoOpDoesNotValidateAdvanceOrJournal() = runBlocking {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted && it.recurrence == null }
+            .copy(due = ZonedMoment(Instant.parse("2026-07-25T10:00:00Z"), "UTC"))
+        val pastReminder = Reminder(
+            Reminder.primaryId(task.id),
+            task.id,
+            ZonedMoment(Instant.parse("2026-07-25T09:00:00Z"), "UTC"),
+            precise = true,
+        )
+        val journal = InMemoryBackupJournal()
+        val local = scheduleRepository(task, pastReminder, journal)
+
+        val result = executeScheduleWithoutMutation(
+            local,
+            journal,
+            DomainCommand.SetTaskSchedule(task.id, task.start, task.due, pastReminder),
+        ) as CommandResult.Success
+
+        assertNull(result.undo)
     }
 
     @Test
@@ -479,6 +902,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = due,
                 recurrence = rule,
                 estimate = original.estimate,
@@ -552,6 +976,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = due,
                 recurrence = rule,
                 estimate = original.estimate,
@@ -612,6 +1037,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = anchor,
                 recurrence = monthly,
                 estimate = original.estimate,
@@ -635,6 +1061,7 @@ class InMemoryVaultRepositoryTest {
                 description = occurrence.description,
                 projectId = occurrence.projectId,
                 priority = occurrence.priority,
+                start = occurrence.start,
                 due = occurrence.due,
                 recurrence = RecurrenceRule(RecurrenceFrequency.WEEKLY),
                 estimate = occurrence.estimate,
@@ -666,6 +1093,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = null,
                 recurrence = RecurrenceRule(RecurrenceFrequency.DAILY),
                 estimate = original.estimate,
@@ -799,6 +1227,7 @@ class InMemoryVaultRepositoryTest {
                 description = task.description,
                 projectId = OpenTasksFixtures.taxProject.id,
                 priority = task.priority,
+                start = task.start,
                 due = task.due,
                 recurrence = task.recurrence,
                 estimate = task.estimate,
@@ -1190,6 +1619,10 @@ class InMemoryVaultRepositoryTest {
     @Test
     fun taskDetailsUpdateTogetherAndUndoRestoresEveryField() = runBlocking {
         val original = OpenTasksFixtures.tasks.first { !it.isCompleted }
+        val start = ZonedMoment(
+            instant = Instant.parse("2026-08-03T08:00:00Z"),
+            zoneId = "Asia/Bangkok",
+        )
         val due = ZonedMoment(
             instant = Instant.parse("2026-08-03T10:00:00Z"),
             zoneId = "Asia/Bangkok",
@@ -1202,6 +1635,7 @@ class InMemoryVaultRepositoryTest {
                 description = "Persist the agreed decisions.",
                 projectId = OpenTasksFixtures.taxProject.id,
                 priority = Priority.URGENT,
+                start = start,
                 due = due,
                 recurrence = original.recurrence,
                 estimate = Duration.ofMinutes(45),
@@ -1213,6 +1647,7 @@ class InMemoryVaultRepositoryTest {
         assertEquals("Persist the agreed decisions.", updated.description)
         assertEquals(OpenTasksFixtures.taxProject.id, updated.projectId)
         assertEquals(Priority.URGENT, updated.priority)
+        assertEquals(start, updated.start)
         assertEquals(due, updated.due)
         assertEquals(Duration.ofMinutes(45), updated.estimate)
         assertTrue(updated.revision.logicalCounter > original.revision.logicalCounter)
@@ -1224,6 +1659,7 @@ class InMemoryVaultRepositoryTest {
         assertEquals(original.description, restored.description)
         assertEquals(original.projectId, restored.projectId)
         assertEquals(original.priority, restored.priority)
+        assertEquals(original.start, restored.start)
         assertEquals(original.due, restored.due)
         assertEquals(original.estimate, restored.estimate)
     }
@@ -1238,6 +1674,7 @@ class InMemoryVaultRepositoryTest {
                 description = original.description,
                 projectId = original.projectId,
                 priority = original.priority,
+                start = original.start,
                 due = original.due,
                 recurrence = original.recurrence,
                 estimate = original.estimate,
@@ -1352,6 +1789,7 @@ class InMemoryVaultRepositoryTest {
                 description = task.description,
                 projectId = task.projectId,
                 priority = task.priority,
+                start = task.start,
                 due = task.due,
                 recurrence = task.recurrence,
                 estimate = task.estimate,
@@ -1415,6 +1853,7 @@ class InMemoryVaultRepositoryTest {
                 description = task.description,
                 projectId = task.projectId,
                 priority = task.priority,
+                start = task.start,
                 due = task.due,
                 recurrence = task.recurrence,
                 estimate = task.estimate,
@@ -1430,6 +1869,7 @@ class InMemoryVaultRepositoryTest {
                 description = task.description,
                 projectId = task.projectId,
                 priority = task.priority,
+                start = task.start,
                 due = task.due,
                 recurrence = task.recurrence,
                 estimate = task.estimate,
@@ -1444,6 +1884,7 @@ class InMemoryVaultRepositoryTest {
                 description = assigned.description,
                 projectId = OpenTasksFixtures.taxProject.id,
                 priority = assigned.priority,
+                start = assigned.start,
                 due = assigned.due,
                 recurrence = assigned.recurrence,
                 estimate = assigned.estimate,
@@ -1886,6 +2327,44 @@ class InMemoryVaultRepositoryTest {
             listOf(ActivityKind.RECORD_CREATED),
             after.activityEntries.filter { it.taskId == duplicate.id }.map { it.kind },
         )
+    }
+
+    private fun scheduleRepository(
+        task: Task,
+        reminder: Reminder? = null,
+        journal: InMemoryBackupJournal = InMemoryBackupJournal(),
+    ): InMemoryVaultRepository = InMemoryVaultRepository(
+        initial = OpenTasksFixtures.snapshot.copy(
+            tasks = OpenTasksFixtures.snapshot.tasks.map {
+                if (it.id == task.id) task else it
+            },
+            reminders = OpenTasksFixtures.snapshot.reminders
+                .filterNot { it.taskId == task.id } + listOfNotNull(reminder),
+        ),
+        now = { Instant.parse("2026-07-26T10:00:00Z") },
+        backupJournal = journal,
+    )
+
+    private suspend fun executeScheduleWithoutMutation(
+        repository: InMemoryVaultRepository,
+        journal: InMemoryBackupJournal,
+        command: DomainCommand.SetTaskSchedule,
+    ): CommandResult {
+        val before = repository.currentWorkspace()
+        val revisionBefore = before.tasks.single { it.id == command.taskId }.revision
+        val generationBefore = journal.currentGeneration
+        val journalBefore = journal.entries
+        val activityBefore = before.activityEntries
+
+        val result = repository.execute(command)
+
+        val after = repository.currentWorkspace()
+        assertEquals(before, after)
+        assertEquals(revisionBefore, after.tasks.single { it.id == command.taskId }.revision)
+        assertEquals(generationBefore, journal.currentGeneration)
+        assertEquals(journalBefore, journal.entries)
+        assertEquals(activityBefore, after.activityEntries)
+        return result
     }
 
     private fun ZonedMoment.localDateString(): String =
