@@ -232,10 +232,31 @@ internal const val UNDO_SNACKBAR_TIMEOUT_MILLIS = 8_000L
  */
 internal val DATE_ONLY_DUE_TIME: LocalTime = LocalTime.of(17, 0)
 
+internal fun dateOnlyDue(
+    date: LocalDate,
+    zoneProvider: () -> ZoneId,
+): ZonedMoment {
+    val zone = zoneProvider()
+    return ZonedMoment(
+        instant = date.atTime(DATE_ONLY_DUE_TIME).atZone(zone).toInstant(),
+        zoneId = zone.id,
+    )
+}
+
 internal fun currentDeviceClock(
     clock: Clock,
     zoneProvider: () -> ZoneId,
 ): Clock = clock.withZone(zoneProvider())
+
+@Composable
+internal fun rememberProjectionClock(
+    clock: Clock,
+    zoneProvider: () -> ZoneId,
+    timeVersion: Long,
+): Clock = remember(clock, zoneProvider, timeVersion) {
+    val currentClock = currentDeviceClock(clock, zoneProvider)
+    Clock.fixed(currentClock.instant(), currentClock.zone)
+}
 
 internal fun shouldShowNavigationLabels(fontScale: Float): Boolean = fontScale < 1.5f
 
@@ -282,10 +303,7 @@ fun OpenTasksApp(
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val timeVersion by viewModel.timeVersion.collectAsStateWithLifecycle()
-        val projectionClock = remember(clock, zoneProvider, timeVersion) {
-            val currentClock = currentDeviceClock(clock, zoneProvider)
-            Clock.fixed(currentClock.instant(), currentClock.zone)
-        }
+        val projectionClock = rememberProjectionClock(clock, zoneProvider, timeVersion)
         val today = LocalDate.now(projectionClock)
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
@@ -1062,17 +1080,10 @@ fun OpenTasksApp(
                                     onClearBulkSelection = viewModel::clearBulkSelection,
                                     onBulkComplete = viewModel::completeBulkSelection,
                                     onBulkReschedule = { date ->
-                                        val zone = ZoneId.systemDefault()
                                         viewModel.executeBulk(
                                             DomainCommand.RescheduleTasks(
                                                 taskIds = bulkSelection.toList(),
-                                                due = ZonedMoment(
-                                                    instant = date
-                                                        .atTime(DATE_ONLY_DUE_TIME)
-                                                        .atZone(zone)
-                                                        .toInstant(),
-                                                    zoneId = zone.id,
-                                                ),
+                                                due = dateOnlyDue(date, zoneProvider),
                                             ),
                                         )
                                     },
@@ -1554,7 +1565,7 @@ fun OpenTasksApp(
                             }
                             entry<ReviewRoute> {
                                 ReviewScreen(
-                                    queue = buildReviewQueue(snapshot, Instant.now()),
+                                    queue = buildReviewQueue(snapshot, projectionClock.instant()),
                                     projectNames = projectNames,
                                     reviewedTaskIds = reviewedTaskIds,
                                     reviewedProjectIds = reviewedProjectIds,
@@ -1570,16 +1581,10 @@ fun OpenTasksApp(
                                         )
                                     },
                                     onRescheduleTask = { taskId, date ->
-                                        val zone = ZoneId.systemDefault()
                                         viewModel.executeReview(
                                             DomainCommand.RescheduleTasks(
                                                 listOf(taskId),
-                                                ZonedMoment(
-                                                    date.atTime(DATE_ONLY_DUE_TIME)
-                                                        .atZone(zone)
-                                                        .toInstant(),
-                                                    zone.id,
-                                                ),
+                                                dateOnlyDue(date, zoneProvider),
                                             ),
                                             taskId = taskId,
                                         )

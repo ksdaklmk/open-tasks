@@ -374,17 +374,64 @@ class ProcessRestorationInstrumentedTest {
         val instant = Instant.parse("2026-08-10T03:00:00Z")
         val instantClock = Clock.fixed(instant, ZoneId.of("UTC"))
         val zoneProvider = AtomicReference(ZoneId.of("Asia/Bangkok"))
+        val readZone: () -> ZoneId = zoneProvider::get
+        val timeVersion = mutableStateOf(0L)
+        val observedClock = AtomicReference<Clock>()
+        val snapshot = OpenTasksFixtures.snapshot
 
-        val initialClock = currentDeviceClock(instantClock, zoneProvider::get)
+        composeRule.setContent {
+            val projectionClock = rememberProjectionClock(
+                clock = instantClock,
+                zoneProvider = readZone,
+                timeVersion = timeVersion.value,
+            )
+            SideEffect { observedClock.set(projectionClock) }
+            OpenTasksTheme {
+                ScheduleContent(
+                    snapshot = snapshot,
+                    projectNames = snapshot.projects.associate { it.id to it.name },
+                    expanded = false,
+                    projectionClock = projectionClock,
+                    onOpenTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-day-2026-08-10").assertIsSelected()
+        assertEquals(instant, observedClock.get().instant())
+        assertEquals(ZoneId.of("Asia/Bangkok"), observedClock.get().zone)
+
+        composeRule.runOnIdle {
+            zoneProvider.set(ZoneId.of("America/Los_Angeles"))
+            timeVersion.value += 1L
+        }
+        composeRule.waitUntil(timeoutMillis = 2_000) {
+            observedClock.get()?.zone == ZoneId.of("America/Los_Angeles")
+        }
+        composeRule.onNodeWithTag("schedule-today").performClick()
+
+        assertEquals(instant, observedClock.get().instant())
+        assertEquals(ZoneId.of("America/Los_Angeles"), observedClock.get().zone)
+        composeRule.onNodeWithTag("schedule-day-2026-08-09").assertIsSelected()
+    }
+
+    @Test
+    fun dateOnlyDueSamplesReplacementProviderAtActionTime() {
+        val zoneProvider = AtomicReference(ZoneId.of("Asia/Bangkok"))
+        val readZone: () -> ZoneId = zoneProvider::get
+        val date = LocalDate.parse("2026-08-10")
+
+        assertEquals(
+            ZonedMoment(Instant.parse("2026-08-10T10:00:00Z"), "Asia/Bangkok"),
+            dateOnlyDue(date, readZone),
+        )
+
         zoneProvider.set(ZoneId.of("America/Los_Angeles"))
-        val replacementClock = currentDeviceClock(instantClock, zoneProvider::get)
 
-        assertEquals(instant, initialClock.instant())
-        assertEquals(instant, replacementClock.instant())
-        assertEquals(ZoneId.of("Asia/Bangkok"), initialClock.zone)
-        assertEquals(ZoneId.of("America/Los_Angeles"), replacementClock.zone)
-        assertEquals(LocalDate.parse("2026-08-10"), LocalDate.now(initialClock))
-        assertEquals(LocalDate.parse("2026-08-09"), LocalDate.now(replacementClock))
+        assertEquals(
+            ZonedMoment(Instant.parse("2026-08-11T00:00:00Z"), "America/Los_Angeles"),
+            dateOnlyDue(date, readZone),
+        )
     }
 }
 
