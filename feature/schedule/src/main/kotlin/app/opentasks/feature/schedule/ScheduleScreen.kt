@@ -38,10 +38,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -55,6 +51,7 @@ import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Reminder
+import app.opentasks.core.model.ScheduleMonthProjection
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.ZonedMoment
@@ -67,11 +64,21 @@ import java.time.format.FormatStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
+enum class SchedulePresentation { WEEK, MONTH }
+
 @Composable
 fun ScheduleScreen(
     tasks: List<Task>,
     projectNames: Map<ProjectId, String>,
     expanded: Boolean,
+    presentation: SchedulePresentation,
+    selectedDate: LocalDate,
+    month: ScheduleMonthProjection,
+    onPresentationChange: (SchedulePresentation) -> Unit,
+    onSelectedDateChange: (LocalDate) -> Unit,
+    onPrevious: () -> Unit,
+    onToday: () -> Unit,
+    onNext: () -> Unit,
     onOpenTask: (TaskId) -> Unit,
     modifier: Modifier = Modifier,
     reminders: List<Reminder> = emptyList(),
@@ -79,43 +86,73 @@ fun ScheduleScreen(
     calendarEligibleTaskIds: Set<TaskId> = emptySet(),
     onAddToCalendar: (TaskId) -> Unit = {},
 ) {
-    var selectedDateIso by rememberSaveable { mutableStateOf(today.toString()) }
-    val selectedDate = selectedDateIso.toLocalDateOr(today)
     val activeTasks = tasks.filter { it.deletedAt == null }
     val scheduled = activeTasks.filter { it.scheduleMoment() != null }
-    val unscheduled = activeTasks.filter {
-        it.start == null && it.due == null && !it.isCompleted
-    }
+    val unscheduled = activeTasks
+        .filter { it.start == null && it.due == null && !it.isCompleted }
+        .sortedWith(
+            compareByDescending<Task> { it.priority.ordinal }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+        )
     val remindersByTask = reminders.associateBy(Reminder::taskId)
 
-    if (expanded) {
-        ExpandedWeek(
-            tasks = scheduled,
+    when (presentation) {
+        SchedulePresentation.MONTH -> MonthCalendar(
+            month = month,
+            selectedDate = selectedDate,
+            expanded = expanded,
             unscheduled = unscheduled,
             projectNames = projectNames,
             remindersByTask = remindersByTask,
-            selectedDate = selectedDate,
-            today = today,
-            onSelectDate = { selectedDateIso = it.toString() },
+            presentation = presentation,
+            onPresentationChange = onPresentationChange,
+            onSelectedDateChange = onSelectedDateChange,
+            onPrevious = onPrevious,
+            onToday = onToday,
+            onNext = onNext,
             onOpenTask = onOpenTask,
             calendarEligibleTaskIds = calendarEligibleTaskIds,
             onAddToCalendar = onAddToCalendar,
             modifier = modifier,
         )
-    } else {
-        CompactAgenda(
-            tasks = scheduled,
-            unscheduledCount = unscheduled.size,
-            projectNames = projectNames,
-            remindersByTask = remindersByTask,
-            selectedDate = selectedDate,
-            today = today,
-            onSelectDate = { selectedDateIso = it.toString() },
-            onOpenTask = onOpenTask,
-            calendarEligibleTaskIds = calendarEligibleTaskIds,
-            onAddToCalendar = onAddToCalendar,
-            modifier = modifier,
-        )
+
+        SchedulePresentation.WEEK -> if (expanded) {
+            ExpandedWeek(
+                tasks = scheduled,
+                unscheduled = unscheduled,
+                projectNames = projectNames,
+                remindersByTask = remindersByTask,
+                presentation = presentation,
+                selectedDate = selectedDate,
+                today = today,
+                onPresentationChange = onPresentationChange,
+                onPrevious = onPrevious,
+                onToday = onToday,
+                onNext = onNext,
+                onOpenTask = onOpenTask,
+                calendarEligibleTaskIds = calendarEligibleTaskIds,
+                onAddToCalendar = onAddToCalendar,
+                modifier = modifier,
+            )
+        } else {
+            CompactAgenda(
+                tasks = scheduled,
+                unscheduledCount = unscheduled.size,
+                projectNames = projectNames,
+                remindersByTask = remindersByTask,
+                presentation = presentation,
+                selectedDate = selectedDate,
+                onPresentationChange = onPresentationChange,
+                onSelectDate = onSelectedDateChange,
+                onPrevious = onPrevious,
+                onToday = onToday,
+                onNext = onNext,
+                onOpenTask = onOpenTask,
+                calendarEligibleTaskIds = calendarEligibleTaskIds,
+                onAddToCalendar = onAddToCalendar,
+                modifier = modifier,
+            )
+        }
     }
 }
 
@@ -125,9 +162,13 @@ private fun CompactAgenda(
     unscheduledCount: Int,
     projectNames: Map<ProjectId, String>,
     remindersByTask: Map<TaskId, Reminder>,
+    presentation: SchedulePresentation,
     selectedDate: LocalDate,
-    today: LocalDate,
+    onPresentationChange: (SchedulePresentation) -> Unit,
     onSelectDate: (LocalDate) -> Unit,
+    onPrevious: () -> Unit,
+    onToday: () -> Unit,
+    onNext: () -> Unit,
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
@@ -147,11 +188,13 @@ private fun CompactAgenda(
     ) {
         ScheduleTitle(
             dateLabel = selectedDate.format(FULL_DATE_FORMAT),
+            presentation = presentation,
+            onPresentationChange = onPresentationChange,
             previousLabel = "Previous day",
             nextLabel = "Next day",
-            onPrevious = { onSelectDate(selectedDate.minusDays(1)) },
-            onToday = { onSelectDate(today) },
-            onNext = { onSelectDate(selectedDate.plusDays(1)) },
+            onPrevious = onPrevious,
+            onToday = onToday,
+            onNext = onNext,
         )
         Spacer(Modifier.height(16.dp))
         Row(
@@ -220,9 +263,13 @@ private fun ExpandedWeek(
     unscheduled: List<Task>,
     projectNames: Map<ProjectId, String>,
     remindersByTask: Map<TaskId, Reminder>,
+    presentation: SchedulePresentation,
     selectedDate: LocalDate,
     today: LocalDate,
-    onSelectDate: (LocalDate) -> Unit,
+    onPresentationChange: (SchedulePresentation) -> Unit,
+    onPrevious: () -> Unit,
+    onToday: () -> Unit,
+    onNext: () -> Unit,
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
@@ -244,11 +291,13 @@ private fun ExpandedWeek(
         ) {
             ScheduleTitle(
                 dateLabel = weekRangeLabel(weekStart),
+                presentation = presentation,
+                onPresentationChange = onPresentationChange,
                 previousLabel = "Previous week",
                 nextLabel = "Next week",
-                onPrevious = { onSelectDate(selectedDate.minusWeeks(1)) },
-                onToday = { onSelectDate(today) },
-                onNext = { onSelectDate(selectedDate.plusWeeks(1)) },
+                onPrevious = onPrevious,
+                onToday = onToday,
+                onNext = onNext,
             )
             Spacer(Modifier.height(20.dp))
             Row(
@@ -276,10 +325,7 @@ private fun ExpandedWeek(
         }
         VerticalDivider(modifier = Modifier.fillMaxHeight())
         UnscheduledTray(
-            tasks = unscheduled.sortedWith(
-                compareByDescending<Task> { it.priority.ordinal }
-                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
-            ),
+            tasks = unscheduled,
             projectNames = projectNames,
             onOpenTask = onOpenTask,
         )
@@ -287,8 +333,10 @@ private fun ExpandedWeek(
 }
 
 @Composable
-private fun ScheduleTitle(
+internal fun ScheduleTitle(
     dateLabel: String,
+    presentation: SchedulePresentation,
+    onPresentationChange: (SchedulePresentation) -> Unit,
     previousLabel: String,
     nextLabel: String,
     onPrevious: () -> Unit,
@@ -300,6 +348,28 @@ private fun ScheduleTitle(
         style = MaterialTheme.typography.headlineMedium,
         modifier = Modifier.semantics { heading() },
     )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SchedulePresentation.entries.forEach { option ->
+            FilterChip(
+                selected = presentation == option,
+                onClick = { onPresentationChange(option) },
+                label = {
+                    Text(
+                        stringResource(
+                            when (option) {
+                                SchedulePresentation.WEEK -> R.string.schedule_week
+                                SchedulePresentation.MONTH -> R.string.schedule_month
+                            },
+                        ),
+                    )
+                },
+                modifier = Modifier
+                    .widthIn(min = 48.dp)
+                    .heightIn(min = 48.dp)
+                    .testTag("schedule-presentation-${option.name.lowercase(Locale.ROOT)}"),
+            )
+        }
+    }
     Text(
         dateLabel,
         style = MaterialTheme.typography.bodyLarge,
@@ -489,13 +559,14 @@ private fun TimelineTask(
 }
 
 @Composable
-private fun UnscheduledTray(
+internal fun UnscheduledTray(
     tasks: List<Task>,
     projectNames: Map<ProjectId, String>,
     onOpenTask: (TaskId) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .widthIn(min = 280.dp, max = 340.dp)
             .fillMaxHeight()
             .padding(20.dp)
@@ -542,7 +613,7 @@ private fun UnscheduledTray(
 }
 
 @Composable
-private fun AgendaRow(
+internal fun AgendaRow(
     task: Task,
     projectName: String,
     reminder: Reminder?,
@@ -630,9 +701,6 @@ private fun AgendaRow(
     }
 }
 
-private fun String.toLocalDateOr(fallback: LocalDate): LocalDate =
-    runCatching(LocalDate::parse).getOrDefault(fallback)
-
 private fun LocalDate.startOfWeek(): LocalDate =
     with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
@@ -660,7 +728,7 @@ private fun Reminder.reminderDescription(): String {
     return "Reminder set for $time"
 }
 
-private fun itemCountLabel(count: Int, singular: String): String =
+internal fun itemCountLabel(count: Int, singular: String): String =
     "$count $singular${if (count == 1) "" else "s"}"
 
 private fun weekRangeLabel(start: LocalDate): String {

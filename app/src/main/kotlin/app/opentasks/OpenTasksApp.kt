@@ -117,6 +117,7 @@ import app.opentasks.core.domain.arrangeTasks
 import app.opentasks.core.domain.boardColumns
 import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
+import app.opentasks.core.domain.computeScheduleMonthProjection
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
@@ -140,6 +141,7 @@ import app.opentasks.feature.projects.NewProjectSheet
 import app.opentasks.feature.projects.ProjectEdit
 import app.opentasks.feature.projects.ProjectsScreen
 import app.opentasks.feature.projects.WorkflowMove
+import app.opentasks.feature.schedule.SchedulePresentation
 import app.opentasks.feature.schedule.ScheduleScreen
 import app.opentasks.feature.tasks.FocusPresetOption
 import app.opentasks.feature.tasks.TaskEdit
@@ -156,10 +158,12 @@ import app.opentasks.focus.FocusSession
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
-import java.time.Duration
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -228,6 +232,11 @@ internal const val UNDO_SNACKBAR_TIMEOUT_MILLIS = 8_000L
  */
 internal val DATE_ONLY_DUE_TIME: LocalTime = LocalTime.of(17, 0)
 
+internal fun currentDeviceClock(
+    clock: Clock,
+    zoneProvider: () -> ZoneId,
+): Clock = clock.withZone(zoneProvider())
+
 internal fun shouldShowNavigationLabels(fontScale: Float): Boolean = fontScale < 1.5f
 
 internal fun snackbarPresentation(hasUndo: Boolean): SnackbarPresentation =
@@ -257,6 +266,7 @@ fun OpenTasksApp(
     attachmentViewModel: AttachmentIntakeViewModel = viewModel(),
     vaultTransferViewModel: VaultTransferViewModel = viewModel(),
     clock: Clock = Clock.systemDefaultZone(),
+    zoneProvider: () -> ZoneId = ZoneId::systemDefault,
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -272,6 +282,11 @@ fun OpenTasksApp(
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()
         val timeVersion by viewModel.timeVersion.collectAsStateWithLifecycle()
+        val projectionClock = remember(clock, zoneProvider, timeVersion) {
+            val currentClock = currentDeviceClock(clock, zoneProvider)
+            Clock.fixed(currentClock.instant(), currentClock.zone)
+        }
+        val today = LocalDate.now(projectionClock)
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
@@ -495,10 +510,8 @@ fun OpenTasksApp(
             snapshot.tasks,
             projectNames,
             tasksArrangement,
-            clock,
-            timeVersion,
+            projectionClock,
         ) {
-            val projectionClock = Clock.fixed(clock.instant(), clock.zone)
             snapshot.tasks.associate { task ->
                 task.id to classifyDueBucket(task.due, projectionClock)
             } to arrangeTasks(
@@ -516,11 +529,9 @@ fun OpenTasksApp(
             selectedProject,
             projectNames,
             workbenchArrangement,
-            clock,
-            timeVersion,
+            projectionClock,
         ) {
             selectedProject?.let { project ->
-                val projectionClock = Clock.fixed(clock.instant(), clock.zone)
                 arrangeTasks(
                     tasks = snapshot.tasks.filter {
                         it.projectId == project.id && it.deletedAt == null
@@ -988,7 +999,7 @@ fun OpenTasksApp(
                         entryProvider = entryProvider {
                             entry<HomeRoute> {
                                 HomeScreen(
-                                    snapshot = snapshot.home,
+                                    snapshot = snapshot.home.copy(today = today),
                                     projectNames = projectNames,
                                     onOpenSearch = { showSearch = true },
                                     onPlanToday = { navigate(TasksRoute) },
@@ -1376,12 +1387,11 @@ fun OpenTasksApp(
                                 )
                             }
                             entry<ScheduleRoute> {
-                                ScheduleScreen(
-                                    tasks = snapshot.tasks,
+                                ScheduleContent(
+                                    snapshot = snapshot,
                                     projectNames = projectNames,
                                     expanded = layout.showNavigationRail,
-                                    reminders = snapshot.reminders,
-                                    today = snapshot.home.today,
+                                    projectionClock = projectionClock,
                                     onOpenTask = { taskId ->
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
@@ -1422,7 +1432,7 @@ fun OpenTasksApp(
                                         viewModel.startReview()
                                         navigate(ReviewRoute)
                                     },
-                                    today = snapshot.home.today,
+                                    today = today,
                                     onRestoreProject = { projectId ->
                                         viewModel.execute(
                                             DomainCommand.RestoreArchivedProject(projectId),
@@ -1648,7 +1658,7 @@ fun OpenTasksApp(
                     initialTitle = quickAddPrefillText ?: quickAddSheetTitle,
                     projects = snapshot.projects.filter { it.archivedAt == null },
                     tags = snapshot.tags,
-                    clock = clock,
+                    clock = projectionClock,
                 )
             }
         }
@@ -1779,6 +1789,89 @@ fun OpenTasksApp(
             )
         }
     }
+}
+
+@Composable
+internal fun ScheduleContent(
+    snapshot: WorkspaceSnapshot,
+    projectNames: Map<ProjectId, String>,
+    expanded: Boolean,
+    projectionClock: Clock,
+    onOpenTask: (TaskId) -> Unit,
+    calendarEligibleTaskIds: Set<TaskId> = emptySet(),
+    onAddToCalendar: (TaskId) -> Unit = {},
+) {
+    val today = LocalDate.now(projectionClock)
+    var presentationName by rememberSaveable {
+        mutableStateOf(SchedulePresentation.WEEK.name)
+    }
+    val presentation = SchedulePresentation.entries
+        .firstOrNull { it.name == presentationName }
+        ?: SchedulePresentation.WEEK
+    var selectedDateIso by rememberSaveable { mutableStateOf(today.toString()) }
+    val selectedDate = runCatching { LocalDate.parse(selectedDateIso) }.getOrDefault(today)
+    var scheduleMonthIso by rememberSaveable {
+        mutableStateOf(YearMonth.from(selectedDate).toString())
+    }
+    val scheduleMonthValue = runCatching { YearMonth.parse(scheduleMonthIso) }
+        .getOrDefault(YearMonth.from(selectedDate))
+    val scheduleMonth = remember(snapshot, scheduleMonthValue, projectionClock) {
+        computeScheduleMonthProjection(
+            snapshot = snapshot,
+            selectedMonth = scheduleMonthValue,
+            clock = projectionClock,
+            displayZone = projectionClock.zone,
+        )
+    }
+
+    fun selectDate(date: LocalDate) {
+        selectedDateIso = date.toString()
+    }
+
+    fun navigate(direction: Long) {
+        when (presentation) {
+            SchedulePresentation.WEEK -> selectDate(
+                selectedDate.plusDays(direction * if (expanded) 7 else 1),
+            )
+
+            SchedulePresentation.MONTH -> {
+                val destinationMonth = scheduleMonthValue.plusMonths(direction)
+                scheduleMonthIso = destinationMonth.toString()
+                selectDate(
+                    destinationMonth.atDay(
+                        selectedDate.dayOfMonth.coerceAtMost(destinationMonth.lengthOfMonth()),
+                    ),
+                )
+            }
+        }
+    }
+
+    ScheduleScreen(
+        tasks = snapshot.tasks,
+        projectNames = projectNames,
+        expanded = expanded,
+        presentation = presentation,
+        selectedDate = selectedDate,
+        month = scheduleMonth,
+        onPresentationChange = { nextPresentation ->
+            presentationName = nextPresentation.name
+            if (nextPresentation == SchedulePresentation.MONTH) {
+                scheduleMonthIso = YearMonth.from(selectedDate).toString()
+            }
+        },
+        onSelectedDateChange = ::selectDate,
+        onPrevious = { navigate(-1) },
+        onToday = {
+            selectDate(today)
+            scheduleMonthIso = YearMonth.from(today).toString()
+        },
+        onNext = { navigate(1) },
+        onOpenTask = onOpenTask,
+        reminders = snapshot.reminders,
+        today = today,
+        calendarEligibleTaskIds = calendarEligibleTaskIds,
+        onAddToCalendar = onAddToCalendar,
+    )
 }
 
 /**

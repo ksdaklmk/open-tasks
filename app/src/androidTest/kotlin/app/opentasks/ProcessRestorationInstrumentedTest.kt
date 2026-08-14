@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -53,6 +54,7 @@ import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -317,6 +319,72 @@ class ProcessRestorationInstrumentedTest {
         composeRule.onNodeWithTag("workspace-search-query")
             .assertTextContains("restored", substring = true)
         composeRule.onNodeWithTag("active-saved-view-${view.id.value}").assertIsDisplayed()
+    }
+
+    @Test
+    fun schedulePresentationMonthAndSelectedDateRestore() {
+        val restorationTester = StateRestorationTester(composeRule)
+        val projectionClock = Clock.fixed(
+            Instant.parse("2026-08-31T09:00:00Z"),
+            ZoneId.of("UTC"),
+        )
+        val snapshot = OpenTasksFixtures.snapshot
+
+        restorationTester.setContent {
+            OpenTasksTheme {
+                ScheduleContent(
+                    snapshot = snapshot,
+                    projectNames = snapshot.projects.associate { it.id to it.name },
+                    expanded = false,
+                    projectionClock = projectionClock,
+                    onOpenTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("schedule-day-2026-09-01").performClick()
+        composeRule.onNodeWithTag("schedule-presentation-month").performClick()
+        composeRule.onNodeWithText("September 2026").assertExists()
+        composeRule.onNodeWithTag("schedule-previous").performClick()
+        composeRule.onNodeWithTag("schedule-month-day-2026-08-01").assertIsSelected()
+        composeRule.onNodeWithTag("schedule-today").performClick()
+        composeRule.onNodeWithText("August 2026").assertExists()
+        composeRule.onNodeWithTag("schedule-month-day-2026-08-31").assertIsSelected()
+        composeRule.onNodeWithTag("schedule-next").performClick()
+        composeRule.onNodeWithText("September 2026").assertExists()
+        composeRule.onNodeWithTag("schedule-month-day-2026-09-30").assertIsSelected()
+        composeRule.onNodeWithTag("schedule-today").performClick()
+        composeRule.onNodeWithTag("schedule-month-day-2026-07-27")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.onNodeWithTag("schedule-presentation-month").assertIsSelected()
+        composeRule.onNodeWithText("August 2026").assertExists()
+        composeRule.onNodeWithTag("schedule-month-day-2026-07-27").assertIsSelected()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithTag("schedule-presentation-month").assertIsSelected()
+        composeRule.onNodeWithText("August 2026").assertExists()
+        composeRule.onNodeWithTag("schedule-month-day-2026-07-27").assertIsSelected()
+    }
+
+    @Test
+    fun replacementZoneProviderChangesProjectionZoneWithoutChangingNow() {
+        val instant = Instant.parse("2026-08-10T03:00:00Z")
+        val instantClock = Clock.fixed(instant, ZoneId.of("UTC"))
+        val zoneProvider = AtomicReference(ZoneId.of("Asia/Bangkok"))
+
+        val initialClock = currentDeviceClock(instantClock, zoneProvider::get)
+        zoneProvider.set(ZoneId.of("America/Los_Angeles"))
+        val replacementClock = currentDeviceClock(instantClock, zoneProvider::get)
+
+        assertEquals(instant, initialClock.instant())
+        assertEquals(instant, replacementClock.instant())
+        assertEquals(ZoneId.of("Asia/Bangkok"), initialClock.zone)
+        assertEquals(ZoneId.of("America/Los_Angeles"), replacementClock.zone)
+        assertEquals(LocalDate.parse("2026-08-10"), LocalDate.now(initialClock))
+        assertEquals(LocalDate.parse("2026-08-09"), LocalDate.now(replacementClock))
     }
 }
 

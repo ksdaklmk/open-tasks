@@ -1,3 +1,17 @@
 <resources>
     <string name="schedule_add_to_calendar">Add to calendar</string>
+    <string name="schedule_week">Week</string>
+    <string name="schedule_month">Month</string>
+    <string name="schedule_previous_month">Previous month</string>
+    <string name="schedule_next_month">Next month</string>
+    <string name="schedule_adjacent_month">Adjacent month</string>
+    <string name="schedule_month_day_description">%1$s. %2$s, %3$d completed, %4$d overdue.</string>
+    <string name="schedule_month_overdue_count">%1$d overdue</string>
+    <string name="schedule_month_overflow">6+</string>
+    <string name="schedule_month_agenda">Day agenda</string>
+    <string name="schedule_month_no_dated_work">No dated work</string>
+    <plurals name="schedule_month_task_count">
+        <item quantity="one">%1$d task</item>
+        <item quantity="other">%1$d tasks</item>
+    </plurals>
 </resources>
