@@ -112,12 +112,16 @@ import app.opentasks.core.data.export.CsvTable
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
+import app.opentasks.core.domain.ScheduleMoveFailure
+import app.opentasks.core.domain.ScheduleMovePlan
+import app.opentasks.core.domain.ScheduleMoveTarget
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.domain.arrangeTasks
 import app.opentasks.core.domain.boardColumns
 import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.domain.computeScheduleMonthProjection
+import app.opentasks.core.domain.planTaskScheduleMove
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
@@ -581,6 +585,57 @@ fun OpenTasksApp(
             val endZoneId = task.due?.zoneId.takeIf { draft.endEpochMillis != null }
             return CalendarPreviewState(draft, beginZoneId, endZoneId)
         }
+
+        fun executeScheduleMove(taskId: TaskId, target: ScheduleMoveTarget) {
+            val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: return
+            val reminder = snapshot.reminders.firstOrNull { it.taskId == taskId }
+            val currentClock = currentDeviceClock(clock, zoneProvider)
+            when (
+                val plan = planTaskScheduleMove(
+                    task,
+                    reminder,
+                    target,
+                    currentClock.instant(),
+                    currentClock.zone,
+                )
+            ) {
+                is ScheduleMovePlan.Ready -> viewModel.execute(
+                    DomainCommand.SetTaskSchedule(
+                        taskId = taskId,
+                        start = plan.start,
+                        due = plan.due,
+                        reminder = plan.reminder,
+                    ),
+                )
+
+                is ScheduleMovePlan.Rejected -> coroutineScope.launch {
+                    val message = when (plan.failure) {
+                        ScheduleMoveFailure.TASK_NOT_MOVABLE ->
+                            R.string.schedule_move_task_not_movable
+                        ScheduleMoveFailure.REMINDER_IDENTITY_MISMATCH ->
+                            R.string.schedule_move_reminder_changed
+                        ScheduleMoveFailure.DUE_BEFORE_START ->
+                            R.string.schedule_move_due_before_start
+                        ScheduleMoveFailure.RECURRENCE_REQUIRES_SCHEDULE ->
+                            R.string.schedule_move_recurrence_requires_schedule
+                        ScheduleMoveFailure.RECURRENCE_COUNT_AND_END_DATE ->
+                            R.string.schedule_move_recurrence_limit_conflict
+                        ScheduleMoveFailure.RECURRENCE_END_BEFORE_SCHEDULE ->
+                            R.string.schedule_move_recurrence_end_before_schedule
+                        ScheduleMoveFailure.REMINDER_REQUIRES_DUE ->
+                            R.string.schedule_move_reminder_requires_due
+                        ScheduleMoveFailure.REMINDER_IN_PAST ->
+                            R.string.schedule_move_reminder_in_past
+                    }
+                    snackbarHostState.showSnackbar(activity.getString(message))
+                }
+
+                ScheduleMovePlan.NoChange,
+                ScheduleMovePlan.ReminderRemovalConfirmationRequired,
+                -> Unit
+            }
+        }
+
         val calendarEligibleTaskIds = snapshot.tasks
             .filter { task -> calendarPreviewFor(task) != null }
             .mapTo(hashSetOf(), Task::id)
@@ -1414,6 +1469,17 @@ fun OpenTasksApp(
                                             ?.let(::calendarPreviewFor)
                                             ?.let { preview -> calendarPreview = preview }
                                     },
+                                    onRescheduleTask = { taskId, date ->
+                                        executeScheduleMove(taskId, ScheduleMoveTarget.Day(date))
+                                    },
+                                    onRemoveTaskSchedule = { taskId ->
+                                        executeScheduleMove(
+                                            taskId,
+                                            ScheduleMoveTarget.Unscheduled(
+                                                reminderRemovalConfirmed = true,
+                                            ),
+                                        )
+                                    },
                                 )
                             }
                             entry<MoreRoute> {
@@ -1805,6 +1871,8 @@ internal fun ScheduleContent(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId> = emptySet(),
     onAddToCalendar: (TaskId) -> Unit = {},
+    onRescheduleTask: (TaskId, LocalDate) -> Unit = { _, _ -> },
+    onRemoveTaskSchedule: (TaskId) -> Unit = {},
 ) {
     val today = LocalDate.now(projectionClock)
     var presentationName by rememberSaveable {
@@ -1876,6 +1944,8 @@ internal fun ScheduleContent(
         today = today,
         calendarEligibleTaskIds = calendarEligibleTaskIds,
         onAddToCalendar = onAddToCalendar,
+        onRescheduleTask = onRescheduleTask,
+        onRemoveTaskSchedule = onRemoveTaskSchedule,
     )
 }
 

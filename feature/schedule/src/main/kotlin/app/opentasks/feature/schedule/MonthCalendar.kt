@@ -73,6 +73,8 @@ internal fun MonthCalendar(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     if (expanded) {
@@ -91,6 +93,8 @@ internal fun MonthCalendar(
             onOpenTask = onOpenTask,
             calendarEligibleTaskIds = calendarEligibleTaskIds,
             onAddToCalendar = onAddToCalendar,
+            onRescheduleTask = onRescheduleTask,
+            onRemoveTaskSchedule = onRemoveTaskSchedule,
             modifier = modifier,
         )
     } else {
@@ -108,6 +112,8 @@ internal fun MonthCalendar(
             onOpenTask = onOpenTask,
             calendarEligibleTaskIds = calendarEligibleTaskIds,
             onAddToCalendar = onAddToCalendar,
+            onRescheduleTask = onRescheduleTask,
+            onRemoveTaskSchedule = onRemoveTaskSchedule,
             modifier = modifier,
         )
     }
@@ -128,6 +134,8 @@ private fun CompactMonth(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     Column(
@@ -160,6 +168,8 @@ private fun CompactMonth(
             onOpenTask = onOpenTask,
             calendarEligibleTaskIds = calendarEligibleTaskIds,
             onAddToCalendar = onAddToCalendar,
+            onRescheduleTask = onRescheduleTask,
+            onRemoveTaskSchedule = onRemoveTaskSchedule,
             lazy = false,
         )
     }
@@ -181,6 +191,8 @@ private fun ExpandedMonth(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     Row(
@@ -224,6 +236,8 @@ private fun ExpandedMonth(
                 onOpenTask = onOpenTask,
                 calendarEligibleTaskIds = calendarEligibleTaskIds,
                 onAddToCalendar = onAddToCalendar,
+                onRescheduleTask = onRescheduleTask,
+                onRemoveTaskSchedule = onRemoveTaskSchedule,
                 lazy = true,
                 modifier = Modifier
                     .weight(1f)
@@ -235,6 +249,9 @@ private fun ExpandedMonth(
                 tasks = unscheduled,
                 projectNames = projectNames,
                 onOpenTask = onOpenTask,
+                initialDate = selectedDate,
+                onRescheduleTask = onRescheduleTask,
+                onRemoveTaskSchedule = onRemoveTaskSchedule,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -424,6 +441,8 @@ private fun MonthAgenda(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     lazy: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -446,9 +465,12 @@ private fun MonthAgenda(
                         task = task,
                         projectNames = projectNames,
                         remindersByTask = remindersByTask,
+                        initialDate = selectedDate,
                         onOpenTask = onOpenTask,
                         calendarEligibleTaskIds = calendarEligibleTaskIds,
                         onAddToCalendar = onAddToCalendar,
+                        onRescheduleTask = onRescheduleTask,
+                        onRemoveTaskSchedule = onRemoveTaskSchedule,
                     )
                 }
             }
@@ -458,9 +480,12 @@ private fun MonthAgenda(
                     task = task,
                     projectNames = projectNames,
                     remindersByTask = remindersByTask,
+                    initialDate = selectedDate,
                     onOpenTask = onOpenTask,
                     calendarEligibleTaskIds = calendarEligibleTaskIds,
                     onAddToCalendar = onAddToCalendar,
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
                 )
             }
         }
@@ -472,17 +497,23 @@ private fun MonthAgendaRow(
     task: Task,
     projectNames: Map<ProjectId, String>,
     remindersByTask: Map<TaskId, Reminder>,
+    initialDate: LocalDate,
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
 ) {
     AgendaRow(
         task = task,
         projectName = projectNames[task.projectId] ?: "Inbox",
         reminder = remindersByTask[task.id],
+        initialDate = initialDate,
         onClick = { onOpenTask(task.id) },
         onAddToCalendar = { onAddToCalendar(task.id) }
             .takeIf { task.id in calendarEligibleTaskIds },
+        onRescheduleTask = onRescheduleTask,
+        onRemoveTaskSchedule = onRemoveTaskSchedule,
     )
 }
 

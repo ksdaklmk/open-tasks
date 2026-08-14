@@ -85,6 +85,8 @@ fun ScheduleScreen(
     today: LocalDate = LocalDate.now(),
     calendarEligibleTaskIds: Set<TaskId> = emptySet(),
     onAddToCalendar: (TaskId) -> Unit = {},
+    onRescheduleTask: (TaskId, LocalDate) -> Unit = { _, _ -> },
+    onRemoveTaskSchedule: (TaskId) -> Unit = {},
 ) {
     val activeTasks = tasks.filter { it.deletedAt == null }
     val scheduled = activeTasks.filter { it.scheduleMoment() != null }
@@ -113,6 +115,8 @@ fun ScheduleScreen(
             onOpenTask = onOpenTask,
             calendarEligibleTaskIds = calendarEligibleTaskIds,
             onAddToCalendar = onAddToCalendar,
+            onRescheduleTask = onRescheduleTask,
+            onRemoveTaskSchedule = onRemoveTaskSchedule,
             modifier = modifier,
         )
 
@@ -132,6 +136,8 @@ fun ScheduleScreen(
                 onOpenTask = onOpenTask,
                 calendarEligibleTaskIds = calendarEligibleTaskIds,
                 onAddToCalendar = onAddToCalendar,
+                onRescheduleTask = onRescheduleTask,
+                onRemoveTaskSchedule = onRemoveTaskSchedule,
                 modifier = modifier,
             )
         } else {
@@ -150,6 +156,8 @@ fun ScheduleScreen(
                 onOpenTask = onOpenTask,
                 calendarEligibleTaskIds = calendarEligibleTaskIds,
                 onAddToCalendar = onAddToCalendar,
+                onRescheduleTask = onRescheduleTask,
+                onRemoveTaskSchedule = onRemoveTaskSchedule,
                 modifier = modifier,
             )
         }
@@ -172,6 +180,8 @@ private fun CompactAgenda(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     val selectedTasks = tasks
@@ -238,9 +248,12 @@ private fun CompactAgenda(
                     task = task,
                     projectName = projectNames[task.projectId] ?: "Inbox",
                     reminder = remindersByTask[task.id],
+                    initialDate = selectedDate,
                     onClick = { onOpenTask(task.id) },
                     onAddToCalendar = { onAddToCalendar(task.id) }
                         .takeIf { task.id in calendarEligibleTaskIds },
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
                 )
             }
         }
@@ -273,6 +286,8 @@ private fun ExpandedWeek(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier,
 ) {
     val weekStart = selectedDate.startOfWeek()
@@ -319,6 +334,8 @@ private fun ExpandedWeek(
                         onOpenTask = onOpenTask,
                         calendarEligibleTaskIds = calendarEligibleTaskIds,
                         onAddToCalendar = onAddToCalendar,
+                        onRescheduleTask = onRescheduleTask,
+                        onRemoveTaskSchedule = onRemoveTaskSchedule,
                     )
                 }
             }
@@ -328,6 +345,9 @@ private fun ExpandedWeek(
             tasks = unscheduled,
             projectNames = projectNames,
             onOpenTask = onOpenTask,
+            initialDate = selectedDate,
+            onRescheduleTask = onRescheduleTask,
+            onRemoveTaskSchedule = onRemoveTaskSchedule,
         )
     }
 }
@@ -417,6 +437,8 @@ private fun DayColumn(
     onOpenTask: (TaskId) -> Unit,
     calendarEligibleTaskIds: Set<TaskId>,
     onAddToCalendar: (TaskId) -> Unit,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -465,9 +487,12 @@ private fun DayColumn(
                     task = task,
                     projectName = projectNames[task.projectId] ?: "Inbox",
                     reminder = remindersByTask[task.id],
+                    initialDate = date,
                     onClick = { onOpenTask(task.id) },
                     onAddToCalendar = { onAddToCalendar(task.id) }
                         .takeIf { task.id in calendarEligibleTaskIds },
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -480,8 +505,11 @@ private fun TimelineTask(
     task: Task,
     projectName: String,
     reminder: Reminder?,
+    initialDate: LocalDate,
     onClick: () -> Unit,
     onAddToCalendar: (() -> Unit)? = null,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
 ) {
     Surface(
         onClick = onClick,
@@ -532,6 +560,13 @@ private fun TimelineTask(
                             )
                         }
                     }
+                    ScheduleTaskActions(
+                        task = task,
+                        reminder = reminder,
+                        initialDate = initialDate,
+                        onRescheduleTask = onRescheduleTask,
+                        onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    )
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -563,6 +598,9 @@ internal fun UnscheduledTray(
     tasks: List<Task>,
     projectNames: Map<ProjectId, String>,
     onOpenTask: (TaskId) -> Unit,
+    initialDate: LocalDate,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -597,12 +635,24 @@ internal fun UnscheduledTray(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         shape = MaterialTheme.shapes.medium,
                     ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(task.title, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                projectNames[task.projectId] ?: "Inbox",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(task.title, style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    projectNames[task.projectId] ?: "Inbox",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            ScheduleTaskActions(
+                                task = task,
+                                reminder = null,
+                                initialDate = initialDate,
+                                onRescheduleTask = onRescheduleTask,
+                                onRemoveTaskSchedule = onRemoveTaskSchedule,
                             )
                         }
                     }
@@ -617,8 +667,11 @@ internal fun AgendaRow(
     task: Task,
     projectName: String,
     reminder: Reminder?,
+    initialDate: LocalDate,
     onClick: () -> Unit,
     onAddToCalendar: (() -> Unit)? = null,
+    onRescheduleTask: (TaskId, LocalDate) -> Unit,
+    onRemoveTaskSchedule: (TaskId) -> Unit,
 ) {
     Surface(
         onClick = onClick,
@@ -697,6 +750,13 @@ internal fun AgendaRow(
                     )
                 }
             }
+            ScheduleTaskActions(
+                task = task,
+                reminder = reminder,
+                initialDate = initialDate,
+                onRescheduleTask = onRescheduleTask,
+                onRemoveTaskSchedule = onRemoveTaskSchedule,
+            )
         }
     }
 }

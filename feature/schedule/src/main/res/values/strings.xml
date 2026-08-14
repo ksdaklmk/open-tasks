@@ -10,6 +10,13 @@
     <string name="schedule_month_overflow">6+</string>
     <string name="schedule_month_agenda">Day agenda</string>
     <string name="schedule_month_no_dated_work">No dated work</string>
+    <string name="schedule_actions_description">Schedule actions for %1$s</string>
+    <string name="schedule_reschedule">Reschedule</string>
+    <string name="schedule_remove">Remove schedule</string>
+    <string name="schedule_set_date">Set date</string>
+    <string name="schedule_cancel">Cancel</string>
+    <string name="schedule_remove_reminder_title">Remove schedule and reminder?</string>
+    <string name="schedule_remove_reminder_message">Removing this schedule also removes its reminder.</string>
     <plurals name="schedule_month_task_count">
         <item quantity="one">%1$d task</item>
         <item quantity="other">%1$d tasks</item>

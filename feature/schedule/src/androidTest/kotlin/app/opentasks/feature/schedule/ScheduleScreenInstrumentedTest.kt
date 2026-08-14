@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.RecurrenceFrequency
+import app.opentasks.core.model.RecurrenceRule
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.ScheduleMonthDay
 import app.opentasks.core.model.ScheduleMonthProjection
@@ -468,6 +470,192 @@ class ScheduleScreenInstrumentedTest {
         )
     }
 
+    @Test
+    fun compactWeekReschedulePickerEmitsTaskAndDate() {
+        val task = scheduledTask(
+            id = "compact-reschedule",
+            title = "Move compact task",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showFallback(
+            tasks = listOf(task),
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-reschedule-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-reschedule-confirm-${task.id.value}").performClick()
+
+        assertEquals(task.id to FALLBACK_DATE, rescheduled.get())
+    }
+
+    @Test
+    fun monthAgendaUsesTheSameReschedulePicker() {
+        val task = scheduledTask(
+            id = "month-reschedule",
+            title = "Move month task",
+            instant = "2026-08-17T10:00:00Z",
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showFallback(
+            tasks = listOf(task),
+            presentation = SchedulePresentation.MONTH,
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-reschedule-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-reschedule-confirm-${task.id.value}").performClick()
+
+        assertEquals(task.id to FALLBACK_DATE, rescheduled.get())
+    }
+
+    @Test
+    fun removeWithoutReminderEmitsImmediately() {
+        val task = scheduledTask(
+            id = "remove-without-reminder",
+            title = "Remove schedule now",
+            instant = "2026-08-17T11:00:00Z",
+        )
+        val removed = AtomicReference<TaskId?>()
+        showFallback(tasks = listOf(task), onRemoveTaskSchedule = removed::set)
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-remove-${task.id.value}").performClick()
+
+        assertEquals(task.id, removed.get())
+    }
+
+    @Test
+    fun removeWithReminderRequiresConfirmationAndCancelDoesNothing() {
+        val task = scheduledTask(
+            id = "remove-with-reminder",
+            title = "Confirm reminder loss",
+            instant = "2026-08-17T12:00:00Z",
+        )
+        val reminder = Reminder(
+            id = Reminder.primaryId(task.id),
+            taskId = task.id,
+            triggerAt = ZonedMoment(Instant.parse("2026-08-17T11:30:00Z"), "UTC"),
+            precise = false,
+        )
+        val removed = AtomicReference<TaskId?>()
+        showFallback(
+            tasks = listOf(task),
+            reminders = listOf(reminder),
+            onRemoveTaskSchedule = removed::set,
+        )
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-remove-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-remove-cancel-${task.id.value}").performClick()
+        assertEquals(null, removed.get())
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-remove-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-remove-confirm-${task.id.value}").performClick()
+        assertEquals(task.id, removed.get())
+    }
+
+    @Test
+    fun recurringTaskHasNoRemoveAction() {
+        val task = scheduledTask(
+            id = "recurring-reschedule",
+            title = "Recurring task",
+            instant = "2026-08-17T13:00:00Z",
+        ).copy(recurrence = RecurrenceRule(RecurrenceFrequency.DAILY))
+        showFallback(tasks = listOf(task))
+
+        assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
+        assertMinimumTarget("schedule-reschedule-${task.id.value}")
+        composeRule.onNodeWithTag("schedule-remove-${task.id.value}").assertDoesNotExist()
+    }
+
+    @Test
+    fun completedAndBinnedTasksExposeNoRescheduleAction() {
+        val completed = scheduledTask(
+            id = "completed-fallback",
+            title = "Completed fallback task",
+            instant = "2026-08-17T14:00:00Z",
+        ).copy(
+            semanticStatus = SemanticStatus.COMPLETED,
+            completedAt = Instant.parse("2026-08-17T15:00:00Z"),
+        )
+        val binned = scheduledTask(
+            id = "binned-fallback",
+            title = "Binned fallback task",
+            instant = "2026-08-17T16:00:00Z",
+        ).copy(deletedAt = Instant.parse("2026-08-17T17:00:00Z"))
+        showFallback(
+            tasks = listOf(completed, binned),
+            presentation = SchedulePresentation.MONTH,
+        )
+
+        composeRule.onNodeWithText(completed.title).assertIsDisplayed()
+        composeRule.onNodeWithText(binned.title).assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-actions-${completed.id.value}").assertDoesNotExist()
+        composeRule.onNodeWithTag("schedule-actions-${binned.id.value}").assertDoesNotExist()
+    }
+
+    @Test
+    fun ordinaryTapStillOpensTask() {
+        val task = scheduledTask(
+            id = "ordinary-open",
+            title = "Open without actions",
+            instant = "2026-08-17T18:00:00Z",
+        )
+        val opened = AtomicReference<TaskId?>()
+        showFallback(tasks = listOf(task), onOpenTask = opened::set)
+
+        composeRule.onNodeWithTag("schedule-task-${task.id.value}").performClick()
+
+        assertEquals(task.id, opened.get())
+    }
+
+    private fun showFallback(
+        tasks: List<Task>,
+        presentation: SchedulePresentation = SchedulePresentation.WEEK,
+        reminders: List<Reminder> = emptyList(),
+        onRescheduleTask: (TaskId, LocalDate) -> Unit = { _, _ -> },
+        onRemoveTaskSchedule: (TaskId) -> Unit = {},
+        onOpenTask: (TaskId) -> Unit = {},
+    ) {
+        composeRule.setContent {
+            OpenTasksTheme {
+                ScheduleScreen(
+                    tasks = tasks,
+                    projectNames = emptyMap(),
+                    expanded = false,
+                    presentation = presentation,
+                    selectedDate = FALLBACK_DATE,
+                    month = literalMonthProjection(
+                        mapOf(
+                            FALLBACK_DATE.toString() to literalDay(
+                                date = FALLBACK_DATE.toString(),
+                                inSelectedMonth = true,
+                                tasks = tasks,
+                            ),
+                        ),
+                    ),
+                    onPresentationChange = {},
+                    onSelectedDateChange = {},
+                    onPrevious = {},
+                    onToday = {},
+                    onNext = {},
+                    onOpenTask = onOpenTask,
+                    reminders = reminders,
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
+                )
+            }
+        }
+    }
+
+    private fun assertMinimumTarget(tag: String) = composeRule.onNodeWithTag(tag)
+        .assertHeightIsAtLeast(48.dp)
+        .assertWidthIsAtLeast(48.dp)
+
     private fun scheduledTask(
         id: String,
         title: String,
@@ -537,6 +725,8 @@ class ScheduleScreenInstrumentedTest {
     }
 
     private companion object {
+        val FALLBACK_DATE: LocalDate = LocalDate.parse("2026-08-17")
+
         val LITERAL_MONTH_DATES = listOf(
             "2026-07-27" to false,
             "2026-07-28" to false,

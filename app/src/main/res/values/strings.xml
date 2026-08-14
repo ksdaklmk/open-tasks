@@ -80,6 +80,15 @@
     <string name="calendar_cancel_action">Cancel</string>
     <string name="calendar_no_provider">No app on this device can accept a calendar event.</string>
 
+    <string name="schedule_move_task_not_movable">Only open tasks can be rescheduled.</string>
+    <string name="schedule_move_reminder_changed">Reopen the task before moving it because its reminder changed.</string>
+    <string name="schedule_move_due_before_start">Set the due time on or after the start time.</string>
+    <string name="schedule_move_recurrence_requires_schedule">Add a start or due time before repeating this task.</string>
+    <string name="schedule_move_recurrence_limit_conflict">Choose either an occurrence count or an end date before moving this task.</string>
+    <string name="schedule_move_recurrence_end_before_schedule">Set the repeat end date on or after the schedule.</string>
+    <string name="schedule_move_reminder_requires_due">Add a due time before moving this reminder.</string>
+    <string name="schedule_move_reminder_in_past">Choose a future reminder time before moving this task.</string>
+
     <string name="saved_search_save_description">Save this search</string>
     <string name="saved_search_filter_due">Filter by due date</string>
     <string name="saved_search_filter_priority">Filter by priority</string>
