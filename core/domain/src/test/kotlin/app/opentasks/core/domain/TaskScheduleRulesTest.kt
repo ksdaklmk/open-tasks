@@ -99,14 +99,16 @@ class TaskScheduleRulesTest {
     @Test
     fun sameSourceMoveReturnsNoChange() {
         val task = task(start = moment("2026-08-20T13:00:00Z", "America/New_York"), due = moment("2026-08-21T03:00:00Z", "Asia/Bangkok"))
+        val invalid = task(start = moment("2026-08-20T10:00:00Z", "UTC"), due = moment("2026-08-19T10:00:00Z", "UTC"))
 
         assertEquals(ScheduleMovePlan.NoChange, move(task, ScheduleMoveTarget.Day(LocalDate.of(2026, 8, 20))))
+        assertEquals(ScheduleMovePlan.NoChange, move(invalid, ScheduleMoveTarget.Day(LocalDate.of(2026, 8, 20))))
     }
 
     @Test
     fun sameSourceWithAnUnchangedPastReminderReturnsNoChange() {
         val task = task(due = moment("2026-08-20T03:00:00Z", "Asia/Bangkok"))
-        val reminder = reminder(task, "2026-08-20T02:00:00Z")
+        val reminder = reminder(task, "2026-08-10T00:00:00Z")
 
         assertEquals(ScheduleMovePlan.NoChange, move(task, ScheduleMoveTarget.Day(LocalDate.of(2026, 8, 20)), reminder))
     }
