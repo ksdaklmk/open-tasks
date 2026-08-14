@@ -11,6 +11,9 @@ status are superseded here.
   eight tasks are committed and independently reviewed; every Critical or
   Important finding was fixed and scoped re-reviewed. Task 8 is PASS/Approved
   with no findings.
+- The seven-document documentation checkpoint is
+  `ba88821c7b5779ce4f1521e19c89e85a66b86c44`; this correction commit follows
+  it.
 - Landed scope is the pure 42-cell Month projection; exact move rules; pure,
   bounded Timeline projection vocabulary and computation; atomic dual-engine
   `SetTaskSchedule` and start-aware `UpdateTask`; start/due editor controls;
