@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 design approved, plan pending, 14 August 2026
+## Current resume point — Stage 8 plan ready, execution pending, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
@@ -43,10 +43,10 @@ status are superseded here.
   2026. This package registration does not create a Play Store listing; the
   release remains signed-sideload distribution.
 - Remaining work after this closure:
-  1. Stage 8: its detailed planning-surfaces design is approved. Complete the
-     written-spec review gate, then write the implementation plan and execute
-     month planning, drag-to-reschedule, Gantt-lite, and the opt-in daily
-     digest with no durable schema change.
+  1. Stage 8: its detailed planning-surfaces design and implementation plan
+     are approved-spec-derived and committed. Review the plan, choose its
+     execution mode, then execute month planning, drag-to-reschedule,
+     Gantt-lite, and the opt-in daily digest with no durable schema change.
   2. Stage 9: the single Room v10 wave for automations-lite, board WIP limits,
      My Day ordering, and subtasks.
   3. Repository-wide Unicode tag-identity hardening; do not patch only one
@@ -68,7 +68,7 @@ status are superseded here.
   untracked `.kotlin/` and `artifacts/`. The ignored execution ledger is
   `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
 
-## Stage 8 detailed design approved — written-spec review pending — 14 August 2026
+## Stage 8 detailed design approved and implementation plan ready — 14 August 2026
 
 The user approved all five Stage 8 design sections. The durable authority is
 `docs/superpowers/specs/2026-08-14-stage-8-planning-surfaces-design.md` under
@@ -98,11 +98,18 @@ Pinned rulings:
   roadmap's complete review, connected, repository, privacy, qualification,
   and release gates.
 
-Resume by completing the brainstorming written-spec review gate. Once the
-user approves the committed spec, invoke `superpowers:writing-plans`, derive
-the implementation plan from it, self-review the plan, update this checkpoint,
-and pause for plan approval before implementation. Preserve the unrelated
-Stage 3 plan edit, deleted pinfo spec, `.kotlin/`, and `artifacts/`.
+The committed implementation authority is
+`docs/superpowers/plans/2026-08-14-stage-8-planning-surfaces-plan.md`. It has 15
+dependency-ordered, test-first tasks: Tasks 1–14 are independently
+implemented/committed/reviewed, and controller-owned Task 15 performs the sole
+device, signing, cleanup, GitHub Free CI, tag, and release-record gates. Stage
+7's app-lock, cleanup, and CI waivers do not carry forward.
+
+Resume by reviewing/approving the plan and choosing either
+`superpowers:subagent-driven-development` (recommended) or
+`superpowers:executing-plans`; do not start product code before that choice.
+Preserve the unrelated Stage 3 plan edit, deleted pinfo spec, `.kotlin/`, and
+`artifacts/`.
 
 ## Historical context
 

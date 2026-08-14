@@ -1,10 +1,8 @@
 # Stage 8 Design — Planning Surfaces
 
 - Date: 14 August 2026
-- Status: design content approved by the user in the brainstorming session of
-  14 August 2026 (architecture, month/rescheduling, Gantt-lite, daily digest,
-  and verification sections approved as presented); committed written-spec
-  review and approval pending.
+- Status: approved by the user on 14 August 2026 after the committed
+  written-spec and code-fact review gates.
 - Authority: this document is the Stage 8 design authority under
   `2026-08-10-stage-7-9-roadmap-design.md`. The roadmap's stage scope,
   ordering, bounds, and uniform exit criteria apply unchanged. The
@@ -168,14 +166,15 @@ reimplement date, zone, recurrence, or reminder arithmetic.
 | Start only | Move start to the target local date, preserving its local time and stored zone |
 | Start and due | Shift both by the same calendar-day delta, preserving each local time, stored zone, and day span |
 
-For a start-and-due task, the source anchor is the start date in the start
-moment's stored zone. Each target moment uses `ZonedDateTime.plusDays(delta)`
-in its own stored zone. Java therefore preserves the local time when it exists,
-shifts a nonexistent gap time forward by the gap, and retains the previous
-offset during an overlap when possible. This is the sole exception to literal
-wall-time preservation and keeps the rule deterministic across DST and
-differing stored zones. The command rejects a target whose due instant is
-before its start instant.
+For a due-only or start-only task, the target combines the chosen date with
+the existing local time through `ZonedDateTime.ofLocal`, using the existing
+offset as the preferred overlap offset. For a start-and-due task, the source
+anchor is the start date in the start moment's stored zone and each target
+moment uses `ZonedDateTime.plusDays(delta)` in its own stored zone. Java shifts
+a nonexistent gap time forward by the gap and retains the previous offset
+during an overlap when that offset remains valid. These are the deterministic
+exceptions to literal wall-time preservation across DST. The command rejects
+a target whose due instant is before its start instant.
 
 A reminder remains due-relative: when due moves, its existing lead duration is
 applied to the new due moment, preserving precise/inexact preference. A move
