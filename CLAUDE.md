@@ -63,6 +63,12 @@ race KSP while release Hilt sources are generated.
   Tasks, workbench, and board ordering; `searchWorkspace` is the shared filter
   and ranking authority for both repositories. Do not recreate either rule in
   `app` or a feature. Schedule and Home retain their separate existing order.
+- Stage 8 is an in-development, unqualified checkpoint through Task 8. Its
+  Month and Timeline rules are pure projections; `SetTaskSchedule` owns one
+  atomic task/reminder schedule mutation in both repositories, while
+  `UpdateTask` is start-aware. Preserve the non-drag rescheduling fallback.
+  Timeline UI/state, pointer drag scheduling, and daily digest are pending;
+  do not claim device or release coverage before Task 15.
 
 ## Data and security
 
@@ -128,6 +134,9 @@ race KSP while release Hilt sources are generated.
 - The implemented Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
   add a schema, backup family, exported surface, permission, or network path for
   its ergonomics state.
+- Stage 8 Tasks 1–8 also remain on Room v9 and backup v1. Do not add a
+  schema, backup family, permission, manifest component, Drive scope, or route
+  while completing the remaining Stage 8 work without an approved plan change.
 - `AttachmentBlobCoordinator.resume()` has exactly one product caller: the
   silent auto-resume in `AttachmentRuntime.resumeInterruptedSessions()`,
   which runs strictly after session expiry on runtime start and re-arms

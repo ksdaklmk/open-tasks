@@ -1,72 +1,44 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 plan ready, execution pending, 14 August 2026
+## Current resume point — Stage 8 Tasks 1–8 checkpoint, paused before Task 9, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
-for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
+for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
 status are superseded here.
 
-- Stage 7 release 1.1.0 is tagged. The product/test head and recorded
-  `implementationHeadSha` are
-  `19aecf4bf7ac7322e9ecdf51d0c09412e2c73b84` (`19aecf4`): version 1.1.0
-  (versionCode 2), including the committed test-only two-scroll passphrase
-  reachability correction. Annotated tag `v1.1.0` points to the pushed
-  qualification-document candidate
-  `e8c91ae26ea3b4f06dc88c862c9e826cccb708f8` (`e8c91ae`); this HANDOFF-only
-  closure follows the tag.
-- The focused passphrase method is green 1/1; the More suite is green 64/64;
-  source compilation and local gates are green. The complete six-module
-  connected gate is green: 391 total, 389 passed, zero failures/errors, and
-  exactly two established skips. Module totals (tests/failures/errors/skips):
-  App 80/0/0/2, Data 179/0/0/0, Tasks 43/0/0/0, Projects 23/0/0/0, Schedule
-  2/0/0/0, More 64/0/0/0.
-- The forced signed verifier is green. The exact signed artifact is 16,242,815
-  bytes with SHA-256
-  `e5a0d947b890c72cfa692f78e54341a5fe562415a57ee6489f7d6d19d262802c`.
-  Signed smoke rows 1, 2, 3, 4, 6, and 7, plus all four extras, are PASS.
-  Row 5 (app lock) is **SKIPPED by explicit user instruction**.
-- Secure cleanup is **SKIPPED by explicit user instruction**. The temporary
-  exported `.otvault` was removed, but credential-file, screen-credential, and
-  disposable-overlay cleanup was not performed; residual state remains. No
-  credential or device identifier is recorded here.
-- GitHub CI qualification is **SKIPPED by explicit user instruction**. The tag
-  was created without CI evidence; this record does not claim any candidate
-  CI job passed, and no workflow run or job result was used for release
-  qualification. The API 37.0 F6 phrase **credential-encrypted storage
-  unavailable** remains historical observe-only context, not a check of this
-  candidate.
-- The user explicitly accepted these original Task 18 gaps and authorized
-  tagging. Release 1.1.0 exists under those explicit waivers and is not fully
-  qualified under the original Task 18 plan.
-- Android developer verification is complete for package `app.opentasks`:
-  Play Console showed **Registered** with one release signing key on 14 August
-  2026. This package registration does not create a Play Store listing; the
-  release remains signed-sideload distribution.
-- Remaining work after this closure:
-  1. Stage 8: its detailed planning-surfaces design and implementation plan
-     are approved-spec-derived and committed. Review the plan, choose its
-     execution mode, then execute month planning, drag-to-reschedule,
-     Gantt-lite, and the opt-in daily digest with no durable schema change.
-  2. Stage 9: the single Room v10 wave for automations-lite, board WIP limits,
-     My Day ordering, and subtasks.
-  3. Repository-wide Unicode tag-identity hardening; do not patch only one
-     caller.
-  4. Optional Play Store publication only if the signed-sideload distribution
-     ruling changes; package registration is complete, but no store listing,
-     AAB release, or Play review has been prepared.
-- App-lock smoke, secure cleanup, and candidate CI are not remaining release
-  blockers under the user's explicit waiver. The recorded cleanup residual
-  remains sensitive state if that task is reopened later.
-- **GitHub Free only.** Do not add a payment method, enable metered spend, use
-  larger runners, Codespaces, Copilot, paid Marketplace products, or any other
-  paid GitHub service. If included runner allowance is unavailable, do not add
-  paid capacity; GitHub CI remains waived for this explicitly accepted candidate.
-- Preserve the unrelated dirty state: modified
-  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
-  deleted user-owned
-  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
-  untracked `.kotlin/` and `artifacts/`. The ignored execution ledger is
-  `.superpowers/sdd/2026-08-10-stage-7-ergonomics-sweep-plan/progress.md`.
+- Stage 8 began from `8047f136541d22b15ca20db8971ea67685e250b5` and Tasks
+  1–8 end at `441e1350ebe5fe460432fb6968230e8789a7c6a6` (`441e135`). All
+  eight tasks are committed and independently reviewed; every Critical or
+  Important finding was fixed and scoped re-reviewed. Task 8 is PASS/Approved
+  with no findings.
+- Landed scope is the pure 42-cell Month projection; exact move rules; pure,
+  bounded Timeline projection vocabulary and computation; atomic dual-engine
+  `SetTaskSchedule` and start-aware `UpdateTask`; start/due editor controls;
+  shared root drag mechanics with Board migrated; stateless Week/Month UI and
+  a live-zone root clock; and the complete accessible non-drag rescheduling
+  fallback. Undated day placement remains due at 18:00 in the current device
+  zone; the editor's new due-date default remains 17:00 by design.
+- Baseline `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` passed
+  before Task 1, and every task passed its focused JVM/compile gate.
+  Instrumented regressions were compile-only: no device or connected test ran.
+- This is an in-development, unqualified checkpoint. There is no whole-stage
+  review, Task 15 qualification, signed APK, release bump, GitHub CI, tag, or
+  release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and
+  backup v1. No schema, backup format/family, fixture, dependency, permission,
+  manifest, Drive scope, or route changed in Tasks 1–8.
+- Six non-blocking deferred Minors are recorded in the ignored ledger: an
+  unused move-test zone constant; binned Timeline-selection coverage; a
+  content-safe Room `ByteArray` helper; two editor-test strengthening notes;
+  and a Month agenda plural resource. Hand them to the final whole-branch
+  review.
+- **PAUSED by user instruction before Task 9.** Resume with Task 9 pointer
+  drag over the proven fallback, then Tasks 10–15 in plan order. Timeline UI
+  and saved state, pointer drag scheduling, and the daily digest are still
+  pending. Stage 7's waivers do not carry into Stage 8; do not run a device
+  suite before Task 15.
+- Preserve the unrelated user dirty state: the modified historical Stage 3
+  plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
+  ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
 
 ## Stage 8 detailed design approved and implementation plan ready — 14 August 2026
 

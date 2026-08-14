@@ -274,6 +274,19 @@ non-completed tasks without either date. Reminder indicators are joined by
 task ID from the same snapshot. Selecting an item deep-links to the existing
 task editor, so Schedule introduces no alternate mutation path.
 
+## Stage 8 checkpoint (in development, unqualified)
+
+Tasks 1–8 add a pure Monday-first 42-cell Month projection and a pure bounded
+Timeline projection vocabulary, alongside exact single-task move rules. The
+repository command `SetTaskSchedule` changes task schedule and reminder
+atomically in both engines; `UpdateTask` is start-aware. The task editor has
+start/due controls, and stateless Week/Month UI uses a live-zone root clock and
+the complete non-drag rescheduling fallback. Shared root-coordinate drag
+mechanics now serve Board. Timeline UI/state, pointer-drag scheduling, and the
+daily digest remain pending. Room stays v9 and backup v1; this checkpoint adds
+no schema, backup, permission, manifest, Drive-scope, or route change and has
+no device or release qualification.
+
 The Home-screen Today widget is a second read-only projection of
 `WorkspaceSnapshot`, computed by the pure `computeTodayProjection`
 function (today/overdue counts and up to three focus task titles). A

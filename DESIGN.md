@@ -157,6 +157,14 @@ for floating controls and temporary surfaces.
   open-only unscheduled tray. Start time takes precedence over due time for placement;
   due-only work is labelled explicitly, and completion, blocking and reminders
   never rely on colour alone.
+
+Stage 8 is an in-development, unqualified checkpoint. The landed Schedule
+work adds a Monday-first 42-cell Month view, start/due editor controls, and a
+complete non-drag rescheduling fallback; undated day placement is due at 18:00
+in the current device zone, while a new editor due date defaults to 17:00.
+Week/Month remain stateless and use the live device zone. Pointer drag,
+Timeline UI and saved state, daily digest, device coverage, and release
+qualification remain pending.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
 - Today widget: the minimum 2×1 Glance layout keeps both counts and Quick Add

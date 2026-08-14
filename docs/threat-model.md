@@ -300,6 +300,16 @@ exported component, intent filter, runtime permission, Storage Access Framework
 flow, provider scope, network request, or cloud object family. Room remains v9
 and the authenticated backup object format remains v1.
 
+## Stage 8 checkpoint addendum (in development, unqualified)
+
+Tasks 1–8 add pure Month and Timeline projections, exact schedule validation,
+atomic task/reminder mutation, start/due editor controls, and the non-drag
+rescheduling fallback. These changes add no external input, permission,
+manifest component, network or Drive path, durable schema, backup family, or
+plaintext boundary. Pointer drag scheduling, Timeline UI/state, and the daily
+digest have not landed. No device or release qualification is claimed; Stage
+7's release waivers do not apply to Stage 8.
+
 ## Security acceptance gates
 
 Before production release:

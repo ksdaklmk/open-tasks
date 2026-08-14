@@ -25,6 +25,16 @@ Compose Material 3, Hilt, Android `SharedPreferences`, `AlarmManager`, AndroidX
 notifications, JUnit 4, and Compose UI test v2. No new dependency, permission,
 worker, service, route, schema, backup record, or Drive scope.
 
+## Execution checkpoint — 14 August 2026
+
+Tasks 1–8 are complete, committed, and independently reviewed through
+`441e1350ebe5fe460432fb6968230e8789a7c6a6`; Task 8 is PASS/Approved. Task 9
+(pointer drag over the proven fallback) is next; Tasks 9–15 remain pending.
+This is an in-development, unqualified checkpoint: no device/connected suite,
+whole-stage review, qualification, version bump, signed APK, tag, or release
+evidence exists. The six deferred non-blocking Minors are in the ignored ledger
+at `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
 ## Global Constraints
 
 - Authority:
