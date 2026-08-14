@@ -1,7 +1,16 @@
 package app.opentasks.feature.projects
 
 import android.view.ViewConfiguration
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -12,6 +21,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
@@ -25,6 +35,7 @@ import app.opentasks.core.model.WorkflowStatusId
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -195,6 +206,107 @@ class BoardViewInstrumentedTest {
 
         assertNull(staleMove.get())
         assertEquals(task.id to OpenTasksFixtures.planned, moved.get())
+    }
+
+    @Test
+    fun outsideTargetSnapsBackWithoutCallback() {
+        val task = OpenTasksFixtures.tasks
+            .first { it.id.value == "task-proposal" }
+            .copy(
+                statusId = OpenTasksFixtures.backlog,
+                semanticStatus = SemanticStatus.BACKLOG,
+            )
+        val moved = AtomicReference<Pair<TaskId, WorkflowStatusId>?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = columnsFor(task),
+                    columnWidth = 160.dp,
+                    onMoveTask = { taskId, statusId -> moved.set(taskId to statusId) },
+                    onOpenTask = {},
+                )
+            }
+        }
+        val cardBounds = composeRule
+            .onNodeWithTag("board-card-${task.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val targetBounds = composeRule
+            .onNodeWithTag("board-column-${OpenTasksFixtures.planned.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val gap = Offset(
+            x = (cardBounds.right + targetBounds.left) / 2f,
+            y = cardBounds.center.y,
+        )
+
+        composeRule.onRoot().performTouchInput {
+            down(cardBounds.center)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(gap)
+        }
+        composeRule.onNodeWithTag("board-drag-preview-${task.id.value}")
+            .assertIsDisplayed()
+        composeRule.onRoot().performTouchInput { up() }
+
+        assertNull(moved.get())
+        composeRule.onNodeWithTag("board-drag-preview-${task.id.value}")
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag("board-card-${task.id.value}").assertIsDisplayed()
+    }
+
+    @Test
+    fun rtlPreviewUsesAbsoluteRootCoordinatesAndIsNotClipped() {
+        val task = OpenTasksFixtures.tasks
+            .first { it.id.value == "task-proposal" }
+            .copy(
+                statusId = OpenTasksFixtures.backlog,
+                semanticStatus = SemanticStatus.BACKLOG,
+            )
+        val dragDelta = Offset(80f, 0f)
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        BoardView(
+                            columns = columnsFor(task),
+                            columnWidth = 160.dp,
+                            onMoveTask = { _, _ -> },
+                            onOpenTask = {},
+                            modifier = Modifier
+                                .width(240.dp)
+                                .testTag("board"),
+                        )
+                    }
+                }
+            }
+        }
+        val boardBounds = composeRule.onNodeWithTag("board")
+            .fetchSemanticsNode().boundsInRoot
+        val cardBounds = composeRule.onNodeWithTag("board-card-${task.id.value}")
+            .fetchSemanticsNode().boundsInRoot
+
+        composeRule.onRoot().performTouchInput {
+            down(cardBounds.center)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(cardBounds.center + dragDelta)
+        }
+
+        composeRule.onNodeWithTag("board-drag-preview-${task.id.value}")
+            .assertIsDisplayed()
+        val previewBounds = composeRule
+            .onNodeWithTag("board-drag-preview-${task.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertEquals(cardBounds.left + dragDelta.x, previewBounds.left, 1f)
+        assertTrue(previewBounds.right > boardBounds.right)
+
+        composeRule.onRoot().performTouchInput { up() }
     }
 
     private fun columnsFor(task: Task): List<BoardColumn> =
