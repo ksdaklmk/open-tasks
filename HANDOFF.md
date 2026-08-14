@@ -1,16 +1,19 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 18 waiver-accepted pre-tag candidate, 14 August 2026
+## Current resume point — release 1.1.0 tagged under explicit Task 18 waivers, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
 status are superseded here.
 
-- Stage 7 remains local and unpushed on `main`. The product/test head and
-  recorded `implementationHeadSha` are
+- Stage 7 release 1.1.0 is tagged. The product/test head and recorded
+  `implementationHeadSha` are
   `19aecf4bf7ac7322e9ecdf51d0c09412e2c73b84` (`19aecf4`): version 1.1.0
   (versionCode 2), including the committed test-only two-scroll passphrase
-  reachability correction. No remote mutation or `v1.1.0` tag has occurred.
+  reachability correction. Annotated tag `v1.1.0` points to the pushed
+  qualification-document candidate
+  `e8c91ae26ea3b4f06dc88c862c9e826cccb708f8` (`e8c91ae`); this HANDOFF-only
+  closure follows the tag.
 - The focused passphrase method is green 1/1; the More suite is green 64/64;
   source compilation and local gates are green. The complete six-module
   connected gate is green: 391 total, 389 passed, zero failures/errors, and
@@ -27,19 +30,31 @@ status are superseded here.
   disposable-overlay cleanup was not performed; residual state remains. No
   credential or device identifier is recorded here.
 - GitHub CI qualification is **SKIPPED by explicit user instruction**. The tag
-  is authorized without CI evidence; this record does not claim any candidate
-  CI job passed. The API 37.0 F6 phrase **credential-encrypted storage
+  was created without CI evidence; this record does not claim any candidate
+  CI job passed, and no workflow run or job result was used for release
+  qualification. The API 37.0 F6 phrase **credential-encrypted storage
   unavailable** remains historical observe-only context, not a check of this
   candidate.
 - The user explicitly accepted these original Task 18 gaps and authorized
-  tagging. This is an explicitly waiver-accepted release candidate, not a
-  fully qualified release under the original Task 18 plan; no `v1.1.0` tag
-  exists yet.
-- Stage 8 remains next: month planning, drag-to-reschedule, Gantt-lite, and an
-  opt-in daily digest, with no durable schema change. Stage 9 remains the one
-  Room v10 wave for automations-lite, board WIP limits, My Day ordering, and
-  subtasks. The repository-wide Unicode tag-identity policy remains a bounded
-  deferred hardening task; do not patch only one caller.
+  tagging. Release 1.1.0 exists under those explicit waivers and is not fully
+  qualified under the original Task 18 plan.
+- Android developer verification is complete for package `app.opentasks`:
+  Play Console showed **Registered** with one release signing key on 14 August
+  2026. This package registration does not create a Play Store listing; the
+  release remains signed-sideload distribution.
+- Remaining work after this closure:
+  1. Stage 8: month planning, drag-to-reschedule, Gantt-lite, and an opt-in
+     daily digest, with no durable schema change.
+  2. Stage 9: the single Room v10 wave for automations-lite, board WIP limits,
+     My Day ordering, and subtasks.
+  3. Repository-wide Unicode tag-identity hardening; do not patch only one
+     caller.
+  4. Optional Play Store publication only if the signed-sideload distribution
+     ruling changes; package registration is complete, but no store listing,
+     AAB release, or Play review has been prepared.
+- App-lock smoke, secure cleanup, and candidate CI are not remaining release
+  blockers under the user's explicit waiver. The recorded cleanup residual
+  remains sensitive state if that task is reopened later.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
   paid GitHub service. If included runner allowance is unavailable, do not add
