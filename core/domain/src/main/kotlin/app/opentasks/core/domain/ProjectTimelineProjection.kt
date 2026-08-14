@@ -1,6 +1,5 @@
 package app.opentasks.core.domain
 
-import app.opentasks.core.model.PROJECT_TIMELINE_DAY_COUNT
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.ProjectTimelineDependencyRole
 import app.opentasks.core.model.ProjectTimelineMarkerKind
@@ -89,11 +88,8 @@ private fun taskPlacement(
         dueDate < window.firstDate -> ProjectTimelineTaskPlacement.Outside(ProjectTimelineWindowSide.BEFORE)
         startDate > window.lastDate -> ProjectTimelineTaskPlacement.Outside(ProjectTimelineWindowSide.AFTER)
         else -> ProjectTimelineTaskPlacement.Span(
-            firstVisibleDayIndex = maxOf(0, ChronoUnit.DAYS.between(window.firstDate, startDate).toInt()),
-            lastVisibleDayIndex = minOf(
-                PROJECT_TIMELINE_DAY_COUNT - 1,
-                ChronoUnit.DAYS.between(window.firstDate, dueDate).toInt(),
-            ),
+            firstVisibleDayIndex = ChronoUnit.DAYS.between(window.firstDate, maxOf(window.firstDate, startDate)).toInt(),
+            lastVisibleDayIndex = ChronoUnit.DAYS.between(window.firstDate, minOf(window.lastDate, dueDate)).toInt(),
             totalDayCount = ChronoUnit.DAYS.between(startDate, dueDate) + 1,
             continuesBefore = startDate < window.firstDate,
             continuesAfter = dueDate > window.lastDate,

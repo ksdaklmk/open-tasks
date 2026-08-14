@@ -16,6 +16,7 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.ZonedMoment
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -86,6 +87,11 @@ class ProjectTimelineProjectionTest {
         val clipsBefore = task("clips-before", start = utc("2026-07-31T12:00:00Z"), due = utc("2026-08-04T12:00:00Z"))
         val clipsAfter = task("clips-after", start = utc("2026-10-24T12:00:00Z"), due = utc("2026-10-28T12:00:00Z"))
         val clipsBoth = task("clips-both", start = utc("2026-07-31T12:00:00Z"), due = utc("2026-10-28T12:00:00Z"))
+        val clipsExtreme = task(
+            "clips-extreme",
+            start = ZonedMoment(LocalDate.of(-10_000_000, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant(), "UTC"),
+            due = ZonedMoment(LocalDate.of(10_000_000, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant(), "UTC"),
+        )
         val spanBefore = task("span-before", start = utc("2026-07-30T12:00:00Z"), due = utc("2026-08-01T12:00:00Z"))
         val spanAfter = task("span-after", start = utc("2026-10-26T12:00:00Z"), due = utc("2026-10-27T12:00:00Z"))
         val markerBefore = task("marker-before", start = utc("2026-08-02T12:00:00Z"))
@@ -95,6 +101,7 @@ class ProjectTimelineProjectionTest {
             clipsBefore,
             clipsAfter,
             clipsBoth,
+            clipsExtreme,
             spanBefore,
             spanAfter,
             markerBefore,
@@ -104,6 +111,9 @@ class ProjectTimelineProjectionTest {
         assertEquals(ProjectTimelineTaskPlacement.Span(0, 1, 5, true, false), rows.getValue(clipsBefore.id).placement)
         assertEquals(ProjectTimelineTaskPlacement.Span(82, 83, 5, false, true), rows.getValue(clipsAfter.id).placement)
         assertEquals(ProjectTimelineTaskPlacement.Span(0, 83, 90, true, true), rows.getValue(clipsBoth.id).placement)
+        val extremePlacement = rows.getValue(clipsExtreme.id).placement as ProjectTimelineTaskPlacement.Span
+        assertEquals(0, extremePlacement.firstVisibleDayIndex)
+        assertEquals(83, extremePlacement.lastVisibleDayIndex)
         assertEquals(ProjectTimelineTaskPlacement.Outside(ProjectTimelineWindowSide.BEFORE), rows.getValue(spanBefore.id).placement)
         assertEquals(ProjectTimelineTaskPlacement.Outside(ProjectTimelineWindowSide.AFTER), rows.getValue(spanAfter.id).placement)
         assertEquals(ProjectTimelineTaskPlacement.Outside(ProjectTimelineWindowSide.BEFORE), rows.getValue(markerBefore.id).placement)
