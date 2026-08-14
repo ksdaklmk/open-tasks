@@ -276,13 +276,19 @@ task editor, so Schedule introduces no alternate mutation path.
 
 ## Stage 8 checkpoint (in development, unqualified)
 
-Tasks 1–8 add a pure Monday-first 42-cell Month projection and a pure bounded
+Tasks 1–9 add a pure Monday-first 42-cell Month projection and a pure bounded
 Timeline projection vocabulary, alongside exact single-task move rules. The
 repository command `SetTaskSchedule` changes task schedule and reminder
 atomically in both engines; `UpdateTask` is start-aware. The task editor has
 start/due controls, and stateless Week/Month UI uses a live-zone root clock and
-the complete non-drag rescheduling fallback. Shared root-coordinate drag
-mechanics now serve Board. Timeline UI/state, pointer-drag scheduling, and the
+the complete non-drag rescheduling fallback. Long-press pointer drag now
+layers over that fallback, reusing the shared root-coordinate drag mechanics
+that also serve Board: expanded Week registers day-column and tray targets,
+Month registers its 42 visible cells, drop targets and eligibility stay
+feature-local, the drag payload carries the rendering context's own date
+rather than recomputing one, and a tray drop on a reminder-bearing task opens
+the same hoisted confirmation as the menu path. Drag adds no command,
+arithmetic, controller, or persistence state. Timeline UI/state and the
 daily digest remain pending. Room stays v9 and backup v1; this checkpoint adds
 no schema, backup, permission, manifest, Drive-scope, or route change and has
 no device or release qualification.

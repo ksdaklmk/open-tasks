@@ -63,12 +63,14 @@ race KSP while release Hilt sources are generated.
   Tasks, workbench, and board ordering; `searchWorkspace` is the shared filter
   and ranking authority for both repositories. Do not recreate either rule in
   `app` or a feature. Schedule and Home retain their separate existing order.
-- Stage 8 is an in-development, unqualified checkpoint through Task 8. Its
+- Stage 8 is an in-development, unqualified checkpoint through Task 9. Its
   Month and Timeline rules are pure projections; `SetTaskSchedule` owns one
   atomic task/reminder schedule mutation in both repositories, while
-  `UpdateTask` is start-aware. Preserve the non-drag rescheduling fallback.
-  Timeline UI/state, pointer drag scheduling, and daily digest are pending;
-  do not claim device or release coverage before Task 15.
+  `UpdateTask` is start-aware. Pointer drag rescheduling layers over the
+  non-drag fallback, which stays complete and must be preserved; drag adds
+  no command, arithmetic, controller, or persistence state. Timeline
+  UI/state and daily digest are pending; do not claim device or release
+  coverage before Task 15.
 
 ## Data and security
 

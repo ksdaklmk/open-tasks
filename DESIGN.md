@@ -159,12 +159,17 @@ for floating controls and temporary surfaces.
   never rely on colour alone.
 
 Stage 8 is an in-development, unqualified checkpoint. The landed Schedule
-work adds a Monday-first 42-cell Month view, start/due editor controls, and a
-complete non-drag rescheduling fallback; undated day placement is due at 18:00
-in the current device zone, while a new editor due date defaults to 17:00.
-Week/Month remain stateless and use the live device zone. Pointer drag,
-Timeline UI and saved state, daily digest, device coverage, and release
-qualification remain pending.
+work adds a Monday-first 42-cell Month view, start/due editor controls, a
+complete non-drag rescheduling fallback, and long-press pointer drag layered
+over that fallback: expanded Week drags between day columns and the tray,
+Month drags agenda and tray rows onto visible cells, compact Week stays
+tap/menu only by design, only open non-binned tasks drag, and recurring tasks
+cannot target the tray. The drag preview renders unclipped above scroll
+containers and is RTL-safe; the tap/menu fallback remains complete. Undated
+day placement is due at 18:00 in the current device zone, while a new editor
+due date defaults to 17:00. Week/Month remain stateless and use the live
+device zone. Timeline UI and saved state, daily digest, device coverage, and
+release qualification remain pending.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
 - Today widget: the minimum 2×1 Glance layout keeps both counts and Quick Add

@@ -1,44 +1,73 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 Tasks 1–8 checkpoint, paused before Task 9, 14 August 2026
+## Current resume point — Stage 8 Tasks 1–9 checkpoint, paused before Task 10, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
 status are superseded here.
 
 - Stage 8 began from `8047f136541d22b15ca20db8971ea67685e250b5` and Tasks
-  1–8 end at `441e1350ebe5fe460432fb6968230e8789a7c6a6` (`441e135`). All
-  eight tasks are committed and independently reviewed; every Critical or
-  Important finding was fixed and scoped re-reviewed. Task 8 is PASS/Approved
-  with no findings.
-- The seven-document documentation checkpoint is
-  `ba88821c7b5779ce4f1521e19c89e85a66b86c44`; this correction commit follows
-  it.
+  1–9 end at `5074c10ef1f2150f8bbb4e786c054ae20ac4ee9f` (`5074c10`). All
+  nine tasks are committed and independently reviewed; every Critical or
+  Important finding was fixed and scoped re-reviewed. Task 9 is
+  spec-compliant and Approved with no Critical or Important findings.
+- Task 9 layered long-press pointer drag over the Task 8 non-drag fallback:
+  expanded Week drags between its seven day columns and the tray; Month
+  registers its 42 visible cells and sources individual agenda/tray rows;
+  compact Week stays tap/menu only by design. It reuses the Task 6 root-drag
+  primitives and the Task 8 `onRescheduleTask`/`onRemoveTaskSchedule`
+  callbacks; only open non-binned tasks drag, recurring tasks cannot target
+  the tray, same-source/outside drops snap back without a callback, and the
+  preview is unclipped and RTL-safe. A recorded controller ruling allowed a
+  fourth staged file beyond the task manifest: the Task 8 confirmation
+  `AlertDialog` was hoisted verbatim into one internal
+  `RemoveScheduleConfirmation` in `ScheduleReschedule.kt` so the
+  tray-with-reminder drop opens the same dialog as the menu path — one
+  definition, unchanged strings, tags, and menu behaviour.
+- The Tasks 1–8 documentation checkpoint remains
+  `ba88821c7b5779ce4f1521e19c89e85a66b86c44` with its correction at
+  `cd773d148295469063ea86547c08d7caad71246d`; this Tasks 1–9 checkpoint
+  commit follows `5074c10`.
 - Landed scope is the pure 42-cell Month projection; exact move rules; pure,
   bounded Timeline projection vocabulary and computation; atomic dual-engine
   `SetTaskSchedule` and start-aware `UpdateTask`; start/due editor controls;
   shared root drag mechanics with Board migrated; stateless Week/Month UI and
-  a live-zone root clock; and the complete accessible non-drag rescheduling
-  fallback. Undated day placement remains due at 18:00 in the current device
-  zone; the editor's new due-date default remains 17:00 by design.
+  a live-zone root clock; the complete accessible non-drag rescheduling
+  fallback; and pointer drag rescheduling layered over that fallback. Undated
+  day placement remains due at 18:00 in the current device zone; the editor's
+  new due-date default remains 17:00 by design.
 - Baseline `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` passed
-  before Task 1, and every task passed its focused JVM/compile gate.
-  Instrumented regressions were compile-only: no device or connected test ran.
+  before Task 1, every task passed its focused JVM/compile gate, and the full
+  gate was re-run green at `5074c10` (553 tasks, BUILD SUCCESSFUL).
+  Instrumented regressions were compile-only: no device or connected test
+  ran. Task 9's eight drag tests exist as instrumented sources and are
+  compile-verified only; their RED phase was runtime-shaped and honestly
+  unobservable under the no-device rule.
+- Carry-forward Task 15 obligation: expanded Week reserves a 280 dp
+  unscheduled tray, so the two expanded-Week drag tests need a
+  wide-window/tablet leg and are expected to fail on a phone-width leg —
+  layout geometry, not drag wiring.
 - This is an in-development, unqualified checkpoint. There is no whole-stage
   review, Task 15 qualification, signed APK, release bump, GitHub CI, tag, or
   release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and
   backup v1. No schema, backup format/family, fixture, dependency, permission,
-  manifest, Drive scope, or route changed in Tasks 1–8.
-- Six non-blocking deferred Minors are recorded in the ignored ledger: an
-  unused move-test zone constant; binned Timeline-selection coverage; a
-  content-safe Room `ByteArray` helper; two editor-test strengthening notes;
-  and a Month agenda plural resource. Hand them to the final whole-branch
-  review.
-- **PAUSED by user instruction before Task 9.** Resume with Task 9 pointer
-  drag over the proven fallback, then Tasks 10–15 in plan order. Timeline UI
-  and saved state, pointer drag scheduling, and the daily digest are still
-  pending. Stage 7's waivers do not carry into Stage 8; do not run a device
-  suite before Task 15.
+  manifest, Drive scope, or route changed in Tasks 1–9.
+- Fourteen non-blocking deferred Minors are recorded in the ignored ledger:
+  six from Tasks 1–8 (an unused move-test zone constant; binned
+  Timeline-selection coverage; a content-safe Room `ByteArray` helper; two
+  editor-test strengthening notes; a Month agenda plural resource) and eight
+  from Task 9 (per-move non-skippable Month/Week recomposition matching the
+  Board precedent; unbounded `targetBounds` growth across navigation; the
+  drag-opened confirmation using `remember` while the menu path uses
+  `rememberSaveable`; a density-dependent RTL-preview test delta; a
+  state-map-vs-plain-map choice; a latent compact-Week `dragSource` value
+  beside its null binding; uncovered confirmation-dismiss and
+  recurring-tray-eligibility branches; a duplicated `startOfWeek()`
+  computation). Hand them to the final whole-branch review.
+- **PAUSED by user instruction after Task 9.** Resume with Task 10
+  (per-project planning state), then Tasks 11–15 in plan order. Timeline UI
+  and saved state and the daily digest are still pending. Stage 7's waivers
+  do not carry into Stage 8; do not run a device suite before Task 15.
 - Preserve the unrelated user dirty state: the modified historical Stage 3
   plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
   ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.

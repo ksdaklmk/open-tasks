@@ -27,13 +27,19 @@ worker, service, route, schema, backup record, or Drive scope.
 
 ## Execution checkpoint — 14 August 2026
 
-Tasks 1–8 are complete, committed, and independently reviewed through
-`441e1350ebe5fe460432fb6968230e8789a7c6a6`; Task 8 is PASS/Approved. Task 9
-(pointer drag over the proven fallback) is next; Tasks 9–15 remain pending.
-This is an in-development, unqualified checkpoint: no device/connected suite,
-whole-stage review, qualification, version bump, signed APK, tag, or release
-evidence exists. The six deferred non-blocking Minors are in the ignored ledger
-at `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+Tasks 1–9 are complete, committed, and independently reviewed through
+`5074c10ef1f2150f8bbb4e786c054ae20ac4ee9f`; Task 9 is Approved with no
+Critical or Important findings. A recorded controller ruling let Task 9 stage
+a fourth file — a minimal confirmation-hoisting seam in
+`ScheduleReschedule.kt` — because exact reuse of the Task 8 confirmation
+outranks the task's three-file manifest. Task 10 (per-project planning state)
+is next; Tasks 10–15 remain pending. This is an in-development, unqualified
+checkpoint: no device/connected suite, whole-stage review, qualification,
+version bump, signed APK, tag, or release evidence exists; Task 9's eight
+drag tests are compile-verified only. Carry to Task 15: the expanded-Week
+tray geometry means the two expanded-Week drag tests need a wide-window leg.
+The fourteen deferred non-blocking Minors are in the ignored ledger at
+`.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
 
 ## Global Constraints
 

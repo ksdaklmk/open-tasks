@@ -117,10 +117,11 @@ surface, permission, network path, cloud path, schema, or backup family.
 
 Stage 8 is an in-development, unqualified checkpoint. It has landed the
 Month schedule surface, exact single-task schedule mutation, start/due editor
-controls, and a complete non-drag rescheduling fallback; its Timeline remains
-projection-only. Pointer drag scheduling, Timeline UI/state, the daily digest,
-device coverage, and release qualification remain pending. Room stays v9 and
-backup v1, with no schema, permission, manifest, Drive-scope, or route change.
+controls, a complete non-drag rescheduling fallback, and long-press pointer
+drag rescheduling layered over that fallback; its Timeline remains
+projection-only. Timeline UI/state, the daily digest, device coverage, and
+release qualification remain pending. Room stays v9 and backup v1, with no
+schema, permission, manifest, Drive-scope, or route change.
 
 ## Approved future contract
 
