@@ -144,35 +144,53 @@ internal fun ScheduleTaskActions(
     }
 
     if (confirmReminderRemoval) {
-        AlertDialog(
-            onDismissRequest = { confirmReminderRemoval = false },
-            title = { Text(stringResource(R.string.schedule_remove_reminder_title)) },
-            text = { Text(stringResource(R.string.schedule_remove_reminder_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmReminderRemoval = false
-                        onRemoveTaskSchedule(task.id)
-                    },
-                    modifier = Modifier
-                        .widthIn(min = 48.dp)
-                        .heightIn(min = 48.dp)
-                        .testTag("schedule-remove-confirm-${task.id.value}"),
-                ) {
-                    Text(stringResource(R.string.schedule_remove))
-                }
+        RemoveScheduleConfirmation(
+            taskId = task.id,
+            onConfirm = {
+                confirmReminderRemoval = false
+                onRemoveTaskSchedule(task.id)
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { confirmReminderRemoval = false },
-                    modifier = Modifier
-                        .widthIn(min = 48.dp)
-                        .heightIn(min = 48.dp)
-                        .testTag("schedule-remove-cancel-${task.id.value}"),
-                ) {
-                    Text(stringResource(R.string.schedule_cancel))
-                }
-            },
+            onDismiss = { confirmReminderRemoval = false },
         )
     }
+}
+
+/**
+ * The single reminder-loss confirmation. Both the action menu above and the
+ * Schedule drag host open this same dialog, so a tray drop and a Remove
+ * schedule tap confirm identically.
+ */
+@Composable
+internal fun RemoveScheduleConfirmation(
+    taskId: TaskId,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.schedule_remove_reminder_title)) },
+        text = { Text(stringResource(R.string.schedule_remove_reminder_message)) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier
+                    .widthIn(min = 48.dp)
+                    .heightIn(min = 48.dp)
+                    .testTag("schedule-remove-confirm-${taskId.value}"),
+            ) {
+                Text(stringResource(R.string.schedule_remove))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .widthIn(min = 48.dp)
+                    .heightIn(min = 48.dp)
+                    .testTag("schedule-remove-cancel-${taskId.value}"),
+            ) {
+                Text(stringResource(R.string.schedule_cancel))
+            }
+        },
+    )
 }

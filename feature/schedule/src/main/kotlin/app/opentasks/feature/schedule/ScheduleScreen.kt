@@ -38,17 +38,34 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import app.opentasks.core.designsystem.EmptyState
+import app.opentasks.core.designsystem.RootDragPreview
+import app.opentasks.core.designsystem.RootDragState
 import app.opentasks.core.designsystem.SectionHeader
+import app.opentasks.core.designsystem.dragTargetAt
+import app.opentasks.core.designsystem.rootLongPressDragSource
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.ScheduleMonthProjection
@@ -65,6 +82,32 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 enum class SchedulePresentation { WEEK, MONTH }
+
+/**
+ * A place a Schedule row can be dragged from or dropped on. The rendering
+ * context always knows its own target, so a payload never recomputes a task's
+ * date or zone from its moments.
+ */
+internal sealed interface ScheduleDropTarget {
+    data class Day(val date: LocalDate) : ScheduleDropTarget
+
+    data object Tray : ScheduleDropTarget
+}
+
+internal data class ScheduleDragPayload(
+    val task: Task,
+    val source: ScheduleDropTarget,
+)
+
+/** Drag wiring handed to rows and targets. Null where a surface has no drag. */
+internal data class ScheduleDragBinding(
+    val draggingTaskId: TaskId?,
+    val onStart: (Task, ScheduleDropTarget, Offset, Rect) -> Unit,
+    val onMove: (Offset) -> Unit,
+    val onDrop: () -> Unit,
+    val onCancel: () -> Unit,
+    val onTargetBounds: (ScheduleDropTarget, Rect) -> Unit,
+)
 
 @Composable
 fun ScheduleScreen(
@@ -97,39 +140,80 @@ fun ScheduleScreen(
                 .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
         )
     val remindersByTask = reminders.associateBy(Reminder::taskId)
+    val weekDates = (0L..6L).map(selectedDate.startOfWeek()::plusDays)
 
-    when (presentation) {
-        SchedulePresentation.MONTH -> MonthCalendar(
-            month = month,
-            selectedDate = selectedDate,
-            expanded = expanded,
-            unscheduled = unscheduled,
-            projectNames = projectNames,
-            remindersByTask = remindersByTask,
-            presentation = presentation,
-            onPresentationChange = onPresentationChange,
-            onSelectedDateChange = onSelectedDateChange,
-            onPrevious = onPrevious,
-            onToday = onToday,
-            onNext = onNext,
-            onOpenTask = onOpenTask,
-            calendarEligibleTaskIds = calendarEligibleTaskIds,
-            onAddToCalendar = onAddToCalendar,
-            onRescheduleTask = onRescheduleTask,
-            onRemoveTaskSchedule = onRemoveTaskSchedule,
-            modifier = modifier,
-        )
+    val currentOnRescheduleTask by rememberUpdatedState(onRescheduleTask)
+    val currentOnRemoveTaskSchedule by rememberUpdatedState(onRemoveTaskSchedule)
+    val targetBounds = remember(presentation, expanded) {
+        mutableStateMapOf<ScheduleDropTarget, Rect>()
+    }
+    var hostBounds by remember { mutableStateOf(Rect.Zero) }
+    var dragState by remember { mutableStateOf<RootDragState<ScheduleDragPayload>?>(null) }
+    var pendingTrayRemoval by remember { mutableStateOf<TaskId?>(null) }
 
-        SchedulePresentation.WEEK -> if (expanded) {
-            ExpandedWeek(
-                tasks = scheduled,
+    // Only the currently rendered targets are considered, so navigating a week
+    // or month can never leave a stale registered rect catching a drop.
+    val dropTargets: List<ScheduleDropTarget> = when {
+        presentation == SchedulePresentation.MONTH ->
+            month.days.map { ScheduleDropTarget.Day(it.date) }
+
+        expanded -> weekDates.map { ScheduleDropTarget.Day(it) } + ScheduleDropTarget.Tray
+        else -> emptyList()
+    }
+
+    fun dropTarget(drag: RootDragState<ScheduleDragPayload>): ScheduleDropTarget? = dragTargetAt(
+        positionInRoot = drag.positionInRoot,
+        targets = dropTargets,
+        bounds = targetBounds,
+        eligible = { target ->
+            target != drag.payload.source &&
+                (target != ScheduleDropTarget.Tray || drag.payload.task.recurrence == null)
+        },
+    )
+
+    fun finishDrag() {
+        val drag = dragState
+        dragState = null
+        val payload = drag?.payload ?: return
+        when (val target = dropTarget(drag)) {
+            is ScheduleDropTarget.Day -> currentOnRescheduleTask(payload.task.id, target.date)
+            ScheduleDropTarget.Tray -> if (remindersByTask[payload.task.id] == null) {
+                currentOnRemoveTaskSchedule(payload.task.id)
+            } else {
+                pendingTrayRemoval = payload.task.id
+            }
+
+            null -> Unit
+        }
+    }
+
+    val dragBinding = ScheduleDragBinding(
+        draggingTaskId = dragState?.payload?.task?.id,
+        onStart = { task, source, positionInRoot, sourceBounds ->
+            dragState = RootDragState(
+                payload = ScheduleDragPayload(task = task, source = source),
+                sourceBounds = sourceBounds,
+                startInRoot = positionInRoot,
+            )
+        },
+        onMove = { dragAmount -> dragState = dragState?.movedBy(dragAmount) },
+        onDrop = ::finishDrag,
+        onCancel = { dragState = null },
+        onTargetBounds = { target, bounds -> targetBounds[target] = bounds },
+    ).takeIf { dropTargets.isNotEmpty() }
+
+    Box(modifier = modifier.onGloballyPositioned { hostBounds = it.boundsInRoot() }) {
+        when (presentation) {
+            SchedulePresentation.MONTH -> MonthCalendar(
+                month = month,
+                selectedDate = selectedDate,
+                expanded = expanded,
                 unscheduled = unscheduled,
                 projectNames = projectNames,
                 remindersByTask = remindersByTask,
                 presentation = presentation,
-                selectedDate = selectedDate,
-                today = today,
                 onPresentationChange = onPresentationChange,
+                onSelectedDateChange = onSelectedDateChange,
                 onPrevious = onPrevious,
                 onToday = onToday,
                 onNext = onNext,
@@ -138,27 +222,88 @@ fun ScheduleScreen(
                 onAddToCalendar = onAddToCalendar,
                 onRescheduleTask = onRescheduleTask,
                 onRemoveTaskSchedule = onRemoveTaskSchedule,
-                modifier = modifier,
+                dragBinding = dragBinding,
+                modifier = Modifier,
             )
-        } else {
-            CompactAgenda(
-                tasks = scheduled,
-                unscheduledCount = unscheduled.size,
-                projectNames = projectNames,
-                remindersByTask = remindersByTask,
-                presentation = presentation,
-                selectedDate = selectedDate,
-                onPresentationChange = onPresentationChange,
-                onSelectDate = onSelectedDateChange,
-                onPrevious = onPrevious,
-                onToday = onToday,
-                onNext = onNext,
-                onOpenTask = onOpenTask,
-                calendarEligibleTaskIds = calendarEligibleTaskIds,
-                onAddToCalendar = onAddToCalendar,
-                onRescheduleTask = onRescheduleTask,
-                onRemoveTaskSchedule = onRemoveTaskSchedule,
-                modifier = modifier,
+
+            SchedulePresentation.WEEK -> if (expanded) {
+                ExpandedWeek(
+                    tasks = scheduled,
+                    unscheduled = unscheduled,
+                    projectNames = projectNames,
+                    remindersByTask = remindersByTask,
+                    presentation = presentation,
+                    selectedDate = selectedDate,
+                    weekDates = weekDates,
+                    today = today,
+                    onPresentationChange = onPresentationChange,
+                    onPrevious = onPrevious,
+                    onToday = onToday,
+                    onNext = onNext,
+                    onOpenTask = onOpenTask,
+                    calendarEligibleTaskIds = calendarEligibleTaskIds,
+                    onAddToCalendar = onAddToCalendar,
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    dragBinding = dragBinding,
+                    modifier = Modifier,
+                )
+            } else {
+                CompactAgenda(
+                    tasks = scheduled,
+                    unscheduledCount = unscheduled.size,
+                    projectNames = projectNames,
+                    remindersByTask = remindersByTask,
+                    presentation = presentation,
+                    selectedDate = selectedDate,
+                    onPresentationChange = onPresentationChange,
+                    onSelectDate = onSelectedDateChange,
+                    onPrevious = onPrevious,
+                    onToday = onToday,
+                    onNext = onNext,
+                    onOpenTask = onOpenTask,
+                    calendarEligibleTaskIds = calendarEligibleTaskIds,
+                    onAddToCalendar = onAddToCalendar,
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    modifier = Modifier,
+                )
+            }
+        }
+        dragState?.let { drag ->
+            RootDragPreview(
+                state = drag,
+                containerBounds = hostBounds,
+                modifier = Modifier
+                    .zIndex(1f)
+                    .testTag("schedule-drag-preview-${drag.payload.task.id.value}")
+                    .clearAndSetSemantics { },
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.medium,
+                    shadowElevation = 8.dp,
+                ) {
+                    Box(
+                        modifier = Modifier.padding(12.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            drag.payload.task.title,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
+                }
+            }
+        }
+        pendingTrayRemoval?.let { taskId ->
+            RemoveScheduleConfirmation(
+                taskId = taskId,
+                onConfirm = {
+                    pendingTrayRemoval = null
+                    currentOnRemoveTaskSchedule(taskId)
+                },
+                onDismiss = { pendingTrayRemoval = null },
             )
         }
     }
@@ -254,6 +399,10 @@ private fun CompactAgenda(
                         .takeIf { task.id in calendarEligibleTaskIds },
                     onRescheduleTask = onRescheduleTask,
                     onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    // Compact Week has no honest target grid, so it stays on the
+                    // tap/menu fallback alone.
+                    dragBinding = null,
+                    dragSource = ScheduleDropTarget.Day(selectedDate),
                 )
             }
         }
@@ -278,6 +427,7 @@ private fun ExpandedWeek(
     remindersByTask: Map<TaskId, Reminder>,
     presentation: SchedulePresentation,
     selectedDate: LocalDate,
+    weekDates: List<LocalDate>,
     today: LocalDate,
     onPresentationChange: (SchedulePresentation) -> Unit,
     onPrevious: () -> Unit,
@@ -288,10 +438,10 @@ private fun ExpandedWeek(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier,
 ) {
     val weekStart = selectedDate.startOfWeek()
-    val weekDates = (0L..6L).map(weekStart::plusDays)
 
     Row(
         modifier = modifier
@@ -336,6 +486,7 @@ private fun ExpandedWeek(
                         onAddToCalendar = onAddToCalendar,
                         onRescheduleTask = onRescheduleTask,
                         onRemoveTaskSchedule = onRemoveTaskSchedule,
+                        dragBinding = dragBinding,
                     )
                 }
             }
@@ -348,6 +499,8 @@ private fun ExpandedWeek(
             initialDate = selectedDate,
             onRescheduleTask = onRescheduleTask,
             onRemoveTaskSchedule = onRemoveTaskSchedule,
+            dragBinding = dragBinding,
+            isDropTarget = true,
         )
     }
 }
@@ -439,11 +592,15 @@ private fun DayColumn(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
 ) {
     Column(
         modifier = Modifier
             .width(176.dp)
             .fillMaxHeight()
+            .onGloballyPositioned {
+                dragBinding?.onTargetBounds(ScheduleDropTarget.Day(date), it.boundsInRoot())
+            }
             .verticalScroll(rememberScrollState())
             .testTag("schedule-column-$date"),
     ) {
@@ -493,6 +650,8 @@ private fun DayColumn(
                         .takeIf { task.id in calendarEligibleTaskIds },
                     onRescheduleTask = onRescheduleTask,
                     onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    dragBinding = dragBinding,
+                    dragSource = ScheduleDropTarget.Day(date),
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -510,12 +669,15 @@ private fun TimelineTask(
     onAddToCalendar: (() -> Unit)? = null,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
+    dragSource: ScheduleDropTarget,
 ) {
     Surface(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 80.dp)
+            .scheduleDragSource(dragBinding, task, dragSource)
             .testTag("schedule-task-${task.id.value}"),
         color = if (task.isCompleted) {
             MaterialTheme.colorScheme.surfaceVariant
@@ -601,12 +763,23 @@ internal fun UnscheduledTray(
     initialDate: LocalDate,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
+    isDropTarget: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val trayTarget = if (dragBinding != null && isDropTarget) {
+        Modifier.onGloballyPositioned {
+            dragBinding.onTargetBounds(ScheduleDropTarget.Tray, it.boundsInRoot())
+        }
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = modifier
             .widthIn(min = 280.dp, max = 340.dp)
             .fillMaxHeight()
+            .then(trayTarget)
             .padding(20.dp)
             .testTag("unscheduled-tray"),
     ) {
@@ -630,6 +803,7 @@ internal fun UnscheduledTray(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 64.dp)
+                            .scheduleDragSource(dragBinding, task, ScheduleDropTarget.Tray)
                             .testTag("unscheduled-task-${task.id.value}")
                             .semantics { role = Role.Button },
                         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -672,6 +846,8 @@ internal fun AgendaRow(
     onAddToCalendar: (() -> Unit)? = null,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
+    dragSource: ScheduleDropTarget,
 ) {
     Surface(
         onClick = onClick,
@@ -679,6 +855,7 @@ internal fun AgendaRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 72.dp)
+            .scheduleDragSource(dragBinding, task, dragSource)
             .testTag("schedule-task-${task.id.value}"),
     ) {
         Row(
@@ -759,6 +936,30 @@ internal fun AgendaRow(
             )
         }
     }
+}
+
+/**
+ * Long-press drag for one row. Only open, non-binned tasks are sources; the
+ * complete tap/menu fallback stays on every row either way.
+ */
+@Composable
+private fun Modifier.scheduleDragSource(
+    binding: ScheduleDragBinding?,
+    task: Task,
+    source: ScheduleDropTarget,
+): Modifier {
+    if (binding == null) return this
+    return graphicsLayer { alpha = if (binding.draggingTaskId == task.id) 0f else 1f }
+        .rootLongPressDragSource(
+            key = task.id,
+            enabled = !task.isCompleted && task.deletedAt == null,
+            onStart = { positionInRoot, sourceBounds ->
+                binding.onStart(task, source, positionInRoot, sourceBounds)
+            },
+            onDrag = binding.onMove,
+            onDrop = binding.onDrop,
+            onCancel = binding.onCancel,
+        )
 }
 
 private fun LocalDate.startOfWeek(): LocalDate =

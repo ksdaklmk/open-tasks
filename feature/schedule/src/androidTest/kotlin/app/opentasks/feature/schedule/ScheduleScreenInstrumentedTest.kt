@@ -1,9 +1,20 @@
 package app.opentasks.feature.schedule
 
+import android.view.ViewConfiguration
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -20,8 +31,11 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
@@ -40,6 +54,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -612,6 +627,350 @@ class ScheduleScreenInstrumentedTest {
 
         assertEquals(task.id, opened.get())
     }
+
+    @Test
+    fun expandedWeekDragMovesDatedTaskBetweenDays() {
+        val task = scheduledTask(
+            id = "week-drag-source",
+            title = "Drag across days",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showSchedule(
+            tasks = listOf(task),
+            expanded = true,
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        beginDrag(
+            from = boundsOf("schedule-task-${task.id.value}").center,
+            to = boundsOf("schedule-column-2026-08-18").center,
+        )
+        composeRule.onNodeWithTag("schedule-drag-preview-${task.id.value}").assertIsDisplayed()
+        endDrag()
+
+        assertEquals(task.id to LocalDate.parse("2026-08-18"), rescheduled.get())
+    }
+
+    @Test
+    fun expandedWeekTrayDragUsesDayAndRemoveCallbacks() {
+        val undated = unscheduledTask("week-tray-open", "Undated tray task")
+        val dated = scheduledTask(
+            id = "week-tray-dated",
+            title = "Dated task without reminder",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val remindered = scheduledTask(
+            id = "week-tray-remindered",
+            title = "Dated task with reminder",
+            instant = "2026-08-17T10:00:00Z",
+        )
+        val reminder = Reminder(
+            id = Reminder.primaryId(remindered.id),
+            taskId = remindered.id,
+            triggerAt = ZonedMoment(Instant.parse("2026-08-17T09:30:00Z"), "UTC"),
+            precise = false,
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        val removed = AtomicReference<TaskId?>()
+        showSchedule(
+            tasks = listOf(undated, dated, remindered),
+            expanded = true,
+            reminders = listOf(reminder),
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+            onRemoveTaskSchedule = removed::set,
+        )
+
+        beginDrag(
+            from = boundsOf("unscheduled-task-${undated.id.value}").center,
+            to = boundsOf("schedule-column-$FALLBACK_DATE").center,
+        )
+        endDrag()
+        assertEquals(undated.id to FALLBACK_DATE, rescheduled.get())
+
+        beginDrag(
+            from = boundsOf("schedule-task-${dated.id.value}").center,
+            to = boundsOf("unscheduled-tray").center,
+        )
+        endDrag()
+        assertEquals(dated.id, removed.get())
+
+        beginDrag(
+            from = boundsOf("schedule-task-${remindered.id.value}").center,
+            to = boundsOf("unscheduled-tray").center,
+        )
+        endDrag()
+        assertEquals(dated.id, removed.get())
+        assertMinimumTarget("schedule-remove-confirm-${remindered.id.value}").performClick()
+        assertEquals(remindered.id, removed.get())
+    }
+
+    @Test
+    fun monthAgendaDragTargetsVisibleCell() {
+        val task = scheduledTask(
+            id = "month-agenda-drag",
+            title = "Month agenda task",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showSchedule(
+            tasks = listOf(task),
+            presentation = SchedulePresentation.MONTH,
+            dated = listOf(task),
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        beginDrag(
+            from = boundsOf("schedule-task-${task.id.value}").center,
+            to = boundsOf("schedule-month-day-2026-08-31").center,
+        )
+        composeRule.onNodeWithTag("schedule-drag-preview-${task.id.value}").assertIsDisplayed()
+        endDrag()
+
+        assertEquals(task.id to LocalDate.parse("2026-08-31"), rescheduled.get())
+    }
+
+    @Test
+    fun monthTrayDragTargetsVisibleCell() {
+        val undated = unscheduledTask("month-tray-drag", "Month tray task")
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showSchedule(
+            tasks = listOf(undated),
+            expanded = true,
+            presentation = SchedulePresentation.MONTH,
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        beginDrag(
+            from = boundsOf("unscheduled-task-${undated.id.value}").center,
+            to = boundsOf("schedule-month-day-$FALLBACK_DATE").center,
+        )
+        endDrag()
+
+        assertEquals(undated.id to FALLBACK_DATE, rescheduled.get())
+    }
+
+    @Test
+    fun completedTaskIsNotADragSource() {
+        val completed = scheduledTask(
+            id = "month-completed-drag",
+            title = "Completed month task",
+            instant = "2026-08-17T09:00:00Z",
+        ).copy(
+            semanticStatus = SemanticStatus.COMPLETED,
+            completedAt = Instant.parse("2026-08-17T10:00:00Z"),
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        showSchedule(
+            tasks = listOf(completed),
+            presentation = SchedulePresentation.MONTH,
+            dated = listOf(completed),
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+        )
+
+        beginDrag(
+            from = boundsOf("schedule-task-${completed.id.value}").center,
+            to = boundsOf("schedule-month-day-2026-08-31").center,
+        )
+        composeRule.onNodeWithTag("schedule-drag-preview-${completed.id.value}")
+            .assertDoesNotExist()
+        endDrag()
+
+        assertNull(rescheduled.get())
+    }
+
+    @Test
+    fun sameSourceAndOutsideDropSnapBackWithoutCallback() {
+        val task = scheduledTask(
+            id = "month-snap-back",
+            title = "Snap back task",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val rescheduled = AtomicReference<Pair<TaskId, LocalDate>?>()
+        val removed = AtomicReference<TaskId?>()
+        showSchedule(
+            tasks = listOf(task),
+            presentation = SchedulePresentation.MONTH,
+            dated = listOf(task),
+            onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
+            onRemoveTaskSchedule = removed::set,
+        )
+        val row = "schedule-task-${task.id.value}"
+        val preview = "schedule-drag-preview-${task.id.value}"
+
+        beginDrag(
+            from = boundsOf(row).center,
+            to = boundsOf("schedule-month-day-$FALLBACK_DATE").center,
+        )
+        composeRule.onNodeWithTag(preview).assertIsDisplayed()
+        endDrag()
+        assertNull(rescheduled.get())
+        composeRule.onNodeWithTag(preview).assertDoesNotExist()
+        composeRule.onNodeWithTag(row).assertIsDisplayed()
+
+        beginDrag(from = boundsOf(row).center, to = boundsOf("schedule-today").center)
+        endDrag()
+        assertNull(rescheduled.get())
+        assertNull(removed.get())
+    }
+
+    @Test
+    fun dragUsesReplacementCallback() {
+        val task = scheduledTask(
+            id = "month-replacement-callback",
+            title = "Replacement callback task",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val stale = AtomicReference<Pair<TaskId, LocalDate>?>()
+        val fresh = AtomicReference<Pair<TaskId, LocalDate>?>()
+        val onRescheduleTask = mutableStateOf<(TaskId, LocalDate) -> Unit>(
+            { taskId, date -> stale.set(taskId to date) },
+        )
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                ScheduleScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    expanded = false,
+                    presentation = SchedulePresentation.MONTH,
+                    selectedDate = FALLBACK_DATE,
+                    month = monthWith(listOf(task)),
+                    onPresentationChange = {},
+                    onSelectedDateChange = {},
+                    onPrevious = {},
+                    onToday = {},
+                    onNext = {},
+                    onOpenTask = {},
+                    today = FALLBACK_DATE,
+                    onRescheduleTask = onRescheduleTask.value,
+                )
+            }
+        }
+
+        beginDrag(
+            from = boundsOf("schedule-task-${task.id.value}").center,
+            to = boundsOf("schedule-month-day-2026-08-31").center,
+        )
+        composeRule.runOnIdle {
+            onRescheduleTask.value = { taskId, date -> fresh.set(taskId to date) }
+        }
+        composeRule.waitForIdle()
+        endDrag()
+
+        assertNull(stale.get())
+        assertEquals(task.id to LocalDate.parse("2026-08-31"), fresh.get())
+    }
+
+    @Test
+    fun previewIsUnclippedAndRtlSafe() {
+        val task = scheduledTask(
+            id = "month-rtl-preview",
+            title = "Right to left preview task",
+            instant = "2026-08-17T09:00:00Z",
+        )
+        val dragDelta = Offset(80f, 0f)
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        ScheduleScreen(
+                            tasks = listOf(task),
+                            projectNames = emptyMap(),
+                            expanded = false,
+                            presentation = SchedulePresentation.MONTH,
+                            selectedDate = FALLBACK_DATE,
+                            month = monthWith(listOf(task)),
+                            onPresentationChange = {},
+                            onSelectedDateChange = {},
+                            onPrevious = {},
+                            onToday = {},
+                            onNext = {},
+                            onOpenTask = {},
+                            today = FALLBACK_DATE,
+                            modifier = Modifier
+                                .width(240.dp)
+                                .testTag("schedule-host"),
+                        )
+                    }
+                }
+            }
+        }
+        val hostBounds = boundsOf("schedule-host")
+        val rowBounds = boundsOf("schedule-task-${task.id.value}")
+        val preview = "schedule-drag-preview-${task.id.value}"
+
+        beginDrag(from = rowBounds.center, to = rowBounds.center + dragDelta)
+
+        composeRule.onNodeWithTag(preview).assertIsDisplayed()
+        val previewBounds = boundsOf(preview)
+        assertEquals(rowBounds.left + dragDelta.x, previewBounds.left, 1f)
+        assertTrue(previewBounds.right > hostBounds.right)
+
+        endDrag()
+    }
+
+    private fun beginDrag(from: Offset, to: Offset) {
+        composeRule.onRoot().performTouchInput {
+            down(from)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(to)
+        }
+    }
+
+    private fun endDrag() {
+        composeRule.onRoot().performTouchInput { up() }
+    }
+
+    private fun boundsOf(tag: String): Rect =
+        composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+
+    private fun showSchedule(
+        tasks: List<Task>,
+        expanded: Boolean = false,
+        presentation: SchedulePresentation = SchedulePresentation.WEEK,
+        dated: List<Task> = emptyList(),
+        reminders: List<Reminder> = emptyList(),
+        onRescheduleTask: (TaskId, LocalDate) -> Unit = { _, _ -> },
+        onRemoveTaskSchedule: (TaskId) -> Unit = {},
+    ) {
+        composeRule.setContent {
+            OpenTasksTheme {
+                ScheduleScreen(
+                    tasks = tasks,
+                    projectNames = emptyMap(),
+                    expanded = expanded,
+                    presentation = presentation,
+                    selectedDate = FALLBACK_DATE,
+                    month = monthWith(dated),
+                    onPresentationChange = {},
+                    onSelectedDateChange = {},
+                    onPrevious = {},
+                    onToday = {},
+                    onNext = {},
+                    onOpenTask = {},
+                    reminders = reminders,
+                    today = FALLBACK_DATE,
+                    onRescheduleTask = onRescheduleTask,
+                    onRemoveTaskSchedule = onRemoveTaskSchedule,
+                )
+            }
+        }
+    }
+
+    private fun monthWith(dated: List<Task>) = literalMonthProjection(
+        mapOf(
+            FALLBACK_DATE.toString() to literalDay(
+                date = FALLBACK_DATE.toString(),
+                inSelectedMonth = true,
+                tasks = dated,
+            ),
+        ),
+    )
 
     private fun showFallback(
         tasks: List<Task>,

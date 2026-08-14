@@ -31,6 +31,8 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -75,6 +77,7 @@ internal fun MonthCalendar(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier,
 ) {
     if (expanded) {
@@ -95,6 +98,7 @@ internal fun MonthCalendar(
             onAddToCalendar = onAddToCalendar,
             onRescheduleTask = onRescheduleTask,
             onRemoveTaskSchedule = onRemoveTaskSchedule,
+            dragBinding = dragBinding,
             modifier = modifier,
         )
     } else {
@@ -114,6 +118,7 @@ internal fun MonthCalendar(
             onAddToCalendar = onAddToCalendar,
             onRescheduleTask = onRescheduleTask,
             onRemoveTaskSchedule = onRemoveTaskSchedule,
+            dragBinding = dragBinding,
             modifier = modifier,
         )
     }
@@ -136,6 +141,7 @@ private fun CompactMonth(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier,
 ) {
     Column(
@@ -158,6 +164,7 @@ private fun CompactMonth(
             month = month,
             selectedDate = selectedDate,
             onSelectedDateChange = onSelectedDateChange,
+            dragBinding = dragBinding,
         )
         Spacer(Modifier.height(24.dp))
         MonthAgenda(
@@ -170,6 +177,7 @@ private fun CompactMonth(
             onAddToCalendar = onAddToCalendar,
             onRescheduleTask = onRescheduleTask,
             onRemoveTaskSchedule = onRemoveTaskSchedule,
+            dragBinding = dragBinding,
             lazy = false,
         )
     }
@@ -193,6 +201,7 @@ private fun ExpandedMonth(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier,
 ) {
     Row(
@@ -220,6 +229,7 @@ private fun ExpandedMonth(
                 month = month,
                 selectedDate = selectedDate,
                 onSelectedDateChange = onSelectedDateChange,
+                dragBinding = dragBinding,
             )
         }
         VerticalDivider(modifier = Modifier.fillMaxHeight())
@@ -238,6 +248,7 @@ private fun ExpandedMonth(
                 onAddToCalendar = onAddToCalendar,
                 onRescheduleTask = onRescheduleTask,
                 onRemoveTaskSchedule = onRemoveTaskSchedule,
+                dragBinding = dragBinding,
                 lazy = true,
                 modifier = Modifier
                     .weight(1f)
@@ -252,6 +263,8 @@ private fun ExpandedMonth(
                 initialDate = selectedDate,
                 onRescheduleTask = onRescheduleTask,
                 onRemoveTaskSchedule = onRemoveTaskSchedule,
+                dragBinding = dragBinding,
+                isDropTarget = false,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -284,6 +297,7 @@ private fun MonthGrid(
     month: ScheduleMonthProjection,
     selectedDate: LocalDate,
     onSelectedDateChange: (LocalDate) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -313,6 +327,7 @@ private fun MonthGrid(
                             day = day,
                             selected = day.date == selectedDate,
                             onClick = { onSelectedDateChange(day.date) },
+                            dragBinding = dragBinding,
                             modifier = Modifier.width(cellWidth),
                         )
                     }
@@ -327,6 +342,7 @@ private fun MonthDayCell(
     day: ScheduleMonthDay,
     selected: Boolean,
     onClick: () -> Unit,
+    dragBinding: ScheduleDragBinding?,
     modifier: Modifier = Modifier,
 ) {
     val fullDate = day.date.format(FULL_DATE_FORMAT)
@@ -348,6 +364,12 @@ private fun MonthDayCell(
         onClick = onClick,
         modifier = modifier
             .height(64.dp)
+            .onGloballyPositioned {
+                dragBinding?.onTargetBounds(
+                    ScheduleDropTarget.Day(day.date),
+                    it.boundsInRoot(),
+                )
+            }
             .testTag("schedule-month-day-${day.date}")
             .semantics(mergeDescendants = true) {
                 contentDescription = description
@@ -443,6 +465,7 @@ private fun MonthAgenda(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
     lazy: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -471,6 +494,7 @@ private fun MonthAgenda(
                         onAddToCalendar = onAddToCalendar,
                         onRescheduleTask = onRescheduleTask,
                         onRemoveTaskSchedule = onRemoveTaskSchedule,
+                        dragBinding = dragBinding,
                     )
                 }
             }
@@ -486,6 +510,7 @@ private fun MonthAgenda(
                     onAddToCalendar = onAddToCalendar,
                     onRescheduleTask = onRescheduleTask,
                     onRemoveTaskSchedule = onRemoveTaskSchedule,
+                    dragBinding = dragBinding,
                 )
             }
         }
@@ -503,6 +528,7 @@ private fun MonthAgendaRow(
     onAddToCalendar: (TaskId) -> Unit,
     onRescheduleTask: (TaskId, LocalDate) -> Unit,
     onRemoveTaskSchedule: (TaskId) -> Unit,
+    dragBinding: ScheduleDragBinding?,
 ) {
     AgendaRow(
         task = task,
@@ -514,6 +540,8 @@ private fun MonthAgendaRow(
             .takeIf { task.id in calendarEligibleTaskIds },
         onRescheduleTask = onRescheduleTask,
         onRemoveTaskSchedule = onRemoveTaskSchedule,
+        dragBinding = dragBinding,
+        dragSource = ScheduleDropTarget.Day(initialDate),
     )
 }
 
