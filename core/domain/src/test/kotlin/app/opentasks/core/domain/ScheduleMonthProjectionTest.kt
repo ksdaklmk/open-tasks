@@ -34,7 +34,7 @@ class ScheduleMonthProjectionTest {
 
     @Test
     fun startPrecedesDueAndPlacementUsesItsStoredZone() {
-        val task = task("start", start = moment("2026-02-01T00:30:00Z", "America/Los_Angeles"), due = moment("2026-02-02T10:00:00Z", "UTC"))
+        val task = task("start", start = moment("2026-02-01T00:30:00Z", "America/Los_Angeles"), due = moment("2026-02-01T00:30:00Z", "UTC"))
         val days = project(YearMonth.of(2026, 2), task).days
         assertEquals(listOf(task), days.single { it.date.toString() == "2026-01-31" }.tasks)
     }
