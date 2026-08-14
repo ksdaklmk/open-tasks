@@ -1,5 +1,7 @@
 package app.opentasks.feature.tasks
 
+import android.app.TimePickerDialog
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -83,6 +85,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -134,6 +137,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeFormatterBuilder
 import java.time.format.ResolverStyle
@@ -1017,6 +1021,12 @@ private fun TaskDetailPane(
     var priorityName by rememberSaveable(task.id.value) {
         mutableStateOf(task.priority.name)
     }
+    var startEpochMillis by rememberSaveable(task.id.value) {
+        mutableStateOf(task.start?.instant?.toEpochMilli())
+    }
+    var startZoneId by rememberSaveable(task.id.value) {
+        mutableStateOf(task.start?.zoneId)
+    }
     var dueEpochMillis by rememberSaveable(task.id.value) {
         mutableStateOf(task.due?.instant?.toEpochMilli())
     }
@@ -1067,6 +1077,7 @@ private fun TaskDetailPane(
     }
     var newTagName by rememberSaveable(task.id.value) { mutableStateOf("") }
     var newChecklistText by rememberSaveable(task.id.value) { mutableStateOf("") }
+    var showStartPicker by rememberSaveable(task.id.value) { mutableStateOf(false) }
     var showDuePicker by rememberSaveable(task.id.value) { mutableStateOf(false) }
     var showRecurrenceEndPicker by rememberSaveable(task.id.value) {
         mutableStateOf(false)
@@ -1083,7 +1094,14 @@ private fun TaskDetailPane(
         .sortedBy(WorkflowStatus::rank)
     val currentStatus = workflowStatuses.firstOrNull { it.id == task.statusId }
     val currentStatusName = currentStatus?.name ?: task.semanticStatus.readableName()
+    val context = LocalContext.current
 
+    val editorStart = startEpochMillis?.let { epoch ->
+        ZonedMoment(
+            instant = Instant.ofEpochMilli(epoch),
+            zoneId = startZoneId ?: ZoneId.systemDefault().id,
+        )
+    }
     val editorDue = dueEpochMillis?.let { epoch ->
         ZonedMoment(
             instant = Instant.ofEpochMilli(epoch),
@@ -1099,13 +1117,14 @@ private fun TaskDetailPane(
         .split(',')
         .filter(String::isNotBlank)
         .mapTo(linkedSetOf(), DayOfWeek::valueOf)
-    val dueDate = editorDue
+    val recurrenceAnchor = editorDue ?: editorStart
+    val recurrenceAnchorDate = recurrenceAnchor
         ?.instant
-        ?.atZone(ZoneId.of(editorDue.zoneId))
+        ?.atZone(ZoneId.of(recurrenceAnchor.zoneId))
         ?.toLocalDate()
     val recurrenceError = when {
         recurrenceFrequency == null -> null
-        editorDue == null -> "Choose a due date before adding a repeat"
+        recurrenceAnchor == null -> stringResource(R.string.task_recurrence_requires_schedule)
         recurrenceInterval == null || recurrenceInterval !in 1..MAX_RECURRENCE_INTERVAL ->
             "Use an interval from 1 to $MAX_RECURRENCE_INTERVAL"
         recurrenceFrequency == RecurrenceFrequency.WEEKLY && recurrenceWeekdays.isEmpty() ->
@@ -1116,10 +1135,10 @@ private fun TaskDetailPane(
         recurrenceEndMode == RecurrenceEndMode.DATE && recurrenceEndDate == null ->
             "Choose an end date"
         recurrenceEndMode == RecurrenceEndMode.DATE &&
-            dueDate != null &&
+            recurrenceAnchorDate != null &&
             recurrenceEndDate != null &&
-            recurrenceEndDate.isBefore(dueDate) ->
-            "The end date cannot be before the due date"
+            recurrenceEndDate.isBefore(recurrenceAnchorDate) ->
+            stringResource(R.string.task_recurrence_end_before_schedule)
         else -> null
     }
     val editorRecurrence = if (recurrenceFrequency != null && recurrenceError == null) {
@@ -1157,7 +1176,7 @@ private fun TaskDetailPane(
         description = description,
         projectId = projectIdValue?.let(::ProjectId),
         priority = Priority.valueOf(priorityName),
-        start = task.start,
+        start = editorStart,
         due = editorDue,
         recurrence = editorRecurrence,
         estimate = estimateMinutes?.let(Duration::ofMinutes),
@@ -1172,7 +1191,16 @@ private fun TaskDetailPane(
         else -> null
     }
     val descriptionError = description.length > MAX_TASK_DESCRIPTION_LENGTH
-    val valid = titleError == null && !descriptionError && recurrenceError == null
+    val scheduleError = if (
+        editorStart != null && editorDue != null &&
+        editorDue.instant.isBefore(editorStart.instant)
+    ) {
+        stringResource(R.string.task_schedule_due_before_start)
+    } else {
+        null
+    }
+    val valid = titleError == null && !descriptionError &&
+        recurrenceError == null && scheduleError == null
     val dirty = editorValue != persistedValue
 
     LaunchedEffect(persistedValue) {
@@ -1185,6 +1213,8 @@ private fun TaskDetailPane(
             description = task.description
             projectIdValue = task.projectId?.value
             priorityName = task.priority.name
+            startEpochMillis = task.start?.instant?.toEpochMilli()
+            startZoneId = task.start?.zoneId
             dueEpochMillis = task.due?.instant?.toEpochMilli()
             dueZoneId = task.due?.zoneId
             recurrenceFrequencyName = task.recurrence?.frequency?.name
@@ -1719,7 +1749,88 @@ private fun TaskDetailPane(
         SectionHeader("Planning")
         Spacer(Modifier.height(12.dp))
         Text(
-            "Due date",
+            stringResource(R.string.task_schedule_start),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(
+                onClick = { showStartPicker = true },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .testTag("task-start-date-button"),
+            ) {
+                Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    editorStart?.let { start ->
+                        DUE_DATE_FORMAT.format(start.instant.atZone(start.zone()))
+                    } ?: stringResource(R.string.task_schedule_choose_date),
+                )
+            }
+            if (editorStart != null) {
+                IconButton(
+                    onClick = {
+                        startEpochMillis = null
+                        startZoneId = null
+                        if (editorDue == null) recurrenceFrequencyName = null
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("task-clear-start"),
+                ) {
+                    Icon(
+                        Icons.Rounded.Clear,
+                        contentDescription = stringResource(R.string.task_schedule_clear_start),
+                    )
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = {
+                val start = editorStart ?: return@OutlinedButton
+                val local = start.instant.atZone(start.zone()).toLocalTime()
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute ->
+                        val changed = start.withLocal(time = LocalTime.of(hour, minute))
+                        startEpochMillis = changed.instant.toEpochMilli()
+                        startZoneId = changed.zoneId
+                    },
+                    local.hour,
+                    local.minute,
+                    true,
+                ).show()
+            },
+            enabled = editorStart != null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("task-start-time-button"),
+        ) {
+            Icon(Icons.Rounded.Schedule, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                editorStart?.let { start ->
+                    SCHEDULE_TIME_FORMAT.format(start.instant.atZone(start.zone()))
+                } ?: stringResource(R.string.task_schedule_choose_time),
+            )
+        }
+        Text(
+            stringResource(R.string.task_schedule_start_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            stringResource(R.string.task_schedule_due),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1733,35 +1844,81 @@ private fun TaskDetailPane(
                 onClick = { showDuePicker = true },
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 48.dp),
+                    .heightIn(min = 48.dp)
+                    .testTag("task-due-date-button"),
             ) {
                 Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    editorValue.due?.let { due ->
-                        DUE_DATE_FORMAT.format(due.instant.atZone(ZoneId.of(due.zoneId)))
-                    } ?: "Choose date",
+                    editorDue?.let { due ->
+                        DUE_DATE_FORMAT.format(due.instant.atZone(due.zone()))
+                    } ?: stringResource(R.string.task_schedule_choose_date),
                 )
             }
-            if (editorValue.due != null) {
+            if (editorDue != null) {
                 IconButton(
                     onClick = {
                         dueEpochMillis = null
                         dueZoneId = null
-                        recurrenceFrequencyName = null
+                        if (editorStart == null) recurrenceFrequencyName = null
                         reminderLeadSeconds = null
                     },
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("task-clear-due"),
                 ) {
-                    Icon(Icons.Rounded.Clear, contentDescription = "Clear due date")
+                    Icon(
+                        Icons.Rounded.Clear,
+                        contentDescription = stringResource(R.string.task_schedule_clear_due),
+                    )
                 }
             }
         }
+        OutlinedButton(
+            onClick = {
+                val due = editorDue ?: return@OutlinedButton
+                val local = due.instant.atZone(due.zone()).toLocalTime()
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute ->
+                        val changed = due.withLocal(time = LocalTime.of(hour, minute))
+                        dueEpochMillis = changed.instant.toEpochMilli()
+                        dueZoneId = changed.zoneId
+                    },
+                    local.hour,
+                    local.minute,
+                    true,
+                ).show()
+            },
+            enabled = editorDue != null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("task-due-time-button"),
+        ) {
+            Icon(Icons.Rounded.Schedule, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                editorDue?.let { due ->
+                    SCHEDULE_TIME_FORMAT.format(due.instant.atZone(due.zone()))
+                } ?: stringResource(R.string.task_schedule_choose_time),
+            )
+        }
         Text(
-            "Existing times are preserved; new dates use 17:00.",
+            stringResource(R.string.task_schedule_due_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (scheduleError != null) {
+            Text(
+                scheduleError,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+                    .testTag("task-schedule-warning"),
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
         Text(
@@ -1946,13 +2103,13 @@ private fun TaskDetailPane(
                             frequency == RecurrenceFrequency.WEEKLY &&
                             recurrenceWeekdaysCsv.isBlank()
                         ) {
-                            recurrenceWeekdaysCsv = dueDate
+                            recurrenceWeekdaysCsv = recurrenceAnchorDate
                                 ?.dayOfWeek
                                 ?.name
                                 .orEmpty()
                         }
                     },
-                    enabled = editorDue != null,
+                    enabled = recurrenceAnchor != null,
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .testTag(
@@ -2068,7 +2225,7 @@ private fun TaskDetailPane(
                                 mode == RecurrenceEndMode.DATE &&
                                 recurrenceEndDateEpochDay == null
                             ) {
-                                recurrenceEndDateEpochDay = dueDate?.toEpochDay()
+                                recurrenceEndDateEpochDay = recurrenceAnchorDate?.toEpochDay()
                             }
                         },
                         modifier = Modifier
@@ -2142,9 +2299,9 @@ private fun TaskDetailPane(
                         .testTag("recurrence-supporting-text"),
                 )
             }
-        } else if (editorDue == null) {
+        } else if (recurrenceAnchor == null) {
             Text(
-                "Choose a due date to set a repeat.",
+                stringResource(R.string.task_recurrence_requires_schedule_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2452,18 +2609,60 @@ private fun TaskDetailPane(
         )
     }
 
-    if (showDuePicker) {
-        val zone = editorValue.due
-            ?.zoneId
-            ?.let(ZoneId::of)
-            ?: ZoneId.systemDefault()
-        val selectedDateMillis = editorValue.due
+    if (showStartPicker) {
+        val zone = editorStart?.zone() ?: ZoneId.systemDefault()
+        val selectedDateMillis = (editorStart
             ?.instant
-            ?.atZone(ZoneId.of(editorValue.due.zoneId))
-            ?.toLocalDate()
+            ?.atZone(zone)
+            ?.toLocalDate() ?: LocalDate.now(zone))
             ?.atStartOfDay(ZoneOffset.UTC)
             ?.toInstant()
             ?.toEpochMilli()
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDateMillis,
+        )
+        DatePickerDialog(
+            onDismissRequest = { showStartPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selected ->
+                            val selectedDate = Instant.ofEpochMilli(selected)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                            val start = editorStart?.withLocal(date = selectedDate)
+                                ?: ZonedMoment(
+                                    selectedDate.atTime(9, 0).atZone(zone).toInstant(),
+                                    zone.id,
+                                )
+                            startEpochMillis = start.instant.toEpochMilli()
+                            startZoneId = start.zoneId
+                        }
+                        showStartPicker = false
+                    },
+                ) {
+                    Text(stringResource(R.string.task_schedule_use_date))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartPicker = false }) {
+                    Text(stringResource(R.string.task_schedule_cancel))
+                }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showDuePicker) {
+        val zone = editorDue?.zone() ?: ZoneId.systemDefault()
+        val selectedDateMillis = (editorDue
+            ?.instant
+            ?.atZone(zone)
+            ?.toLocalDate() ?: LocalDate.now(zone))
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
         val datePickerState = rememberDatePickerState(
             initialSelectedDateMillis = selectedDateMillis,
         )
@@ -2476,24 +2675,23 @@ private fun TaskDetailPane(
                             val selectedDate = Instant.ofEpochMilli(selected)
                                 .atZone(ZoneOffset.UTC)
                                 .toLocalDate()
-                            val localTime = editorValue.due
-                                ?.instant
-                                ?.atZone(ZoneId.of(editorValue.due.zoneId))
-                                ?.toLocalTime()
-                                ?: LocalTime.of(17, 0)
-                            val due = selectedDate.atTime(localTime).atZone(zone)
-                            dueEpochMillis = due.toInstant().toEpochMilli()
-                            dueZoneId = zone.id
+                            val due = editorDue?.withLocal(date = selectedDate)
+                                ?: ZonedMoment(
+                                    selectedDate.atTime(17, 0).atZone(zone).toInstant(),
+                                    zone.id,
+                                )
+                            dueEpochMillis = due.instant.toEpochMilli()
+                            dueZoneId = due.zoneId
                         }
                         showDuePicker = false
                     },
                 ) {
-                    Text("Use date")
+                    Text(stringResource(R.string.task_schedule_use_date))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDuePicker = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.task_schedule_cancel))
                 }
             },
         ) {
@@ -2506,7 +2704,7 @@ private fun TaskDetailPane(
             ?.atStartOfDay(ZoneOffset.UTC)
             ?.toInstant()
             ?.toEpochMilli()
-            ?: dueDate
+            ?: recurrenceAnchorDate
                 ?.atStartOfDay(ZoneOffset.UTC)
                 ?.toInstant()
                 ?.toEpochMilli()
@@ -3321,6 +3519,15 @@ private fun Task.toTaskEdit(reminder: Reminder?): TaskEdit = TaskEdit(
     reminder = reminder,
 )
 
+private fun ZonedMoment.withLocal(
+    date: LocalDate = instant.atZone(zone()).toLocalDate(),
+    time: LocalTime = instant.atZone(zone()).toLocalTime(),
+): ZonedMoment {
+    val current = instant.atZone(zone())
+    val changed = ZonedDateTime.ofLocal(date.atTime(time), current.zone, current.offset)
+    return ZonedMoment(changed.toInstant(), zoneId)
+}
+
 private fun reminderLeadSeconds(task: Task, reminder: Reminder?): Long? {
     val due = task.due ?: return null
     val triggerAt = reminder?.triggerAt ?: return null
@@ -3438,6 +3645,7 @@ private const val MAX_RECURRENCE_INTERVAL = 999
 private const val MAX_RECURRENCE_COUNT = 9_999
 private const val AUTO_SAVE_DELAY_MILLIS = 650L
 private val DUE_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.UK)
+private val SCHEDULE_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val REMINDER_DATE_TIME_FORMAT =
     DateTimeFormatter.ofPattern("EEE, d MMM, HH:mm", Locale.UK)
 private val TIME_ENTRY_DATE_FORMAT =

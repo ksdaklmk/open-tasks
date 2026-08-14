@@ -1,5 +1,7 @@
 package app.opentasks.feature.tasks
 
+import android.view.View
+import android.widget.TimePicker
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +37,15 @@ import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.UiController
+import androidx.test.espresso.ViewAction
+import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.withText
+import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
@@ -56,9 +67,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.hamcrest.Matcher
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -66,6 +82,209 @@ import java.util.concurrent.atomic.AtomicReference
 class TaskEditorInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    private fun showEditor(task: Task, onUpdate: (TaskEdit) -> Unit) {
+        composeRule.setContent {
+            OpenTasksTheme {
+                TasksScreen(
+                    tasks = listOf(task),
+                    projectNames = emptyMap(),
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    tags = OpenTasksFixtures.snapshot.tags,
+                    selectedTaskId = task.id,
+                    showDetailPane = false,
+                    onSelectTask = {},
+                    onCloseDetail = {},
+                    onCompleteTask = {},
+                    onChangeTaskStatus = { _, _ -> },
+                    onDeleteTask = {},
+                    activeTimerTaskId = null,
+                    onToggleTimer = {},
+                    onUpdateTask = { _, edit -> onUpdate(edit) },
+                    onAddChecklistItem = { _, _ -> },
+                    onUpdateChecklistItem = { _, _ -> },
+                    onDeleteChecklistItem = { _, _ -> },
+                    onSetTaskTag = { _, _, _ -> },
+                    onCreateAndAssignTag = { _, _ -> },
+                )
+            }
+        }
+    }
+
+    private fun selectTime(tag: String, hour: Int, minute: Int) {
+        composeRule.onNodeWithTag(tag)
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        onView(isAssignableFrom(TimePicker::class.java))
+            .inRoot(isDialog())
+            .perform(
+                object : ViewAction {
+                    override fun getConstraints(): Matcher<View> = isDisplayed()
+
+                    override fun getDescription() = "set time to %02d:%02d".format(hour, minute)
+
+                    override fun perform(uiController: UiController, view: View) {
+                        (view as TimePicker).apply {
+                            this.hour = hour
+                            this.minute = minute
+                        }
+                        uiController.loopMainThreadUntilIdle()
+                    }
+                },
+            )
+        onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun startDateAndTimeDefaultToNineAndAutoSaveTogether() {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = null, due = null)
+        val submitted = AtomicReference<TaskEdit?>()
+        val saveCount = AtomicInteger()
+        showEditor(task) {
+            saveCount.incrementAndGet()
+            submitted.set(it)
+        }
+
+        composeRule.onNodeWithTag("task-start-date-button")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        val useDate = composeRule.onNodeWithText("Use date")
+        composeRule.mainClock.autoAdvance = false
+        useDate.performClick()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.onNodeWithTag("task-start-time-button")
+            .assertHeightIsAtLeast(48.dp)
+        composeRule.onNodeWithTag("task-title-field")
+            .performTextReplacement("Plan together")
+        composeRule.mainClock.advanceTimeBy(700)
+        composeRule.waitForIdle()
+
+        val edit = submitted.get()
+        assertEquals(1, saveCount.get())
+        assertEquals("Plan together", edit?.title)
+        assertEquals(9, edit?.start?.instant?.atZone(ZoneId.of(edit.start.zoneId))?.hour)
+        assertEquals(0, edit?.start?.instant?.atZone(ZoneId.of(edit.start.zoneId))?.minute)
+    }
+
+    @Test
+    fun existingStartAndDueControlsPreserveStoredZones() {
+        val startZone = ZoneId.of("America/New_York")
+        val dueZone = ZoneId.of("Asia/Bangkok")
+        val start = ZonedMoment(
+            ZonedDateTime.ofLocal(
+                LocalDate.of(2026, 11, 1).atTime(1, 30),
+                startZone,
+                ZoneOffset.ofHours(-5),
+            ).toInstant(),
+            startZone.id,
+        )
+        val due = ZonedMoment(
+            LocalDate.of(2026, 11, 2).atTime(17, 0).atZone(dueZone).toInstant(),
+            dueZone.id,
+        )
+        val submitted = AtomicReference<TaskEdit?>()
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = start, due = due)
+        showEditor(task, submitted::set)
+
+        listOf("task-start-date-button", "task-start-time-button", "task-due-date-button", "task-due-time-button")
+            .forEach { tag ->
+                composeRule.onNodeWithTag(tag)
+                    .performScrollTo()
+                    .assertHeightIsAtLeast(48.dp)
+            }
+        selectTime("task-start-time-button", 1, 45)
+        selectTime("task-due-time-button", 18, 15)
+        composeRule.waitUntil(timeoutMillis = 5_000) { submitted.get()?.due != due }
+
+        assertEquals(startZone.id, submitted.get()?.start?.zoneId)
+        assertEquals(dueZone.id, submitted.get()?.due?.zoneId)
+        assertEquals(
+            ZoneOffset.ofHours(-5),
+            submitted.get()?.start?.instant?.atZone(startZone)?.offset,
+        )
+        assertEquals(LocalDate.of(2026, 11, 1), submitted.get()?.start?.instant?.atZone(startZone)?.toLocalDate())
+        assertEquals(LocalDate.of(2026, 11, 2), submitted.get()?.due?.instant?.atZone(dueZone)?.toLocalDate())
+    }
+
+    @Test
+    fun newDueDateStillDefaultsToSeventeenAndTimeCanBeChanged() {
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = null, due = null)
+        val submitted = AtomicReference<TaskEdit?>()
+        showEditor(task, submitted::set)
+
+        composeRule.onNodeWithTag("task-due-date-button")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.onNodeWithText("Use date").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { submitted.get()?.due != null }
+        val defaultDue = checkNotNull(submitted.get()?.due)
+        assertEquals(17, defaultDue.instant.atZone(ZoneId.of(defaultDue.zoneId)).hour)
+
+        selectTime("task-due-time-button", 19, 25)
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            submitted.get()?.due?.instant?.atZone(ZoneId.of(defaultDue.zoneId))?.hour == 19
+        }
+        assertEquals(25, submitted.get()?.due?.instant?.atZone(ZoneId.of(defaultDue.zoneId))?.minute)
+    }
+
+    @Test
+    fun dueBeforeStartShowsWarningAndSuppressesAutoSave() {
+        val zone = ZoneId.of("Europe/London")
+        val date = LocalDate.of(2026, 10, 10)
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(
+            start = ZonedMoment(date.atTime(16, 0).atZone(zone).toInstant(), zone.id),
+            due = ZonedMoment(date.atTime(17, 0).atZone(zone).toInstant(), zone.id),
+        )
+        val submitted = AtomicReference<TaskEdit?>()
+        showEditor(task, submitted::set)
+
+        selectTime("task-due-time-button", 15, 0)
+        composeRule.onNodeWithText(
+            InstrumentationRegistry.getInstrumentation().targetContext.getString(
+                R.string.task_schedule_due_before_start,
+            ),
+        ).assertIsDisplayed()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.waitForIdle()
+
+        assertNull(submitted.get())
+    }
+
+    @Test
+    fun legacyInvalidScheduleRemainsVisibleUntilCorrected() {
+        val zone = ZoneId.of("Europe/London")
+        val date = LocalDate.of(2026, 10, 10)
+        val start = ZonedMoment(date.atTime(16, 0).atZone(zone).toInstant(), zone.id)
+        val due = ZonedMoment(date.atTime(15, 0).atZone(zone).toInstant(), zone.id)
+        val submitted = AtomicReference<TaskEdit?>()
+        val saveCount = AtomicInteger()
+        val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = start, due = due)
+        showEditor(task) {
+            saveCount.incrementAndGet()
+            submitted.set(it)
+        }
+
+        composeRule.onNodeWithTag("task-start-time-button")
+            .performScrollTo()
+            .assertTextContains("16:00")
+        composeRule.onNodeWithTag("task-due-time-button")
+            .assertTextContains("15:00")
+        composeRule.onNodeWithText(
+            InstrumentationRegistry.getInstrumentation().targetContext.getString(
+                R.string.task_schedule_due_before_start,
+            ),
+        ).assertIsDisplayed()
+        assertNull(submitted.get())
+
+        selectTime("task-due-time-button", 17, 0)
+        composeRule.waitUntil(timeoutMillis = 5_000) { saveCount.get() == 1 }
+        assertEquals(start, submitted.get()?.start)
+        assertEquals(17, submitted.get()?.due?.instant?.atZone(zone)?.hour)
+    }
 
     @Test
     fun duplicateActionEmitsTaskId() {

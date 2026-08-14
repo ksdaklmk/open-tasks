@@ -14,6 +14,21 @@
     <string name="task_add_to_calendar">Add to calendar</string>
     <string name="task_duplicate">Duplicate task</string>
 
+    <string name="task_schedule_start">Start</string>
+    <string name="task_schedule_due">Due</string>
+    <string name="task_schedule_choose_date">Choose date</string>
+    <string name="task_schedule_choose_time">Choose time</string>
+    <string name="task_schedule_clear_start">Clear start</string>
+    <string name="task_schedule_clear_due">Clear due date</string>
+    <string name="task_schedule_start_hint">Existing times are preserved; new dates use 09:00.</string>
+    <string name="task_schedule_due_hint">Existing times are preserved; new dates use 17:00.</string>
+    <string name="task_schedule_due_before_start">Due cannot be before start.</string>
+    <string name="task_schedule_use_date">Use date</string>
+    <string name="task_schedule_cancel">Cancel</string>
+    <string name="task_recurrence_requires_schedule">Choose a start or due date before adding a repeat</string>
+    <string name="task_recurrence_end_before_schedule">The end date cannot be before the scheduled date</string>
+    <string name="task_recurrence_requires_schedule_hint">Choose a start or due date to set a repeat.</string>
+
     <string name="tasks_sort_control">Sort tasks: %1$s</string>
     <string name="tasks_group_control">Group tasks: %1$s</string>
     <string name="tasks_sort_due_label">Due</string>
