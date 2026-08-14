@@ -2,15 +2,17 @@
 
 ## Status and source identity
 
-**Candidate only — not yet qualified or released.** The exact-head connected
-gate is red. Its fix/rerun, signed-smoke, disposal, remote-CI, and tag gates
-marked TODO below are release blockers.
+**Waiver-accepted candidate — pre-tag, not released.** The exact-head local
+connected gate and signed artifact verification are green. The user explicitly
+waived app-lock testing, secure cleanup, and GitHub CI qualification and
+authorized tagging with those gaps. This is not fully qualified under the
+original Task 18 plan.
 
-- Date: 13 August 2026
+- Date: 14 August 2026
 - Implementation base:
   `7026596d33c6430d4a05919fd1e05f174a6cefd7`
 - `implementationHeadSha` and product source commit:
-  `ec09e1b1e48653e61e4ecc833c54b5962b0fef92`
+  `19aecf4bf7ac7322e9ecdf51d0c09412e2c73b84`
 - Candidate version: versionName 1.1.0, versionCode 2
 
 The implementation head is deliberately the last product/test commit, not the
@@ -68,8 +70,10 @@ Subsequent connected-boundary fixes were independently re-reviewed with zero
 Critical, Important, or Minor issues. The canonical widget-action fix's three
 test-evidence findings were addressed by `1b5f3a3`; its re-review was clean.
 The final responsive widget patch at `ec09e1b` also received a zero-Critical,
-zero-Important, zero-Minor verdict. There are zero open Critical or Important
-review findings.
+zero-Important, zero-Minor verdict. The passphrase viewport correction is
+test-only: two `performScrollTo()` calls immediately precede the existing
+guidance-display assertions. Its scoped re-review passed with zero findings.
+There are zero open Critical or Important review findings.
 
 ## Completed evidence that remains valid
 
@@ -82,7 +86,7 @@ row invisibly. The Room test proves a v2 query survives update, Undo, and an
 encrypted restart. The 20-view, 64-character name, 500-character query, and
 2 MiB payload bounds remain unchanged.
 
-Static comparison of the implementation base to `ec09e1b` finds all checked-in
+Static comparison of the implementation base to `19aecf4` finds all checked-in
 Room schemas and `BackupRecordFamily` unchanged. Twelve manifests are
 byte-identical; the app manifest's sole semantic delta is native `singleTop`
 on the already-exported `MainActivity`. Its exported value, intent filters,
@@ -111,8 +115,9 @@ release checklist.
 
 At committed head `cfd7b52`, the complete six-module run executed 391 tests:
 389 passed, exactly two established skips remained, and there were no failures
-or errors. Because `ec09e1b` later changed production widget code, those counts
-are retained only as prerequisite evidence, not as the final exact-head gate.
+or errors. Those counts remain valid prerequisite evidence. The final exact
+head adds the passphrase test-only correction and retains the same aggregate
+green result.
 
 The widget change followed a focused RED/GREEN cycle. On the actual launcher,
 the current implementation displayed complete normal-text counts with a fully
@@ -124,14 +129,14 @@ the same action remained visible. The setting was restored after the check.
 
 | Gate | Result |
 |---|---|
-| Six Android-test source compiles | PASS — the 219-action graph completed; 2 actions executed and 217 were up-to-date after the forced local gate. |
+| Six Android-test source compiles | PASS — all six Android-test source compiles are green. |
 | Forced JVM/lint/debug build | PASS — 553/553 actions executed in 5m08s; XML totals are 1,235 tests, 0 failures, 0 errors, and 0 skips. |
-| Six-module connected run | **FAIL — release blocker.** The complete restart ran 455 actions in 1h19m57s; 391 tests produced 388 passes, 2 established skips, and 1 More failure. |
+| Six-module connected run | PASS — module totals (tests/failures/errors/skips): App 80/0/0/2, Data 179/0/0/0, Tasks 43/0/0/0, Projects 23/0/0/0, Schedule 2/0/0/0, More 64/0/0/0; 391 tests, 389 passed, 0 failures, 0 errors, 2 established skips. |
 | Room/fixtures/workflow | PASS — schema drift executed 33/33 actions; all five fixture families were byte-identical; workflow pinning and whitespace passed. |
 | Privacy/release scope | PASS — the exact base-to-head audit found no added logging/endpoints or schema/backup drift; 12 manifests were byte-identical and the app manifest contained only the reviewed `singleTop` semantic delta. |
-| Forced signed release | TODO — blocked until the complete connected gate is green; record the forced action count, duration, verifier result, APK byte count, and SHA-256. |
+| Forced signed release | PASS — verifier passed; APK is 16,242,815 bytes with SHA-256 `e5a0d947b890c72cfa692f78e54341a5fe562415a57ee6489f7d6d19d262802c`. |
 
-### Connected-gate blocker
+### Connected-gate history and correction
 
 The first exact-head attempt passed Projects 23/23, Schedule 2/2, Tasks 43/43,
 Data 179/179, and More 64/64. App never started because UTP rejected the debug
@@ -139,7 +144,7 @@ APK with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. UTP cleanup left both app
 packages absent, and a bounded debug install/uninstall proof passed before the
 entire matrix restarted.
 
-The complete restart produced these XML totals:
+The historical complete restart produced these XML totals:
 
 | Module | Tests | Failures | Errors | Skips |
 |---|---:|---:|---:|---:|
@@ -157,29 +162,33 @@ After entering a short passphrase and tapping submit, its line 548 assertion
 could not see the exact `Use 12–128 characters.` guidance. Read-only triage
 found that exact supporting-text node in the merged field semantics, proving
 validation, state, and copy worked; the open password IME had moved it outside
-the scroll viewport. Work paused before modification. Resume with the bounded
-test correction—scroll each guidance node into view before retaining its
-display assertion—then run one focused RED/GREEN proof, the full More suite,
-scoped review, the Step 9 local/compile checks, and a complete six-module rerun
-from zero. Do not weaken the assertion to existence or waive the failure.
+the scroll viewport. The test-only correction then scrolled both exact
+guidance nodes into view before retaining their display assertions. The
+focused test passed 1/1 and the full More suite passed 64/64 afterward.
 
-The eventual green connected result must contain exactly the two established
-skips: the preserved one-shot credentialed Drive qualification row and the
-cross-display fold-continuity harness exception. Any additional skip, failure,
-or error blocks qualification.
+The final connected result contains exactly the two established skips: the
+preserved one-shot credentialed Drive qualification row and the cross-display
+fold-continuity harness exception. Any additional skip, failure, or error
+blocks qualification.
 
 ## Final signed acceptance and closure
 
-- **TODO (release blocker):** run and record all seven literal signed-sideload
-  rows from `RELEASING.md` on the exact-head APK.
-- **TODO (release blocker):** record the extra saved-filter, grammar-capture,
-  duplicate/Undo, and Insights chart/table checks.
-- **TODO (release blocker):** remove temporary credential material, disable the
-  disposable screen credential, kill only the audited disposable overlay, and
-  confirm no ADB target or disposable process remains.
-- **TODO (release blocker):** qualify the exact GitHub candidate push under the
-  Free-only ruling, create annotated tag `v1.1.0`, then record the HANDOFF-only
-  closure commit.
+- Signed-sideload rows 1, 2, 3, 4, 6, and 7: PASS on the exact-head APK.
+- Signed-sideload row 5 (immediate app-lock background/unlock): **SKIPPED by
+  explicit user instruction**, not PASS evidence.
+- Release extras: PASS — saved-view save/activate/refine/clear/restore with
+  force-stop persistence; six-token confirm-only grammar with one atomic Root
+  create; duplicate/Undo open count 7→8→7 with no copy; Insights 7/30/90 and
+  chart/table parity including project/tag rows.
+- Secure cleanup is **SKIPPED by explicit user instruction**. The temporary
+  `.otvault` was removed, but credential-file, screen-credential, and
+  disposable-overlay cleanup was not performed; residual state remains. No
+  credential or device identifier is recorded here.
+- GitHub CI qualification is **SKIPPED by explicit user instruction**. The tag
+  is authorized without CI evidence; no candidate CI job is claimed to have
+  passed. The API 37.0 F6 phrase **credential-encrypted storage unavailable**
+  is historical observe-only context, not a check of this candidate.
 
-Until all four items are complete, Stage 7 remains a local candidate and this
-document must not say qualified or released.
+The user explicitly accepted the original Task 18 gaps and authorized tagging.
+Stage 7 remains an explicitly waiver-accepted pre-tag candidate, not a fully
+qualified release under the original Task 18 plan; `v1.1.0` does not yet exist.

@@ -1,86 +1,49 @@
 # Open Tasks Handoff
 
-## Current resume point — Task 18 safe pause after exact-head gate RED, 13 August 2026
+## Current resume point — Task 18 waiver-accepted pre-tag candidate, 14 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-execution
 status are superseded here.
 
-- Stage 7 remains local and unpushed on `main`. The implementation base is
-  `7026596d33c6430d4a05919fd1e05f174a6cefd7`; the reviewed product/test
-  candidate and recorded `implementationHeadSha` is
-  `ec09e1b1e48653e61e4ecc833c54b5962b0fef92`. It contains version 1.1.0
-  (versionCode 2), the connected-boundary repairs at `cfd7b52`, corrected
-  first-launch instructions at `d93236a`, and the responsive Today-widget
-  correction at `ec09e1b`. No remote mutation or `v1.1.0` tag has occurred.
-- The responsive widget correction is committed and independently reviewed
-  with zero Critical, Important, or Minor findings. On the actual launcher,
-  the compact widget kept counts and its 48 dp Quick Add action visible at
-  normal and 200% text; tapping the action opened an exactly empty Quick Add
-  sheet. That focused host proof remains valid, but it is not the final signed
-  release smoke.
-- Exact-head non-device gates at `ec09e1b` are green. The forced
-  `testDebugUnitTest lintDebug :app:assembleDebug` gate executed 553/553
-  actions in 5m08s; its XML records 1,235 tests with zero failures, errors, or
-  skips. All six Android-test sources compiled in the 219-action graph. Room
-  v9 drift executed 33/33 actions; all five frozen fixture families were
-  byte-identical; workflow pinning and whitespace passed. The literal Stage 7
-  privacy/release audit found no logging, endpoint, schema, or backup-family
-  drift: 12 manifests are byte-identical and the app manifest's sole semantic
-  delta is the reviewed `MainActivity` `singleTop`, with permissions, exports,
-  filters, providers, services, and receivers unchanged.
-- The final six-module connected gate at `ec09e1b` is **RED and not waived**.
-  Its first attempt passed Projects 23/23, Schedule 2/2, Tasks 43/43, Data
-  179/179, and More 64/64, but App never ran because UTP rejected its debug APK
-  with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. UTP cleanup left both app packages
-  absent; a bounded debug install/uninstall proof passed. The complete restart
-  then ran 455 actions in 1h19m57s. XML records Data 179/0/0/0, Tasks
-  43/0/0/0, Projects 23/0/0/0, Schedule 2/0/0/0, App 80/0/0/2, and More
-  64/1/0/0: 391 tests total, 388 passed, exactly the two established skips,
-  and one failure. The failing row is
-  `BackupRecoveryScreenInstrumentedTest.passphraseValidationUsesExactLengthAndMismatchGuidance`:
-  after entering a short passphrase and tapping submit, line 548 could not see
-  the exact `Use 12–128 characters.` guidance. Read-only triage found the
-  merged text-field node and exact copy present; the password IME had opened
-  with a large bottom inset and left the node outside the scroll viewport.
-  Production validation/state/copy worked. The smallest robust test correction
-  is to `performScrollTo()` before asserting each guidance node is displayed,
-  preserving reachability rather than weakening the assertion to existence.
-  No code change or focused rerun has been made.
-- Resume by applying that bounded test correction, then run its focused
-  RED/GREEN proof, the full More suite, an independent scoped review, the Step 9
-  local/compile checks, and the complete six-module connected gate from zero.
-  Only a green aggregate may proceed to a forced signed build and
-  `verify-release-apk.sh`; compute a new byte count and SHA-256 and do not reuse
-  the earlier artifact digest.
-- The final signed install and literal seven-row `RELEASING.md` smoke remain
-  pending, as do saved filter, grammar capture, duplicate/Undo, and Insights
-  chart/table extras. The provisional signed workspace/widget was erased for
-  the debug gate, so the eventual exact-head signed smoke must start fresh.
-  After all rows pass, remove temporary credential material, disable the
-  disposable screen credential, and destroy only the audited overlay.
-- Then finish the qualification records, push `main` under the GitHub Free-only
-  ruling, and qualify the exact candidate push run. Require `verify`,
-  `release`, and exactly one API 36 job green. Keep exactly one API 37.0 lane
-  observe-only; if red, record its reason exactly as
-  **credential-encrypted storage unavailable**. Only then create and push
-  annotated tag `v1.1.0`, followed by the HANDOFF-only closure commit.
+- Stage 7 remains local and unpushed on `main`. The product/test head and
+  recorded `implementationHeadSha` are
+  `19aecf4bf7ac7322e9ecdf51d0c09412e2c73b84` (`19aecf4`): version 1.1.0
+  (versionCode 2), including the committed test-only two-scroll passphrase
+  reachability correction. No remote mutation or `v1.1.0` tag has occurred.
+- The focused passphrase method is green 1/1; the More suite is green 64/64;
+  source compilation and local gates are green. The complete six-module
+  connected gate is green: 391 total, 389 passed, zero failures/errors, and
+  exactly two established skips. Module totals (tests/failures/errors/skips):
+  App 80/0/0/2, Data 179/0/0/0, Tasks 43/0/0/0, Projects 23/0/0/0, Schedule
+  2/0/0/0, More 64/0/0/0.
+- The forced signed verifier is green. The exact signed artifact is 16,242,815
+  bytes with SHA-256
+  `e5a0d947b890c72cfa692f78e54341a5fe562415a57ee6489f7d6d19d262802c`.
+  Signed smoke rows 1, 2, 3, 4, 6, and 7, plus all four extras, are PASS.
+  Row 5 (app lock) is **SKIPPED by explicit user instruction**.
+- Secure cleanup is **SKIPPED by explicit user instruction**. The temporary
+  exported `.otvault` was removed, but credential-file, screen-credential, and
+  disposable-overlay cleanup was not performed; residual state remains. No
+  credential or device identifier is recorded here.
+- GitHub CI qualification is **SKIPPED by explicit user instruction**. The tag
+  is authorized without CI evidence; this record does not claim any candidate
+  CI job passed. The API 37.0 F6 phrase **credential-encrypted storage
+  unavailable** remains historical observe-only context, not a check of this
+  candidate.
+- The user explicitly accepted these original Task 18 gaps and authorized
+  tagging. This is an explicitly waiver-accepted release candidate, not a
+  fully qualified release under the original Task 18 plan; no `v1.1.0` tag
+  exists yet.
 - Stage 8 remains next: month planning, drag-to-reschedule, Gantt-lite, and an
   opt-in daily digest, with no durable schema change. Stage 9 remains the one
   Room v10 wave for automations-lite, board WIP limits, My Day ordering, and
   subtasks. The repository-wide Unicode tag-identity policy remains a bounded
   deferred hardening task; do not patch only one caller.
-- Safe-pause state: no Gradle or instrumentation process is running. The sole
-  audited `Fold8_Acceptance` read-only overlay remains alive for resumption;
-  UTP cleanup left both the app and test packages absent. Its disposable
-  system credential and protected temporary credential file
-  remain in place and must never be printed. Revalidate that it is the sole
-  target before every device action. The protected `Pixel_10_Pro_Fold` was not
-  touched and must not be booted, installed to, changed, or killed.
 - **GitHub Free only.** Do not add a payment method, enable metered spend, use
   larger runners, Codespaces, Copilot, paid Marketplace products, or any other
-  paid GitHub service. If included runner allowance is unavailable, stop at
-  the remote gate without tagging.
+  paid GitHub service. If included runner allowance is unavailable, do not add
+  paid capacity; GitHub CI remains waived for this explicitly accepted candidate.
 - Preserve the unrelated dirty state: modified
   `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
   deleted user-owned

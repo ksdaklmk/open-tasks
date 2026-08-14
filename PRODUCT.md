@@ -96,7 +96,7 @@ record merge, wearable surface, location reminder, or durable schema change.
 Markdown and CSV deliberately leave the encrypted vault as plaintext through
 person-selected Storage Access Framework documents.
 
-Stage 7's visible ergonomics changes give Tasks and project workbenches
+Stage 7's implemented visible ergonomics changes give Tasks and project workbenches
 fixed-direction sort and bounded grouping, saved filters gain due-bucket,
 priority, semantic-status, and sort choices, and search uses one relevance
 ranking. Quick Add offers confirm-only project, tag, priority, recurrence, and

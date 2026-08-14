@@ -125,7 +125,7 @@ race KSP while release Hilt sources are generated.
 - `DuplicateTask` must exclude completion, reminders, recurrence/series state,
   prior activity, time entries, notes, and attachments. Both repositories must
   keep the copy and its repository-produced Undo atomic.
-- Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
+- The implemented Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
   add a schema, backup family, exported surface, permission, or network path for
   its ergonomics state.
 - `AttachmentBlobCoordinator.resume()` has exactly one product caller: the

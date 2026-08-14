@@ -303,7 +303,7 @@ round launcher resources share that adaptive artwork; the monochrome layer
 keeps the card, bars, and cursor distinct for themed or minimal icon treatment.
 The artwork stays centred with safe inset under Android launcher's round mask.
 
-## Stage 7 ergonomics
+## Stage 7 ergonomics (implemented)
 
 Tasks and project-workbench lists expose compact sort and group controls. Sort
 directions are fixed: due soonest, priority highest, title A–Z, or most recently

@@ -508,7 +508,7 @@ codec is provider-independent, and only `RecoveryCoordinator` may use decoded
 backup data to construct a staged replacement Room vault. Live structured data
 is never synchronized or merged from Drive during normal operation.
 
-## Stage 7 ergonomics boundary
+## Stage 7 ergonomics boundary (implemented)
 
 Stage 7 keeps the existing module direction. `core:model` owns the shared
 due-bucket, sort, group, and saved-filter vocabulary. `core:domain` is the one

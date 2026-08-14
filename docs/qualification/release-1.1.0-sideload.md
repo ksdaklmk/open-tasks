@@ -2,47 +2,55 @@
 
 ## Status and candidate identity
 
-**Candidate only — tagging is blocked.** The exact-head connected gate is red,
-so the final signed artifact was not rebuilt. Its seven-row smoke,
-disposable-overlay cleanup, remote CI, and annotated tag are all still TODO.
+**Waiver-accepted candidate — pre-tag, not released.** The exact-head local
+connected gate and signed artifact verification are green. The user explicitly
+waived app-lock testing, secure cleanup, and GitHub CI qualification and
+authorized tagging with those gaps. This is not fully qualified under the
+original Task 18 plan.
 
-- Date: 13 August 2026
+- Date: 14 August 2026
 - Product source commit:
-  `ec09e1b1e48653e61e4ecc833c54b5962b0fef92`
+  `19aecf4bf7ac7322e9ecdf51d0c09412e2c73b84`
 - Version: versionName 1.1.0, versionCode 2
 - Distribution: signed sideload only; no AAB, Play Console, or CI signing
 - Signing: the established external user-held release identity; no signing
   material is stored or reproduced here
-- Final artifact: **TODO (release blocker):** `app-release.apk` byte count and
-  SHA-256 from the forced exact-head build
+- Final artifact: `app-release.apk`, 16,242,815 bytes, SHA-256
+  `e5a0d947b890c72cfa692f78e54341a5fe562415a57ee6489f7d6d19d262802c`
 
-The eventual `v1.1.0` tag will point to the later qualification-document
-candidate commit, not create an impossible self-reference in the product
-source identity above. No device identifier, process id, credential, private
-task text, Drive id, or other secret belongs in this record.
+The future `v1.1.0` tag will point to the qualification-document candidate
+commit, not create an impossible self-reference in the product source identity
+above. No device identifier, process id, credential, private task text, Drive
+id, or other secret belongs in this record.
 
 ## Automated verification
 
-**TODO (release blocker):** first fix and pass the complete six-module
-connected gate. Then build the signed APK from the exact product head with all
-release actions forced, run `bash scripts/verify-release-apk.sh`, and record the
-action count, duration, verifier result, final byte count, and SHA-256. The
-verifier must prove a valid modern signature, version 1.1.0 (2), absence of the
+The passphrase viewport issue was corrected in the test only with two
+`performScrollTo()` calls before the existing exact guidance assertions. The
+focused test passed 1/1; the complete More suite passed 64/64; and the final
+six-module connected module totals (tests/failures/errors/skips) were App
+80/0/0/2, Data 179/0/0/0, Tasks 43/0/0/0, Projects 23/0/0/0, Schedule 2/0/0/0,
+and More 64/0/0/0: 391 tests, 389 passed, 0 failures, 0 errors, 2 established
+skips.
+
+The forced signed APK build and `bash scripts/verify-release-apk.sh` passed.
+The verifier proved a valid modern signature, version 1.1.0 (2), absence of the
 debug qualification activity, non-debuggable packaging, and `drive.appdata` as
-the sole Drive authorization scope. Record established release-identity
-continuity and the minified/shrunk release configuration as separate build
-evidence without publishing certificate details.
+the sole Drive authorization scope. Established release-identity continuity and
+the minified/shrunk release configuration are separate build evidence without
+publishing certificate details. The final artifact is
+16,242,815 bytes with SHA-256
+`e5a0d947b890c72cfa692f78e54341a5fe562415a57ee6489f7d6d19d262802c`.
 
-Do not reuse the digest of an earlier candidate: `ec09e1b` changed production
-widget code after that artifact was built.
+The final artifact is tied to the recorded product/test head `19aecf4`, rather
+than an earlier widget candidate.
 
-The post-`ec09e1b` non-device gates are green: 553/553 forced local actions,
-1,235 JVM tests with no failure/error/skip, six source compiles, Room v9 drift,
-five byte-identical fixture families, workflow/whitespace, and the exact privacy
-audit. The connected matrix is not green: its complete run recorded 391 tests,
-388 passes, the two established skips, and one failure in More's passphrase
-length-guidance assertion. No signed build or final smoke may proceed until a
-reviewed fix and a full green connected rerun exist.
+The post-candidate non-device gates are green: 553/553 forced local actions,
+1,235 JVM tests with no failure/error/skip, six Android-test source compiles,
+Room v9 drift, five byte-identical fixture families, workflow/whitespace, and
+the exact privacy audit. The historical pre-fix connected run is retained below;
+the final post-fix connected matrix is green with exactly the two established
+skips.
 
 ## Focused pre-final evidence
 
@@ -62,56 +70,52 @@ head install.
 
 ## Final signed smoke checklist
 
-**TODO (release blocker):** execute every row literally against the final
-exact-head APK on the sole audited read-only disposable. `PASS` must be based on
-an observed result, never inferred from a unit or connected test.
+Six rows were executed literally against the final exact-head APK on the sole
+audited read-only disposable. `PASS` is based on observed results, not inferred
+from a unit or connected test. Row 5 is explicitly waived, not evidence.
 
 | # | Required step | Result |
 |---|---|---|
-| 1 | Fresh launch; choose `Start without restoring` | TODO |
-| 2 | Add a project, a task with one checklist item, and a tag | TODO |
-| 3 | Force-stop and relaunch; all created content persists | TODO |
-| 4 | Export `.otvault`, import with Replace, and verify counts/content | TODO |
-| 5 | Enable immediate app lock, background, and unlock through the system prompt | TODO |
-| 6 | Place Today widget; counts render and its visible 48 dp Quick Add action opens an exactly empty sheet | TODO |
-| 7 | Use the actual launcher Quick Add shortcut; an exactly empty sheet opens | TODO |
+| 1 | Fresh launch; choose `Start without restoring` | PASS |
+| 2 | Add a project, a task with one checklist item, and a tag | PASS |
+| 3 | Force-stop and relaunch; all created content persists | PASS |
+| 4 | Export `.otvault`, import with Replace, and verify counts/content | PASS |
+| 5 | Enable immediate app lock, background, and unlock through the system prompt | **SKIPPED — explicit user instruction** |
+| 6 | Place Today widget; counts render and its visible 48 dp Quick Add action opens an exactly empty sheet | PASS |
+| 7 | Use the actual launcher Quick Add shortcut; an exactly empty sheet opens | PASS |
 
-Seven of seven rows must pass before tagging.
+The original plan required all seven rows; the user explicitly waived row 5 for
+this candidate.
 
 ## Stage 7 release extras
 
 | Required extra | Result |
 |---|---|
-| Save, activate, refine, clear, and restore one filtered view | TODO |
-| Confirm grammar tokens before one atomic create | TODO |
-| Duplicate one task and prove Undo affects only the copy | TODO |
-| Switch Insights completion trend between chart and table | TODO |
+| Save, activate, refine, clear, and restore one filtered view | PASS, including force-stop persistence |
+| Confirm grammar tokens before one atomic create | PASS, six-token confirm-only grammar and one Root create |
+| Duplicate one task and prove Undo affects only the copy | PASS, open count 7→8→7 with no copy |
+| Switch Insights completion trend between chart and table | PASS, 7/30/90 ranges and project/tag rows match |
 
-Any failed row or extra blocks the release.
+All four extras passed; none is waived.
 
 ## Disposable cleanup
 
-**TODO (release blocker):** delete the temporary credential file without
-reading or printing it, disable the disposable screen credential through the
-visible system flow, kill only the audited read-only overlay, and confirm that
-both the ADB target list and disposable-emulator process audit are empty. The
-protected persistent AVD must remain untouched.
-
-At the safe pause, no Gradle or instrumentation process is running. The sole
-audited read-only disposable remains alive with its temporary credential state
-intact for resumption; neither the credential nor any device identifier is
-recorded here. The provisional signed workspace and widget were erased before
-the debug gate, so the final signed checklist must begin from a fresh install.
+**SKIPPED — explicit user instruction.** The temporary `.otvault` export was
+removed, but credential-file cleanup, screen-credential removal, and
+disposable-overlay shutdown were not performed; residual state remains.
+Neither a credential nor a device identifier is recorded here. The provisional
+signed workspace and widget were erased before the debug gate, so the final
+signed checklist began from a fresh install.
 
 ## Remote qualification and tag
 
-- **TODO (release blocker):** push the candidate under the GitHub Free-only
-  ruling and identify the exact push workflow by candidate head SHA.
-- **TODO (release blocker):** require `verify`, `release`, and exactly one API
-  36 job to succeed. Keep exactly one API 37.0 lane observe-only; if red, record
-  the reason exactly as **credential-encrypted storage unavailable**.
-- **TODO (release blocker):** create and push annotated tag `v1.1.0` only after
-  the required jobs pass, assert that it points to the qualified candidate,
-  then complete the later HANDOFF-only closure commit.
+- **SKIPPED — explicit user instruction.** GitHub CI qualification was not run
+  for this candidate, and the authorized tag will be created without CI
+  evidence. This record does not claim any CI job passed.
+- The API 37.0 F6 phrase **credential-encrypted storage unavailable** is
+  historical observe-only context, not a check of this candidate.
+- The user explicitly accepted these original Task 18 gaps and authorized
+  tagging. The later HANDOFF-only closure remains a separate post-tag action.
 
-Until these TODOs are discharged, release 1.1.0 does not exist.
+This is an explicitly waiver-accepted pre-tag candidate, not a fully qualified
+release under the original Task 18 plan. Release 1.1.0 does not yet exist.

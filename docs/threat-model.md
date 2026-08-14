@@ -278,7 +278,7 @@ interop feature rather than a confidentiality claim; completed-file custody
 belongs to the person, while all partial-output failure paths delete the
 document.
 
-## Stage 7 addendum
+## Stage 7 implementation addendum
 
 Stage 7 parses Quick Add and saved-view payloads as bounded untrusted input.
 Grammar matches remain transient suggestions until individually confirmed;
