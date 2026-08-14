@@ -917,17 +917,6 @@ class RoomVaultRepositoryInstrumentedTest {
         )
         assertEquals(beforeTask.revision.logicalCounter + 1, updatedTask.revision.logicalCounter)
         assertEquals(before.activityEntries, updated.activityEntries)
-        val generationAfter =
-            database!!.backupStateDao().require("vault-primary").currentGeneration
-        assertEquals(generationBefore + 1, generationAfter)
-        assertEquals(
-            listOf(BackupRecordFamily.TASK, BackupRecordFamily.REMINDER),
-            journalRows(generationAfter).map { row ->
-                BackupMutationCodec.decode(row.payload).let { mutation ->
-                    mutation.record?.family ?: mutation.deletedFamily
-                }
-            },
-        )
         assertEquals(
             DomainCommand.SetTaskSchedule(
                 original.id,
@@ -952,6 +941,17 @@ class RoomVaultRepositoryInstrumentedTest {
             }
         }
         assertEquals(start, reopened.tasks.single { it.id == original.id }.start)
+        val generationAfter =
+            database!!.backupStateDao().require("vault-primary").currentGeneration
+        assertEquals(generationBefore + 1, generationAfter)
+        assertEquals(
+            listOf(BackupRecordFamily.TASK, BackupRecordFamily.REMINDER),
+            journalRows(generationAfter).map { row ->
+                BackupMutationCodec.decode(row.payload).let { mutation ->
+                    mutation.record?.family ?: mutation.deletedFamily
+                }
+            },
+        )
 
         repository!!.execute(checkNotNull(result.undo))
 
