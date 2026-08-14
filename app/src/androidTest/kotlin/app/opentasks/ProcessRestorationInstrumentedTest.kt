@@ -6,8 +6,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -26,20 +29,26 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
+import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.QuickAddTokenKind
+import app.opentasks.core.domain.computeProjectTimelineProjection
 import app.opentasks.core.domain.parseQuickAdd
 import app.opentasks.core.domain.stripQuickAddToken
 import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.ProjectPresentation
+import app.opentasks.core.model.ProjectTimelineWindow
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.RecurrenceFrequency
 import app.opentasks.core.model.RecurrenceRule
@@ -49,6 +58,7 @@ import app.opentasks.core.model.SearchQuery
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TaskSortKey
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.feature.projects.ProjectsScreen
 import app.opentasks.lock.AppLockSettings
 import java.time.Clock
 import java.time.DayOfWeek
@@ -56,7 +66,9 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
@@ -377,6 +389,7 @@ class ProcessRestorationInstrumentedTest {
         val readZone: () -> ZoneId = zoneProvider::get
         val timeVersion = mutableStateOf(0L)
         val observedClock = AtomicReference<Clock>()
+        val observedTimelineToday = AtomicReference<LocalDate>()
         val snapshot = OpenTasksFixtures.snapshot
 
         composeRule.setContent {
@@ -387,19 +400,41 @@ class ProcessRestorationInstrumentedTest {
             )
             SideEffect { observedClock.set(projectionClock) }
             OpenTasksTheme {
-                ScheduleContent(
-                    snapshot = snapshot,
-                    projectNames = snapshot.projects.associate { it.id to it.name },
-                    expanded = false,
-                    projectionClock = projectionClock,
-                    onOpenTask = {},
-                )
+                Column {
+                    ScheduleContent(
+                        snapshot = snapshot,
+                        projectNames = snapshot.projects.associate { it.id to it.name },
+                        expanded = false,
+                        projectionClock = projectionClock,
+                        onOpenTask = {},
+                    )
+                    // A minimal probe for Task 11's constraint: Timeline's
+                    // Today anchor must resample `zoneProvider` fresh at the
+                    // action point (`currentDeviceClock`), never the
+                    // memoized `projectionClock.zone` above -- so this reads
+                    // `instantClock`/`readZone` directly, exactly as
+                    // `OpenTasksApp`'s `onTimelineToday` does.
+                    Button(
+                        onClick = {
+                            observedTimelineToday.set(
+                                LocalDate.now(currentDeviceClock(instantClock, readZone))
+                                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+                            )
+                        },
+                        modifier = Modifier.testTag("timeline-today-probe"),
+                    ) { Text("Timeline today probe") }
+                }
             }
         }
 
         composeRule.onNodeWithTag("schedule-day-2026-08-10").assertIsSelected()
         assertEquals(instant, observedClock.get().instant())
         assertEquals(ZoneId.of("Asia/Bangkok"), observedClock.get().zone)
+
+        composeRule.onNodeWithTag("timeline-today-probe").performClick()
+        // 10 Aug 2026 is itself a Monday in Bangkok, so the current Monday
+        // is that same day.
+        assertEquals(LocalDate.of(2026, 8, 10), observedTimelineToday.get())
 
         composeRule.runOnIdle {
             zoneProvider.set(ZoneId.of("America/Los_Angeles"))
@@ -413,6 +448,146 @@ class ProcessRestorationInstrumentedTest {
         assertEquals(instant, observedClock.get().instant())
         assertEquals(ZoneId.of("America/Los_Angeles"), observedClock.get().zone)
         composeRule.onNodeWithTag("schedule-day-2026-08-09").assertIsSelected()
+
+        composeRule.onNodeWithTag("timeline-today-probe").performClick()
+        // The injected instant never changes; only the zone did. Local time
+        // in Los Angeles is now 9 Aug 2026 (a Sunday), so the current Monday
+        // moves back to 3 Aug 2026.
+        assertEquals(instant, instantClock.instant())
+        assertEquals(LocalDate.of(2026, 8, 3), observedTimelineToday.get())
+    }
+
+    @Test
+    fun timelinePresentationAnchorAndSelectionIsolateBetweenProjectsAfterRootRecreation() {
+        val projectA = OpenTasksFixtures.researchProject
+        val projectB = OpenTasksFixtures.studioProject
+        val snapshot = OpenTasksFixtures.snapshot
+        val chainTask = snapshot.tasks.first { it.projectId == projectA.id && it.dependencyIds.isNotEmpty() }
+        val defaultFirstDate = LocalDate.of(2026, 8, 3)
+
+        fun renderWith(state: WorkspaceProjectViewState, initialProjectId: ProjectId) {
+            composeRule.setContent {
+                val viewState by state.state.collectAsState()
+                var selectedProjectId by remember { mutableStateOf(initialProjectId) }
+                val presentation = viewState.presentationByProject[selectedProjectId]
+                    ?: ProjectPresentation.LIST
+                val firstDate = viewState.timelineFirstDateByProject[selectedProjectId]
+                    ?: defaultFirstDate
+                val selectedTaskId = viewState.selectedTimelineTaskByProject[selectedProjectId]
+                val timelineProjection = if (presentation == ProjectPresentation.TIMELINE) {
+                    computeProjectTimelineProjection(
+                        snapshot = snapshot,
+                        projectId = selectedProjectId,
+                        window = ProjectTimelineWindow(firstDate),
+                        selectedTaskId = selectedTaskId,
+                    )
+                } else {
+                    null
+                }
+                OpenTasksTheme {
+                    ProjectsScreen(
+                        projects = snapshot.projects,
+                        tasks = snapshot.tasks,
+                        milestones = snapshot.milestones,
+                        workflowStatuses = snapshot.workflowStatuses,
+                        selectedProjectId = selectedProjectId,
+                        showDetailPane = false,
+                        presentation = presentation,
+                        timelineProjection = timelineProjection,
+                        onPresentationChange = { state.setProjectPresentation(selectedProjectId, it) },
+                        onTimelinePrevious = {
+                            state.setProjectTimelineFirstDate(selectedProjectId, firstDate.minusWeeks(4))
+                        },
+                        onTimelineToday = {
+                            state.setProjectTimelineFirstDate(selectedProjectId, defaultFirstDate)
+                        },
+                        onTimelineNext = {
+                            state.setProjectTimelineFirstDate(selectedProjectId, firstDate.plusWeeks(4))
+                        },
+                        onTimelineTaskSelectionChange = { taskId ->
+                            state.setProjectTimelineSelection(selectedProjectId, taskId)
+                        },
+                        onSelectProject = { selectedProjectId = it },
+                        onCloseDetail = {},
+                        onUpdateProject = { _, _ -> },
+                        onArchiveProject = {},
+                        onOpenTask = {},
+                    )
+                }
+            }
+        }
+
+        val original = WorkspaceProjectViewState(SavedStateHandle())
+        renderWith(original, projectA.id)
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("workbench-view-timeline"))
+        composeRule.onNodeWithTag("workbench-view-timeline").performClick()
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("timeline-next"))
+        composeRule.onNodeWithTag("timeline-next").performClick()
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("timeline-task-row-${chainTask.id.value}"))
+        composeRule.onNodeWithTag("timeline-task-row-${chainTask.id.value}").performClick()
+
+        assertEquals(
+            ProjectPresentation.TIMELINE,
+            original.state.value.presentationByProject[projectA.id],
+        )
+        assertEquals(
+            defaultFirstDate.plusWeeks(4),
+            original.state.value.timelineFirstDateByProject[projectA.id],
+        )
+        assertEquals(chainTask.id, original.state.value.selectedTimelineTaskByProject[projectA.id])
+
+        // "Recreate": a fresh `WorkspaceProjectViewState` restored purely
+        // from the exported `SavedStateHandle` keys, exactly as
+        // `WorkspaceProjectViewStateTest` restores it -- this is the real
+        // persistence boundary Task 10 established (a plain `rememberSaveable`
+        // round trip would not exercise it, since this state lives in the
+        // view model's `SavedStateHandle`, not local composable state).
+        val restored = WorkspaceProjectViewState(
+            SavedStateHandle(
+                mapOf(
+                    WorkspaceProjectViewState.PROJECT_BOARD_MODE_IDS to
+                        original.state.value.presentationByProject
+                            .filterValues { it == ProjectPresentation.BOARD }
+                            .keys.map { it.value },
+                    WorkspaceProjectViewState.PROJECT_TIMELINE_MODE_IDS to
+                        original.state.value.presentationByProject
+                            .filterValues { it == ProjectPresentation.TIMELINE }
+                            .keys.map { it.value },
+                    WorkspaceProjectViewState.PROJECT_TIMELINE_ANCHORS to
+                        original.state.value.timelineFirstDateByProject
+                            .flatMap { (id, date) -> listOf(id.value, date.toEpochDay().toString()) },
+                    WorkspaceProjectViewState.PROJECT_TIMELINE_SELECTIONS to
+                        original.state.value.selectedTimelineTaskByProject
+                            .flatMap { (id, taskId) -> listOf(id.value, taskId.value) },
+                ),
+            ),
+        )
+
+        renderWith(restored, projectB.id)
+
+        // B was never touched: it restores to the LIST default, independent
+        // of A's Timeline selection/anchor.
+        composeRule.onNodeWithTag("workbench-view-list").assertIsSelected()
+        assertNull(restored.state.value.presentationByProject[projectB.id])
+        assertNull(restored.state.value.timelineFirstDateByProject[projectB.id])
+        assertNull(restored.state.value.selectedTimelineTaskByProject[projectB.id])
+
+        // A's restored values are exactly what it left with.
+        assertEquals(
+            ProjectPresentation.TIMELINE,
+            restored.state.value.presentationByProject[projectA.id],
+        )
+        assertEquals(
+            defaultFirstDate.plusWeeks(4),
+            restored.state.value.timelineFirstDateByProject[projectA.id],
+        )
+        assertEquals(chainTask.id, restored.state.value.selectedTimelineTaskByProject[projectA.id])
     }
 
     @Test

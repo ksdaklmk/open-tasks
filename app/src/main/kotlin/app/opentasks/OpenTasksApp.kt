@@ -120,6 +120,7 @@ import app.opentasks.core.domain.arrangeTasks
 import app.opentasks.core.domain.boardColumns
 import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
+import app.opentasks.core.domain.computeProjectTimelineProjection
 import app.opentasks.core.domain.computeScheduleMonthProjection
 import app.opentasks.core.domain.planTaskScheduleMove
 import app.opentasks.core.model.Attachment
@@ -127,6 +128,7 @@ import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.ProjectPresentation
+import app.opentasks.core.model.ProjectTimelineWindow
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchResult
 import app.opentasks.core.model.Task
@@ -164,6 +166,7 @@ import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.LockDelay
 import app.opentasks.reminders.ReminderNotifications
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -171,6 +174,7 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -577,6 +581,29 @@ fun OpenTasksApp(
                 sort = boardSort,
             )
         }.orEmpty()
+        val projectPresentation = selectedProjectId?.let {
+            projectWorkbenchViewState.presentationByProject[it]
+        } ?: ProjectPresentation.LIST
+        // Recomputed every recomposition (not `remember`-memoized) so a
+        // replacement `zoneProvider` is sampled fresh, matching
+        // `executeScheduleMove`'s pattern below -- never the memoized
+        // `projectionClock.zone`.
+        val projectTimelineFirstDate = selectedProjectId
+            ?.let { projectWorkbenchViewState.timelineFirstDateByProject[it] }
+            ?: LocalDate.now(currentDeviceClock(clock, zoneProvider))
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val selectedTimelineTaskId = selectedProjectId
+            ?.let { projectWorkbenchViewState.selectedTimelineTaskByProject[it] }
+        val timelineProjection = selectedProject?.takeIf {
+            projectPresentation == ProjectPresentation.TIMELINE
+        }?.let { project ->
+            computeProjectTimelineProjection(
+                snapshot = snapshot,
+                projectId = project.id,
+                window = ProjectTimelineWindow(projectTimelineFirstDate),
+                selectedTaskId = selectedTimelineTaskId,
+            )
+        }
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
         // case is keyed on a null project name, and `projectNames` has no Inbox entry.
@@ -1306,25 +1333,47 @@ fun OpenTasksApp(
                                     selectedProjectId = selectedProjectId,
                                     showDetailPane = showDetailPane,
                                     listPaneFraction = listPaneFraction,
-                                    boardMode = selectedProjectId?.let {
-                                        projectWorkbenchViewState.presentationByProject[it]
-                                    } == ProjectPresentation.BOARD,
+                                    presentation = projectPresentation,
+                                    timelineProjection = timelineProjection,
                                     boardColumnWidth = boardColumnWidth,
                                     workbenchTaskGroups = workbenchTaskGroups,
                                     workbenchSort = workbenchArrangement.sort,
                                     workbenchGroupBy = workbenchArrangement.groupBy,
                                     selectedBoardColumns = selectedBoardColumns,
                                     boardSort = boardSort,
-                                    onBoardModeChange = { enabled ->
+                                    onPresentationChange = { value ->
                                         selectedProjectId?.let {
-                                            viewModel.setProjectPresentation(
+                                            viewModel.setProjectPresentation(it, value)
+                                        }
+                                    },
+                                    onTimelinePrevious = {
+                                        selectedProjectId?.let {
+                                            viewModel.setProjectTimelineFirstDate(
                                                 it,
-                                                if (enabled) {
-                                                    ProjectPresentation.BOARD
-                                                } else {
-                                                    ProjectPresentation.LIST
-                                                },
+                                                projectTimelineFirstDate.minusWeeks(4),
                                             )
+                                        }
+                                    },
+                                    onTimelineToday = {
+                                        selectedProjectId?.let {
+                                            viewModel.setProjectTimelineFirstDate(
+                                                it,
+                                                LocalDate.now(currentDeviceClock(clock, zoneProvider))
+                                                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+                                            )
+                                        }
+                                    },
+                                    onTimelineNext = {
+                                        selectedProjectId?.let {
+                                            viewModel.setProjectTimelineFirstDate(
+                                                it,
+                                                projectTimelineFirstDate.plusWeeks(4),
+                                            )
+                                        }
+                                    },
+                                    onTimelineTaskSelectionChange = { taskId ->
+                                        selectedProjectId?.let {
+                                            viewModel.setProjectTimelineSelection(it, taskId)
                                         }
                                     },
                                     onWorkbenchSortChange = { sort ->

@@ -32,6 +32,7 @@ import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskGroup
@@ -167,7 +168,7 @@ class ProjectWorkbenchInstrumentedTest {
             boardColumns = selectedColumn,
             boardSort = TaskSortKey.TITLE,
             onBoardSortChange = selectedSort::set,
-            initialBoardMode = true,
+            initialPresentation = ProjectPresentation.BOARD,
         )
 
         val firstTop = composeRule.onNodeWithTag("board-card-${first.id.value}")
@@ -618,10 +619,10 @@ class ProjectWorkbenchInstrumentedTest {
         boardColumns: List<BoardColumn> = emptyList(),
         boardSort: TaskSortKey = TaskSortKey.PRIORITY,
         onBoardSortChange: (TaskSortKey) -> Unit = {},
-        initialBoardMode: Boolean = false,
+        initialPresentation: ProjectPresentation = ProjectPresentation.LIST,
     ) {
         composeRule.setContent {
-            val boardMode = remember { mutableStateOf(initialBoardMode) }
+            val presentation = remember { mutableStateOf(initialPresentation) }
             OpenTasksTheme {
                 ProjectsScreen(
                     projects = OpenTasksFixtures.snapshot.projects,
@@ -630,7 +631,7 @@ class ProjectWorkbenchInstrumentedTest {
                     workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
                     selectedProjectId = project.id,
                     showDetailPane = false,
-                    boardMode = boardMode.value,
+                    presentation = presentation.value,
                     workbenchTaskGroups = groups,
                     workbenchSort = sort,
                     workbenchGroupBy = groupBy,
@@ -639,7 +640,7 @@ class ProjectWorkbenchInstrumentedTest {
                     onWorkbenchSortChange = onSortChange,
                     onWorkbenchGroupChange = onGroupChange,
                     onBoardSortChange = onBoardSortChange,
-                    onBoardModeChange = { boardMode.value = it },
+                    onPresentationChange = { presentation.value = it },
                     onSelectProject = {},
                     onCloseDetail = {},
                     onUpdateProject = { _, _ -> },

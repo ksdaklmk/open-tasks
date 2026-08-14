@@ -109,6 +109,8 @@ import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.ProjectPresentation
+import app.opentasks.core.model.ProjectTimelineProjection
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.Task
@@ -148,14 +150,19 @@ fun ProjectsScreen(
     showDetailPane: Boolean,
     modifier: Modifier = Modifier,
     listPaneFraction: Float = 0.42f,
-    boardMode: Boolean = false,
+    presentation: ProjectPresentation = ProjectPresentation.LIST,
+    timelineProjection: ProjectTimelineProjection? = null,
     boardColumnWidth: Dp = 272.dp,
     workbenchTaskGroups: List<TaskGroup> = emptyList(),
     workbenchSort: TaskSortKey = TaskSortKey.DUE,
     workbenchGroupBy: TaskGroupKey? = null,
     selectedBoardColumns: List<BoardColumn> = emptyList(),
     boardSort: TaskSortKey = TaskSortKey.PRIORITY,
-    onBoardModeChange: (Boolean) -> Unit = {},
+    onPresentationChange: (ProjectPresentation) -> Unit = {},
+    onTimelinePrevious: () -> Unit = {},
+    onTimelineToday: () -> Unit = {},
+    onTimelineNext: () -> Unit = {},
+    onTimelineTaskSelectionChange: (TaskId?) -> Unit = {},
     onWorkbenchSortChange: (TaskSortKey) -> Unit = {},
     onWorkbenchGroupChange: (TaskGroupKey?) -> Unit = {},
     onBoardSortChange: (TaskSortKey) -> Unit = {},
@@ -200,14 +207,19 @@ fun ProjectsScreen(
             tasks = tasks,
             milestones = milestones,
             workflowStatuses = workflowStatuses,
-            boardMode = boardMode,
+            presentation = presentation,
+            timelineProjection = timelineProjection,
             boardColumnWidth = boardColumnWidth,
             workbenchTaskGroups = workbenchTaskGroups,
             workbenchSort = workbenchSort,
             workbenchGroupBy = workbenchGroupBy,
             selectedBoardColumns = selectedBoardColumns,
             boardSort = boardSort,
-            onBoardModeChange = onBoardModeChange,
+            onPresentationChange = onPresentationChange,
+            onTimelinePrevious = onTimelinePrevious,
+            onTimelineToday = onTimelineToday,
+            onTimelineNext = onTimelineNext,
+            onTimelineTaskSelectionChange = onTimelineTaskSelectionChange,
             onWorkbenchSortChange = onWorkbenchSortChange,
             onWorkbenchGroupChange = onWorkbenchGroupChange,
             onBoardSortChange = onBoardSortChange,
@@ -274,14 +286,19 @@ fun ProjectsScreen(
                     tasks = tasks,
                     milestones = milestones,
                     workflowStatuses = workflowStatuses,
-                    boardMode = boardMode,
+                    presentation = presentation,
+                    timelineProjection = timelineProjection,
                     boardColumnWidth = boardColumnWidth,
                     workbenchTaskGroups = workbenchTaskGroups,
                     workbenchSort = workbenchSort,
                     workbenchGroupBy = workbenchGroupBy,
                     selectedBoardColumns = selectedBoardColumns,
                     boardSort = boardSort,
-                    onBoardModeChange = onBoardModeChange,
+                    onPresentationChange = onPresentationChange,
+                    onTimelinePrevious = onTimelinePrevious,
+                    onTimelineToday = onTimelineToday,
+                    onTimelineNext = onTimelineNext,
+                    onTimelineTaskSelectionChange = onTimelineTaskSelectionChange,
                     onWorkbenchSortChange = onWorkbenchSortChange,
                     onWorkbenchGroupChange = onWorkbenchGroupChange,
                     onBoardSortChange = onBoardSortChange,
@@ -413,14 +430,19 @@ private fun ProjectWorkbench(
     tasks: List<Task>,
     milestones: List<Milestone>,
     workflowStatuses: List<WorkflowStatus>,
-    boardMode: Boolean,
+    presentation: ProjectPresentation,
+    timelineProjection: ProjectTimelineProjection?,
     boardColumnWidth: Dp,
     workbenchTaskGroups: List<TaskGroup>,
     workbenchSort: TaskSortKey,
     workbenchGroupBy: TaskGroupKey?,
     selectedBoardColumns: List<BoardColumn>,
     boardSort: TaskSortKey,
-    onBoardModeChange: (Boolean) -> Unit,
+    onPresentationChange: (ProjectPresentation) -> Unit,
+    onTimelinePrevious: () -> Unit,
+    onTimelineToday: () -> Unit,
+    onTimelineNext: () -> Unit,
+    onTimelineTaskSelectionChange: (TaskId?) -> Unit,
     onWorkbenchSortChange: (TaskSortKey) -> Unit,
     onWorkbenchGroupChange: (TaskGroupKey?) -> Unit,
     onBoardSortChange: (TaskSortKey) -> Unit,
@@ -697,9 +719,9 @@ private fun ProjectWorkbench(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SingleChoiceSegmentedButtonRow {
                     SegmentedButton(
-                        selected = !boardMode,
-                        onClick = { onBoardModeChange(false) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        selected = presentation == ProjectPresentation.LIST,
+                        onClick = { onPresentationChange(ProjectPresentation.LIST) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .testTag("workbench-view-list"),
@@ -707,17 +729,27 @@ private fun ProjectWorkbench(
                         Text(stringResource(R.string.workbench_view_list))
                     }
                     SegmentedButton(
-                        selected = boardMode,
-                        onClick = { onBoardModeChange(true) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        selected = presentation == ProjectPresentation.BOARD,
+                        onClick = { onPresentationChange(ProjectPresentation.BOARD) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .testTag("workbench-view-board"),
                     ) {
                         Text(stringResource(R.string.workbench_view_board))
                     }
+                    SegmentedButton(
+                        selected = presentation == ProjectPresentation.TIMELINE,
+                        onClick = { onPresentationChange(ProjectPresentation.TIMELINE) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("workbench-view-timeline"),
+                    ) {
+                        Text(stringResource(R.string.workbench_view_timeline))
+                    }
                 }
-                if (boardMode) {
+                if (presentation == ProjectPresentation.BOARD) {
                     BoardSortControl(
                         boardSort = boardSort,
                         onBoardSortChange = onBoardSortChange,
@@ -725,7 +757,7 @@ private fun ProjectWorkbench(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            if (boardMode) {
+            if (presentation == ProjectPresentation.BOARD) {
                 BoardView(
                     columns = selectedBoardColumns,
                     columnWidth = boardColumnWidth,
@@ -795,40 +827,62 @@ private fun ProjectWorkbench(
             )
         }
 
-        if (!boardMode) {
-            item {
-                Spacer(Modifier.height(24.dp))
-                SectionHeader(
-                    title = "Tasks",
-                    supportingText = if (projectTasks.isEmpty()) {
-                        "No active tasks are assigned to this project."
-                    } else {
-                        "${projectTasks.size} active tasks"
-                    },
-                    action = {
-                        WorkbenchArrangementControls(
-                            workbenchSort = workbenchSort,
-                            workbenchGroupBy = workbenchGroupBy,
-                            onWorkbenchSortChange = onWorkbenchSortChange,
-                            onWorkbenchGroupChange = onWorkbenchGroupChange,
-                        )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-            }
+        when (presentation) {
+            ProjectPresentation.LIST -> {
+                item {
+                    Spacer(Modifier.height(24.dp))
+                    SectionHeader(
+                        title = "Tasks",
+                        supportingText = if (projectTasks.isEmpty()) {
+                            "No active tasks are assigned to this project."
+                        } else {
+                            "${projectTasks.size} active tasks"
+                        },
+                        action = {
+                            WorkbenchArrangementControls(
+                                workbenchSort = workbenchSort,
+                                workbenchGroupBy = workbenchGroupBy,
+                                onWorkbenchSortChange = onWorkbenchSortChange,
+                                onWorkbenchGroupChange = onWorkbenchGroupChange,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
 
-            renderedGroups.forEach { group ->
-                group.value?.let { value ->
-                    item(key = "workbench:group:${value.stableKey()}") {
-                        Text(
-                            workbenchGroupLabel(value),
-                            modifier = Modifier.semantics { heading() },
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                renderedGroups.forEach { group ->
+                    group.value?.let { value ->
+                        item(key = "workbench:group:${value.stableKey()}") {
+                            Text(
+                                workbenchGroupLabel(value),
+                                modifier = Modifier.semantics { heading() },
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                    }
+                    items(group.tasks, key = { "workbench:task:${it.id.value}" }) { task ->
+                        ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
                     }
                 }
-                items(group.tasks, key = { "workbench:task:${it.id.value}" }) { task ->
-                    ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+            }
+
+            ProjectPresentation.BOARD -> Unit
+
+            ProjectPresentation.TIMELINE -> {
+                item {
+                    Spacer(Modifier.height(24.dp))
+                    if (timelineProjection != null) {
+                        ProjectTimelineView(
+                            projection = timelineProjection,
+                            onPrevious = onTimelinePrevious,
+                            onToday = onTimelineToday,
+                            onNext = onTimelineNext,
+                            onTaskSelectionChange = onTimelineTaskSelectionChange,
+                            onOpenTask = onOpenTask,
+                            onOpenMilestone = { milestoneEditorKey = it.value },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }

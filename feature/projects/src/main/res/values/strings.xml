@@ -2,6 +2,7 @@
 <resources>
     <string name="workbench_view_list">List</string>
     <string name="workbench_view_board">Board</string>
+    <string name="workbench_view_timeline">Timeline</string>
     <string name="workbench_sort_control">Sort project tasks: %1$s</string>
     <string name="board_sort_control">Sort board cards: %1$s</string>
     <string name="workbench_group_control">Group project tasks: %1$s</string>
@@ -39,4 +40,33 @@
     <string name="board_priority_medium">Medium</string>
     <string name="board_priority_high">High</string>
     <string name="board_priority_urgent">Urgent</string>
+    <string name="timeline_window_range">%1$s to %2$s</string>
+    <string name="timeline_previous">Previous four weeks</string>
+    <string name="timeline_today">Today</string>
+    <string name="timeline_next">Next four weeks</string>
+    <string name="timeline_open_task">Open %1$s</string>
+    <string name="timeline_milestones_label">Milestones</string>
+    <string name="timeline_milestones_outside_window">%1$d milestones before this window • %2$d after</string>
+    <string name="timeline_milestone_open">%1$s, due %2$s</string>
+    <string name="timeline_milestone_complete">%1$s, due %2$s, complete</string>
+    <string name="timeline_row_starts">Starts %1$s</string>
+    <string name="timeline_row_due">Due %1$s</string>
+    <string name="timeline_row_continues_before">Continues from before this window</string>
+    <string name="timeline_row_continues_after">Continues after this window</string>
+    <string name="timeline_row_outside_before">Scheduled before this window</string>
+    <string name="timeline_row_outside_after">Scheduled after this window</string>
+    <string name="timeline_row_invalid">Invalid schedule: due date is before the start date</string>
+    <string name="timeline_row_unscheduled">Unscheduled</string>
+    <string name="timeline_row_completed">Completed</string>
+    <string name="timeline_row_not_completed">Not completed</string>
+    <string name="timeline_row_blocked">Blocked</string>
+    <string name="timeline_row_not_blocked">Not blocked</string>
+    <string name="timeline_row_role_selected">Selected task</string>
+    <string name="timeline_row_role_prerequisite">Prerequisite of the selected task</string>
+    <string name="timeline_row_role_dependant">Depends on the selected task</string>
+    <string name="timeline_row_role_prerequisite_and_dependant">Prerequisite and dependant of the selected task</string>
+    <plurals name="timeline_row_duration_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
 </resources>
