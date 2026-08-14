@@ -37,16 +37,18 @@ status are superseded here.
   day placement remains due at 18:00 in the current device zone; the editor's
   new due-date default remains 17:00 by design.
 - Baseline `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` passed
-  before Task 1, every task passed its focused JVM/compile gate, and the full
-  gate was re-run green at `5074c10` (553 tasks, BUILD SUCCESSFUL).
-  Instrumented regressions were compile-only: no device or connected test
-  ran. Task 9's eight drag tests exist as instrumented sources and are
-  compile-verified only; their RED phase was runtime-shaped and honestly
-  unobservable under the no-device rule.
+  before Task 1, every task passed its focused JVM/compile gate, and the
+  controller re-ran the full gate green at the `5074c10` checkpoint (BUILD
+  SUCCESSFUL, 553 actionable tasks; the run is recorded in the ignored
+  ledger). Instrumented regressions were compile-only: no device or
+  connected test ran. Task 9's eight drag tests exist as instrumented
+  sources and are compile-verified only; their RED phase was runtime-shaped
+  and honestly unobservable under the no-device rule.
 - Carry-forward Task 15 obligation: expanded Week reserves a 280 dp
-  unscheduled tray, so the two expanded-Week drag tests need a
-  wide-window/tablet leg and are expected to fail on a phone-width leg —
-  layout geometry, not drag wiring.
+  unscheduled tray, so `expandedWeekDragMovesDatedTaskBetweenDays`, which
+  needs two day columns visible at once, requires a wide-window/tablet leg
+  and is expected to fail on a phone-width leg — layout geometry, not drag
+  wiring.
 - This is an in-development, unqualified checkpoint. There is no whole-stage
   review, Task 15 qualification, signed APK, release bump, GitHub CI, tag, or
   release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and

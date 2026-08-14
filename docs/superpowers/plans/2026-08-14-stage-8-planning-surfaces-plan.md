@@ -36,8 +36,9 @@ outranks the task's three-file manifest. Task 10 (per-project planning state)
 is next; Tasks 10–15 remain pending. This is an in-development, unqualified
 checkpoint: no device/connected suite, whole-stage review, qualification,
 version bump, signed APK, tag, or release evidence exists; Task 9's eight
-drag tests are compile-verified only. Carry to Task 15: the expanded-Week
-tray geometry means the two expanded-Week drag tests need a wide-window leg.
+drag tests are compile-verified only. Carry to Task 15: expanded-Week tray
+geometry means `expandedWeekDragMovesDatedTaskBetweenDays` needs a
+wide-window leg.
 The fourteen deferred non-blocking Minors are in the ignored ledger at
 `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
 
