@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 Tasks 1–9 checkpoint, paused before Task 10, 14 August 2026
+## Current resume point — Stage 8 executing, Tasks 1–10 complete, 15 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
@@ -24,6 +24,15 @@ status are superseded here.
   `RemoveScheduleConfirmation` in `ScheduleReschedule.kt` so the
   tray-with-reminder drop opens the same dialog as the menu path — one
   definition, unchanged strings, tags, and menu behaviour.
+- Execution resumed on 15 August 2026 by user instruction. Task 10 is
+  complete and Approved with no Critical or Important findings at `3530648`
+  (`feat: save project planning views`): per-project planning state —
+  LIST/BOARD/TIMELINE presentation, Monday-only Timeline anchor, and Timeline
+  task selection — now lives in `SavedStateHandle` through
+  `WorkspaceProjectViewState`, replacing the Board boolean state. Legacy
+  `projectBoardModeIds` restores as BOARD, decoding is fail-closed (Timeline
+  wins a corrupt dual-mode row), LIST defaults and null selections are never
+  persisted, and `OpenTasksApp` derives unchanged LIST/BOARD behaviour.
 - The Tasks 1–8 documentation checkpoint remains
   `ba88821c7b5779ce4f1521e19c89e85a66b86c44` with its correction at
   `cd773d148295469063ea86547c08d7caad71246d`; this Tasks 1–9 checkpoint
@@ -54,8 +63,10 @@ status are superseded here.
   release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and
   backup v1. No schema, backup format/family, fixture, dependency, permission,
   manifest, Drive scope, or route changed in Tasks 1–9.
-- Fourteen non-blocking deferred Minors are recorded in the ignored ledger:
-  six from Tasks 1–8 (an unused move-test zone constant; binned
+- Sixteen non-blocking deferred Minors are recorded in the ignored ledger:
+  two from Task 10 (decode-path test-coverage gaps: untested
+  selections-dedup/anchor-ordering branches and the position-preserving
+  non-string paired-list decode); six from Tasks 1–8 (an unused move-test zone constant; binned
   Timeline-selection coverage; a content-safe Room `ByteArray` helper; two
   editor-test strengthening notes; a Month agenda plural resource) and eight
   from Task 9 (per-move non-skippable Month/Week recomposition matching the
@@ -66,10 +77,10 @@ status are superseded here.
   beside its null binding; uncovered confirmation-dismiss and
   recurring-tray-eligibility branches; a duplicated `startOfWeek()`
   computation). Hand them to the final whole-branch review.
-- **PAUSED by user instruction after Task 9.** Resume with Task 10
-  (per-project planning state), then Tasks 11–15 in plan order. Timeline UI
-  and saved state and the daily digest are still pending. Stage 7's waivers
-  do not carry into Stage 8; do not run a device suite before Task 15.
+- **In execution.** Next: Task 11 (render and wire the read-only project
+  Timeline), then Tasks 12–15 in plan order. Timeline UI and the daily
+  digest are still pending. Stage 7's waivers do not carry into Stage 8; do
+  not run a device suite before Task 15.
 - Preserve the unrelated user dirty state: the modified historical Stage 3
   plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
   ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
