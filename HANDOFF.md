@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 Tasks 1–13 complete, Task 14 next, 15 August 2026
+## Current resume point — Stage 8 Tasks 1–14 complete, Task 15 in progress, 15 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
@@ -83,6 +83,23 @@ status are superseded here.
   compile-only until Task 15. The digest stays dormant (default off) and
   `OPEN_DAILY_DIGEST_HOME` unconsumed until Task 14's toggle and
   MainActivity wiring.
+- Task 14 is complete and Approved with no Critical or Important findings
+  at `92bb191` (`feat: configure daily digest in More`): six primitive
+  digest parameters joined the stateless `MoreScreen` with an inline
+  setting row in the existing overview list (no new route), an
+  enabled-only `HH:mm` row whose 48 dp button launches the native 24-hour
+  `TimePickerDialog` emitting `hour * 60 + minute` (the store's range
+  guard is unreachable from the UI), and notification guidance that never
+  gates the switch. `MainActivity.onStart` reconciles the digest and
+  initialises the vault in independent `runCatching`s; `handleIntent`
+  recognises only `OPEN_DAILY_DIGEST_HOME` and increments
+  `openHomeSignal`, consumed only inside the unlocked Active workspace
+  arm; `OpenTasksApp` collects coordinator settings lifecycle-aware,
+  recomputes notification availability from `permissionStateVersion`, and
+  navigates Home via the brief's literal `LaunchedEffect`.
+  `PrivacyToggleRow` was renamed `SettingToggleRow` (three call sites,
+  behaviour unchanged). The four named instrumented tests are
+  compile-only until Task 15.
 - The Tasks 1–8 documentation checkpoint remains
   `ba88821c7b5779ce4f1521e19c89e85a66b86c44` with its correction at
   `cd773d148295469063ea86547c08d7caad71246d`; this Tasks 1–9 checkpoint
@@ -113,8 +130,15 @@ status are superseded here.
   release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and
   backup v1. No schema, backup format/family, fixture, dependency, permission,
   manifest, Drive scope, or route changed in Tasks 1–9.
-- Thirty non-blocking deferred Minors are recorded in the ignored
-  ledger: six from Task 13 (untested zero-count and SecurityException
+- Thirty-six non-blocking deferred Minors are recorded in the ignored
+  ledger: six from Task 14 (a sticky never-consumed `openHomeSignal` that
+  can misroute a later reminder tap to Home after an app-lock
+  recomposition — brief-prescribed shape, triage at the final review; the
+  click-launched TimePickerDialog leaks its window on configuration
+  change; a hard-coded English guidance-copy assertion; picker seeding
+  untested off the default; no app-side wiring test; `onStart`'s
+  sequential `runCatching` pair swallowing `CancellationException`);
+  six from Task 13 (untested zero-count and SecurityException
   no-retry paths; digest reconcile inside the reminder receiver's shared
   IllegalStateException catch; an unguarded throwing setMinuteOfDay
   boundary; a third near-verbatim per-surface notification-channel helper;
@@ -140,14 +164,14 @@ status are superseded here.
   beside its null binding; uncovered confirmation-dismiss and
   recurring-tray-eligibility branches; a duplicated `startOfWeek()`
   computation). Hand them to the final whole-branch review.
-- **Execution continues.** Task 14 (inline More digest setting,
-  MainActivity foreground reconcile, and `OPEN_DAILY_DIGEST_HOME` → Home
-  routing) is next, then controller-owned Task 15 (device qualification,
-  signing, cleanup, CI, tag, and release record). Carry the Task 13
-  device-proof obligations into Task 15: channel properties, receiver
-  export scope, the notification public/private split, and delivery-intent
-  identity are compile-verified only. Stage 7's waivers do not carry into
-  Stage 8; do not run a device suite before Task 15.
+- **Execution continues.** Controller-owned Task 15 (whole-stage review,
+  device qualification on the sole audited `Fold8_Acceptance` overlay,
+  signing, secure cleanup, GitHub Free CI, tag `v1.2.0`, and release
+  records) is in progress. Carried device-proof obligations: digest
+  channel properties, receiver export scope, the notification
+  public/private split, delivery-intent identity, the espresso TimePicker
+  dialog leg, and the wide-window `expandedWeekDragMovesDatedTaskBetweenDays`
+  geometry. Stage 7's waivers do not carry into Stage 8.
 - Preserve the unrelated user dirty state: the modified historical Stage 3
   plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
   ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
