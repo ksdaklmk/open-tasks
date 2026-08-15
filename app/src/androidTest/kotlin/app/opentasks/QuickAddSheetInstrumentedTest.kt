@@ -464,7 +464,7 @@ class QuickAddSheetInstrumentedTest {
 
         composeRule.onNodeWithTag("quick-add-title").performTextReplacement(text)
         composeRule.onNodeWithTag(suggestionTag(match))
-            .performClick()
+            .performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.onNodeWithTag("quick-add-applied-project")
             .assertHeightIsAtLeast(48.dp)
