@@ -25,21 +25,25 @@ Compose Material 3, Hilt, Android `SharedPreferences`, `AlarmManager`, AndroidX
 notifications, JUnit 4, and Compose UI test v2. No new dependency, permission,
 worker, service, route, schema, backup record, or Drive scope.
 
-## Execution checkpoint — 14 August 2026
+## Execution checkpoint — 15 August 2026
 
-Tasks 1–9 are complete, committed, and independently reviewed through
-`5074c10ef1f2150f8bbb4e786c054ae20ac4ee9f`; Task 9 is Approved with no
-Critical or Important findings. A recorded controller ruling let Task 9 stage
-a fourth file — a minimal confirmation-hoisting seam in
-`ScheduleReschedule.kt` — because exact reuse of the Task 8 confirmation
-outranks the task's three-file manifest. Task 10 (per-project planning state)
-is next; Tasks 10–15 remain pending. This is an in-development, unqualified
-checkpoint: no device/connected suite, whole-stage review, qualification,
-version bump, signed APK, tag, or release evidence exists; Task 9's eight
-drag tests are compile-verified only. Carry to Task 15: expanded-Week tray
-geometry means `expandedWeekDragMovesDatedTaskBetweenDays` needs a
-wide-window leg.
-The fourteen deferred non-blocking Minors are in the ignored ledger at
+Tasks 1–12 are complete, committed, and independently reviewed; Task 12 ends
+at `f91a1bb` and the controller re-ran the full gate green at that head.
+Tasks 1–9 run through `5074c10ef1f2150f8bbb4e786c054ae20ac4ee9f` (Task 9's
+recorded ruling allowed the fourth staged file — the confirmation-hoisting
+seam in `ScheduleReschedule.kt`). Task 10 (`3530648`) replaced the saved
+Board booleans with per-project planning state in `SavedStateHandle`;
+Task 11 (`f805d84` + fix `17694db`) shipped the read-only 84-day
+`ProjectTimelineView` and the LIST/BOARD/TIMELINE workbench branch; Task 12
+(`f91a1bb`) added the bounded digest preference store, wall-time
+`nextDailyDigestOccurrence`, and the title-free notification plan. Task 13
+(deliver one private digest and always re-arm first) is next; Tasks 13–15
+remain pending. This is an in-development, unqualified checkpoint: no
+device/connected suite, whole-stage review, qualification, version bump,
+signed APK, tag, or release evidence exists; all Stage 8 instrumented tests
+are compile-verified only. Carry to Task 15: expanded-Week tray geometry
+means `expandedWeekDragMovesDatedTaskBetweenDays` needs a wide-window leg.
+The twenty-four deferred non-blocking Minors are in the ignored ledger at
 `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
 
 ## Global Constraints

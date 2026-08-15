@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 executing, Tasks 1–11 complete, 15 August 2026
+## Current resume point — Stage 8 Tasks 1–12 checkpoint, paused before Task 13, 15 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
@@ -47,6 +47,24 @@ status are superseded here.
   anchors through the injectable zone provider at action time. Timeline
   Compose tests and extended restoration/zone regressions are compile-only
   until Task 15.
+- Task 12 is complete and Approved with no Critical or Important findings at
+  `f91a1bb` (`feat: plan private daily digests`): `DailyDigestSystem.kt`
+  holds the exact `daily_digest` preference boundary (keys `enabled`,
+  `minute_of_day`, `last_handled_epoch_day`, Boolean/Int/Long only,
+  raw-type validation via `prefs.all`, fail-closed rewrite to
+  disabled/08:00 retaining only a valid handled day, disable writes only
+  `enabled`), the brief-exact wall-time `nextDailyDigestOccurrence` (Java
+  gap/overlap DST authority, handled-day bound on a rewound clock), and
+  `dailyDigestNotificationPlan` calling `computeTodayProjection` once with
+  `titlesPermitted = false` and carrying counts only. One singleton store
+  provider joined `AppModule`; no alarm, notification, receiver, manifest,
+  dependency, or permission surface was touched (that is Task 13). The
+  reviewer independently re-derived the Europe/London DST instants and
+  re-verified compile/tests with a forced clean rebuild (11/11).
+- The controller re-ran the full gate
+  `./gradlew testDebugUnitTest lintDebug :app:assembleDebug` at this
+  checkpoint head `f91a1bb`: BUILD SUCCESSFUL in 34s, 553 actionable tasks
+  (24 executed, 529 up-to-date); the run is recorded in the ignored ledger.
 - The Tasks 1–8 documentation checkpoint remains
   `ba88821c7b5779ce4f1521e19c89e85a66b86c44` with its correction at
   `cd773d148295469063ea86547c08d7caad71246d`; this Tasks 1–9 checkpoint
@@ -77,7 +95,11 @@ status are superseded here.
   release evidence. The app remains 1.1.0 (versionCode 2); Room remains v9 and
   backup v1. No schema, backup format/family, fixture, dependency, permission,
   manifest, Drive scope, or route changed in Tasks 1–9.
-- Twenty non-blocking deferred Minors are recorded in the ignored ledger:
+- Twenty-four non-blocking deferred Minors are recorded in the ignored
+  ledger: four from Task 12 (a titles-suppression test that cannot
+  behaviourally distinguish the flag; uncovered `store.state` wiring;
+  missing handled-day/minute boundary tests; out-of-range `markHandled`
+  resetting unrelated valid state untested and undocumented);
   four from Task 11 (no in-Timeline deselect; awkward outside-window
   milestone copy; requireNotNull trust in the projection invariant; a
   single-visible-day clipped+status span can overflow its day-cell box);
@@ -94,10 +116,19 @@ status are superseded here.
   beside its null binding; uncovered confirmation-dismiss and
   recurring-tray-eligibility branches; a duplicated `startOfWeek()`
   computation). Hand them to the final whole-branch review.
-- **In execution.** Next: Task 12 (bounded digest preferences, timing, and
-  title-free planning), then Tasks 13–15 in plan order. The daily digest is
-  still pending. Stage 7's waivers do not carry into Stage 8; do not run a
-  device suite before Task 15.
+- **PAUSED by user instruction after Task 12.** Resume with Task 13
+  (deliver one private digest and always re-arm first — scheduler,
+  coordinator, notifier, receiver, the one permitted manifest delta), then
+  Tasks 14–15 in plan order. Useful pinned seams for Task 13:
+  `ReminderNotifications.createChannel(this)` in
+  `OpenTasksApplication.onCreate` is where the digest channel joins;
+  `ReminderSystemEventReceiver` (`ReminderSystem.kt:416`) injects
+  `Lazy<VaultRepository>` and orders device-local focus re-arm before the
+  lazy vault lookup — digest reconcile slots in the same way;
+  `ReminderIntents` is the intent-constants precedent; existing strings
+  `today_widget_label`, `today_widget_counts`, `reminder_public_text` are
+  reused per the brief. Stage 7's waivers do not carry into Stage 8; do not
+  run a device suite before Task 15.
 - Preserve the unrelated user dirty state: the modified historical Stage 3
   plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
   ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
