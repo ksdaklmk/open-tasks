@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 Tasks 1–14 complete, Task 15 in progress, 15 August 2026
+## Current resume point — Stage 8 Task 15 paused mid-qualification, 15 August 2026
 
 This section is authoritative. Older chronological notes below are retained
 for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
@@ -164,14 +164,62 @@ status are superseded here.
   beside its null binding; uncovered confirmation-dismiss and
   recurring-tray-eligibility branches; a duplicated `startOfWeek()`
   computation). Hand them to the final whole-branch review.
-- **Execution continues.** Controller-owned Task 15 (whole-stage review,
-  device qualification on the sole audited `Fold8_Acceptance` overlay,
-  signing, secure cleanup, GitHub Free CI, tag `v1.2.0`, and release
-  records) is in progress. Carried device-proof obligations: digest
-  channel properties, receiver export scope, the notification
-  public/private split, delivery-intent identity, the espresso TimePicker
-  dialog leg, and the wide-window `expandedWeekDragMovesDatedTaskBetweenDays`
-  geometry. Stage 7's waivers do not carry into Stage 8.
+- **Task 15 is mid-flight, PAUSED by user instruction (usage budget).**
+  Completed so far, all recorded in the ignored ledger:
+  - Version 1.2.0 (versionCode 3) committed at `79afd97`. The whole-stage
+    review over `8047f13..79afd97` returned zero Critical and two
+    Important findings; both are discharged — the sticky
+    `openTaskSignal`/`openHomeSignal` consumed-callback fix landed at
+    `5426a2f` (scoped re-review clean), and the contract-docs refresh is
+    Step 16 work with all seven drafts already written and independently
+    anchor-verified in the workspace `step16-drafts/` directory.
+  - Connected attempt 1 hung 96 minutes: on this AVD (`hw.gpu.mode=auto`)
+    the plan's `-no-window` flag selects SwiftShader software rendering,
+    whose missed frame budgets make `ThreadedRenderer` demand a redraw
+    every frame, so the main looper never idles and the Compose rule's
+    unbounded teardown `waitForIdleSync` blocks forever (AndroidX's own
+    sources document the hazard). Fixed test-side by `HideWindowsRule`
+    guarding all 31 compose instrumented classes (`9f17bd6` + `04b2ee4`,
+    two review rounds, closed clean). Standing ruling: overlays launch
+    with `-gpu host` added to the plan's pinned flags.
+  - All forced-fresh gates re-ran green at the refreshed implementation
+    head `04b2ee4`: 553/553 full gate, release build + verifier, schema/
+    fixture/workflow gates, and the scope audit (one recorded harness
+    ruling narrows its no-new-Log check to production sources; the only
+    added Log lines in the whole range are content-free lines in the
+    test-only guard).
+  - Connected attempt 2 on the host-GPU overlay ran clean of hangs:
+    450 tests, 423 passed, 0 errors, exactly the two established skips —
+    and **27 real failures, every one in a never-device-run Stage 8
+    test**, in six clusters: `core:data` 2 (the `SetTaskSchedule`
+    journal/Undo parity pair — highest stakes), `feature:schedule` 12
+    (drag previews not displayed, null drop callbacks, plus non-drag
+    agenda/semantics failures and one bounded 60 s AppNotIdle),
+    `feature:tasks` 5 (TaskEditor start/due tests), `feature:more` 4
+    (digest settings `performScrollTo` cannot find LazyColumn items —
+    suspected test-side), `app` 3 (a `setContent`-already-set possibly
+    from the new guard's rule nesting; a zone-provider restoration null;
+    digest channel `lockscreenVisibility` -1000 vs expected PRIVATE), and
+    `feature:projects` 1 (Board RTL preview geometry 536 vs 225).
+  - Both overlays were secure-stopped and audited clean; no emulator,
+    ADB target, or temp file remains. The Task-12-era protected state is
+    untouched.
+- **Resume here:** durable evidence and the exact resume sequence live in
+  the ignored ledger
+  (`.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`,
+  tail section) and its `attempt2-evidence/` directory (failure messages,
+  full Gradle log, SIGQUIT trace, amended audit/overlay scripts, and the
+  ready six-cluster diagnosis workflow). Sequence: six-cluster read-only
+  diagnosis → one consolidated fix wave → scoped re-review → forced-fresh
+  gates → fresh `-gpu host` overlay → rerun the connected gate → manual
+  matrix, signed smoke, cleanup, docs (drafts ready), CI push, tag.
+  Carried device-proof obligations remain: digest channel properties,
+  receiver export scope, notification public/private split,
+  delivery-intent identity, the espresso TimePicker leg, and the
+  wide-window `expandedWeekDragMovesDatedTaskBetweenDays` geometry.
+  Stage 7's waivers do not carry into Stage 8. The qualification
+  invalidation invariant governs: any production/test edit before the tag
+  restarts Steps 8–9 review and the forced-fresh/device evidence chain.
 - Preserve the unrelated user dirty state: the modified historical Stage 3
   plan, deleted pinfo spec, `.kotlin/`, and `artifacts/`. The ignored execution
   ledger is `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
