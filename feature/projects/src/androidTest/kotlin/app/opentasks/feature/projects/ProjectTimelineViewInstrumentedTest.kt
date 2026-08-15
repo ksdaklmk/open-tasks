@@ -74,6 +74,7 @@ class ProjectTimelineViewInstrumentedTest {
         milestonesBeforeWindow: Int = 0,
         milestonesAfterWindow: Int = 0,
         selectedTaskId: TaskId? = null,
+        outOfProjectDependencyTaskCount: Int = 0,
     ) = ProjectTimelineProjection(
         projectId = project.id,
         window = window,
@@ -82,7 +83,7 @@ class ProjectTimelineViewInstrumentedTest {
         milestonesBeforeWindow = milestonesBeforeWindow,
         milestonesAfterWindow = milestonesAfterWindow,
         selectedTaskId = selectedTaskId,
-        outOfProjectDependencyTaskCount = 0,
+        outOfProjectDependencyTaskCount = outOfProjectDependencyTaskCount,
     )
 
     @Test
@@ -341,6 +342,7 @@ class ProjectTimelineViewInstrumentedTest {
                 rowFor(unrelated, ProjectTimelineDependencyRole.NONE),
             ),
             selectedTaskId = selected.id,
+            outOfProjectDependencyTaskCount = 2,
         )
         val selectedResult = AtomicReference<TaskId?>()
         val openedResult = AtomicReference<TaskId?>()
@@ -358,6 +360,14 @@ class ProjectTimelineViewInstrumentedTest {
                 )
             }
         }
+
+        composeRule.onNodeWithTag("timeline-dependency-chain-summary").assertTextEquals(
+            context.resources.getQuantityString(
+                R.plurals.timeline_dependency_chain_outside_project,
+                2,
+                2,
+            ),
+        )
 
         composeRule.onNodeWithTag("timeline-task-row-${selected.id.value}")
             .assertContentDescriptionEquals(

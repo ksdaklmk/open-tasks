@@ -120,6 +120,19 @@ fun ProjectTimelineView(
             )
             Spacer(Modifier.height(8.dp))
         }
+        if (projection.selectedTaskId != null) {
+            Text(
+                pluralStringResource(
+                    R.plurals.timeline_dependency_chain_outside_project,
+                    projection.outOfProjectDependencyTaskCount,
+                    projection.outOfProjectDependencyTaskCount,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("timeline-dependency-chain-summary"),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         Row {
             Spacer(Modifier.width(TIMELINE_LABEL_WIDTH))

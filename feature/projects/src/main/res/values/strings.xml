@@ -47,6 +47,10 @@
     <string name="timeline_open_task">Open %1$s</string>
     <string name="timeline_milestones_label">Milestones</string>
     <string name="timeline_milestones_outside_window">%1$d milestones before this window • %2$d after</string>
+    <plurals name="timeline_dependency_chain_outside_project">
+        <item quantity="one">Dependency chain: %1$d task outside this project</item>
+        <item quantity="other">Dependency chain: %1$d tasks outside this project</item>
+    </plurals>
     <string name="timeline_milestone_open">%1$s, due %2$s</string>
     <string name="timeline_milestone_complete">%1$s, due %2$s, complete</string>
     <string name="timeline_row_starts">Starts %1$s</string>
