@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.crypto.AndroidVaultContentKeyStore
@@ -31,6 +32,7 @@ import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.data.VaultSlotRegistry
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.VaultId
+import app.opentasks.digest.DailyDigestIntents
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
@@ -179,6 +181,38 @@ class FoldContinuityInstrumentedTest {
             } finally {
                 check(sidecar.delete() || !sidecar.exists())
             }
+        }
+    }
+
+    @Test
+    fun consumedDigestIntentDoesNotReplayHomeAfterRecreation() {
+        composeRule.activityRule.scenario.close()
+        val launchIntent = DailyDigestIntents.homeIntent(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        )
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                composeRule.onAllNodesWithTag("recovery-shell")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("Start without restoring").performClick()
+            ownedVault = awaitCreatedVault()
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onAllNodesWithText("More", useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+
+            composeRule.onNodeWithText("More", useUnmergedTree = true).performClick()
+            composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+            scenario.onActivity { activity ->
+                // ActivityScenario filters lifecycle events against this
+                // retained launch token; synchronize the token without
+                // changing the production Activity intent under test.
+                launchIntent.action = activity.intent.action
+            }
+            scenario.recreate()
+
+            composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
         }
     }
 

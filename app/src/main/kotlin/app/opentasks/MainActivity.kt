@@ -133,6 +133,9 @@ class MainActivity : ComponentActivity() {
                             onOpenTaskConsumed = {
                                 openTaskSignal = 0
                                 openTaskId = null
+                                intent.takeIf {
+                                    it.action == ReminderIntents.ACTION_OPEN_TASK
+                                }?.action = null
                             },
                             // Only reachable here, after the runtime and app
                             // lock branches above: a digest tap arriving while
@@ -140,7 +143,12 @@ class MainActivity : ComponentActivity() {
                             // for those to resolve rather than jumping past
                             // them to Home.
                             openHomeSignal = openHomeSignal,
-                            onOpenHomeConsumed = { openHomeSignal = 0 },
+                            onOpenHomeConsumed = {
+                                openHomeSignal = 0
+                                intent.takeIf {
+                                    it.action == DailyDigestIntents.ACTION_OPEN_HOME
+                                }?.action = null
+                            },
                             onOpenRecovery = { activeRecovery = true },
                         )
                     }
