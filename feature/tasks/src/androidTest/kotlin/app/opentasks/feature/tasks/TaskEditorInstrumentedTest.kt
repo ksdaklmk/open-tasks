@@ -19,6 +19,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -40,11 +42,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.UiController
 import androidx.test.espresso.ViewAction
-import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.platform.app.InstrumentationRegistry
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.ChecklistItem
@@ -127,19 +127,26 @@ class TaskEditorInstrumentedTest {
                 object : ViewAction {
                     override fun getConstraints(): Matcher<View> = isDisplayed()
 
-                    override fun getDescription() = "set time to %02d:%02d".format(hour, minute)
+                    override fun getDescription() = "set and confirm time %02d:%02d".format(hour, minute)
 
                     override fun perform(uiController: UiController, view: View) {
                         (view as TimePicker).apply {
                             this.hour = hour
                             this.minute = minute
+                            val positiveButton = checkNotNull(
+                                rootView.findViewById<View>(android.R.id.button1),
+                            )
+                            check(positiveButton.performClick())
                         }
                         uiController.loopMainThreadUntilIdle()
                     }
                 },
             )
-        onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
-        composeRule.waitForIdle()
+        val selectedTime = "%02d:%02d".format(hour, minute)
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodes(hasTestTag(tag) and hasText(selectedTime))
+                .fetchSemanticsNodes().size == 1
+        }
     }
 
     @Test
@@ -147,16 +154,16 @@ class TaskEditorInstrumentedTest {
         val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = null, due = null)
         val submitted = AtomicReference<TaskEdit?>()
         val saveCount = AtomicInteger()
-        composeRule.mainClock.autoAdvance = false
         showEditor(task) {
             saveCount.incrementAndGet()
             submitted.set(it)
         }
 
-        composeRule.onNodeWithTag("task-start-date-button")
+        val startDateButton = composeRule.onNodeWithTag("task-start-date-button")
             .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
-            .performClick()
+        composeRule.mainClock.autoAdvance = false
+        startDateButton.performClick()
         composeRule.mainClock.advanceTimeByFrame()
         val useDate = composeRule.onNodeWithText("Use date")
         useDate.performClick()
@@ -166,7 +173,7 @@ class TaskEditorInstrumentedTest {
         composeRule.onNodeWithTag("task-title-field")
             .performTextReplacement("Plan together")
         composeRule.mainClock.advanceTimeBy(700)
-        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = true
 
         val edit = submitted.get()
         assertEquals(1, saveCount.get())
@@ -203,16 +210,19 @@ class TaskEditorInstrumentedTest {
             }
         selectTime("task-start-time-button", 1, 45)
         selectTime("task-due-time-button", 18, 15)
-        composeRule.waitUntil(timeoutMillis = 5_000) { submitted.get()?.due != due }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            submitted.get()?.let { it.due != due } == true
+        }
+        val edit = checkNotNull(submitted.get())
 
-        assertEquals(startZone.id, submitted.get()?.start?.zoneId)
-        assertEquals(dueZone.id, submitted.get()?.due?.zoneId)
+        assertEquals(startZone.id, edit.start?.zoneId)
+        assertEquals(dueZone.id, edit.due?.zoneId)
         assertEquals(
             ZoneOffset.ofHours(-5),
-            submitted.get()?.start?.instant?.atZone(startZone)?.offset,
+            edit.start?.instant?.atZone(startZone)?.offset,
         )
-        assertEquals(LocalDate.of(2026, 11, 1), submitted.get()?.start?.instant?.atZone(startZone)?.toLocalDate())
-        assertEquals(LocalDate.of(2026, 11, 2), submitted.get()?.due?.instant?.atZone(dueZone)?.toLocalDate())
+        assertEquals(LocalDate.of(2026, 11, 1), edit.start?.instant?.atZone(startZone)?.toLocalDate())
+        assertEquals(LocalDate.of(2026, 11, 2), edit.due?.instant?.atZone(dueZone)?.toLocalDate())
     }
 
     @Test
@@ -435,7 +445,7 @@ class TaskEditorInstrumentedTest {
         composeRule.onNodeWithTag("task-title-field")
             .performTextReplacement("Review launch proposal")
         composeRule.mainClock.advanceTimeBy(700)
-        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = true
 
         assertEquals("Review launch proposal", submitted.get()?.title)
     }
@@ -474,7 +484,7 @@ class TaskEditorInstrumentedTest {
 
         composeRule.onNodeWithTag("task-title-field").performTextReplacement("")
         composeRule.mainClock.advanceTimeBy(1_000)
-        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = true
 
         composeRule.onNodeWithText("A task needs a title").assertIsDisplayed()
         composeRule.onNodeWithText("Fix fields to save").assertIsDisplayed()
