@@ -549,12 +549,16 @@ class BackupRecoveryScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
         composeRule.onNodeWithTag("backup-passphrase").performTextInput("too short")
-        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
+        composeRule.onNodeWithTag("backup-submit")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithText("Use 12–128 characters.").performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("backup-passphrase").performTextInput(" and now valid")
         composeRule.onNodeWithTag("backup-confirmation").performTextInput("not the same")
-        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
+        composeRule.onNodeWithTag("backup-submit")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithText("Passphrases do not match.").performScrollTo().assertIsDisplayed()
     }
 
