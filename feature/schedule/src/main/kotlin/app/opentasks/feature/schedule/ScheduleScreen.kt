@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -379,7 +380,11 @@ private fun CompactAgenda(
         Spacer(Modifier.height(24.dp))
         SectionHeader(
             "Day agenda",
-            supportingText = itemCountLabel(selectedTasks.size, "scheduled item"),
+            supportingText = pluralStringResource(
+                R.plurals.schedule_scheduled_item_count,
+                selectedTasks.size,
+                selectedTasks.size,
+            ),
         )
         Spacer(Modifier.height(8.dp))
         if (selectedTasks.isEmpty()) {

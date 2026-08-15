@@ -18,7 +18,6 @@ import org.junit.Test
 class TaskScheduleRulesTest {
     private val now = Instant.parse("2026-08-10T00:00:00Z")
     private val displayZone = ZoneId.of("Asia/Bangkok")
-    private val newYork = ZoneId.of("America/New_York")
 
     @Test
     fun undatedMoveUsesEighteenHundredInDisplayZone() {

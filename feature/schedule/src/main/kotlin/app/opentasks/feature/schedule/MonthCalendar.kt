@@ -473,7 +473,11 @@ private fun MonthAgenda(
         SectionHeader(
             title = stringResource(R.string.schedule_month_agenda),
             supportingText = "${selectedDate.format(FULL_DATE_FORMAT)} · " +
-                itemCountLabel(tasks.size, "scheduled item"),
+                pluralStringResource(
+                    R.plurals.schedule_scheduled_item_count,
+                    tasks.size,
+                    tasks.size,
+                ),
         )
         Spacer(Modifier.height(8.dp))
         if (tasks.isEmpty()) {

@@ -54,6 +54,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -478,15 +479,29 @@ private fun DailyDigestSetting(
     // Only a wall-clock minute is ever displayed or seeded into the picker;
     // the picker itself can only produce one.
     val time = LocalTime.ofSecondOfDay(minuteOfDay.coerceIn(0, 1439) * 60L)
+    // The platform picker is a window this composable owns, so it is tied to
+    // the composition: a configuration change -- or the digest switch being
+    // turned off, which returns above before this point -- takes it down
+    // instead of leaking it onto the destroyed activity.
+    val timePicker = remember { mutableStateOf<TimePickerDialog?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            timePicker.value?.dismiss()
+            timePicker.value = null
+        }
+    }
     OutlinedButton(
         onClick = {
-            TimePickerDialog(
+            timePicker.value?.dismiss()
+            val dialog = TimePickerDialog(
                 context,
                 { _, hour, minute -> onMinuteOfDayChange(hour * 60 + minute) },
                 time.hour,
                 time.minute,
                 true,
-            ).show()
+            )
+            timePicker.value = dialog
+            dialog.show()
         },
         modifier = Modifier
             .heightIn(min = 48.dp)

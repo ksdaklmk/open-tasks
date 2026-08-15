@@ -125,12 +125,22 @@ class MainActivity : ComponentActivity() {
                             onQuickAddConsumed = { quickAddPrefillText = null },
                             openTaskSignal = openTaskSignal,
                             openTaskId = openTaskId,
+                            // Cleared once the workspace has navigated, like
+                            // `onQuickAddConsumed` above: the composition is
+                            // disposed and rebuilt on every app lock, so a
+                            // signal left standing would replay its tap on
+                            // each later unlock.
+                            onOpenTaskConsumed = {
+                                openTaskSignal = 0
+                                openTaskId = null
+                            },
                             // Only reachable here, after the runtime and app
                             // lock branches above: a digest tap arriving while
                             // the workspace is locked or has no vault waits
                             // for those to resolve rather than jumping past
                             // them to Home.
                             openHomeSignal = openHomeSignal,
+                            onOpenHomeConsumed = { openHomeSignal = 0 },
                             onOpenRecovery = { activeRecovery = true },
                         )
                     }

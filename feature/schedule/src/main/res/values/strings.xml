@@ -21,4 +21,8 @@
         <item quantity="one">%1$d task</item>
         <item quantity="other">%1$d tasks</item>
     </plurals>
+    <plurals name="schedule_scheduled_item_count">
+        <item quantity="one">%1$d scheduled item</item>
+        <item quantity="other">%1$d scheduled items</item>
+    </plurals>
 </resources>

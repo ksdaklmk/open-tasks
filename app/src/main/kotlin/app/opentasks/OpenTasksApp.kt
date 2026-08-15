@@ -292,7 +292,9 @@ fun OpenTasksApp(
     onQuickAddConsumed: () -> Unit = {},
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
+    onOpenTaskConsumed: () -> Unit = {},
     openHomeSignal: Int = 0,
+    onOpenHomeConsumed: () -> Unit = {},
     onOpenRecovery: () -> Unit = {},
     viewModel: WorkspaceViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
@@ -851,11 +853,25 @@ fun OpenTasksApp(
             if (openTaskSignal > 0 && taskId != null) {
                 viewModel.selectTask(taskId)
                 navigate(TasksRoute)
+                // Consumed the way `onQuickAddConsumed` above is: one tap
+                // navigates exactly once. App lock disposes this composition
+                // on every lock, so an unconsumed signal would replay its
+                // long-past reminder tap on every later unlock, throwing the
+                // user off whatever surface they returned to.
+                onOpenTaskConsumed()
             }
         }
 
         LaunchedEffect(openHomeSignal) {
-            if (openHomeSignal > 0) navigate(HomeRoute)
+            if (openHomeSignal > 0) {
+                navigate(HomeRoute)
+                // Same consume-once contract as the reminder signal above,
+                // and this effect is why it matters most: declared after it,
+                // an unconsumed digest tap would win every later unlock --
+                // including one where a reminder tap had just selected a task
+                // -- landing the user on Home instead.
+                onOpenHomeConsumed()
+            }
         }
 
         LaunchedEffect(attachmentViewModel, activity) {
