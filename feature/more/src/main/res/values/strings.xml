@@ -294,6 +294,12 @@
     <string name="markdown_export_completed">Markdown file exported.</string>
     <string name="markdown_export_sheet_title">Choose a project to export</string>
 
+    <string name="daily_digest_title">Daily digest</string>
+    <string name="daily_digest_supporting">One private notification a day with your open and overdue counts.</string>
+    <string name="daily_digest_time_action">Digest time %1$s</string>
+    <string name="daily_digest_notifications_unavailable">Notifications are switched off, so the digest cannot be delivered.</string>
+    <string name="daily_digest_enable_notifications">Turn on notifications</string>
+
     <string name="privacy_lock_title">Privacy &amp; lock</string>
     <string name="privacy_lock_back">Back to More</string>
     <string name="privacy_lock_summary_on">App lock is on</string>

@@ -140,6 +140,8 @@ import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.digest.DailyDigestCoordinator
+import app.opentasks.digest.DailyDigestNotifications
 import app.opentasks.feature.home.HomeScreen
 import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
@@ -284,11 +286,13 @@ internal fun rememberWorkspaceBackStack(): NavBackStack<NavKey> =
 fun OpenTasksApp(
     activity: Activity,
     appLockSettings: AppLockSettings,
+    dailyDigestCoordinator: DailyDigestCoordinator,
     quickAddSignal: Int,
     quickAddPrefillText: String? = null,
     onQuickAddConsumed: () -> Unit = {},
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
+    openHomeSignal: Int = 0,
     onOpenRecovery: () -> Unit = {},
     viewModel: WorkspaceViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
@@ -499,6 +503,14 @@ fun OpenTasksApp(
         // enable-notifications route rather than a second permission flow.
         val focusAlertsEnabled = remember(permissionStateVersion) {
             FocusNotifications.areEnabled(activity)
+        }
+        // Read on the same refresh as every other permission-derived value
+        // above, so returning from the notification settings the More screen
+        // sends a person to updates the digest's guidance immediately.
+        val dailyDigestSettings by
+            dailyDigestCoordinator.settings.collectAsStateWithLifecycle()
+        val dailyDigestNotificationsEnabled = remember(permissionStateVersion) {
+            DailyDigestNotifications.areEnabled(activity)
         }
         // Re-read on the same trigger as the permission checks above: this
         // most commonly changes when a person leaves for system settings to
@@ -840,6 +852,10 @@ fun OpenTasksApp(
                 viewModel.selectTask(taskId)
                 navigate(TasksRoute)
             }
+        }
+
+        LaunchedEffect(openHomeSignal) {
+            if (openHomeSignal > 0) navigate(HomeRoute)
         }
 
         LaunchedEffect(attachmentViewModel, activity) {
@@ -1687,6 +1703,25 @@ fun OpenTasksApp(
                                     onScreenshotBlockingChange = { value ->
                                         appLockSettings.screenshotBlocking = value
                                     },
+                                    dailyDigestEnabled = dailyDigestSettings.enabled,
+                                    dailyDigestMinuteOfDay =
+                                        dailyDigestSettings.minuteOfDay,
+                                    dailyDigestNotificationsEnabled =
+                                        dailyDigestNotificationsEnabled,
+                                    onDailyDigestEnabledChange = { enabled ->
+                                        coroutineScope.launch {
+                                            dailyDigestCoordinator.setEnabled(enabled)
+                                        }
+                                    },
+                                    // Always a picker-produced `hour * 60 +
+                                    // minute`, which the coordinator requires
+                                    // to be a wall-clock minute of day.
+                                    onDailyDigestMinuteOfDayChange = { minuteOfDay ->
+                                        coroutineScope.launch {
+                                            dailyDigestCoordinator.setMinuteOfDay(minuteOfDay)
+                                        }
+                                    },
+                                    onEnableNotifications = ::enableNotifications,
                                 )
                             }
                             entry<ReviewRoute> {

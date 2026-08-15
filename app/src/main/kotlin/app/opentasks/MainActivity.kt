@@ -32,6 +32,8 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.digest.DailyDigestCoordinator
+import app.opentasks.digest.DailyDigestIntents
 import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
@@ -57,10 +59,14 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var appLockController: AppLockController
 
+    @Inject
+    lateinit var dailyDigestCoordinator: DailyDigestCoordinator
+
     private var quickAddSignal by mutableIntStateOf(0)
     private var quickAddPrefillText by mutableStateOf<String?>(null)
     private var openTaskSignal by mutableIntStateOf(0)
     private var openTaskId by mutableStateOf<String?>(null)
+    private var openHomeSignal by mutableIntStateOf(0)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
     private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
     private var activeRecovery by mutableStateOf(false)
@@ -113,11 +119,18 @@ class MainActivity : ComponentActivity() {
                         OpenTasksApp(
                             activity = this,
                             appLockSettings = appLockSettings,
+                            dailyDigestCoordinator = dailyDigestCoordinator,
                             quickAddSignal = signal,
                             quickAddPrefillText = quickAddPrefillText,
                             onQuickAddConsumed = { quickAddPrefillText = null },
                             openTaskSignal = openTaskSignal,
                             openTaskId = openTaskId,
+                            // Only reachable here, after the runtime and app
+                            // lock branches above: a digest tap arriving while
+                            // the workspace is locked or has no vault waits
+                            // for those to resolve rather than jumping past
+                            // them to Home.
+                            openHomeSignal = openHomeSignal,
                             onOpenRecovery = { activeRecovery = true },
                         )
                     }
@@ -278,7 +291,14 @@ class MainActivity : ComponentActivity() {
         // unnecessary: every foregrounding of the app passes through here.
         appLockController.onAppForegrounded()
         lifecycleScope.launch {
+            // Two independent `runCatching`s, not one: a vault that cannot be
+            // opened must not leave the digest alarm unarmed, and a scheduler
+            // failure must not suppress vault initialisation. Re-arming here
+            // settles an alarm the platform dropped -- a force-stop, a
+            // reboot, or a device clock change -- without any receiver of its
+            // own.
             runCatching { vaultRuntimeManager.initialize() }
+            runCatching { dailyDigestCoordinator.reconcile() }
         }
     }
 
@@ -334,6 +354,11 @@ class MainActivity : ComponentActivity() {
             ReminderIntents.ACTION_OPEN_TASK -> {
                 openTaskId = intent.getStringExtra(ReminderIntents.EXTRA_TASK_ID)
                 if (openTaskId != null) openTaskSignal++
+            }
+            DailyDigestIntents.ACTION_OPEN_HOME -> {
+                // The digest names no task and carries no extra: the tap asks
+                // only for Home, and the workspace composition acts on it.
+                openHomeSignal++
             }
         }
     }

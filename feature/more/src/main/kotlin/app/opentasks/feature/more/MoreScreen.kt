@@ -1,5 +1,6 @@
 package app.opentasks.feature.more
 
+import android.app.TimePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -63,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -85,6 +87,7 @@ import app.opentasks.core.model.Template
 import app.opentasks.core.model.TemplateId
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -177,6 +180,12 @@ fun MoreScreen(
     onTitlePrivacyChange: (Boolean) -> Unit = {},
     screenshotBlockingEnabled: Boolean = false,
     onScreenshotBlockingChange: (Boolean) -> Unit = {},
+    dailyDigestEnabled: Boolean = false,
+    dailyDigestMinuteOfDay: Int = 8 * 60,
+    dailyDigestNotificationsEnabled: Boolean = true,
+    onDailyDigestEnabledChange: (Boolean) -> Unit = {},
+    onDailyDigestMinuteOfDayChange: (Int) -> Unit = {},
+    onEnableNotifications: () -> Unit = {},
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
 ) {
@@ -421,6 +430,84 @@ fun MoreScreen(
                 onClick = { destination = MoreDestination.BACKUP_RECOVERY },
                 modifier = Modifier.testTag("open-backup-recovery"),
             )
+        }
+
+        item {
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            DailyDigestSetting(
+                enabled = dailyDigestEnabled,
+                minuteOfDay = dailyDigestMinuteOfDay,
+                notificationsEnabled = dailyDigestNotificationsEnabled,
+                onEnabledChange = onDailyDigestEnabledChange,
+                onMinuteOfDayChange = onDailyDigestMinuteOfDayChange,
+                onEnableNotifications = onEnableNotifications,
+            )
+        }
+    }
+}
+
+/**
+ * The one inline daily digest control: a switch, and -- only while it is on
+ * -- the wall-clock time it fires at plus, when the platform will not deliver
+ * a notification, the same enable/settings action the rest of the app offers.
+ *
+ * Notification access is deliberately not a precondition of the switch: the
+ * schedule is device-local state a person chose, so a refused or revoked
+ * permission leaves the digest on and only explains that delivery is
+ * unavailable.
+ */
+@Composable
+private fun DailyDigestSetting(
+    enabled: Boolean,
+    minuteOfDay: Int,
+    notificationsEnabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onMinuteOfDayChange: (Int) -> Unit,
+    onEnableNotifications: () -> Unit,
+) {
+    SettingToggleRow(
+        title = stringResource(R.string.daily_digest_title),
+        supportingText = stringResource(R.string.daily_digest_supporting),
+        checked = enabled,
+        onCheckedChange = onEnabledChange,
+        testTag = "daily-digest-enable",
+    )
+    if (!enabled) return
+
+    val context = LocalContext.current
+    // Only a wall-clock minute is ever displayed or seeded into the picker;
+    // the picker itself can only produce one.
+    val time = LocalTime.ofSecondOfDay(minuteOfDay.coerceIn(0, 1439) * 60L)
+    OutlinedButton(
+        onClick = {
+            TimePickerDialog(
+                context,
+                { _, hour, minute -> onMinuteOfDayChange(hour * 60 + minute) },
+                time.hour,
+                time.minute,
+                true,
+            ).show()
+        },
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .testTag("daily-digest-time"),
+    ) {
+        Text(stringResource(R.string.daily_digest_time_action, time.format(DIGEST_TIME_FORMAT)))
+    }
+    if (!notificationsEnabled) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.daily_digest_notifications_unavailable),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(
+            onClick = onEnableNotifications,
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("daily-digest-enable-notifications"),
+        ) {
+            Text(stringResource(R.string.daily_digest_enable_notifications))
         }
     }
 }
@@ -1091,7 +1178,7 @@ private fun PrivacyLockScreen(
                 )
             }
             Spacer(Modifier.height(24.dp))
-            PrivacyToggleRow(
+            SettingToggleRow(
                 title = stringResource(R.string.privacy_lock_enable_title),
                 supportingText = if (lockAvailable || lockEnabled) {
                     stringResource(R.string.privacy_lock_enable_supporting)
@@ -1126,14 +1213,14 @@ private fun PrivacyLockScreen(
         item {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            PrivacyToggleRow(
+            SettingToggleRow(
                 title = stringResource(R.string.privacy_lock_title_privacy_title),
                 supportingText = stringResource(R.string.privacy_lock_title_privacy_supporting),
                 checked = titlePrivacyEnabled,
                 onCheckedChange = onTitlePrivacyChange,
                 testTag = "privacy-lock-title-privacy",
             )
-            PrivacyToggleRow(
+            SettingToggleRow(
                 title = stringResource(R.string.privacy_lock_screenshot_title),
                 supportingText = stringResource(R.string.privacy_lock_screenshot_supporting),
                 checked = screenshotBlockingEnabled,
@@ -1145,7 +1232,7 @@ private fun PrivacyLockScreen(
 }
 
 @Composable
-private fun PrivacyToggleRow(
+private fun SettingToggleRow(
     title: String,
     supportingText: String,
     checked: Boolean,
@@ -1291,6 +1378,7 @@ private fun DestinationRow(
     }
 }
 
+private val DIGEST_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val TRASH_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM", Locale.UK)
 private val ARCHIVE_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK)
 private val TEMPLATE_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.UK)
