@@ -24,10 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.UiController
 import androidx.test.espresso.ViewAction
-import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
-import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.OpenTasksFixtures
@@ -117,7 +115,6 @@ class DailyDigestSettingsInstrumentedTest {
         onView(isAssignableFrom(TimePicker::class.java))
             .inRoot(isDialog())
             .perform(setPickerTime(hour = 21, minute = 45, is24Hour = twentyFourHourPicker))
-        onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click())
 
         assertTrue(twentyFourHourPicker.get())
         assertEquals(21 * 60 + 45, minuteOfDay.get())
@@ -206,6 +203,10 @@ class DailyDigestSettingsInstrumentedTest {
                 is24Hour.set(picker.is24HourView)
                 picker.hour = hour
                 picker.minute = minute
+                val positiveButton = checkNotNull(
+                    picker.rootView.findViewById<View>(android.R.id.button1),
+                )
+                check(positiveButton.performClick())
                 uiController.loopMainThreadUntilIdle()
             }
         }

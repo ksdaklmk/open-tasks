@@ -549,7 +549,7 @@ class BackupRecoveryScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("backup-prepare").performScrollTo().performClick()
         composeRule.onNodeWithTag("backup-passphrase").performTextInput("too short")
-        composeRule.onNodeWithTag("backup-submit").performClick()
+        composeRule.onNodeWithTag("backup-submit").performScrollTo().performClick()
         composeRule.onNodeWithText("Use 12–128 characters.").performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("backup-passphrase").performTextInput(" and now valid")
