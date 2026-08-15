@@ -75,6 +75,7 @@ import app.opentasks.core.model.RemoteBackupFailureCategory
 import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStatus
 import app.opentasks.core.model.RemoteBackupVerifiedInfo
+import app.opentasks.digest.DailyDigestSettingsStore
 import app.opentasks.InsightsTimeProvider
 import app.opentasks.SystemInsightsTimeProvider
 import app.opentasks.ViewArrangementStore
@@ -138,6 +139,18 @@ object AppModule {
         @ApplicationContext context: Context,
     ): FocusSessionStore = FocusSessionStore(
         context.getSharedPreferences("focus_session", Context.MODE_PRIVATE),
+    )
+
+    // Process-scoped, independent of any vault slot, like app lock and the
+    // focus cycle: the daily digest schedule is a device-local timing aid
+    // over whichever vault slot happens to be open, and it stores no task
+    // text.
+    @Provides
+    @Singleton
+    fun provideDailyDigestSettingsStore(
+        @ApplicationContext context: Context,
+    ): DailyDigestSettingsStore = DailyDigestSettingsStore(
+        context.getSharedPreferences("daily_digest", Context.MODE_PRIVATE),
     )
 
     @Provides
