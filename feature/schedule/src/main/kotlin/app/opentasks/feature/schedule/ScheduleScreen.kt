@@ -954,7 +954,7 @@ private fun Modifier.scheduleDragSource(
     source: ScheduleDropTarget,
 ): Modifier {
     if (binding == null) return this
-    return graphicsLayer { alpha = if (binding.draggingTaskId == task.id) 0f else 1f }
+    return this.graphicsLayer { alpha = if (binding.draggingTaskId == task.id) 0f else 1f }
         .rootLongPressDragSource(
             key = task.id,
             enabled = !task.isCompleted && task.deletedAt == null,

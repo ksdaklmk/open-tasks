@@ -147,6 +147,7 @@ class TaskEditorInstrumentedTest {
         val task = OpenTasksFixtures.tasks.first { !it.isCompleted }.copy(start = null, due = null)
         val submitted = AtomicReference<TaskEdit?>()
         val saveCount = AtomicInteger()
+        composeRule.mainClock.autoAdvance = false
         showEditor(task) {
             saveCount.incrementAndGet()
             submitted.set(it)
@@ -156,8 +157,8 @@ class TaskEditorInstrumentedTest {
             .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
             .performClick()
+        composeRule.mainClock.advanceTimeByFrame()
         val useDate = composeRule.onNodeWithText("Use date")
-        composeRule.mainClock.autoAdvance = false
         useDate.performClick()
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.onNodeWithTag("task-start-time-button")
@@ -248,11 +249,14 @@ class TaskEditorInstrumentedTest {
         showEditor(task, submitted::set)
 
         selectTime("task-due-time-button", 15, 0)
-        composeRule.onNodeWithText(
-            InstrumentationRegistry.getInstrumentation().targetContext.getString(
-                R.string.task_schedule_due_before_start,
-            ),
-        ).assertIsDisplayed()
+        composeRule.onNodeWithTag("task-schedule-warning")
+            .performScrollTo()
+            .assertTextContains(
+                InstrumentationRegistry.getInstrumentation().targetContext.getString(
+                    R.string.task_schedule_due_before_start,
+                ),
+            )
+            .assertIsDisplayed()
         composeRule.mainClock.advanceTimeBy(1_000)
         composeRule.waitForIdle()
 
@@ -278,11 +282,14 @@ class TaskEditorInstrumentedTest {
             .assertTextContains("16:00")
         composeRule.onNodeWithTag("task-due-time-button")
             .assertTextContains("15:00")
-        composeRule.onNodeWithText(
-            InstrumentationRegistry.getInstrumentation().targetContext.getString(
-                R.string.task_schedule_due_before_start,
-            ),
-        ).assertIsDisplayed()
+        composeRule.onNodeWithTag("task-schedule-warning")
+            .performScrollTo()
+            .assertTextContains(
+                InstrumentationRegistry.getInstrumentation().targetContext.getString(
+                    R.string.task_schedule_due_before_start,
+                ),
+            )
+            .assertIsDisplayed()
         assertNull(submitted.get())
 
         selectTime("task-due-time-button", 17, 0)

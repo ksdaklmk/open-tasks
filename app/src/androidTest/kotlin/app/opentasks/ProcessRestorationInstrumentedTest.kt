@@ -1,6 +1,7 @@
 package app.opentasks
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -8,10 +9,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -46,7 +49,6 @@ import app.opentasks.core.domain.parseQuickAdd
 import app.opentasks.core.domain.stripQuickAddToken
 import app.opentasks.core.model.DueBucket
 import app.opentasks.core.model.OpenTasksFixtures
-import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.ProjectTimelineWindow
 import app.opentasks.core.model.Priority
@@ -404,7 +406,7 @@ class ProcessRestorationInstrumentedTest {
             )
             SideEffect { observedClock.set(projectionClock) }
             OpenTasksTheme {
-                Column {
+                Box {
                     ScheduleContent(
                         snapshot = snapshot,
                         projectNames = snapshot.projects.associate { it.id to it.name },
@@ -425,7 +427,9 @@ class ProcessRestorationInstrumentedTest {
                                     .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
                             )
                         },
-                        modifier = Modifier.testTag("timeline-today-probe"),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .testTag("timeline-today-probe"),
                     ) { Text("Timeline today probe") }
                 }
             }
@@ -468,11 +472,15 @@ class ProcessRestorationInstrumentedTest {
         val snapshot = OpenTasksFixtures.snapshot
         val chainTask = snapshot.tasks.first { it.projectId == projectA.id && it.dependencyIds.isNotEmpty() }
         val defaultFirstDate = LocalDate.of(2026, 8, 3)
+        val original = WorkspaceProjectViewState(SavedStateHandle())
+        val activeState = mutableStateOf(original)
+        val initialProjectId = mutableStateOf(projectA.id)
 
-        fun renderWith(state: WorkspaceProjectViewState, initialProjectId: ProjectId) {
-            composeRule.setContent {
+        composeRule.setContent {
+            val state = activeState.value
+            key(state) {
                 val viewState by state.state.collectAsState()
-                var selectedProjectId by remember { mutableStateOf(initialProjectId) }
+                var selectedProjectId by remember { mutableStateOf(initialProjectId.value) }
                 val presentation = viewState.presentationByProject[selectedProjectId]
                     ?: ProjectPresentation.LIST
                 val firstDate = viewState.timelineFirstDateByProject[selectedProjectId]
@@ -520,9 +528,6 @@ class ProcessRestorationInstrumentedTest {
                 }
             }
         }
-
-        val original = WorkspaceProjectViewState(SavedStateHandle())
-        renderWith(original, projectA.id)
 
         composeRule.onNodeWithTag("project-workbench-list")
             .performScrollToNode(hasTestTag("workbench-view-timeline"))
@@ -573,7 +578,10 @@ class ProcessRestorationInstrumentedTest {
             ),
         )
 
-        renderWith(restored, projectB.id)
+        composeRule.runOnIdle {
+            initialProjectId.value = projectB.id
+            activeState.value = restored
+        }
 
         // B was never touched: it restores to the LIST default, independent
         // of A's Timeline selection/anchor.

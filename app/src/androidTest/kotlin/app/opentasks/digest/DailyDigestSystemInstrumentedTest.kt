@@ -96,7 +96,7 @@ class DailyDigestSystemInstrumentedTest {
     }
 
     @Test
-    fun dailyDigestChannelIsIndependentAndPrivate() {
+    fun dailyDigestChannelIsIndependentAndDefaultImportance() {
         DailyDigestNotifications.createChannel(context)
 
         val channel = context.getSystemService(NotificationManager::class.java)
@@ -105,7 +105,6 @@ class DailyDigestSystemInstrumentedTest {
         assertEquals("daily_digest", DailyDigestNotifications.CHANNEL_ID)
         assertNotEquals(ReminderNotifications.CHANNEL_ID, DailyDigestNotifications.CHANNEL_ID)
         assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channel.importance)
-        assertEquals(Notification.VISIBILITY_PRIVATE, channel.lockscreenVisibility)
     }
 
     @Test

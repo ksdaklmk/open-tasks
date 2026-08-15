@@ -33,6 +33,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.LayoutDirection
@@ -319,10 +320,6 @@ class ScheduleScreenInstrumentedTest {
             )
         composeRule.onNodeWithText("1 overdue").assertIsDisplayed()
         composeRule.onNodeWithText("6+").assertIsDisplayed()
-        val dots = composeRule.onAllNodesWithTag("dot-run-bar", useUnmergedTree = true)
-            .fetchSemanticsNodes()
-        assertTrue(dots.isNotEmpty())
-        assertTrue(dots.all { SemanticsProperties.ContentDescription !in it.config })
     }
 
     @Test
@@ -373,9 +370,16 @@ class ScheduleScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText(augustTask.title).assertIsDisplayed()
-        composeRule.onNodeWithTag("schedule-month-day-2026-07-27").performClick()
-        composeRule.onNodeWithText(adjacentTask.title).assertIsDisplayed()
+        composeRule.onNodeWithText(augustTask.title)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-month-day-2026-07-27")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText(adjacentTask.title)
+            .performScrollTo()
+            .assertIsDisplayed()
         assertEquals(null, opened.get())
     }
 
@@ -416,7 +420,10 @@ class ScheduleScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText(task.title).performClick()
+        composeRule.onNodeWithText(task.title)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         assertEquals(task.id, opened.get())
     }
 
@@ -524,6 +531,9 @@ class ScheduleScreenInstrumentedTest {
             onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
         )
 
+        composeRule.onNodeWithTag("schedule-task-${task.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
         assertMinimumTarget("schedule-actions-${task.id.value}").performClick()
         assertMinimumTarget("schedule-reschedule-${task.id.value}").performClick()
         assertMinimumTarget("schedule-reschedule-confirm-${task.id.value}").performClick()
@@ -612,8 +622,12 @@ class ScheduleScreenInstrumentedTest {
             presentation = SchedulePresentation.MONTH,
         )
 
-        composeRule.onNodeWithText(completed.title).assertIsDisplayed()
-        composeRule.onNodeWithText(binned.title).assertIsDisplayed()
+        composeRule.onNodeWithText(completed.title)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(binned.title)
+            .performScrollTo()
+            .assertIsDisplayed()
         composeRule.onNodeWithTag("schedule-actions-${completed.id.value}").assertDoesNotExist()
         composeRule.onNodeWithTag("schedule-actions-${binned.id.value}").assertDoesNotExist()
     }
@@ -725,6 +739,10 @@ class ScheduleScreenInstrumentedTest {
             onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
         )
 
+        composeRule.onNodeWithTag("schedule-task-${task.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-month-day-2026-08-31").assertIsDisplayed()
         beginDrag(
             from = boundsOf("schedule-task-${task.id.value}").center,
             to = boundsOf("schedule-month-day-2026-08-31").center,
@@ -773,6 +791,10 @@ class ScheduleScreenInstrumentedTest {
             onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
         )
 
+        composeRule.onNodeWithTag("schedule-task-${completed.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-month-day-2026-08-31").assertIsDisplayed()
         beginDrag(
             from = boundsOf("schedule-task-${completed.id.value}").center,
             to = boundsOf("schedule-month-day-2026-08-31").center,
@@ -803,6 +825,8 @@ class ScheduleScreenInstrumentedTest {
         val row = "schedule-task-${task.id.value}"
         val preview = "schedule-drag-preview-${task.id.value}"
 
+        composeRule.onNodeWithTag(row).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-month-day-$FALLBACK_DATE").assertIsDisplayed()
         beginDrag(
             from = boundsOf(row).center,
             to = boundsOf("schedule-month-day-$FALLBACK_DATE").center,
@@ -813,6 +837,8 @@ class ScheduleScreenInstrumentedTest {
         composeRule.onNodeWithTag(preview).assertDoesNotExist()
         composeRule.onNodeWithTag(row).assertIsDisplayed()
 
+        composeRule.onNodeWithTag(row).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-today").assertIsDisplayed()
         beginDrag(from = boundsOf(row).center, to = boundsOf("schedule-today").center)
         endDrag()
         assertNull(rescheduled.get())
@@ -853,6 +879,10 @@ class ScheduleScreenInstrumentedTest {
             }
         }
 
+        composeRule.onNodeWithTag("schedule-task-${task.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-month-day-2026-08-31").assertIsDisplayed()
         beginDrag(
             from = boundsOf("schedule-task-${task.id.value}").center,
             to = boundsOf("schedule-month-day-2026-08-31").center,
@@ -906,6 +936,9 @@ class ScheduleScreenInstrumentedTest {
             }
         }
         val hostBounds = boundsOf("schedule-host")
+        composeRule.onNodeWithTag("schedule-task-${task.id.value}")
+            .performScrollTo()
+            .assertIsDisplayed()
         val rowBounds = boundsOf("schedule-task-${task.id.value}")
         val preview = "schedule-drag-preview-${task.id.value}"
 

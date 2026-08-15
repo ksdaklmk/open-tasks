@@ -933,13 +933,7 @@ class RoomVaultRepositoryInstrumentedTest {
         repository = null
         database = null
         openRepository(now = { SCHEDULE_NOW })
-        val reopened = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
-            repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.single { it.id == original.id }.let { task ->
-                    task.start == start && task.due == due
-                } && snapshot.reminders.singleOrNull { it.taskId == original.id } == reminder
-            }
-        }
+        val reopened = repository!!.currentWorkspace()
         assertEquals(start, reopened.tasks.single { it.id == original.id }.start)
         val generationAfter =
             database!!.backupStateDao().require("vault-primary").currentGeneration
@@ -993,7 +987,9 @@ class RoomVaultRepositoryInstrumentedTest {
         )
         val replaced = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.reminders.singleOrNull { it.taskId == task.id } == replacement
+                snapshot.reminders.singleOrNull { it.taskId == task.id } == replacement &&
+                    snapshot.tasks.singleOrNull { it.id == task.id }
+                        ?.revision?.logicalCounter == revisionBefore.logicalCounter + 1
             }
         }
         val replacedTask = replaced.tasks.single { it.id == task.id }
@@ -1011,7 +1007,9 @@ class RoomVaultRepositoryInstrumentedTest {
         )
         val removed = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.reminders.none { it.taskId == task.id }
+                snapshot.reminders.none { it.taskId == task.id } &&
+                    snapshot.tasks.singleOrNull { it.id == task.id }
+                        ?.revision?.logicalCounter == replacedTask.revision.logicalCounter + 1
             }
         }
         assertEquals(

@@ -87,7 +87,7 @@ fun BoxScope.RootDragPreview(
 ) {
     val density = LocalDensity.current
     Box(
-        modifier = modifier
+        modifier = Modifier
             .align(AbsoluteAlignment.TopLeft)
             .absoluteOffset {
                 IntOffset(
@@ -98,7 +98,8 @@ fun BoxScope.RootDragPreview(
                 )
             }
             .width(with(density) { state.sourceBounds.width.toDp() })
-            .height(with(density) { state.sourceBounds.height.toDp() }),
+            .height(with(density) { state.sourceBounds.height.toDp() })
+            .then(modifier),
         propagateMinConstraints = true,
     ) {
         content()

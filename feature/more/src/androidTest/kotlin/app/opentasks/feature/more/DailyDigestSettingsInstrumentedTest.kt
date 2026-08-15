@@ -11,11 +11,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.UiController
@@ -70,17 +74,17 @@ class DailyDigestSettingsInstrumentedTest {
         }
 
         // Off is the default: nothing is scheduled until the switch is used.
+        scrollOverviewTo(hasTestTag("daily-digest-enable"))
         composeRule.onNodeWithTag("daily-digest-time").assertDoesNotExist()
         composeRule.onNodeWithTag("daily-digest-enable")
-            .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
             .assertIsOff()
             .performClick()
 
         assertEquals(true, optIn.get())
         composeRule.onNodeWithTag("daily-digest-enable").assertIsOn()
+        scrollOverviewTo(hasTestTag("daily-digest-time"))
         composeRule.onNodeWithTag("daily-digest-time")
-            .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
             .assertTextContains("08:00", substring = true)
     }
@@ -104,8 +108,8 @@ class DailyDigestSettingsInstrumentedTest {
             }
         }
 
+        scrollOverviewTo(hasTestTag("daily-digest-time"))
         composeRule.onNodeWithTag("daily-digest-time")
-            .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
             .assertTextContains("08:00", substring = true)
             .performClick()
@@ -139,6 +143,9 @@ class DailyDigestSettingsInstrumentedTest {
             }
         }
 
+        scrollOverviewTo(
+            hasText("Notifications are switched off, so the digest cannot be delivered."),
+        )
         composeRule.onNodeWithText(
             "Notifications are switched off, so the digest cannot be delivered.",
         ).performScrollTo().assertIsDisplayed()
@@ -176,11 +183,15 @@ class DailyDigestSettingsInstrumentedTest {
             }
         }
 
+        scrollOverviewTo(hasTestTag("daily-digest-enable"))
         composeRule.onNodeWithTag("daily-digest-enable")
-            .performScrollTo()
             .assertIsOff()
         composeRule.onNodeWithTag("daily-digest-time").assertDoesNotExist()
         composeRule.onNodeWithTag("daily-digest-enable-notifications").assertDoesNotExist()
+    }
+
+    private fun scrollOverviewTo(matcher: SemanticsMatcher) {
+        composeRule.onNodeWithTag("more-overview").performScrollToNode(matcher)
     }
 
     private fun setPickerTime(hour: Int, minute: Int, is24Hour: AtomicBoolean): ViewAction =
