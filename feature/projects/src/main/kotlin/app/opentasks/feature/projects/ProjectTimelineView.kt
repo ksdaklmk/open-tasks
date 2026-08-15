@@ -368,47 +368,66 @@ private fun TimelinePlacementContent(row: ProjectTimelineTaskRow) {
                         .fillMaxWidth()
                         .height(16.dp),
                 )
-                if (task.isCompleted) {
-                    Icon(
-                        Icons.Rounded.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .size(16.dp)
-                            .clearAndSetSemantics {},
-                    )
+                // The continuation chevron and the completed/blocked status
+                // icon can both land on the same edge (a completed task
+                // clipped at the window start, or a blocked task clipped at
+                // the window end) -- each edge is its own Row so the two
+                // cues sit in distinct slots instead of stacking on top of
+                // each other. Order: chevron outermost (it marks the very
+                // edge of the visible window), status icon just inside it.
+                if (placement.continuesBefore || task.isCompleted) {
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterStart),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        if (placement.continuesBefore) {
+                            Icon(
+                                Icons.Rounded.ChevronLeft,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clearAndSetSemantics {},
+                            )
+                        }
+                        if (task.isCompleted) {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clearAndSetSemantics {},
+                            )
+                        }
+                    }
                 }
-                if (task.isBlocked) {
-                    Icon(
-                        Icons.Rounded.Block,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(16.dp)
-                            .clearAndSetSemantics {},
-                    )
-                }
-                if (placement.continuesBefore) {
-                    Icon(
-                        Icons.Rounded.ChevronLeft,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .size(16.dp)
-                            .clearAndSetSemantics {},
-                    )
-                }
-                if (placement.continuesAfter) {
-                    Icon(
-                        Icons.Rounded.ChevronRight,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(16.dp)
-                            .clearAndSetSemantics {},
-                    )
+                if (placement.continuesAfter || task.isBlocked) {
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        if (task.isBlocked) {
+                            Icon(
+                                Icons.Rounded.Block,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clearAndSetSemantics {},
+                            )
+                        }
+                        if (placement.continuesAfter) {
+                            Icon(
+                                Icons.Rounded.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clearAndSetSemantics {},
+                            )
+                        }
+                    }
                 }
             }
         }

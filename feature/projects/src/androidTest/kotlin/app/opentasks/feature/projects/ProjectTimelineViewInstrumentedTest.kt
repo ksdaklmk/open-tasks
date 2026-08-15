@@ -476,6 +476,13 @@ class ProjectTimelineViewInstrumentedTest {
 
     @Test
     fun completedBlockedAndUnscheduledRowsRemainVisible() {
+        // `completedTask` and `blockedTask` are Spans clipped at the edge
+        // where their own status icon also lands (completed -> CenterStart,
+        // same edge as a `continuesBefore` chevron; blocked -> CenterEnd,
+        // same edge as a `continuesAfter` chevron) -- this is the icon
+        // co-occurrence the fix round covers: both cues must stay legible
+        // (distinct slots) and both must still be named in the row's
+        // merged content description.
         val completedTask = baseTask.copy(
             id = TaskId("timeline-completed"),
             title = "Wrapped up",
@@ -494,27 +501,35 @@ class ProjectTimelineViewInstrumentedTest {
             semanticStatus = SemanticStatus.BACKLOG,
         )
 
+        val completedStart = LocalDate.of(2026, 7, 20)
+        val completedDue = LocalDate.of(2026, 8, 5)
+        val blockedStart = LocalDate.of(2026, 8, 6)
+        val blockedDue = LocalDate.of(2026, 11, 1)
+
         val rows = listOf(
             ProjectTimelineTaskRow(
                 task = completedTask,
-                startDate = null,
-                dueDate = LocalDate.of(2026, 8, 4),
-                placement = ProjectTimelineTaskPlacement.Marker(
-                    dayIndex = 1,
-                    kind = ProjectTimelineMarkerKind.DUE,
+                startDate = completedStart,
+                dueDate = completedDue,
+                placement = ProjectTimelineTaskPlacement.Span(
+                    firstVisibleDayIndex = 0,
+                    lastVisibleDayIndex = 2,
+                    totalDayCount = 17,
+                    continuesBefore = true,
+                    continuesAfter = false,
                 ),
                 dependencyRole = ProjectTimelineDependencyRole.NONE,
             ),
             ProjectTimelineTaskRow(
                 task = blockedTask,
-                startDate = LocalDate.of(2026, 8, 6),
-                dueDate = LocalDate.of(2026, 8, 9),
+                startDate = blockedStart,
+                dueDate = blockedDue,
                 placement = ProjectTimelineTaskPlacement.Span(
                     firstVisibleDayIndex = 3,
-                    lastVisibleDayIndex = 6,
-                    totalDayCount = 4,
+                    lastVisibleDayIndex = 83,
+                    totalDayCount = 88,
                     continuesBefore = false,
-                    continuesAfter = false,
+                    continuesAfter = true,
                 ),
                 dependencyRole = ProjectTimelineDependencyRole.NONE,
             ),
@@ -547,31 +562,32 @@ class ProjectTimelineViewInstrumentedTest {
         composeRule.onNodeWithTag("timeline-task-row-${unscheduledTask.id.value}").assertIsDisplayed()
 
         val dateFormat = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.UK)
+        // Completed + clipped at the window start: both the "Completed" and
+        // the "continues from before this window" fragments must survive
+        // in the merged description even though their icons now share one
+        // edge of the bar.
         composeRule.onNodeWithTag("timeline-task-row-${completedTask.id.value}")
             .assertContentDescriptionEquals(
                 listOf(
                     completedTask.title,
-                    context.getString(
-                        R.string.timeline_row_due,
-                        LocalDate.of(2026, 8, 4).format(dateFormat),
-                    ),
+                    context.getString(R.string.timeline_row_starts, completedStart.format(dateFormat)),
+                    context.getString(R.string.timeline_row_due, completedDue.format(dateFormat)),
+                    context.resources.getQuantityString(R.plurals.timeline_row_duration_days, 17, 17),
+                    context.getString(R.string.timeline_row_continues_before),
                     context.getString(R.string.timeline_row_completed),
                     context.getString(R.string.timeline_row_not_blocked),
                 ).joinToString(". "),
             )
+        // Blocked + clipped at the window end: same coexistence check on
+        // the opposite edge ("Blocked" and "continues after this window").
         composeRule.onNodeWithTag("timeline-task-row-${blockedTask.id.value}")
             .assertContentDescriptionEquals(
                 listOf(
                     blockedTask.title,
-                    context.getString(
-                        R.string.timeline_row_starts,
-                        LocalDate.of(2026, 8, 6).format(dateFormat),
-                    ),
-                    context.getString(
-                        R.string.timeline_row_due,
-                        LocalDate.of(2026, 8, 9).format(dateFormat),
-                    ),
-                    context.resources.getQuantityString(R.plurals.timeline_row_duration_days, 4, 4),
+                    context.getString(R.string.timeline_row_starts, blockedStart.format(dateFormat)),
+                    context.getString(R.string.timeline_row_due, blockedDue.format(dateFormat)),
+                    context.resources.getQuantityString(R.plurals.timeline_row_duration_days, 88, 88),
+                    context.getString(R.string.timeline_row_continues_after),
                     context.getString(R.string.timeline_row_not_completed),
                     context.getString(R.string.timeline_row_blocked),
                 ).joinToString(". "),
