@@ -934,7 +934,8 @@ class RoomVaultRepositoryInstrumentedTest {
         database = null
         openRepository(now = { SCHEDULE_NOW })
         val reopened = repository!!.currentWorkspace()
-        assertEquals(start, reopened.tasks.single { it.id == original.id }.start)
+        assertEquals(updatedTask, reopened.tasks.single { it.id == original.id })
+        assertEquals(reminder, reopened.reminders.singleOrNull { it.taskId == original.id })
         val generationAfter =
             database!!.backupStateDao().require("vault-primary").currentGeneration
         assertEquals(generationBefore + 1, generationAfter)
