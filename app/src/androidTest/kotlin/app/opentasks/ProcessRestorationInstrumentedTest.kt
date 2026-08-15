@@ -78,8 +78,12 @@ import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class ProcessRestorationInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     private val zone = ZoneId.of("Asia/Bangkok")
     private val clock = Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), zone)
@@ -646,8 +650,12 @@ class MainActivityRecoveryRestorationInstrumentedTest {
     }
     private val composeRule = createAndroidComposeRule<MainActivity>()
 
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val ruleChain: RuleChain = RuleChain.outerRule(recoveryFixtureRule).around(composeRule)
+    val ruleChain: RuleChain = RuleChain.outerRule(recoveryFixtureRule)
+        .around(composeRule)
+        .around(HideWindowsRule())
 
     @Test
     fun productionRecoveryRouteClearsPassphraseAfterActivityRecreation() {

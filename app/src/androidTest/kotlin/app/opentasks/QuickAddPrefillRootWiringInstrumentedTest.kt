@@ -56,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 
 /**
  * Exercises the same `quickAddSignal` / `quickAddPrefillText` wiring
@@ -88,8 +89,12 @@ import org.junit.Test
  *    explicit trigger wins".
  */
 class QuickAddPrefillRootWiringInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     private val clock = Clock.fixed(
         Instant.parse("2026-08-10T03:00:00Z"),

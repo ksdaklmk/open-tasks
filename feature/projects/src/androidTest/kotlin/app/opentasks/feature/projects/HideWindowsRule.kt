@@ -1,4 +1,4 @@
-package app.opentasks.feature.more
+package app.opentasks.feature.projects
 
 import android.os.Handler
 import android.os.Looper

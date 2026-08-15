@@ -38,6 +38,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.withKeyDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.opentasks.HideWindowsRule
 import app.opentasks.QuickAddSheet
 import app.opentasks.SearchSurface
 import app.opentasks.suggestionTag
@@ -62,6 +63,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
 /**
@@ -77,8 +79,12 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class ShortcutRootWiringInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     @Test
     fun ctrlKOpensSearchAndFocusesTheQueryField() {
@@ -239,8 +245,12 @@ class ShortcutRootWiringInstrumentedTest {
 
 @RunWith(AndroidJUnit4::class)
 class ShortcutRootEscapeInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     @Test
     fun escapeDismissesTheOpenSheet() {

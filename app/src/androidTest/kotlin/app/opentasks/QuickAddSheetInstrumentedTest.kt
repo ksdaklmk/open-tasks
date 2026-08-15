@@ -69,10 +69,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 
 class QuickAddSheetInstrumentedTest {
+    private val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createAndroidComposeRule<ComponentActivity>()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     private val zone = ZoneId.of("Asia/Bangkok")
     private val now = Instant.parse("2026-08-10T03:00:00Z")

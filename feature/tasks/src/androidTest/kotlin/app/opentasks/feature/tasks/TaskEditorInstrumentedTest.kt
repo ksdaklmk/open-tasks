@@ -66,6 +66,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.hamcrest.Matcher
 import java.time.DayOfWeek
@@ -80,8 +81,12 @@ import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class TaskEditorInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     private fun showEditor(task: Task, onUpdate: (TaskEdit) -> Unit) {
         composeRule.setContent {

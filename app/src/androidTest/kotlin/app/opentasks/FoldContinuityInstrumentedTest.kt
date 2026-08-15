@@ -109,8 +109,12 @@ class FoldContinuityInstrumentedTest {
     }
     private val composeRule = createAndroidComposeRule<MainActivity>()
 
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val ruleChain: RuleChain = RuleChain.outerRule(vaultFixtureRule).around(composeRule)
+    val ruleChain: RuleChain = RuleChain.outerRule(vaultFixtureRule)
+        .around(composeRule)
+        .around(HideWindowsRule())
 
     @Test
     fun legacyBaselineRejectsOrphanKeystoreAliasesWithoutDeletingThem() {

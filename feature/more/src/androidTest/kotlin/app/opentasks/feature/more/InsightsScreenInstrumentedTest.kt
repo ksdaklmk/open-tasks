@@ -70,6 +70,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
@@ -77,8 +78,12 @@ import java.time.LocalDate
 
 @RunWith(AndroidJUnit4::class)
 class InsightsScreenInstrumentedTest {
+    private val composeRule = createComposeRule()
+
+    // HideWindowsRule runs inside the compose rule so a renderer-driven
+    // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
-    val composeRule = createComposeRule()
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     private val hasCompletionTrendDayTag = SemanticsMatcher(
         "has completion trend day test tag",

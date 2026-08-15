@@ -2,6 +2,7 @@ package app.opentasks.feature.schedule
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.inspector.WindowInspector
 import java.util.concurrent.CountDownLatch
@@ -30,6 +31,10 @@ import org.junit.runners.model.Statement
  * not run while a traversal barrier is pending. On a healthy device this is a
  * no-op moment before the activity is torn down anyway.
  *
+ * Duplicated per androidTest source set on purpose: feature modules depend
+ * only on `:core:model` and `:core:designsystem`, so there is no shared test
+ * artifact to host it. Keep the copies identical apart from the package line.
+ *
  * Wire it inside the compose rule so it runs first:
  * `RuleChain.outerRule(composeRule).around(HideWindowsRule())`.
  */
@@ -49,19 +54,36 @@ class HideWindowsRule : TestRule {
         val hidden = CountDownLatch(1)
         Handler.createAsync(Looper.getMainLooper()).post {
             try {
-                WindowInspector.getGlobalWindowViews().forEach { root ->
-                    root.visibility = View.GONE
+                val roots = WindowInspector.getGlobalWindowViews()
+                val visible = roots.filter { it.visibility == View.VISIBLE }
+                visible.forEach { root -> root.visibility = View.GONE }
+                if (visible.isNotEmpty()) {
+                    Log.i(
+                        TAG,
+                        "Hid ${visible.size} of ${roots.size} window roots: " +
+                            visible.joinToString { it.javaClass.simpleName },
+                    )
                 }
+            } catch (failure: Throwable) {
+                // A last-ditch teardown guard must never make the run worse:
+                // an uncaught main-looper throwable would kill the process.
+                Log.w(TAG, "Could not hide the test windows", failure)
             } finally {
                 hidden.countDown()
             }
         }
         try {
-            // Best effort with a bound: never replace the test's own failure
-            // and never wait without a timeout the way waitForIdleSync does.
-            hidden.await(10, TimeUnit.SECONDS)
+            // Bounded best effort: never replace the test's own failure and
+            // never wait without a timeout the way waitForIdleSync does.
+            if (!hidden.await(10, TimeUnit.SECONDS)) {
+                Log.w(TAG, "The main thread did not run the hide runnable within 10 seconds")
+            }
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
         }
+    }
+
+    private companion object {
+        const val TAG = "HideWindowsRule"
     }
 }
