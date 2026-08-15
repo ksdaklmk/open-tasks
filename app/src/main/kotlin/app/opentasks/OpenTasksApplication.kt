@@ -6,6 +6,7 @@ import android.os.LocaleList
 import androidx.work.Configuration
 import app.opentasks.backup.RemoteBackupWorkerFactory
 import app.opentasks.core.data.DefaultVaultRuntimeManager
+import app.opentasks.digest.DailyDigestNotifications
 import app.opentasks.reminders.ReminderNotifications
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -46,6 +47,10 @@ class OpenTasksApplication : Application(), Configuration.Provider {
                 LocaleList.forLanguageTags(UK_ENGLISH_LANGUAGE_TAG)
         }
         ReminderNotifications.createChannel(this)
+        // A separate channel from reminders, and created here for the same
+        // reason: a channel must exist before anything can post to it, and
+        // neither one needs a vault runtime to be declared.
+        DailyDigestNotifications.createChannel(this)
         // Android backup services exist only while a vault runtime is active,
         // and are closed again before the runtime's slot can be replaced.
         vaultRuntimeManager.setActiveServiceQuiescer(activeVaultServices::quiesce)

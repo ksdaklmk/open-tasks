@@ -35,6 +35,10 @@
     <string name="focus_banner_stop">Stop focus</string>
     <string name="focus_banner_enable_notifications">Turn on alerts</string>
 
+    <string name="daily_digest_channel_name">Daily digest</string>
+    <string name="daily_digest_channel_description">One private summary of today\'s and overdue task counts, at the time you choose</string>
+    <string name="daily_digest_public_title">Daily digest</string>
+
     <string name="attachment_default_name">Attachment</string>
     <string name="attachment_adding">Adding attachment…</string>
     <string name="attachment_added">Attachment added</string>

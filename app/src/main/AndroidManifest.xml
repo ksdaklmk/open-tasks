@@ -82,6 +82,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".digest.DailyDigestReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".reminders.ReminderSystemEventReceiver"
             android:exported="false">
             <intent-filter>

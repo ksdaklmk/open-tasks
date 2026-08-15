@@ -26,6 +26,7 @@ import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.digest.DailyDigestCoordinator
 import app.opentasks.focus.FocusAlarms
 import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
@@ -428,6 +429,9 @@ class ReminderSystemEventReceiver : BroadcastReceiver() {
     @Inject
     lateinit var focusAlarms: FocusAlarms
 
+    @Inject
+    lateinit var digestCoordinator: DailyDigestCoordinator
+
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in SUPPORTED_ACTIONS) return
         val pendingResult = goAsync()
@@ -439,6 +443,10 @@ class ReminderSystemEventReceiver : BroadcastReceiver() {
                 // genuinely cannot reconcile. A phase end already in the past
                 // simply fires the boundary immediately, which reconciles it.
                 focusSessionStore.load()?.let(focusAlarms::schedule) ?: focusAlarms.cancel()
+                // Device-local for the same reason, and equally unable to
+                // survive a reboot or a time-zone change on its own: the
+                // digest schedule is re-armed before any vault is resolved.
+                digestCoordinator.reconcile()
                 scheduler.reconcile(vaultRepository.get().currentWorkspace())
             } catch (_: IllegalStateException) {
                 // No active vault runtime: nothing can be reconciled yet.
