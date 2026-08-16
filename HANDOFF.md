@@ -1,10 +1,91 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 Task 15 paused mid-qualification, 15 August 2026
+## Current resume point — Stage 8 release qualification paused at signed-smoke blocker, 16 August 2026
 
-This section is authoritative. Older chronological notes below are retained
-for context; conflicting candidate SHAs, RED checkpoints, and pre-checkpoint
-status are superseded here.
+This section is authoritative. Older checkpoints below are historical and are
+superseded wherever they conflict with this one.
+
+- Stage 8 Tasks 1–14 are complete. Task 15 is not complete, so release 1.2.0
+  is not qualified, tagged, or pushed. The Stage 8 implementation head is
+  `5fbb24b2daca0ea572a50e64178c892510fa6efd`; with this handoff checkpoint,
+  local `main` is 46 commits ahead of `origin/main`
+  (`ea7cd310e33b53c2448d72723bb3d742d9d2397a`). No `v1.2.0` tag exists.
+- At `5fbb24b`, the final forced-fresh host gates were green: all six
+  androidTest source sets compiled (219 tasks); the full local gate completed
+  553/553 tasks with 1,304 JVM tests across 127 suites; the release build
+  completed 442/442 tasks; Room v9, all five fixture families, workflow, scope,
+  privacy, and release-APK verification checks passed. Every recorded Critical
+  or Important finding was discharged by scoped re-review. A final literal
+  whole-stage review of `8047f136..5fbb24b` was not durably recorded before
+  the smoke blocker and remains mandatory after the repair.
+- The final connected attempt executed 451 tests: 449 passed, zero failed,
+  zero errored, and exactly two established skips (credential-only Drive and
+  the unavailable native fold transition). Module totals were core:data
+  192/192, app 88 passed plus 2 skips, projects 30/30, schedule 23/23, tasks
+  48/48, and More 68/68. Evidence remains under the ignored
+  `attempt13-final-evidence/` directory.
+- All executable Step 12 manual rows were exercised. Rotation and true process
+  recreation passed; this Fold8 AVD exposes no usable native fold posture, so
+  native fold is recorded as environment-blocked and is not claimed as a
+  pass. These results are diagnostic, not final release evidence, because the
+  later signed smoke found a blocker.
+- The signed/minified APK at this head is version 1.2.0 (3), 16,372,751 bytes,
+  SHA-256
+  `d631cb847c53c461cc2808caaac7da2c703ddf95170593ac81a6e13b7e3e3c4d`.
+  Signed smoke passed vault creation/persistence, encrypted `.otvault`
+  export/import, Month move plus Undo, Timeline chain summary plus Open,
+  immediate app lock, the Today widget (`3 open today · 5 overdue`), and the
+  real launcher Quick Add shortcut. Digest rendering also passed: private
+  `Today` / `3 open today · 5 overdue`, generic public `Daily digest` /
+  `Open Open Tasks to view it`, with no task-title leakage.
+- **Release blocker:** after opening and cancelling launcher Quick Add, then
+  backgrounding behind immediate app lock, tapping the signed digest and
+  authenticating selected Home underneath but reopened the already-consumed
+  empty Quick Add sheet. This violates the signed-smoke requirement that a
+  digest tap lands on Home. The existing APK must not be distributed or
+  tagged.
+- Root cause is confirmed and no source fix has been applied yet.
+  `MainActivity.onQuickAddConsumed` clears only the prefill while
+  `quickAddSignal` stays armed. App lock disposes `OpenTasksApp`; remounting it
+  reruns `LaunchedEffect(quickAddSignal)` and reopens the sheet. The Activity's
+  matching Quick Add/share/process-text intent token can also survive
+  recreation.
+- Minimum safe repair on resume: consume Quick Add at the existing common
+  `closeQuickAdd()` boundary. Add an `onQuickAddClosed` callback to
+  `OpenTasksApp`; from `MainActivity`, reset the signal/prefill, remove the
+  legacy Quick Add extra, and clear only matching Quick Add, SEND, or
+  PROCESS_TEXT actions. Keep the current prefill-consumed callback so an open
+  externally launched sheet still survives lock/recovery remount. Add one
+  focused cancel→unmount/remount regression and one Activity recreation
+  regression. Do not patch the digest path or add sleeps/retries.
+- Any production or test edit activates Task 15's invalidation rule: repeat
+  the whole-stage review and forced-fresh Steps 2/3/4/6/7, start a new audited
+  overlay, rerun the 451-test connected gate, then repeat the manual and signed
+  smoke evidence before qualification docs, candidate CI, and tagging.
+- Secure stopping point is complete. The temporary device credential is
+  removed (`CredentialType: NONE`), the exported vault and exact temporary
+  screenshots/UI dumps are deleted, digest has no active alarm/notification,
+  emulator PID 51190 is gone, ADB reports zero targets, and
+  `/tmp/opentasks-stage8.QM8w4q` is absent. Those deletions are unrecoverable;
+  the read-only/no-snapshot emulator retained no state.
+- Preserve the unrelated user state exactly: modified
+  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+  deleted
+  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
+  untracked `.kotlin/` plus `artifacts/`. The detailed local execution ledger
+  is the ignored
+  `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
+Resume in this order: implement the focused Quick Add close-consumption fix
+test-first, obtain scoped review, restart the invalidated qualification chain,
+repeat signed smoke, then update the eight qualification documents, run exact-
+candidate GitHub CI, create `v1.2.0`, and finally record the release handoff.
+Pause now; do not push or tag from this checkpoint.
+
+## Superseded checkpoint — Stage 8 Task 15 paused mid-qualification, 15 August 2026
+
+This section was authoritative at that checkpoint. It is retained only for
+chronological context and is superseded by the 16 August checkpoint above.
 
 - Stage 8 began from `8047f136541d22b15ca20db8971ea67685e250b5` and Tasks
   1–9 end at `5074c10ef1f2150f8bbb4e786c054ae20ac4ee9f` (`5074c10`). All
