@@ -24,6 +24,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.opentasks.backup.AndroidBackupFiles
 import app.opentasks.core.crypto.AndroidVaultContentKeyStore
 import app.opentasks.core.data.AtomicFileVaultRegistryOperations
 import app.opentasks.core.data.AndroidVaultKeyManager
@@ -102,6 +103,12 @@ class FoldContinuityInstrumentedTest {
                 runCatching { context.deleteDatabase(databaseName) }
                 runCatching { AndroidVaultKeyManager(context).deleteDatabaseKey(owned.slot) }
                 runCatching { AtomicFileVaultRegistryOperations().delete(activeSlotMarker(context)) }
+                // The owned session's backup runtime writes local backup
+                // objects for this same vault identity. Leaving them behind
+                // makes the next fixture vault's content-key bootstrap demand
+                // an existing key (fail-closed by design) after this teardown
+                // deleted it, so its Keystore alias would never be created.
+                runCatching { AndroidBackupFiles(context).localBackupRoot.deleteRecursively() }
             }
             requireAbsentOwnedLegacyResources(context, databaseName)
             runBlocking { application.vaultRuntimeManager.initialize() }
@@ -423,9 +430,13 @@ class FoldContinuityInstrumentedTest {
         check(runtime.vaultId == LEGACY_VAULT_ID) {
             "The production new-vault flow created an unexpected vault identity"
         }
+        // The content-key alias is created by the backup runtime's bootstrap
+        // after the vault turns Active, so this wait needs its own budget: a
+        // slow Active wait above must not starve the alias wait below.
+        val aliasDeadline = SystemClock.elapsedRealtime() + 10_000
         while (
             !expectedLegacyAliasesExist() &&
-            SystemClock.elapsedRealtime() < deadline
+            SystemClock.elapsedRealtime() < aliasDeadline
         ) {
             SystemClock.sleep(50)
         }
@@ -505,6 +516,9 @@ class FoldContinuityInstrumentedTest {
         check(activeSlotFiles(context).none(File::exists)) {
             "Fold continuity refuses to replace existing active-slot files"
         }
+        check(AndroidBackupFiles(context).localBackupRoot.walkTopDown().none(File::isFile)) {
+            "Fold continuity refuses to reuse existing local backup objects"
+        }
     }
 
     private fun activeSlotMarker(context: android.content.Context): File =
@@ -570,6 +584,9 @@ class FoldContinuityInstrumentedTest {
         }
         check(activeSlotFiles(context).none(File::exists)) {
             "Owned continuity active-slot files remain after cleanup"
+        }
+        check(AndroidBackupFiles(context).localBackupRoot.walkTopDown().none(File::isFile)) {
+            "Owned continuity local backup objects remain after cleanup"
         }
         check(!androidKeyStore().containsAlias(LEGACY_DATABASE_ALIAS)) {
             "The owned continuity database alias remains after cleanup"
