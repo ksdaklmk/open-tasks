@@ -123,6 +123,24 @@ class MainActivity : ComponentActivity() {
                             quickAddSignal = signal,
                             quickAddPrefillText = quickAddPrefillText,
                             onQuickAddConsumed = { quickAddPrefillText = null },
+                            // A close consumes the whole trigger: the signal,
+                            // so the workspace remount after an app lock
+                            // cannot replay an already-cancelled sheet, and
+                            // the matching intent tokens, so activity
+                            // recreation cannot re-arm it through
+                            // `handleIntent`. Prefill consumption above stays
+                            // separate -- a sheet still open at lock time
+                            // keeps its armed signal and survives the remount.
+                            onQuickAddClosed = {
+                                quickAddSignal = 0
+                                quickAddPrefillText = null
+                                intent.removeExtra(EXTRA_OPEN_QUICK_ADD)
+                                intent.takeIf {
+                                    it.action == QUICK_ADD_ACTION ||
+                                        it.action == Intent.ACTION_SEND ||
+                                        it.action == Intent.ACTION_PROCESS_TEXT
+                                }?.action = null
+                            },
                             openTaskSignal = openTaskSignal,
                             openTaskId = openTaskId,
                             // Cleared once the workspace has navigated, like

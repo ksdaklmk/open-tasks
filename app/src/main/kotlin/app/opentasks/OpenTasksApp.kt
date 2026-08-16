@@ -290,6 +290,7 @@ fun OpenTasksApp(
     quickAddSignal: Int,
     quickAddPrefillText: String? = null,
     onQuickAddConsumed: () -> Unit = {},
+    onQuickAddClosed: () -> Unit = {},
     openTaskSignal: Int = 0,
     openTaskId: String? = null,
     onOpenTaskConsumed: () -> Unit = {},
@@ -714,6 +715,12 @@ fun OpenTasksApp(
         fun closeQuickAdd() {
             showQuickAdd = false
             quickAddSheetTitle = ""
+            // A closed sheet has fully served its trigger. `onQuickAddConsumed`
+            // above clears only the prefill, deliberately leaving the signal
+            // armed so a sheet still open when app lock disposes this
+            // composition reopens on the remount; without this second consume
+            // the same replay would resurrect an already-cancelled sheet.
+            onQuickAddClosed()
         }
 
         fun dismissTopShortcutSurface() {

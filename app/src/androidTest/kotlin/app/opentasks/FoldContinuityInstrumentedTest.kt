@@ -2,6 +2,7 @@ package app.opentasks
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -213,6 +214,46 @@ class FoldContinuityInstrumentedTest {
             scenario.recreate()
 
             composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun cancelledQuickAddIntentDoesNotReopenAfterRecreation() {
+        composeRule.activityRule.scenario.close()
+        val launchIntent = Intent(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            MainActivity::class.java,
+        ).setAction(MainActivity.QUICK_ADD_ACTION)
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                composeRule.onAllNodesWithTag("recovery-shell")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("Start without restoring").performClick()
+            ownedVault = awaitCreatedVault()
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onAllNodesWithTag("quick-add-title")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+
+            composeRule.onNodeWithText("Cancel").performClick()
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                composeRule.onAllNodesWithTag("quick-add-title")
+                    .fetchSemanticsNodes().isEmpty()
+            }
+            scenario.onActivity { activity ->
+                // ActivityScenario filters lifecycle events against this
+                // retained launch token; synchronize the token without
+                // changing the production Activity intent under test.
+                launchIntent.action = activity.intent.action
+            }
+            scenario.recreate()
+
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onAllNodesWithText("More", useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
         }
     }
 

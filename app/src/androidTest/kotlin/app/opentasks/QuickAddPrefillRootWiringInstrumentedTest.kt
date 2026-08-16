@@ -86,7 +86,12 @@ import org.junit.rules.RuleChain
  *    static launcher shortcut) arriving while the sheet is open must clear
  *    a stale title left over from an earlier, already-consumed share, not
  *    resurrect it through the `?: quickAddSheetTitle` fallback -- "last
- *    explicit trigger wins".
+ *    explicit trigger wins";
+ *  - a sheet the user has closed must stay closed across a workspace
+ *    unmount/remount (app lock disposes `OpenTasksApp` and a later unlock
+ *    rebuilds it): the close boundary consumes the signal, so the remount's
+ *    `LaunchedEffect(quickAddSignal)` cannot replay the already-served
+ *    trigger as an empty sheet over whatever the user returned to.
  */
 class QuickAddPrefillRootWiringInstrumentedTest {
     private val composeRule = createComposeRule()
@@ -306,6 +311,60 @@ class QuickAddPrefillRootWiringInstrumentedTest {
     }
 
     @Test
+    fun cancelledExplicitQuickAddDoesNotReopenWhenTheWorkspaceRemounts() {
+        composeRule.setContent {
+            var signal by remember { mutableIntStateOf(0) }
+            var prefillText by remember { mutableStateOf<String?>(null) }
+            var workspaceMounted by remember { mutableStateOf(true) }
+            OpenTasksTheme {
+                Column {
+                    Button(
+                        onClick = {
+                            // Mirrors `MainActivity.handleIntent`'s explicit
+                            // launcher-shortcut / widget arm.
+                            prefillText = ""
+                            signal++
+                        },
+                    ) { Text("Quick add trigger") }
+                    Button(onClick = { workspaceMounted = false }) { Text("Lock") }
+                    Button(onClick = { workspaceMounted = true }) { Text("Unlock") }
+                    if (workspaceMounted) {
+                        QuickAddPrefillReplica(
+                            quickAddSignal = signal,
+                            quickAddPrefillText = prefillText,
+                            onQuickAddConsumed = { prefillText = null },
+                            onAdd = {},
+                            projects = emptyList(),
+                            tags = emptyList(),
+                            clock = clock,
+                            // Mirrors `MainActivity.onQuickAddClosed`: a close
+                            // consumes the signal itself, not just the prefill.
+                            onQuickAddClosed = {
+                                signal = 0
+                                prefillText = null
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Quick add trigger").performClick()
+        composeRule.onNodeWithTag("quick-add-title").assertExists()
+
+        // The user cancels the sheet, then app lock disposes the workspace
+        // composition and a later unlock rebuilds it.
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
+        composeRule.onNodeWithText("Lock").performClick()
+        composeRule.onNodeWithTag("quick-add-prefill-root").assertDoesNotExist()
+        composeRule.onNodeWithText("Unlock").performClick()
+
+        composeRule.onNodeWithTag("quick-add-prefill-root").assertExists()
+        composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
+    }
+
+    @Test
     fun escapeAfterPrefillDoesNotResurrectTheConsumedTitleOnReopen() {
         composeRule.setContent {
             var signal by remember { mutableIntStateOf(0) }
@@ -370,6 +429,7 @@ private fun QuickAddPrefillReplica(
     projects: List<Project>,
     tags: List<Tag>,
     clock: Clock,
+    onQuickAddClosed: () -> Unit = {},
 ) {
     var showQuickAdd by remember { mutableStateOf(false) }
     var quickAddSheetTitle by remember { mutableStateOf("") }
@@ -383,6 +443,7 @@ private fun QuickAddPrefillReplica(
     fun closeQuickAdd() {
         showQuickAdd = false
         quickAddSheetTitle = ""
+        onQuickAddClosed()
     }
     Column(
         modifier = Modifier
