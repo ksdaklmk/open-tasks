@@ -1,9 +1,85 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 8 release qualification paused at signed-smoke blocker, 16 August 2026
+## Current resume point — Quick Add blocker fixed, review and requalification pending, 16 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+- The signed-smoke release blocker is repaired and committed at `c495dd2`
+  (`fix: consume quick add trigger on close`), exactly four files. Closing
+  the Quick Add sheet now consumes the whole trigger at the single
+  `closeQuickAdd()` boundary through a new `onQuickAddClosed` callback:
+  `MainActivity` resets `quickAddSignal` and the prefill, removes the legacy
+  `EXTRA_OPEN_QUICK_ADD` extra, and clears only a matching QUICK_ADD, SEND,
+  or PROCESS_TEXT action from the stored intent. Prefill consumption stays a
+  separate callback, so a sheet still open when app lock disposes the
+  workspace keeps its armed signal and survives the remount, exactly as
+  before. With this handoff checkpoint, local `main` is 48 commits ahead
+  of `origin/main`; nothing is pushed and no `v1.2.0` tag exists. Release
+  1.2.0 remains unqualified.
+- The repair was test-first on a fresh audited attempt-14 overlay
+  (headless host-GPU, unfolded 2160x1856 @420, display-0 focus). RED: both
+  new regressions failed by finding the reopened sheet. GREEN: the focused
+  pair passed after the fix (one intermediate run only corrected the
+  post-recreate wait anchor to the digest precedent's "More", because the
+  unfolded layout renders no "Quick add" text node). The new regressions are
+  `cancelledExplicitQuickAddDoesNotReopenWhenTheWorkspaceRemounts`
+  (replica-level, `QuickAddPrefillRootWiringInstrumentedTest`, whose replica
+  now mirrors the close-consumption wiring) and
+  `cancelledQuickAddIntentDoesNotReopenAfterRecreation` (behaviour-level,
+  `FoldContinuityInstrumentedTest`, beside the `ee13170` digest precedent).
+- **Open failure, not diagnosed:** in the full-class run,
+  `QuickAddPrefillRootWiringInstrumentedTest` passed 6/6, but the new
+  FoldContinuity recreation test failed inside the shared
+  `awaitCreatedVault` at `requireExpectedLegacyAliases` — the Keystore
+  alias wait exhausted the helper's single 10-second deadline, which also
+  covers the Active-state wait. The same test passed focused twice on the
+  same overlay and the digest sibling using the identical helper passed in
+  the same full-class run, so full-class fixture timing is the first
+  suspect (any edit would be androidTest-only) — but no diagnosis or fix
+  exists yet. Evidence: `attempt14-quickadd-evidence/` in the ignored SDD
+  workspace (RED XML, mixed full-class XML, validated overlay start/stop
+  scripts). The focused-green XML was overwritten by the full-class run;
+  its passing totals are session-recorded in the ledger only.
+- `c495dd2` has **no scoped review yet**; the last reviewed head remains
+  `5fbb24b`. The pause-audit finding stands: the ledger's last literal
+  whole-stage review covers only `8047f136..79afd97`, so the mandatory
+  whole-stage review of `8047f136..HEAD` is still pending. The local gate
+  at `c495dd2` is green (553/553 with `git diff --check` clean), and the
+  attempt-14 overlay was secure-stopped (`OVERLAY-STOPPED-CLEAN`) with a
+  final audit of zero ADB targets, zero emulator processes, and no
+  stage-8 temp directory.
+- Resume in this order (the ledger tail carries the same sequence):
+  1. Settle the FoldContinuity full-class alias-wait failure (first
+     suspect: the shared 10 s deadline in `awaitCreatedVault`), then rerun
+     that class green on a fresh overlay.
+  2. Scoped independent review of `c495dd2` plus any follow-up edit.
+  3. The pending literal whole-stage review of `8047f136..HEAD`.
+  4. Forced-fresh Steps 2/3/4/6/7 and a refreshed reviewed
+     `implementationHeadSha`.
+  5. Fresh audited overlay and the complete six-module connected gate
+     (now 453 tests).
+  6. Manual matrix and signed smoke, including the exact
+     cancelled-Quick-Add → app lock → digest-tap row that found the
+     blocker.
+  7. Step 16 qualification docs from `step16-drafts/` with evidence
+     numbers, exact-candidate GitHub CI, tag `v1.2.0`, release handoff.
+- The qualification invalidation invariant governs: `c495dd2` already
+  invalidates all prior forced-fresh, connected, manual, and signed
+  evidence, and any further production or test edit before the tag
+  restarts the chain again from the review steps.
+- Preserve the unrelated user state exactly: modified
+  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+  deleted
+  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
+  untracked `.kotlin/` plus `artifacts/`. The detailed execution ledger is
+  the ignored
+  `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
+## Superseded checkpoint — Stage 8 release qualification paused at signed-smoke blocker, 16 August 2026
+
+This section was authoritative at that checkpoint. It is retained only for
+chronological context and is superseded by the repair checkpoint above.
 
 - Stage 8 Tasks 1–14 are complete. Task 15 is not complete, so release 1.2.0
   is not qualified, tagged, or pushed. The Stage 8 implementation head is
