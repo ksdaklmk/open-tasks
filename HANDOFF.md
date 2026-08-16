@@ -1,9 +1,86 @@
 # Open Tasks Handoff
 
-## Current resume point — repairs reviewed, whole-stage review next, 16 August 2026
+## Current resume point — reviews and host gates green, one connected failure open, 16 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+- All review obligations are discharged at head `b6c438f`. The scoped
+  independent review of `5fbb24b..94c42f7` (the `c495dd2` Quick Add
+  close-consumption fix plus the `94c42f7` fold-continuity fixture
+  backup-object cleanup) is APPROVED — spec PASS, quality PASS, 0 Critical.
+  The mandatory literal whole-stage review of `8047f136..b6c438f` (13,908
+  diff lines read fully) returned **Ready to tag WITH FIXES — 0 Critical,
+  no new Important**: its sole Important is the already-queued Step 16
+  contract-docs refresh (`step16-drafts/`, anchors pre-verified), which
+  must land before candidate CI/tag. Scope audit, dual-engine parity,
+  privacy, spec conformance, and test integrity all PASS, re-verified
+  independently against git. Four new deferred Minors joined the ledger
+  (Tasks start/due TimePickerDialog window-leak shape at
+  `TasksScreen.kt:1799/:1881`; MonthCalendar 20 dp paddings; Quick Add
+  grammar's memoized projection clock; digest NOTIFICATION_ID derivation),
+  plus three from the scoped review (process-death intent redelivery,
+  shared by all three consumers; untested `EXTRA_OPEN_QUICK_ADD` removal
+  line; fixture leaves `remoteTransferRoot` by design). The reviewed
+  `implementationHeadSha` is `b6c438f`.
+- Forced-fresh Steps 2/3/4/6/7 are all green at `b6c438f`: six androidTest
+  source sets compile (219 tasks); full gate 553/553 with 1,304 JVM tests
+  across 127 suites; release 442/442 with `verify-release-apk.sh` all
+  checks passed (signed 1.2.0/3); schema/fixtures/workflow/diff-check
+  clean; scope audit `STEP7-ALL-GREEN` (85 changed files, manifest delta
+  exactly the 3-line non-exported DailyDigestReceiver, permissions
+  byte-identical, digest prefs typed-only). Evidence: `step7-b6c438f/`.
+- **Open failure, not diagnosed:** Step 11 attempt 16 (fresh audited
+  headless host-GPU overlay, unfolded 2160x1856 @420, display-0 focus,
+  canary passed) executed all 453 connected tests: 450 passed, 0 errors,
+  exactly the 2 established skips, and ONE failure —
+  `ScheduleScreenInstrumentedTest.completedTaskIsNotADragSource`, a
+  bounded 64.2 s `AppNotIdleException` (Espresso looped 60 s on
+  MAIN_LOOPER_HAS_IDLED; last message a Choreographer frame callback —
+  the renderer frame-churn signature that `HideWindowsRule` converts from
+  an eternal hang into a bounded failure). Every other module was fully
+  green: core:data 192/192, tasks 48/48, projects 30/30, More 68/68, app
+  90+2 skips; schedule 22/23. The same class passed 23/23 in attempts 9
+  and 13 and no source changed since the attempt-15 green runs; the run
+  took 25m06s versus the usual ~10.5m, so environmental renderer
+  starvation is the first suspect — but no diagnosis exists. Evidence:
+  `attempt16-evidence/` in the ignored SDD workspace (six authoritative
+  XMLs, full Gradle log, post-run logcat, start/stop scripts). The
+  overlay was secure-stopped (`OVERLAY-STOPPED-CLEAN`) with a clean final
+  audit; no signed APK or device credential existed this attempt.
+- Resume in this order (the ledger tail carries the same sequence):
+  1. Diagnose the `completedTaskIsNotADragSource` bounded AppNotIdle
+     failure (read the preserved logcat around the 64 s window first).
+     If no edit results and a fresh-overlay rerun of the complete
+     six-module gate is green, record a controller ruling accepting that
+     rerun as Step 11 — the `b6c438f` host gates remain valid because no
+     source changed. Any edit instead restarts from scoped review per
+     the invalidation invariant, then forced-fresh Steps 2/3/4/6/7,
+     before a fresh overlay and the full 453-test gate.
+  2. Step 12 manual matrix and Steps 13–14 signed smoke on the same
+     overlay as the green gate, including the exact cancelled-Quick-Add
+     → app lock → digest-tap row that found the original blocker.
+  3. Step 15 secure cleanup and overlay destruction.
+  4. Steps 16–17 qualification docs from `step16-drafts/` with evidence
+     numbers (discharges the whole-stage review's Important), Step 18
+     exact-candidate GitHub CI, Step 19 tag `v1.2.0`, Step 20 release
+     handoff.
+- The qualification invalidation invariant governs: any production or test
+  edit before the tag restarts the chain from the review steps. With this
+  checkpoint, local `main` is 51 commits ahead of `origin/main`; nothing
+  is pushed and no `v1.2.0` tag exists. Release 1.2.0 remains unqualified.
+- Preserve the unrelated user state exactly: modified
+  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+  deleted
+  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
+  untracked `.kotlin/` plus `artifacts/`. The detailed execution ledger is
+  the ignored
+  `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
+## Superseded checkpoint — repairs reviewed, whole-stage review next, 16 August 2026
+
+This section was authoritative at that checkpoint. It is retained only for
+chronological context and is superseded by the checkpoint above.
 
 - The signed-smoke release blocker is repaired and committed at `c495dd2`
   (`fix: consume quick add trigger on close`), exactly four files. Closing
