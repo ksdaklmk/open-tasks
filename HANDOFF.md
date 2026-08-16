@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Quick Add blocker fixed, review and requalification pending, 16 August 2026
+## Current resume point — repairs reviewed, whole-stage review next, 16 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -14,58 +14,56 @@ superseded wherever they conflict with this one.
   or PROCESS_TEXT action from the stored intent. Prefill consumption stays a
   separate callback, so a sheet still open when app lock disposes the
   workspace keeps its armed signal and survives the remount, exactly as
-  before. With this handoff checkpoint, local `main` is 48 commits ahead
-  of `origin/main`; nothing is pushed and no `v1.2.0` tag exists. Release
-  1.2.0 remains unqualified.
-- The repair was test-first on a fresh audited attempt-14 overlay
-  (headless host-GPU, unfolded 2160x1856 @420, display-0 focus). RED: both
-  new regressions failed by finding the reopened sheet. GREEN: the focused
-  pair passed after the fix (one intermediate run only corrected the
-  post-recreate wait anchor to the digest precedent's "More", because the
-  unfolded layout renders no "Quick add" text node). The new regressions are
+  before. The repair was test-first (attempt-14 RED/GREEN evidence): the new
+  regressions are
   `cancelledExplicitQuickAddDoesNotReopenWhenTheWorkspaceRemounts`
-  (replica-level, `QuickAddPrefillRootWiringInstrumentedTest`, whose replica
-  now mirrors the close-consumption wiring) and
+  (replica-level, `QuickAddPrefillRootWiringInstrumentedTest`) and
   `cancelledQuickAddIntentDoesNotReopenAfterRecreation` (behaviour-level,
   `FoldContinuityInstrumentedTest`, beside the `ee13170` digest precedent).
-- **Open failure, not diagnosed:** in the full-class run,
-  `QuickAddPrefillRootWiringInstrumentedTest` passed 6/6, but the new
-  FoldContinuity recreation test failed inside the shared
-  `awaitCreatedVault` at `requireExpectedLegacyAliases` — the Keystore
-  alias wait exhausted the helper's single 10-second deadline, which also
-  covers the Active-state wait. The same test passed focused twice on the
-  same overlay and the digest sibling using the identical helper passed in
-  the same full-class run, so full-class fixture timing is the first
-  suspect (any edit would be androidTest-only) — but no diagnosis or fix
-  exists yet. Evidence: `attempt14-quickadd-evidence/` in the ignored SDD
-  workspace (RED XML, mixed full-class XML, validated overlay start/stop
-  scripts). The focused-green XML was overwritten by the full-class run;
-  its passing totals are session-recorded in the ledger only.
-- `c495dd2` has **no scoped review yet**; the last reviewed head remains
-  `5fbb24b`. The pause-audit finding stands: the ledger's last literal
-  whole-stage review covers only `8047f136..79afd97`, so the mandatory
-  whole-stage review of `8047f136..HEAD` is still pending. The local gate
-  at `c495dd2` is green (553/553 with `git diff --check` clean), and the
-  attempt-14 overlay was secure-stopped (`OVERLAY-STOPPED-CLEAN`) with a
-  final audit of zero ADB targets, zero emulator processes, and no
-  stage-8 temp directory.
+- The attempt-14 full-class alias-wait failure is **diagnosed and fixed** at
+  `94c42f7` (`test: clean owned backup objects in continuity fixture`),
+  exactly one androidTest file. Root cause, proved by a controlled on-device
+  experiment: the fold-continuity fixture teardown deleted the vault
+  database, keys, aliases, and slot marker but left the owned session's
+  local backup object (`no_backup/backup/v1/current/snapshot-0.otf`)
+  behind; the next vault-owning test's content-key bootstrap then saw the
+  residue, `requiresEstablishedContentKey` turned true, `openExisting`
+  failed against the deleted key, and `bootstrapKeyOnce` never retries — so
+  the content alias never appeared and `awaitCreatedVault` timed out. That
+  is correct fail-closed product behaviour; the defect was fixture-side.
+  The fix deletes the owned local backup root at teardown, refuses
+  pre-existing backup objects in the storage baseline, verifies absence
+  after cleanup, and gives the post-Active alias wait its own 10 s deadline
+  (the deadline split alone was proven insufficient). On a fresh audited
+  attempt-15 overlay the exact previously failing two-class order passed:
+  11 tests, 0 failures, 1 established fold skip; evidence in
+  `attempt15-evidence/`; overlay secure-stopped with a clean audit.
+- Scoped independent review of `5fbb24b..94c42f7` is **APPROVED** — spec
+  compliance PASS, quality PASS, 0 Critical. Its one Important finding (this
+  document's staleness) is discharged by this checkpoint. Three minors are
+  recorded for the final review: true process death from Recents still
+  redelivers a consumed Quick Add/digest/reminder intent (pre-existing,
+  consistent across all three consumers; ActivityScenario.recreate cannot
+  cover it); the `EXTRA_OPEN_QUICK_ADD` removal line has no dedicated
+  regression; fixture teardown deliberately leaves `remoteTransferRoot`
+  (only credentialed flows write it). The reviewed head is now `94c42f7`;
+  the local gate there is green (553/553, `git diff --check` clean). With
+  this checkpoint, local `main` is 50 commits ahead of `origin/main`;
+  nothing is pushed and no `v1.2.0` tag exists. Release 1.2.0 remains
+  unqualified.
 - Resume in this order (the ledger tail carries the same sequence):
-  1. Settle the FoldContinuity full-class alias-wait failure (first
-     suspect: the shared 10 s deadline in `awaitCreatedVault`), then rerun
-     that class green on a fresh overlay.
-  2. Scoped independent review of `c495dd2` plus any follow-up edit.
-  3. The pending literal whole-stage review of `8047f136..HEAD`.
-  4. Forced-fresh Steps 2/3/4/6/7 and a refreshed reviewed
+  1. The pending literal whole-stage review of `8047f136..HEAD`.
+  2. Forced-fresh Steps 2/3/4/6/7 and a refreshed reviewed
      `implementationHeadSha`.
-  5. Fresh audited overlay and the complete six-module connected gate
+  3. Fresh audited overlay and the complete six-module connected gate
      (now 453 tests).
-  6. Manual matrix and signed smoke, including the exact
+  4. Manual matrix and signed smoke, including the exact
      cancelled-Quick-Add → app lock → digest-tap row that found the
      blocker.
-  7. Step 16 qualification docs from `step16-drafts/` with evidence
+  5. Step 16 qualification docs from `step16-drafts/` with evidence
      numbers, exact-candidate GitHub CI, tag `v1.2.0`, release handoff.
-- The qualification invalidation invariant governs: `c495dd2` already
-  invalidates all prior forced-fresh, connected, manual, and signed
+- The qualification invalidation invariant governs: `c495dd2` and `94c42f7`
+  already invalidate all prior forced-fresh, connected, manual, and signed
   evidence, and any further production or test edit before the tag
   restarts the chain again from the review steps.
 - Preserve the unrelated user state exactly: modified
