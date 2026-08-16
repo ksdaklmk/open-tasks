@@ -1,12 +1,52 @@
 # Open Tasks Handoff
 
-## Current resume point — release 1.2.0 locally qualified, remote CI and tag blocked on Actions billing, 16 August 2026
+## Current resume point — release 1.2.0 pushed and awaiting one CI re-run, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
-- **Release 1.2.0 (versionCode 3) is a locally qualified candidate. It is not
-  tagged, not pushed, and not released.** The final reviewed
+### Resume in one paragraph
+
+Release 1.2.0 is fully qualified locally and pushed. Exactly one thing stands
+between here and the tag: the GitHub account is **locked for billing**, so
+Actions refuses to start any job. Clear the lock through Payment history, then
+run `gh run rerun 31957165017` — that re-executes the Android workflow against
+the exact candidate commit `8841fa1`. When `verify`, compact API 36, and
+`release` are green, tag `v1.2.0` **on `8841fa1` by SHA** and commit the
+release handoff. Until the tag exists, make no production, build, or
+test-source edit.
+
+### The blocker, diagnosed
+
+- **The GitHub account is locked for billing.** The authoritative evidence is
+  the check-run annotation on re-run attempt 2 of run `31957165017`, taken
+  after the repository was made public: "The job was not started because your
+  account is locked due to a billing issue." Blocked jobs are never assigned a
+  runner, so they consume zero minutes and incur zero charge.
+- **This is account-level, not repository-level or minute-related.** Two
+  earlier hypotheses are disproved and should not be retried:
+  - *Making the repository public does not help.* It was switched to public on
+    17 August and the block persisted unchanged. Public repositories do not
+    meter Actions minutes at all, so the lock is clearly not about the
+    allowance. The repository is still public; that is now an independent
+    decision to revisit on its own merits, not a fix for this.
+  - *It is not the `$0` spending limit.* The billing overview for August shows
+    gross metered usage `$12.13` fully offset by an included discount of
+    `$12.13` with **Next payment due: –**, and the annotation changed from the
+    generic payments-or-spending-limit wording to an explicit account lock.
+    Raising a budget will not clear a lock.
+- **Resolution.** Settings → Billing and licensing → **Payment history**, and
+  look for an unpaid or failed invoice, including from a period before August;
+  the current-month view will not show it. Settle the outstanding amount and
+  update the payment method under **Payment information**. Check email for a
+  GitHub billing notice as well — account locks are normally announced there.
+  If Actions is still refused once the balance clears, the lock has to be
+  released by GitHub Support; that is the escalation path.
+
+### Exact state
+
+- **Release 1.2.0 (versionCode 3) is a pushed, locally qualified candidate. It
+  is not tagged and not released.** The final reviewed
   `implementationHeadSha` is
   `b6c438f312b40f228e1d19365062debe479054e7`; Stage 8 began at
   `8047f136541d22b15ca20db8971ea67685e250b5`. The qualification records are
@@ -53,22 +93,56 @@ superseded wherever they conflict with this one.
   credential cleared to `CredentialType: NONE`, package uninstalled, overlay
   killed `OVERLAY-STOPPED-CLEAN`, and no ADB target, emulator process, or
   temporary directory remains.
-- **The only blocker to tagging is external.** GitHub Actions cannot start
-  jobs for this account — the most recent push run failed every job in two to
-  four seconds with zero executed steps and the annotation "The job was not
-  started because recent account payments have failed or your spending limit
-  needs to be increased." Resume by restoring Billing & plans, then: push
-  `main`, wait for the candidate's own run, require `verify`, compact API 36,
-  and `release` green (expanded API 37.0 stays observe-only), create the
-  annotated `v1.2.0` tag on the qualification commit, push it, and record the
-  post-tag release handoff. Do not tag before that run is green.
+- **`main` is pushed.** `ea7cd31..8841fa1` went to origin on 16 August, so the
+  whole Stage 8 implementation and both qualification records are on GitHub.
+  The candidate commit is
+  `8841fa19e6b3b989590e6bbdeb7a3813eec06be1` (`8841fa1`,
+  `docs: qualify release 1.2.0 candidate`).
+- **The re-run handle is Android workflow run `31957165017`**, created against
+  that exact candidate SHA. Every job failed in 2–3 seconds with zero executed
+  steps and `release` was skipped, under the billing annotation above; zero
+  minutes were consumed. That failed run is deliberately valuable: the workflow
+  triggers only on `push: branches: [main]` and `pull_request` — there is **no
+  `workflow_dispatch`** — so `gh run rerun 31957165017` is the only way to get
+  a green run on the literal candidate without a new commit. Adding
+  `workflow_dispatch` would be a workflow-file edit that trips the
+  invalidation invariant and the `scripts/verify-actions-workflow.sh` shape
+  check. **GitHub allows re-runs for about 30 days, so this handle expires
+  around 15 September 2026**; after that a fresh push is needed and the tag
+  target moves.
+- **Recorded ruling — tag by SHA, not by HEAD.** This handoff commit sits on
+  top of the candidate, so `8841fa1` is no longer HEAD. Step 19's literal
+  `test "$(git rev-list -n 1 v1.2.0)" = "$(git rev-parse HEAD)"` is therefore
+  replaced by the stronger equivalent: create the tag with
+  `git tag -a v1.2.0 8841fa1` and assert that the tagged SHA equals the
+  `headSha` of the green run. The plan already expects a HANDOFF commit to
+  follow the tag; only the ordering differs.
+- Remaining steps, in order, once billing is fixed: (18) `gh run rerun
+  31957165017` and require `verify`, compact API 36, and `release` green, with
+  expanded API 37.0 observe-only and permitted to stay red **only** on the
+  unchanged historical pre-test failure "credential-encrypted storage
+  unavailable"; (19) `git tag -a v1.2.0 8841fa1` and `git push origin v1.2.0`;
+  (20) rewrite this section with the real run id, job results, and tag, and
+  commit it as `docs: record release 1.2.0 handoff`. Do not tag before that
+  run is green.
 - The qualification invalidation invariant still governs: any production,
   build, or test-source edit before the tag invalidates the recorded
   implementation SHA, the signed APK, the review, and every connected, manual,
-  and signed result collected after it. With this checkpoint, local `main` is
-  ahead of `origin/main` and nothing is pushed.
+  and signed result collected after it. The danger case is concrete — if the
+  re-run comes back red and needs a fix while unrelated work sits on the head,
+  a clean 1.2.0 can no longer be produced.
+- **The six open Dependabot PRs (#14–#19) must wait for the tag.** Every one is
+  a `libs.versions.toml` or workflow edit, so merging any of them before the
+  tag restarts the qualification chain. Merge them as one batch afterwards.
 - After the tag, the ordered remaining work is Stage 9 (the single Room v10
-  wave) and then repository-wide Unicode tag-identity hardening.
+  wave) and then repository-wide Unicode tag-identity hardening. **Stage 9 may
+  be started before the tag, but only as far as documentation.** It has no
+  detailed design or plan yet, so its first three phases — brainstorming, the
+  design spec, and the implementation plan — touch only
+  `docs/superpowers/specs/` and `docs/superpowers/plans/` and do not trip the
+  invariant. Do that work on a `stage-9` branch so `main` stays pinned at the
+  candidate; a branch push triggers no CI under the current triggers.
+  Stage 9 *implementation* waits for `v1.2.0`.
 - Preserve the unrelated user state exactly: modified
   `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
   deleted
