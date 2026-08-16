@@ -96,15 +96,15 @@ record merge, wearable surface, location reminder, or durable schema change.
 Markdown and CSV deliberately leave the encrypted vault as plaintext through
 person-selected Storage Access Framework documents.
 
-Stage 7's implemented visible ergonomics changes give Tasks and project workbenches
-fixed-direction sort and bounded grouping, saved filters gain due-bucket,
-priority, semantic-status, and sort choices, and search uses one relevance
-ranking. Quick Add offers confirm-only project, tag, priority, recurrence, and
-estimate grammar; task detail and board cards can duplicate a task; Insights
-uses accessible dot runs and a completion-per-day trend; the app is light-only.
-The responsive Today widget keeps counts and Quick Add in its compact 2×1
-layout and adds focus-task actions at expanded height. Room remains v9 and the
-authenticated backup object format remains v1.
+Stage 7's implemented visible ergonomics changes give Tasks and project
+workbenches fixed-direction sort and bounded grouping, saved filters gain
+due-bucket, priority, semantic-status, and sort choices, and search uses one
+relevance ranking. Quick Add offers confirm-only project, tag, priority,
+recurrence, and estimate grammar; task detail and board cards can duplicate a
+task; Insights uses accessible dot runs and a completion-per-day trend; the
+app is light-only. The responsive Today widget keeps counts and Quick Add in
+its compact 2×1 layout and adds focus-task actions at expanded height. Room
+remains v9 and the authenticated backup object format remains v1.
 
 The deliberate ceilings are equally visible. There is no sort-direction toggle
 or manual board rank; grouping is limited to due bucket, project, and priority;
@@ -115,13 +115,53 @@ keep their existing comparators. Duplication omits reminders, recurrence,
 activity history, time entries, notes, and attachments. Stage 7 adds no external
 surface, permission, network path, cloud path, schema, or backup family.
 
-Stage 8 is an in-development, unqualified checkpoint. It has landed the
-Month schedule surface, exact single-task schedule mutation, start/due editor
-controls, a complete non-drag rescheduling fallback, and long-press pointer
-drag rescheduling layered over that fallback; its Timeline remains
-projection-only. Timeline UI/state, the daily digest, device coverage, and
-release qualification remain pending. Room stays v9 and backup v1, with no
-schema, permission, manifest, Drive-scope, or route change.
+Stage 8 adds planning surfaces inside the existing destinations rather than a
+new one. Schedule gains a Monday-first month calendar at every window size: a
+six-row by seven-column grid whose cells state the date and the exact placed,
+completed, and overdue counts, with a selected-day agenda beside the
+unscheduled tray at expanded sizes. Rescheduling becomes exact and
+single-task — dragging a task onto a day, or using its 48 dp Reschedule
+action, moves that task's start, due, and reminder together in one atomic,
+undoable step — and the task editor gains native start date and time controls
+beside an explicit due time. Dropping an undated task on a day makes it due at
+18:00 in the device's current zone; new start moments default to 09:00, and
+the editor keeps its existing 17:00 date-only due convention. Projects gains
+Timeline as a third per-project presentation beside List and Board: a
+read-only, Monday-aligned 12-week Gantt-lite with dot-run spans, start, due,
+warning, and continuation markers, milestone diamonds, exact before-and-after
+counts for out-of-window milestones, and transitive prerequisite and
+dependant highlighting for a selected task. More gains an opt-in daily digest
+that posts one private notification at a chosen 24-hour local time carrying
+open-today and overdue counts only, on its own notification channel, with a
+generic lock-screen version. Selected presentation, timeline anchor, selected
+day, and dependency selection survive rotation, resizing, and process
+recreation.
+
+The digest is device-local to the installation, off by default, excluded from
+Android backup, and stores only an enabled flag, a local minute of day, and
+the last handled local date — never titles, counts, zone identifiers, or vault
+content. Invalid settings fail closed by disabling the feature and cancelling
+its alarm, and a backward clock or repeated enabling cannot post twice on one
+local day. Room stays v9 and the authenticated backup object format stays v1;
+Stage 8 adds no schema, backup family, permission, dependency, route, Drive
+scope, or network path, and its only manifest change is a single non-exported
+broadcast receiver for the digest alarm.
+
+The deliberate ceilings are equally visible. Timeline v1 is read-only: no
+dependency arrows, no zoom, no bar drag or resize, no resource allocation and
+no critical path, and every edit still routes through the existing task and
+milestone editors. Month density stops at six dots followed by a compact
+overflow label, with the exact counts always available as text. Pointer drag
+is layered over a complete tap-and-menu path that remains sufficient on its
+own, and compact Week stays tap-and-menu by design because it has no honest
+pointer target grid. The digest never catches up on a missed day, never
+carries task titles or actions, never claims an exact alarm or a background
+worker, and remains one device-local setting rather than a per-vault one.
+There is no Planner destination and no parallel planning store: month,
+timeline, and digest are projections of the same encrypted workspace.
+
+Stage 8 closes as a signed sideload release; its device qualification and
+release evidence live in the Stage 8 qualification record.
 
 ## Approved future contract
 

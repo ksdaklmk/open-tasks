@@ -63,14 +63,33 @@ race KSP while release Hilt sources are generated.
   Tasks, workbench, and board ordering; `searchWorkspace` is the shared filter
   and ranking authority for both repositories. Do not recreate either rule in
   `app` or a feature. Schedule and Home retain their separate existing order.
-- Stage 8 is an in-development, unqualified checkpoint through Task 9. Its
-  Month and Timeline rules are pure projections; `SetTaskSchedule` owns one
-  atomic task/reminder schedule mutation in both repositories, while
-  `UpdateTask` is start-aware. Pointer drag rescheduling layers over the
-  non-drag fallback, which stays complete and must be preserved; drag adds
-  no command, arithmetic, controller, or persistence state. Timeline
-  UI/state and daily digest are pending; do not claim device or release
-  coverage before Task 15.
+- Stage 8 Month and Timeline are pure projections and never write.
+  `computeScheduleMonthProjection` is Monday-first over a fixed 42 cells,
+  with up to six density dots, a `6+` overflow label, and exact
+  task/completed/overdue counts. `computeProjectTimelineProjection` is a
+  bounded, Monday-anchored 84-day (12-week) window with dot-run spans,
+  milestone diamonds, clipped/outside/invalid/unscheduled states, and
+  bounded transitive dependency context. Do not recreate either rule in
+  `app` or a feature, and do not widen either window.
+- `SetTaskSchedule` owns the single-task schedule mutation: task schedule
+  and reminder change in one transaction and one journal generation, with
+  ordered TASK-then-REMINDER entries and repository-produced Undo,
+  identically in `RoomVaultRepository` and `InMemoryVaultRepository`.
+  `UpdateTask` stays start-aware. Never reschedule by pairing separate
+  commands or by rebuilding the reminder in the UI.
+- Week/Month pointer drag layers over the complete 48 dp tap/menu
+  fallback; that fallback stays sufficient on its own and must be
+  preserved. Drag adds no command, arithmetic, controller, or persistence
+  state, and reuses the shared `PlanningDrag` root primitives in
+  `:core:designsystem` that Board also consumes. An undated day drop
+  becomes due 18:00 in the current device zone, spans move by stored-zone
+  `plusDays`, and Java gap/overlap resolution is the sole DST authority;
+  the editor's own defaults stay 09:00 start and 17:00 due.
+- Per-project planning state — LIST/BOARD/TIMELINE presentation, the
+  Monday-only Timeline anchor, and Timeline selection — lives in
+  `SavedStateHandle` through `WorkspaceProjectViewState`. Decoding is
+  fail-closed, legacy board booleans restore as BOARD, and LIST defaults
+  and null selections are never persisted.
 
 ## Data and security
 
@@ -136,9 +155,30 @@ race KSP while release Hilt sources are generated.
 - The implemented Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
   add a schema, backup family, exported surface, permission, or network path for
   its ergonomics state.
-- Stage 8 Tasks 1–8 also remain on Room v9 and backup v1. Do not add a
-  schema, backup family, permission, manifest component, Drive scope, or route
-  while completing the remaining Stage 8 work without an approved plan change.
+- The implemented Stage 8 stays on Room v9 and authenticated backup object
+  format v1. Its planning surfaces and daily digest add no schema, backup
+  family, fixture, dependency, permission, Drive scope, or route; the sole
+  manifest delta is the non-exported, no-intent-filter
+  `DailyDigestReceiver`. Add none of these for further planning work
+  without an approved plan change.
+- The daily digest is opt-in, off by default, and device-local non-vault
+  state. Its `daily_digest` preference file holds exactly `enabled`
+  (Boolean), `minute_of_day` (Int, `0..1439`), and optional
+  `last_handled_epoch_day` (Long) — never task, project, count, zone id,
+  notification payload, or scheduled instant. Invalid or wrongly typed
+  state fails closed to disabled/08:00 and cancels the alarm; disabling
+  retains the handled day so off/on cannot repeat a day's digest.
+- Digest delivery arms exactly one inexact `setAndAllowWhileIdle` alarm
+  through a single stable immutable broadcast `PendingIntent` — never
+  exact-alarm access — and runs under one mutex in the order mark-handled
+  → re-arm → vault lookup → post, so a missing vault, denied permission,
+  disabled channel, or notification failure stays handled for that day
+  with the next alarm still armed. Content comes from one
+  `computeTodayProjection(titlesPermitted = false)` call: counts only in
+  the private notification on the digest's own `daily_digest` channel, a
+  generic public lock-screen version, and nothing posted when both counts
+  are zero. `OPEN_DAILY_DIGEST_HOME` routes to Home behind the app lock,
+  and its navigation signal must be consumed exactly once.
 - `AttachmentBlobCoordinator.resume()` has exactly one product caller: the
   silent auto-resume in `AttachmentRuntime.resumeInterruptedSessions()`,
   which runs strictly after session expiry on runtime start and re-arms

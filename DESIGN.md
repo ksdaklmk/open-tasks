@@ -157,19 +157,53 @@ for floating controls and temporary surfaces.
   open-only unscheduled tray. Start time takes precedence over due time for placement;
   due-only work is labelled explicitly, and completion, blocking and reminders
   never rely on colour alone.
-
-Stage 8 is an in-development, unqualified checkpoint. The landed Schedule
-work adds a Monday-first 42-cell Month view, start/due editor controls, a
-complete non-drag rescheduling fallback, and long-press pointer drag layered
-over that fallback: expanded Week drags between day columns and the tray,
-Month drags agenda and tray rows onto visible cells, compact Week stays
-tap/menu only by design, only open non-binned tasks drag, and recurring tasks
-cannot target the tray. The drag preview renders unclipped above scroll
-containers and is RTL-safe; the tap/menu fallback remains complete. Undated
-day placement is due at 18:00 in the current device zone, while a new editor
-due date defaults to 17:00. Week/Month remain stateless and use the live
-device zone. Timeline UI and saved state, daily digest, device coverage, and
-release qualification remain pending.
+- Month calendar: Schedule offers Week and Month at every window size. Month
+  is a Monday-first six-row by seven-column grid; adjacent-month dates stay
+  selectable but render muted. Previous and Next move one month, Today opens
+  the month containing today and selects it, and choosing a day only changes
+  the agenda — it never jumps straight into a task. Each cell carries the
+  local date, up to six density dots with a `6+` overflow label, and a
+  labelled warning marker when open work is overdue. Dots and warning colour
+  are decorative; the merged cell semantics state the full date and the exact
+  total, completed and overdue counts. Compact stacks the grid above the
+  selected-day agenda, expanded places the agenda and the unscheduled tray in
+  a supporting column.
+- Rescheduling: every movable row has a 48 dp Reschedule action and, where it
+  is valid, Remove schedule. That tap and menu path is complete on its own.
+  Long-press pointer drag layers over it: expanded Week drags between its
+  seven day columns and the tray, Month drags agenda and tray rows onto
+  visible cells, and compact Week stays tap and menu only by design. Only
+  open, non-binned tasks are drag sources, and a recurring task can never
+  reach the tray. The preview renders unclipped above scroll containers and
+  is RTL-safe; same-source, outside-target and rejected drops leave the task
+  where it was and state why. Dropping an undated task on a day makes it due
+  at 18:00 in the current device zone. Removing a schedule from a task that
+  has a reminder always asks first, through the same confirmation from either
+  path.
+- Task scheduling editor: the editor gains native start date and time
+  controls, and the due row gains an explicit time control. A new start
+  defaults to 09:00 and a new due date to 17:00, both in the current device
+  zone; existing moments keep their stored zone and local time. Due before
+  start is refused with inline validation, while an older invalid record
+  stays readable behind a warning until it is corrected.
+- Project Timeline: a read-only third project-workbench presentation beside
+  List and Board, chosen from one 48 dp segmented control. It shows a
+  Monday-aligned 12-week window; Previous and Next move four weeks and Today
+  returns to the current week's Monday. Rows carry dot-run spans, labelled
+  start and due markers, 48 dp milestone diamonds and merged non-colour
+  semantics. Nothing on it is draggable; every edit routes through the
+  existing task and milestone editors.
+- Daily digest setting: an inline More switch, off until it is switched on,
+  with an enabled-only 48 dp row that shows the chosen time as `HH:mm` and
+  opens the platform's native 24-hour picker. Notification access never gates
+  the switch: a refused or revoked permission leaves the digest on and its
+  time visible, explains only that delivery is unavailable, and offers a
+  48 dp action to turn notifications on.
+- Daily digest notification: counts only, never titles. The private version
+  reads Today with `3 open today · 1 overdue`; the lock-screen version shows
+  the generic Daily digest title and no workspace content. It uses its own
+  Daily digest channel so it can be silenced independently of reminders,
+  posts nothing when both counts are zero, and opens Home when tapped.
 - Snackbar: confirms immediate edits and offers Undo where reversible.
 - Search: modal command surface opened from UI or `/` / `Ctrl+K`.
 - Today widget: the minimum 2×1 Glance layout keeps both counts and Quick Add
@@ -275,6 +309,22 @@ selection, list/detail state, completion, and snackbar feedback only when motion
 helps explain a change. If system animator duration is zero, use an instant
 change or a short crossfade. Do not choreograph page-load entrances.
 
+## Data visualisation
+
+Dot matrix is the house visual language for every chart, meter, progress
+indicator and density cue — in the app and in any design material produced
+about it. `DotRunBar` and `DottedAreaChart` in `:core:designsystem` are the
+established primitives: Insights progress, the Insights completion trend,
+Month day density and Timeline spans all read as counted dots rather than
+solid fills. Any new visualisation follows the same language. Do not
+introduce solid progress bars, filled area charts or pie charts.
+
+Marks stay decorative beneath merged label-and-value semantics, so density,
+shape, position and text carry the signal rather than colour. A visual cap —
+six dots in a Month cell, 84 in a Timeline row — is a drawing limit only;
+the exact number always remains available as text and in the accessible
+description.
+
 ## Stage 6 daily flow
 
 Search presents saved views as named, editable chips above results. Applying a
@@ -339,3 +389,114 @@ completion-per-day trend for the selected range. Chart and table presentations
 remain equivalent. Dots and charts are decorative beneath merged label-and-value
 semantics, so density, shape, text, and accessibility names carry the signal
 rather than colour alone.
+
+## Stage 8 planning surfaces (implemented)
+
+Schedule offers Week and Month at every window size. Both are stateless views
+over a live device-zone clock. Placement stays one task, one day: start when
+it is present, otherwise due, converted to a local date in that moment's own
+stored zone. Every non-binned dated task appears, completed work included
+with completed icon and text treatment, and undated open work stays in the
+unscheduled tray. The chosen mode, the selected day and the Month anchor are
+saveable interface state, never vault or backup content.
+
+Rescheduling is exact and single-task. The tap and menu path is the complete
+route: a 48 dp Reschedule action on every movable row, Remove schedule where
+it is valid, and one confirmation before a reminder is cleared along with its
+schedule. Pointer drag is layered over that path and introduces no separate
+rule — the same targets, the same confirmation, the same snackbar Undo, and
+the same repository message when a move is refused. A move preserves each
+moment's local time and stored zone; a task holding both start and due shifts
+by a single calendar-day delta and keeps its span. Dropping an undated task
+on a day makes it due at 18:00 in the current device zone, deliberately
+different from the editor's 17:00 default for a newly typed due date. A
+reminder follows its due moment by the same lead, and a move that would put
+that reminder in the past is refused with actionable feedback rather than
+silently dropping the alarm. Recurring work moves only its current
+occurrence and can never reach the tray.
+
+The task editor now owns the whole schedule: native start date and time
+controls beside the due date and its new explicit time control. A new start
+defaults to 09:00 and a new due date to 17:00 in the current device zone;
+existing moments keep what they already had. Due before start is refused
+inline, and a legacy or imported invalid record stays readable behind a
+warning until it is corrected.
+
+### Project Timeline
+
+Timeline is the third project-workbench presentation: read-only, and bounded
+to a Monday-aligned 12-week window of 84 days. The bound is the design — no
+project history can grow an unbounded canvas. Previous and Next move four
+weeks, Today returns to the current week's Monday, and the day header, the
+milestone row and every task row's grid area scroll horizontally together.
+
+Every non-binned project task keeps a row, whatever its dates:
+
+- start and due render an inclusive dot-run span between their stored-zone
+  local dates;
+- start only or due only render a labelled marker with its own icon;
+- a span crossing a window edge clips there and adds a continuation chevron;
+- a task lying wholly before or after the window states Before window or
+  After window rather than a false in-window point;
+- due before start states the invalid range instead of drawing a backwards
+  span; and
+- undated tasks collect in a compact Unscheduled list below the grid.
+
+Status cues never stack on one another. At each clipped edge the continuation
+chevron and the completed or blocked icon occupy side-by-side slots, so a
+long completed or blocked task running past the window stays legible and both
+cues remain independently named in the row's description.
+
+Milestones dated inside the window are 48 dp diamonds on their own row, with
+completed icon and text treatment when they are done. Milestones outside it
+contribute exact before and after counts in one summary line rather than
+inventing an in-window position, and undated milestones stay in the existing
+milestone list, which remains present in all three presentations.
+
+Selecting a row highlights its complete transitive dependency context.
+Highlighting carries both a container tint and a distinct leading icon for
+selected, prerequisite, dependant and both, so the relationship never depends
+on colour. The chain summary counts unique out-of-project tasks, not
+dependency edges. There is no arrow routing and nothing is draggable; a
+separate 48 dp Open action, a sibling outside the row's merge boundary, opens
+the editor, so selecting a row and opening it can never be confused.
+
+Every row is one merged semantics node naming the title, the complete start
+and due dates, the total duration in days, any clipping or outside state,
+completion, blocked state and dependency role. Spans, markers and diamonds
+are cleared from the semantics tree beneath it. Shape, icon, label and that
+description carry duration, completion, blocked, milestone and dependency
+meaning independently of colour.
+
+Per-project presentation, the Timeline anchor — always a Monday — and the
+selected row are saveable interface state scoped to the project, so two
+projects never share a view.
+
+### Daily digest
+
+The daily digest is opt-in and stays off until it is switched on. Its inline
+More setting is a switch plus, only while it is on, a 48 dp row showing the
+chosen time as `HH:mm` and opening the platform's native 24-hour picker.
+There is no new destination and no separate settings screen. Notification
+access is never a precondition of the switch: a refused or revoked permission
+leaves the digest on and its time visible, states plainly that delivery is
+unavailable, and offers a 48 dp action to turn notifications on. First use
+defaults to 08:00 local.
+
+Delivery is counts only. The private notification reads Today with
+`3 open today · 1 overdue`; the public lock-screen version shows the generic
+Daily digest title and no counts, no titles and no workspace content. When
+both counts are zero nothing is posted at all. The digest owns its own Daily
+digest channel with private lock-screen visibility, so it can be silenced
+without touching reminders, and tapping it opens Home — behind the app-lock
+overlay, which always takes precedence over any workspace composition.
+Exactly one digest is posted per local day, and switching the setting off and
+on again cannot repeat that day's digest.
+
+The setting is device-local to this installation, excluded from Android
+backup, and never appears in vault content or a backup.
+
+These surfaces are implemented and their whole-stage review is closed with
+zero Critical findings. Device confirmation of the drag, time-picker and
+digest legs belongs to the stage qualification record rather than to this
+document; see `docs/qualification/stage8-planning-surfaces.md`.

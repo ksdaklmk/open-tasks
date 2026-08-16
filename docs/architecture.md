@@ -136,6 +136,12 @@ debounce. Room reads the latest committed record before assigning the next
 revision, so rapid edits cannot derive revisions or undo state from a stale UI
 snapshot. Each accepted update returns the prior values as an undo command.
 
+Since Stage 8 the editor's validated core fields include `start` as well as
+`due`. `TaskEdit` and the full `UpdateTask` command both carry start, and the
+app mapper, validation, equality, both engine handlers, and the
+repository-produced inverse builders move start and due together in that same
+debounced atomic save.
+
 Checklist and tag edits use granular commands rather than replacing a complete
 relation set. Room reads current checklist and tag rows inside the serialized
 write path, advances the owning task revision, mutates the relation, and
@@ -246,8 +252,10 @@ Task-editor saves treat the task and reminder as one validated replacement:
 Room writes both records and their independent backup-journal entries in one
 transaction, while repository-produced Undo restores both prior values.
 `SetTaskReminder` is the granular path used by notification actions such as
-Snooze. Permanent task purge removes the reminder and queues its deletion in
-the same transaction as the task tombstone.
+Snooze, and `SetTaskSchedule` is the exact rescheduling path that rewrites a
+task's schedule and its reminder together. Permanent task purge removes the
+reminder and queues its deletion in the same transaction as the task
+tombstone.
 
 `ReminderScheduler` derives Android alarms from future reminders belonging to
 active tasks outside the Bin. Flexible reminders use idle-safe inexact alarms.
@@ -271,29 +279,12 @@ Within a day they sort by local time and then title. Compact windows project
 one selected-day agenda, while expanded windows project the containing ISO
 Monday–Sunday week and an unscheduled tray containing only active,
 non-completed tasks without either date. Reminder indicators are joined by
-task ID from the same snapshot. Selecting an item deep-links to the existing
-task editor, so Schedule introduces no alternate mutation path.
+task ID from the same snapshot. Schedule also offers a Month mode at every
+window size over the same projection rules. Selecting an item deep-links to
+the existing task editor, and rescheduling goes through one repository
+command, so Schedule still introduces no alternate mutation path.
 
-## Stage 8 checkpoint (in development, unqualified)
-
-Tasks 1–9 add a pure Monday-first 42-cell Month projection and a pure bounded
-Timeline projection vocabulary, alongside exact single-task move rules. The
-repository command `SetTaskSchedule` changes task schedule and reminder
-atomically in both engines; `UpdateTask` is start-aware. The task editor has
-start/due controls, and stateless Week/Month UI uses a live-zone root clock and
-the complete non-drag rescheduling fallback. Long-press pointer drag now
-layers over that fallback, reusing the shared root-coordinate drag mechanics
-that also serve Board: expanded Week registers day-column and tray targets,
-Month registers its 42 visible cells, drop targets and eligibility stay
-feature-local, the drag payload carries the rendering context's own date
-rather than recomputing one, and a tray drop on a reminder-bearing task opens
-the same hoisted confirmation as the menu path. Drag adds no command,
-arithmetic, controller, or persistence state. Timeline UI/state and the
-daily digest remain pending. Room stays v9 and backup v1; this checkpoint adds
-no schema, backup, permission, manifest, Drive-scope, or route change and has
-no device or release qualification.
-
-The Home-screen Today widget is a second read-only projection of
+The Home-screen Today widget is another read-only projection of
 `WorkspaceSnapshot`, computed by the pure `computeTodayProjection`
 function (today/overdue counts and up to three focus task titles). A
 publisher is bound to the active vault-slot lifecycle: it starts and
@@ -348,7 +339,9 @@ store:
 - Navigation 3's serializable back stack restores the current top-level
   destination.
 - `SavedStateHandle` restores selected task and project IDs across ViewModel
-  recreation.
+  recreation, and the per-project planning view state: LIST, BOARD or
+  TIMELINE presentation, the Monday-only Timeline anchor, and the Timeline
+  task selection.
 - Compose saveable state restores transient UI context: filters, list/detail
   scroll positions, open sheets, search and quick-add text, and unsaved task
   or project editor fields.
@@ -404,6 +397,15 @@ provider-independent object formats. Hybrid logical clocks and deterministic
 merge primitives may remain as unused, well-tested internal code, but are not
 a product or release dependency.
 
+`core:designsystem` owns the shared low-level drag mechanics — root-coordinate
+source bounds, accumulated pointer offset, fresh start and drop callbacks,
+target hit testing, and absolute preview placement — extracted from the proven
+Board implementation. It is not a general drag framework: drop targets, drag
+eligibility, scrolling, cards, and every scheduling rule stay in the consuming
+feature. Pure planning projections stay in `core:domain` with their small
+result types in `core:model`, and `app` computes them, so feature modules
+still depend only on `core:model` and `core:designsystem`.
+
 ## Security invariants
 
 - The SQLCipher database key and Tink AES-256-GCM vault-content key are
@@ -429,6 +431,11 @@ a product or release dependency.
   remain excluded.
 - Logs and telemetry must never contain task text, account details, Drive IDs,
   attachment names, or encryption metadata.
+- The device-local `daily_digest` preference file stores exactly an enabled
+  flag, a minute of day, and an optional last-handled epoch day. It never
+  stores task text, titles, project or vault identity, counts, zone IDs,
+  notification payloads, or a scheduled instant, and invalid state fails
+  closed by disabling the feature and cancelling its alarm.
 - Biometric app-lock unlock changes no key material: it gates UI content
   composition only and never re-wraps, re-derives, or otherwise touches
   the vault-content key or the SQLCipher database key.
@@ -551,3 +558,179 @@ the ruled task fields, fresh unticked checklist rows, activity, and journal stat
 atomically, while excluding reminder, recurrence, time-entry, note, attachment,
 and prior-activity state. Room remains v9 and the authenticated backup object
 format remains v1; Stage 7 adds no schema, backup family, or external data path.
+
+
+## Stage 8 planning surfaces (implemented)
+
+Stage 8 adds planning surfaces to the existing destinations rather than a new
+one: Week and Month inside Schedule, List/Board/Timeline inside the project
+workbench, and an inline daily-digest setting in More. Room remains v9 and the
+authenticated backup object format remains v1; Stage 8 adds no schema, backup
+family, worker, service, external dependency, permission, Drive scope, or
+top-level route. The application version is 1.2.0, `versionCode` 3.
+
+Month and Timeline are pure projections of `WorkspaceSnapshot` computed in
+`core:domain`, with their small semantic result types in `core:model` beside
+the existing projection vocabulary. `OpenTasksApp` computes both and passes
+plain values and callbacks to stateless feature composables. Neither owns a
+parallel planning store, and neither writes.
+
+The month projection takes a selected month, a `Clock`, and a display zone and
+produces a Monday-first, fixed six-row by seven-column 42-cell grid. Leading
+and trailing adjacent-month dates remain selectable with muted treatment.
+Placement is the one-task-one-day rule Schedule already uses: `start` when
+present, otherwise `due`, converted to a `LocalDate` in that moment's own
+stored zone. Every non-binned dated task is placed and completed work stays
+visible with completed icon and text treatment, but only open tasks are drag
+sources. Each cell carries the local date, the total placed count, the
+completed count, and the overdue count of open tasks classified
+`DueBucket.OVERDUE`, plus up to six density dots and a compact `6+` overflow
+label above that cap. Dots and warning colour are decorative and hidden from
+the semantics tree: merged cell semantics state the full date and the exact
+counts, and overdue state also carries a labelled warning marker. Previous and
+Next move one month, Today opens the month containing today and selects it,
+and selecting a day only updates the selected-day agenda rather than
+short-circuiting into a task.
+
+The project timeline projection is a read-only Gantt-lite over a bounded
+84-day, twelve-week, Monday-aligned window; the fixed window is the bound, so
+no amount of project history can create an unbounded canvas. Every non-binned
+project task remains one row. Start and due render an inclusive dot-run span
+through the existing `DotRunBar`; start-only and due-only render labelled
+markers; a due instant before its start renders a labelled warning instead of
+a fabricated backwards span; and undated tasks fall into a compact unscheduled
+list below the timeline. A span crossing a window edge clips to that edge and
+shows a labelled continuation marker in its own slot beside the
+completed/blocked status icon, while wholly earlier or later dates render
+labelled before-window and after-window states rather than a false in-window
+point. `Task.isBlocked` remains the blocked-marker authority for both
+unfinished dependencies and semantic blocked state. Milestones dated inside
+the window render as 48 dp diamonds, and out-of-window or undated milestones
+contribute exact before and after counts while remaining available in the
+existing milestone list. Selecting a row highlights its complete transitive
+dependency context — prerequisites and dependants — over the full non-binned
+snapshot graph, traversed across project boundaries and bounded by a visited
+set and the snapshot's task count; the chain summary reports unique
+out-of-project tasks rather than dependency edges, and there is no arrow
+routing. Shape, icon, label, and merged semantics carry duration, completion,
+blocked, milestone, and dependency meaning independently of colour. Bars and
+diamonds are not draggable: a separate 48 dp Open action opens the existing
+task editor, and milestone activation opens the existing milestone editor.
+
+The bulk due-only `RescheduleTasks` command and its Tasks and Review callers
+are unchanged. `SetTaskSchedule` is the one exact single-task path,
+implemented in both engines: it carries the task ID, the target `start`, `due`
+and `reminder`, and a `restorePastReminder` flag. The repository validates the
+complete target state — task and reminder identity, reminder-with-due,
+recurrence-with-schedule, recurrence end date, start-before-due, and the
+future-reminder rule — then writes the task and its reminder in one
+transaction under one journal generation with ordered task-then-reminder
+entries, advances the task revision once, journals through the existing
+snapshot diff, and returns the same command carrying the previous exact values
+as repository-produced Undo. Only that repository-produced Undo sets
+`restorePastReminder`, which bypasses solely the future-reminder check,
+restores exact reminder metadata, and never arms an already-past alarm.
+Rescheduling adds no activity kind, preserving the existing due-edit
+behaviour.
+
+A pure `core:domain` move rule converts the current task and reminder plus a
+date or tray target into those exact command fields, so no UI code
+reimplements date, zone, recurrence, or reminder arithmetic. An undated task
+dropped on a day becomes due at 18:00 in the device's current zone. A due-only
+or start-only task keeps its local time and stored zone through
+`ZonedDateTime.ofLocal` with its existing offset preferred; a start-and-due
+task shifts both moments by the same calendar-day delta with `plusDays` in
+each moment's own stored zone, preserving the day span. Java's gap and overlap
+resolution is the DST authority and the only deviation from literal wall-time
+preservation. A reminder stays due-relative: its lead duration and delivery
+precision reapply to the new due moment, and a move that would place it at or
+before now is rejected with an actionable message rather than silently
+deleting or restoring a past alarm. Moving a recurring task changes only the
+current occurrence's dates and leaves its series ID, anchor, occurrence index
+and rule untouched; a recurring task cannot move to the unscheduled tray,
+because recurrence requires a schedule. Dropping an open non-recurring task
+into the tray clears start and due, and when it has a reminder one hoisted
+confirmation explains that both are removed, clears them atomically, and
+restores them together on Undo.
+
+The task editor completes the schedule surface with native start date and time
+controls and an explicit due time control. New start moments default to 09:00
+and new due moments keep the editor's pre-Stage-8 17:00 convention, both in
+the device's current zone, while existing moments preserve their stored zone
+and local time; 18:00 belongs only to an undated day drop. The editor rejects
+due-before-start, and legacy or imported invalid records remain readable
+behind a warning until corrected. Editor saves stay on the debounced
+`UpdateTask` path while `SetTaskSchedule` stays reserved for explicit
+rescheduling actions, so the editor never races two schedule commands.
+
+Pointer drag is a layer over a complete non-drag path, not a replacement for
+it. Expanded Week registers its seven day columns and the unscheduled tray;
+Month registers its 42 visible cells as targets only, because a cell can
+represent several tasks, and sources individual selected-day and tray rows;
+compact Week has no honest pointer target grid and stays tap and menu only.
+The drag payload carries the rendering context's own date rather than
+recomputing one. Completed and binned tasks are never sources, a same-source
+or outside-target drop snaps back without issuing a command, and repository
+rejection leaves the task in place and surfaces its exact message. Every
+draggable task keeps a 48 dp Reschedule action, a Remove schedule action where
+valid, and the same hoisted confirmation the drag path opens. Drag adds no
+command, arithmetic, controller, or persistence state.
+
+The project workbench's per-project Board Boolean is gone. `SavedStateHandle`
+holds one `WorkspaceProjectViewState` per project: a LIST, BOARD or TIMELINE
+presentation, a Monday-only Timeline anchor, and the Timeline task selection.
+This stays session and process-restorable UI state — not a SharedPreferences
+or vault preference — and holds no task or query text. Decoding is
+fail-closed: a legacy board-mode entry restores as BOARD, a corrupt row
+claiming two modes resolves to TIMELINE, and LIST defaults and null selections
+are never persisted. Timeline navigation moves the anchor by exactly four
+weeks and resolves Today and default anchors through the injectable zone
+provider at action time.
+
+The daily digest is opt-in, device-local, off by default, and adds no
+permission. Its `daily_digest` preference file is a second device-local file
+beside `view_prefs` and stores exactly `enabled`, `minute_of_day` in `0..1439`
+and an optional `last_handled_epoch_day`, as Boolean, Int and Long. Raw types
+are validated on read; anything else fails closed by rewriting a disabled
+08:00 state that retains only a valid handled day, and disabling writes only
+`enabled` so an off/on cycle cannot duplicate a digest on the same local day.
+The existing SharedPreferences exclusion keeps the file out of Android Auto
+Backup.
+
+Scheduling is one inexact `AlarmManager.setAndAllowWhileIdle` alarm behind a
+single stable, immutable, non-exported broadcast `PendingIntent`; a daily
+digest does not justify exact-alarm access. The next occurrence is the
+configured local wall time in the device's current zone, resolved by
+`java.time` across DST gaps and overlaps and bounded by the stored handled
+day, so a backward clock or date change cannot post twice. The non-exported,
+no-filter `DailyDigestReceiver` is the stage's only manifest delta; it
+validates its action, re-reads settings, and cancels rather than re-arms when
+the setting is disabled or invalid. Delivery is serialized under one mutex in
+a fixed order: mark today handled, re-arm the next one-shot alarm, then read
+active vault state, then post. Reconciliation also runs on app foreground and
+startup from `MainActivity.onStart` and on boot, package replacement,
+wall-clock change and time-zone change through the existing system-event
+receiver. Enabling after today's configured time schedules tomorrow rather
+than posting a catch-up. A missing active vault, permission denial, a disabled
+channel, or a notification `SecurityException` leaves the day handled and is
+not retried, and the next alarm stays armed.
+
+Digest content is counts only. Delivery captures one `now` and zone and calls
+the existing `computeTodayProjection` with `titlesPermitted = false`, so no
+title can reach the digest; when both counts are zero nothing is posted and
+tomorrow stays armed. The digest uses its own private-visibility
+`daily_digest` channel with a generic public lock-screen version, so Android
+can disable it independently of task reminders. More carries the inline switch
+inside the existing overview list and an enabled-only `HH:mm` row whose 48 dp
+button opens the native 24-hour `TimePickerDialog`; notification guidance is
+contextual and never gates the switch, matching reminder preservation.
+Tapping the digest sends `OPEN_DAILY_DIGEST_HOME`, which `MainActivity` turns
+into a navigation signal consumed exactly once inside the unlocked Active
+workspace, so a stale signal cannot misroute a later reminder tap. The
+app-lock overlay remains authoritative before any workspace composition.
+
+Stage 8 implementation is complete through its fix wave and its whole-stage
+review, which returned no Critical findings. Device qualification, signing,
+and release records live in `docs/qualification/stage8-planning-surfaces.md`
+and `docs/qualification/release-1.2.0-sideload.md`; remote CI and the release
+tag are recorded there as pending.

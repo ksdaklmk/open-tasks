@@ -1,9 +1,86 @@
 # Open Tasks Handoff
 
-## Current resume point — reviews and host gates green, one connected failure open, 16 August 2026
+## Current resume point — release 1.2.0 locally qualified, remote CI and tag blocked on Actions billing, 16 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+- **Release 1.2.0 (versionCode 3) is a locally qualified candidate. It is not
+  tagged, not pushed, and not released.** The final reviewed
+  `implementationHeadSha` is
+  `b6c438f312b40f228e1d19365062debe479054e7`; Stage 8 began at
+  `8047f136541d22b15ca20db8971ea67685e250b5`. The qualification records are
+  `docs/qualification/stage8-planning-surfaces.md` and
+  `docs/qualification/release-1.2.0-sideload.md`.
+- All review obligations are discharged: the scoped review of the two repairs
+  (`c495dd2` Quick Add close-consumption, `94c42f7` fixture backup-object
+  cleanup) is APPROVED, and the literal whole-stage review of
+  `8047f136..b6c438f` returned **Ready to tag with fixes — 0 Critical**, its
+  sole Important being the contract-docs refresh that this checkpoint's commit
+  lands. Zero Critical and zero Important findings are open.
+- Forced-fresh host gates at `b6c438f` are green: six androidTest source sets
+  compile; `testDebugUnitTest lintDebug :app:assembleDebug --rerun-tasks`
+  BUILD SUCCESSFUL in 5m03s with 553/553 tasks and 1,304 JVM tests across 127
+  suites; `:app:assembleRelease --rerun-tasks` BUILD SUCCESSFUL in 4m28s with
+  442/442 tasks and `verify-release-apk.sh` all checks passed; schema, all five
+  fixture generators, workflow pinning, and diff checks clean; scope audit
+  `STEP7-ALL-GREEN` over 85 changed files.
+- **The six-module connected gate is green:** 453 tests, 0 failures, 0 errors,
+  exactly the two established skips (credentialed Drive, cross-display fold),
+  BUILD SUCCESSFUL in 10m25s. Module totals: `:app` 92 with 2 skips,
+  `:core:data` 192, `:feature:tasks` 48, `:feature:projects` 30,
+  `:feature:schedule` 23, `:feature:more` 68.
+- The earlier bounded `AppNotIdleException` in `ScheduleScreenInstrumentedTest`
+  is diagnosed and closed as **environmental, with no repository edit**: a Play
+  Store self-update was AOT-compiling for 78 seconds across that test's
+  60-second Espresso window. The rerun disables the Play client on the
+  disposable overlay and gates start-up on a dexopt quiesce check; its logcat
+  has zero `dex2oat` lines, zero `Davey!` frames, and zero AppNotIdle events.
+- The full Stage 8 manual acceptance matrix passed, including the pinned 18:00
+  undated rule under a live zone replacement, a discriminating DST-gap proof,
+  pointer drag in expanded Week and Month, Timeline chain highlighting, digest
+  privacy and zero-count silence, and process restoration. Native fold posture
+  stays environment-blocked on this AVD and is not claimed.
+- Signed smoke on the verified 1.2.0 (3) APK (16,372,751 bytes, SHA-256
+  `c81fa17d…3c3f17`) passed **6 of 7 rows and 3 of 3 Stage 8 extras**,
+  including the exact scenario that blocked the previous candidate:
+  cancelled Quick Add → immediate app lock → digest tap → unlock landed on
+  Home with no sheet reopening. **Row 6 (placing the Today widget) was not
+  executed** — the launcher will not begin its widget drag from synthetic
+  pointer events on a headless overlay. It is recorded as un-executed, not
+  waived; place it by hand before claiming a complete 7-of-7 smoke.
+- Secure cleanup is complete: exported archive deleted, temporary device
+  credential cleared to `CredentialType: NONE`, package uninstalled, overlay
+  killed `OVERLAY-STOPPED-CLEAN`, and no ADB target, emulator process, or
+  temporary directory remains.
+- **The only blocker to tagging is external.** GitHub Actions cannot start
+  jobs for this account — the most recent push run failed every job in two to
+  four seconds with zero executed steps and the annotation "The job was not
+  started because recent account payments have failed or your spending limit
+  needs to be increased." Resume by restoring Billing & plans, then: push
+  `main`, wait for the candidate's own run, require `verify`, compact API 36,
+  and `release` green (expanded API 37.0 stays observe-only), create the
+  annotated `v1.2.0` tag on the qualification commit, push it, and record the
+  post-tag release handoff. Do not tag before that run is green.
+- The qualification invalidation invariant still governs: any production,
+  build, or test-source edit before the tag invalidates the recorded
+  implementation SHA, the signed APK, the review, and every connected, manual,
+  and signed result collected after it. With this checkpoint, local `main` is
+  ahead of `origin/main` and nothing is pushed.
+- After the tag, the ordered remaining work is Stage 9 (the single Room v10
+  wave) and then repository-wide Unicode tag-identity hardening.
+- Preserve the unrelated user state exactly: modified
+  `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
+  deleted
+  `docs/superpowers/specs/2026-08-10-pinfo-thai-dashboard-design.md`, and
+  untracked `.kotlin/` plus `artifacts/`. The detailed execution ledger is the
+  ignored
+  `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
+## Superseded checkpoint — reviews and host gates green, one connected failure open, 16 August 2026
+
+This section was authoritative at that checkpoint. It is retained only for
+chronological context and is superseded by the checkpoint above.
 
 - All review obligations are discharged at head `b6c438f`. The scoped
   independent review of `5fbb24b..94c42f7` (the `c495dd2` Quick Add

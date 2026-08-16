@@ -1,11 +1,12 @@
 # Threat Model
 
-Last reviewed: 6 August 2026
+Last reviewed: 16 August 2026
 
 This document covers the implemented local-authority foundation and the
 approved backup, recovery-takeover, and cloud-attachment programme. It is a
-release gate: any new data flow, exported Android component, cloud object,
-attachment path, logging sink, or key format must update this model.
+release gate: any new data flow, Android manifest component (exported or
+not), cloud object, attachment path, notification channel, device-local
+preference file, logging sink, or key format must update this model.
 
 ## Scope and security objectives
 
@@ -65,6 +66,9 @@ separate create-only blob namespace; remote merge is not connected.
 | Today-widget state (task titles) | Private content, plaintext at rest, concealment-gated | Glance state files under `filesDir`; cleared through `StopGatedWriter` on a qualifying lock or title-privacy transition; excluded from Android Auto Backup and device transfer |
 | Whole-vault archive (`.otvault`) and its export passphrase | Private encrypted recovery input; a recovery-equivalent secret | The archive is a standard file the person chooses a destination for; the export passphrase is the same recovery passphrase and is never persisted |
 | Exported plaintext CSV file | Private content, disclosed plaintext once written | A standard file the person chooses a destination for, after a mandatory disclosure dialog; not encrypted and not tracked further by the application |
+| Daily digest schedule setting | Device-local non-vault configuration | Private `daily_digest` preferences holding only `enabled`, `minute_of_day`, and `last_handled_epoch_day`; outside the exact-file Android backup allow-list |
+| Daily digest notification content | Aggregate counts derived from private content | Counts-only private-visibility notification on its own `daily_digest` channel, with a generic public lock-screen version; never task titles |
+| Per-project planning view state | Sensitive UI metadata | Android saved-instance-state bundle; presentation enum names, a Monday Timeline anchor date, and record IDs only |
 
 ## Trust boundaries and data flows
 
@@ -85,6 +89,12 @@ PortableBackupPublisher ──────────────────�
 AttachmentBlobCoordinator ─ AuthenticatedCloudObjectCodec ─ AttachmentBlobStore
 RecoveryCoordinator ─ staged verification/takeover ─ replacement Room vault
 
+AlarmManager ── DailyDigestReceiver ─── non-exported, no filter, action/data checked
+    │ mark handled ─ re-arm next alarm ─ then read vault
+    ▼
+DailyDigestCoordinator ─ computeTodayProjection(titlesPermitted = false)
+    └── counts-only private notification ── generic public version
+
 Recovery passphrase ── Argon2id ── AES-GCM unwrap ── vault-content key
 Per-vault Keystore key ─────────── AES-GCM unwrap ── same content key
 Database Keystore key ──────────── AES-GCM unwrap ── SQLCipher database key
@@ -100,6 +110,16 @@ Normal provider flows may handle encrypted objects and limited routing
 metadata but cannot mutate Room records. Only `RecoveryCoordinator` may
 reconstruct a replacement database, and it must stage, verify, claim writer
 ownership where applicable, and activate atomically.
+
+The Stage 8 planning surfaces sit on both sides of that boundary without
+widening it. Month, Timeline, and daily digest projections are pure
+read-only functions over the active `WorkspaceSnapshot`: they derive
+counts, spans, and dependency context and issue no command. The one new
+write path is `SetTaskSchedule`, which updates a task's schedule and its
+reminder in a single Room transaction and a single journal generation,
+appending ordered task-then-reminder entries, so no partial schedule state
+can be observed, journalled, or backed up. The daily digest is a consumer
+of that boundary only; it never writes vault state.
 
 ## Adversaries and assumptions
 
@@ -160,6 +180,11 @@ fails safely where practical and must not weaken platform protections.
 | T31 | A hostile CSV exhausts memory or corrupts existing records | Import caps input at 5 MiB and 5,000 rows, requires strict UTF-8 and the exact own-schema header, validates every row and relation before dispatch, previews create counts, creates only new records atomically, and returns exact Undo | CSV import deliberately duplicates matching records; it never attempts identity matching or third-party format recovery |
 | T32 | Markdown export discloses project content outside the vault | Export is a user-selected, project-scoped SAF write; the product labels the format plain Markdown and deletes a partial document on every non-success path | The completed Markdown file is permanently plaintext and its custody belongs to the person who exported it |
 | T33 | Hostile Quick Add text or a malformed saved-view payload causes unintended mutation or unbounded decode | Quick Add uses bounded pure parsing and confirm-only chips before repository validation; saved views cap names, text, count, and payload bytes, strictly decode only version 1 or 2, reject unknown keys and enums, and keep failed rows invisible | Quick Add deliberately recognizes a small grammar; a future payload version remains retained but unusable until a reviewed decoder exists |
+| T34 | A rescheduling action leaves a task and its reminder inconsistent, or journals half a change | `SetTaskSchedule` validates the complete target state — identity, reminder-with-due, recurrence, start-before-due, and future-reminder rules — then writes the task schedule and its reminder in one transaction and one journal generation with ordered task-then-reminder entries; Undo is produced by the repository with the previous exact values, and both engines carry the same behaviour | Repository-produced Undo may restore a past reminder only through `restorePastReminder`, which bypasses solely the future-reminder check and never arms an already-past alarm; on-device alarm behaviour remains a Task 15 evidence item |
+| T35 | A large or pathological dependency graph makes a planning projection unbounded | Timeline is a read-only projection over a fixed Monday-first 84-day window; transitive prerequisite and dependant traversal uses a visited set bounded by the snapshot's task count, spans clip to the window edges with a labelled continuation state, and out-of-window milestones contribute exact before/after counts instead of fabricated positions | Traversal deliberately crosses project boundaries and the chain summary counts unique out-of-project tasks rather than edges; a wide graph therefore costs one bounded snapshot walk, never unbounded work or an unbounded canvas |
+| T36 | Corrupt, hostile, or foreign local digest preferences drive an unintended schedule | The `daily_digest` file accepts exactly `enabled` (Boolean), `minute_of_day` (Int) and `last_handled_epoch_day` (Long); raw types are validated before use, anything else fails closed to disabled at 08:00 retaining only a valid handled day, disabling writes only `enabled`, and an unusable schedule cancels the alarm rather than guessing one | The file is device-local non-vault state outside the exact-file Android backup allow-list and holds no task, project, query, count, zone id, or scheduled instant; retaining the handled day is what stops an off/on cycle duplicating a digest |
+| T37 | Another application triggers, observes, or hijacks digest delivery | `DailyDigestReceiver` is declared `android:exported="false"` with no intent filter — the sole Stage 8 manifest delta — and still validates its action and data before acting; exactly one stable immutable broadcast `PendingIntent` is armed with `setAndAllowWhileIdle`, so arming replaces the previous alarm rather than accumulating and cancelling addresses the same alarm | No exact-alarm permission, foreground service, worker, exported component, or network path was added; a compromised System UI or OS stays within the compromised-OS assumption |
+| T38 | Digest delivery discloses workspace content, or repeats after a clock change | Delivery is serialised under one mutex in the fixed order mark handled → re-arm the next alarm → read vault state → post, so a durable handled-day record and a re-armed alarm always precede any vault access; a handled local day is never posted again after a backward clock or date change; content comes from `computeTodayProjection(titlesPermitted = false)` and carries counts only, on a private-visibility channel with a generic public lock-screen version | Zero counts post nothing and leave tomorrow armed; missing vault state, permission denial, a disabled channel, or a notification `SecurityException` is handled for that day without retry. Physical-device channel, export-scope, and public/private evidence is recorded in `docs/qualification/stage8-planning-surfaces.md` |
 
 ## Cryptographic invariants
 
@@ -300,16 +325,100 @@ exported component, intent filter, runtime permission, Storage Access Framework
 flow, provider scope, network request, or cloud object family. Room remains v9
 and the authenticated backup object format remains v1.
 
-## Stage 8 checkpoint addendum (in development, unqualified)
+## Stage 8 implementation addendum
 
-Tasks 1–9 add pure Month and Timeline projections, exact schedule validation,
-atomic task/reminder mutation, start/due editor controls, the non-drag
-rescheduling fallback, and a pointer drag layer that reuses the existing
-schedule callbacks and remove confirmation. These changes add no external
-input, permission, manifest component, network or Drive path, durable schema,
-backup family, or plaintext boundary. Timeline UI/state and the daily digest
-have not landed. No device or release qualification is claimed; Stage 7's
-release waivers do not apply to Stage 8.
+Stage 8 is implemented through Task 14 and its fix wave, and whole-stage
+reviewed with no Critical findings. It adds a pure Monday-first 42-cell
+Month projection, exact single-task rescheduling with a drag layer over a
+complete tap/menu fallback, a bounded project Timeline, saved per-project
+planning state, and an opt-in private daily digest. See T34–T38 for the
+corresponding gate rows. The digest receiver has landed; the earlier
+checkpoint statement that the digest had not landed is superseded.
+
+**(a) One atomic schedule mutation.** `SetTaskSchedule` is the single
+command for explicit rescheduling in both repository engines. It validates
+the complete target state before writing, updates the task schedule and its
+reminder inside one transaction, advances the revision once, appends
+ordered task-then-reminder backup-journal entries in the same generation,
+and returns repository-produced Undo carrying the previous exact values. A
+partially applied schedule, an orphaned reminder, and a half-written
+journal generation are therefore all unreachable. The editor's debounced
+save uses the start-aware `UpdateTask` instead, so the two paths never race
+a single record. Drag rescheduling reuses these same callbacks: it adds no
+command, arithmetic, or persistence state of its own, and the accessible
+non-drag path remains complete.
+
+**(b) Bounded planning projections.** Month and Timeline are pure
+projections. Month renders a fixed 42-cell grid with six-dot density and
+exact counts; Timeline renders a fixed 84-day Monday-first window, so no
+project history can grow an unbounded canvas. Dependency highlighting walks
+the non-binned snapshot graph transitively with a visited set bounded by
+the snapshot's task count, even though command validation already prevents
+cycles. Spans that leave the window clip to its edge with a labelled
+continuation state, and dates outside it report labelled before/after
+states and exact milestone counts rather than a fabricated in-window
+position. Per-project presentation, the Monday-only Timeline anchor, and
+the selected task live in `SavedStateHandle` as enum names, a date, and
+record IDs; decoding is fail-closed and the legacy board boolean migrates
+to the BOARD presentation.
+
+**(c) Device-local digest preferences fail closed.** The `daily_digest`
+preference file is device-local, non-vault, off by default, and holds
+exactly three keys: `enabled` (Boolean), `minute_of_day` (Int in
+`0..1439`), and `last_handled_epoch_day` (Long). Raw stored types are
+validated before use; an unknown key, wrong type, or out-of-range value
+rewrites the file closed to disabled at 08:00, retaining only a valid
+handled day, and disabling writes only `enabled`. It stores no task,
+project, query, count, zone id, notification payload, or scheduled instant,
+and preferences remain outside the exact-file Android backup allow-list
+alongside `view_prefs`. An unusable schedule cancels the alarm rather than
+arming a guessed one.
+
+**(d) The digest receiver is explicit and non-exported.**
+`DailyDigestReceiver` is declared `android:exported="false"` with no intent
+filter and is the sole Stage 8 manifest delta. It validates its action and
+data before doing any work, so even an in-package mis-delivery is inert.
+Exactly one stable immutable broadcast `PendingIntent` is armed through
+`AlarmManager.setAndAllowWhileIdle`: a daily convenience does not justify
+exact-alarm access, and one identity means arming replaces the previous
+alarm while cancelling addresses precisely that alarm. Reconciliation on
+foreground, boot, package replacement, and wall-clock or time-zone change
+reuses the existing private system-event receiver. `OPEN_DAILY_DIGEST_HOME`
+routes to Home through a consumed navigation signal, and the app-lock
+overlay stays authoritative before any workspace composition.
+
+**(e) Privacy ordering and counts-only content.** Delivery is serialised
+under one mutex in a fixed order: mark today handled, re-arm the next
+alarm, then read vault state, then post. Durable schedule bookkeeping
+therefore always precedes vault access, so an interruption after the vault
+read cannot lose the alarm, and a backward clock or date change cannot
+re-post a handled day. Content is computed by a single
+`computeTodayProjection(titlesPermitted = false)` call and carries counts
+only; it is posted on the digest's own `daily_digest` private-visibility
+channel with a generic public lock-screen version, so the channel can be
+disabled independently of reminders. Zero counts post nothing. Missing
+active vault state, permission denial, a disabled channel, and a
+notification `SecurityException` are handled for that day without retry,
+with the next alarm still armed.
+
+**(f) No title, network, permission, or backup expansion.** No Stage 8
+surface renders or transmits a task title outside the app process: the
+digest is counts-only, the widget's existing `titlesPermitted` gate is
+unchanged, and nothing new joins the Glance state file. Stage 8 adds no
+network request, Drive scope, provider object, runtime or manifest
+permission, Storage Access Framework flow, exported component, route, or
+dependency. Room remains v9 and the authenticated backup object format
+remains v1, with no new backup family, fixture, or exported schema, so the
+Stage 8 planning and digest state never enters an encrypted backup object
+or the portable package.
+
+Stage 8 is versioned 1.2.0 (`versionCode = 3`). Device and release
+qualification is recorded in `docs/qualification/stage8-planning-surfaces.md`
+and `docs/qualification/release-1.2.0-sideload.md`, where remote CI and the
+release tag remain pending. Stage 7's release waivers do not carry into
+Stage 8.
+```
+
 
 ## Security acceptance gates
 
@@ -332,7 +441,9 @@ Before production release:
 7. Retain reviewed GitHub Actions pins and review every update before CI gains
    secrets.
 8. Re-run every released database/crypto migration fixture, physical-device
-   notification privacy, and separate export, widget, attachment, and app-lock
-   privacy reviews.
+   notification privacy — including the daily digest's own channel
+   properties, its non-exported receiver scope, its delivery-intent
+   identity, and its private/public content split — and separate export,
+   widget, attachment, and app-lock privacy reviews.
 9. Complete Privacy Policy, OAuth verification, Play Data Safety, signing, and
    store operations outside the repository.
