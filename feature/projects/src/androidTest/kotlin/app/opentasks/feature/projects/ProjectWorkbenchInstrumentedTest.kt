@@ -495,6 +495,47 @@ class ProjectWorkbenchInstrumentedTest {
     }
 
     @Test
+    fun editorRowHidesLimitFieldForCompletedColumnsAndSavesOthers() {
+        val project = OpenTasksFixtures.studioProject
+        val saved = AtomicReference<Pair<WorkflowStatusId, Int?>?>()
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                ProjectsScreen(
+                    projects = OpenTasksFixtures.snapshot.projects,
+                    tasks = OpenTasksFixtures.snapshot.tasks,
+                    milestones = OpenTasksFixtures.snapshot.milestones,
+                    workflowStatuses = OpenTasksFixtures.snapshot.workflowStatuses,
+                    selectedProjectId = project.id,
+                    showDetailPane = false,
+                    onSelectProject = {},
+                    onCloseDetail = {},
+                    onUpdateProject = { _, _ -> },
+                    onArchiveProject = {},
+                    onSetWipLimit = { statusId, limit -> saved.set(statusId to limit) },
+                    onOpenTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("manage-workflow"))
+        composeRule.onNodeWithTag("manage-workflow").performClick()
+
+        composeRule.onNodeWithTag("workflow-wip-${OpenTasksFixtures.started.value}")
+            .performScrollTo()
+            .performTextReplacement("3")
+        closeSoftKeyboard()
+        composeRule.onNodeWithTag("save-workflow-wip-${OpenTasksFixtures.started.value}")
+            .performScrollTo()
+            .performClick()
+        assertEquals(OpenTasksFixtures.started to 3, saved.get())
+
+        composeRule.onNodeWithTag("workflow-wip-${OpenTasksFixtures.done.value}")
+            .assertDoesNotExist()
+    }
+
+    @Test
     fun milestoneEditorCreatesUpdatesAndDeletesProjectMilestones() {
         val project = OpenTasksFixtures.studioProject
         val milestone = OpenTasksFixtures.milestones.first { it.projectId == project.id }

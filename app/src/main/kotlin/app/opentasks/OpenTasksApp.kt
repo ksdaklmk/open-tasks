@@ -324,6 +324,7 @@ fun OpenTasksApp(
         val selectedTaskValue by viewModel.selectedTaskId.collectAsStateWithLifecycle()
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
+        val pendingWipMove by viewModel.pendingWipMove.collectAsStateWithLifecycle()
         val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
         val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
         val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
@@ -1441,9 +1442,9 @@ fun OpenTasksApp(
                                         }
                                     },
                                     onChangeTaskStatus = { taskId, statusId ->
-                                        viewModel.execute(
-                                            DomainCommand.ChangeTaskStatus(taskId, statusId),
-                                        )
+                                        snapshot.tasks.firstOrNull { it.id == taskId }?.let { task ->
+                                            viewModel.changeTaskStatus(task, statusId)
+                                        }
                                     },
                                     onDuplicateTask = { taskId ->
                                         viewModel.execute(DomainCommand.DuplicateTask(taskId))
@@ -1490,6 +1491,14 @@ fun OpenTasksApp(
                                     onRestoreWorkflowStatus = { statusId ->
                                         viewModel.execute(
                                             DomainCommand.RestoreArchivedWorkflowStatus(statusId),
+                                        )
+                                    },
+                                    onSetWipLimit = { statusId, limit ->
+                                        viewModel.execute(
+                                            DomainCommand.SetWorkflowStatusWipLimit(
+                                                statusId,
+                                                limit,
+                                            ),
                                         )
                                     },
                                     onCreateMilestone = { projectId, name, dueDate ->
@@ -1935,6 +1944,28 @@ fun OpenTasksApp(
                 dismissButton = {
                     TextButton(onClick = viewModel::dismissBlockedCompletion) {
                         Text("Keep open")
+                    }
+                },
+            )
+        }
+
+        pendingWipMove?.let { pending ->
+            val statusName = snapshot.workflowStatuses
+                .firstOrNull { it.id == pending.statusId }?.name.orEmpty()
+            AlertDialog(
+                onDismissRequest = viewModel::dismissWipMove,
+                title = { Text(stringResource(R.string.wip_confirm_title)) },
+                text = {
+                    Text(stringResource(R.string.wip_confirm_body, statusName))
+                },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmWipMove) {
+                        Text(stringResource(R.string.wip_confirm_move))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissWipMove) {
+                        Text(stringResource(R.string.wip_confirm_keep))
                     }
                 },
             )

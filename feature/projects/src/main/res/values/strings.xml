@@ -29,6 +29,10 @@
         <item quantity="other">%1$d open tasks</item>
     </plurals>
     <string name="board_no_open_tasks">No open tasks</string>
+    <string name="board_wip_count">%1$d / %2$d</string>
+    <string name="workflow_wip_label">Column limit</string>
+    <string name="workflow_wip_error">Limits run from 1 to 200</string>
+    <string name="workflow_wip_save">Save limit</string>
     <string name="board_move_task_description">Move %1$s to another stage</string>
     <string name="board_move_to_stage">Move %1$s to %2$s</string>
     <string name="board_duplicate_task">Duplicate</string>

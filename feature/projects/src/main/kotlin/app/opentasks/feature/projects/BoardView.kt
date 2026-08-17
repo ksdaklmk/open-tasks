@@ -167,14 +167,27 @@ fun BoardView(
                                 modifier = Modifier.semantics { heading() },
                                 style = MaterialTheme.typography.titleMedium,
                             )
+                            val limit = column.status.wipLimit
                             Text(
-                                pluralStringResource(
-                                    R.plurals.board_open_task_count,
-                                    column.tasks.size,
-                                    column.tasks.size,
-                                ),
+                                text = if (limit == null) {
+                                    pluralStringResource(
+                                        R.plurals.board_open_task_count,
+                                        column.tasks.size,
+                                        column.tasks.size,
+                                    )
+                                } else {
+                                    stringResource(
+                                        R.string.board_wip_count,
+                                        column.tasks.size,
+                                        limit,
+                                    )
+                                },
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (limit != null && column.tasks.size > limit) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

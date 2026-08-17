@@ -69,6 +69,11 @@ data class PendingBlockedCompletion(
     val requestedStatusId: WorkflowStatusId?,
 )
 
+data class PendingWipMove(
+    val task: Task,
+    val statusId: WorkflowStatusId,
+)
+
 data class DependencyFeedback(
     val taskId: TaskId,
     val message: String,
@@ -98,6 +103,7 @@ class WorkspaceViewModel @Inject constructor(
     private val projectViewState = WorkspaceProjectViewState(savedStateHandle)
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val pendingBlockedBulk = MutableStateFlow(false)
+    private val pendingWip = MutableStateFlow<PendingWipMove?>(null)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
     private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
@@ -137,6 +143,7 @@ class WorkspaceViewModel @Inject constructor(
     val viewArrangement: StateFlow<ViewArrangementState> = viewArrangementStore.state
 
     val pendingBlockedCompletion: StateFlow<PendingBlockedCompletion?> = pendingBlocked.asStateFlow()
+    val pendingWipMove: StateFlow<PendingWipMove?> = pendingWip.asStateFlow()
     val dependencyFeedback: StateFlow<DependencyFeedback?> =
         mutableDependencyFeedback.asStateFlow()
 
@@ -408,10 +415,12 @@ class WorkspaceViewModel @Inject constructor(
             ) {
                 is CommandResult.Success -> send(result)
                 is CommandResult.Rejected -> {
-                    if (result.reason == RejectionReason.BLOCKED_TASK_WARNING_REQUIRED) {
-                        pendingBlocked.value = PendingBlockedCompletion(task, statusId)
-                    } else {
-                        eventChannel.send(WorkspaceEvent.Message(result.message))
+                    when (result.reason) {
+                        RejectionReason.BLOCKED_TASK_WARNING_REQUIRED ->
+                            pendingBlocked.value = PendingBlockedCompletion(task, statusId)
+                        RejectionReason.WIP_LIMIT_CONFIRM_REQUIRED ->
+                            pendingWip.value = PendingWipMove(task, statusId)
+                        else -> eventChannel.send(WorkspaceEvent.Message(result.message))
                     }
                 }
             }
@@ -504,6 +513,22 @@ class WorkspaceViewModel @Inject constructor(
 
     fun dismissBlockedCompletion() {
         pendingBlocked.value = null
+    }
+
+    fun confirmWipMove() {
+        val pending = pendingWip.value ?: return
+        pendingWip.value = null
+        execute(
+            DomainCommand.ChangeTaskStatus(
+                taskId = pending.task.id,
+                statusId = pending.statusId,
+                acknowledgeWipLimit = true,
+            ),
+        )
+    }
+
+    fun dismissWipMove() {
+        pendingWip.value = null
     }
 
     /**

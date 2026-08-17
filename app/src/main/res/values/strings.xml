@@ -4,6 +4,10 @@
     <string name="bulk_blocked_body">Some selected tasks are still waiting on other work. Completing them keeps those links for review.</string>
     <string name="bulk_blocked_confirm">Complete anyway</string>
     <string name="bulk_blocked_dismiss">Keep open</string>
+    <string name="wip_confirm_title">Column is at its limit</string>
+    <string name="wip_confirm_body">“%1$s” already holds its planned number of open tasks. Move this one anyway?</string>
+    <string name="wip_confirm_move">Move anyway</string>
+    <string name="wip_confirm_keep">Keep it where it is</string>
     <string name="quick_add">Quick add</string>
     <string name="quick_add_shortcut">Capture a task</string>
     <string name="quick_add_date_suggestion">Due %1$s</string>

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
@@ -312,6 +313,30 @@ class BoardViewInstrumentedTest {
         assertTrue(previewBounds.right > boardBounds.right)
 
         composeRule.onRoot().performTouchInput { up() }
+    }
+
+    @Test
+    fun boardColumnHeaderShowsCountAgainstLimitAndOverLimitState() {
+        val column = BoardColumn(
+            status = OpenTasksFixtures.snapshot.workflowStatuses
+                .first {
+                    it.semanticStatus == SemanticStatus.STARTED &&
+                        it.projectId == OpenTasksFixtures.studioProject.id
+                }
+                .copy(wipLimit = 2),
+            tasks = OpenTasksFixtures.tasks.take(3),
+        )
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = listOf(column),
+                    columnWidth = 280.dp,
+                    onMoveTask = { _, _ -> },
+                    onOpenTask = { },
+                )
+            }
+        }
+        composeRule.onNodeWithText("3 / 2").assertIsDisplayed()
     }
 
     private fun columnsFor(task: Task): List<BoardColumn> =

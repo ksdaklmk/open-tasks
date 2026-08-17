@@ -88,6 +88,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
@@ -177,6 +178,7 @@ fun ProjectsScreen(
     onMoveWorkflowStatus: (WorkflowStatusId, WorkflowMove) -> Unit = { _, _ -> },
     onArchiveWorkflowStatus: (WorkflowStatusId) -> Unit = {},
     onRestoreWorkflowStatus: (WorkflowStatusId) -> Unit = {},
+    onSetWipLimit: (WorkflowStatusId, Int?) -> Unit = { _, _ -> },
     onCreateMilestone: (ProjectId, String, LocalDate?) -> Unit = { _, _, _ -> },
     onUpdateMilestone: (MilestoneId, String, LocalDate?, Instant?) -> Unit =
         { _, _, _, _ -> },
@@ -233,6 +235,7 @@ fun ProjectsScreen(
             onMoveWorkflowStatus = onMoveWorkflowStatus,
             onArchiveWorkflowStatus = onArchiveWorkflowStatus,
             onRestoreWorkflowStatus = onRestoreWorkflowStatus,
+            onSetWipLimit = onSetWipLimit,
             onCreateMilestone = onCreateMilestone,
             onUpdateMilestone = onUpdateMilestone,
             onDeleteMilestone = onDeleteMilestone,
@@ -312,6 +315,7 @@ fun ProjectsScreen(
                     onMoveWorkflowStatus = onMoveWorkflowStatus,
                     onArchiveWorkflowStatus = onArchiveWorkflowStatus,
                     onRestoreWorkflowStatus = onRestoreWorkflowStatus,
+                    onSetWipLimit = onSetWipLimit,
                     onCreateMilestone = onCreateMilestone,
                     onUpdateMilestone = onUpdateMilestone,
                     onDeleteMilestone = onDeleteMilestone,
@@ -456,6 +460,7 @@ private fun ProjectWorkbench(
     onMoveWorkflowStatus: (WorkflowStatusId, WorkflowMove) -> Unit,
     onArchiveWorkflowStatus: (WorkflowStatusId) -> Unit,
     onRestoreWorkflowStatus: (WorkflowStatusId) -> Unit,
+    onSetWipLimit: (WorkflowStatusId, Int?) -> Unit,
     onCreateMilestone: (ProjectId, String, LocalDate?) -> Unit,
     onUpdateMilestone: (MilestoneId, String, LocalDate?, Instant?) -> Unit,
     onDeleteMilestone: (MilestoneId) -> Unit,
@@ -977,6 +982,7 @@ private fun ProjectWorkbench(
             onMove = onMoveWorkflowStatus,
             onArchive = onArchiveWorkflowStatus,
             onRestore = onRestoreWorkflowStatus,
+            onSetWipLimit = onSetWipLimit,
         )
     }
 
@@ -1546,6 +1552,7 @@ private fun WorkflowEditorSheet(
     onMove: (WorkflowStatusId, WorkflowMove) -> Unit,
     onArchive: (WorkflowStatusId) -> Unit,
     onRestore: (WorkflowStatusId) -> Unit,
+    onSetWipLimit: (WorkflowStatusId, Int?) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val activeStatuses = statuses
@@ -1604,6 +1611,7 @@ private fun WorkflowEditorSheet(
                     onRename = onRename,
                     onMove = onMove,
                     onArchive = { pendingArchiveId = status.id.value },
+                    onSetWipLimit = onSetWipLimit,
                 )
                 if (index < activeStatuses.lastIndex) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1765,6 +1773,7 @@ private fun WorkflowStatusEditorRow(
     onRename: (WorkflowStatusId, String) -> Unit,
     onMove: (WorkflowStatusId, WorkflowMove) -> Unit,
     onArchive: () -> Unit,
+    onSetWipLimit: (WorkflowStatusId, Int?) -> Unit,
 ) {
     var name by rememberSaveable(status.id.value) { mutableStateOf(status.name) }
     LaunchedEffect(status.name) {
@@ -1772,6 +1781,14 @@ private fun WorkflowStatusEditorRow(
     }
     val trimmedName = name.trim()
     val invalid = trimmedName.isEmpty() || name.length > MAX_WORKFLOW_STATUS_NAME_LENGTH
+    var wipText by rememberSaveable(status.id.value) {
+        mutableStateOf(status.wipLimit?.toString().orEmpty())
+    }
+    val trimmedWip = wipText.trim()
+    val wipBlank = trimmedWip.isEmpty()
+    val parsedWip = trimmedWip.toIntOrNull()
+    val wipInvalid = !wipBlank && (parsedWip == null || parsedWip !in 1..200)
+    val wipValue = if (wipBlank) null else parsedWip
 
     Column(
         modifier = Modifier
@@ -1838,6 +1855,40 @@ private fun WorkflowStatusEditorRow(
                     .testTag("archive-workflow-${status.id.value}"),
             ) {
                 Icon(Icons.Rounded.Archive, contentDescription = "Archive ${status.name}")
+            }
+        }
+        if (status.semanticStatus != SemanticStatus.COMPLETED) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+            ) {
+                OutlinedTextField(
+                    value = wipText,
+                    onValueChange = { wipText = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("workflow-wip-${status.id.value}"),
+                    label = { Text(stringResource(R.string.workflow_wip_label)) },
+                    singleLine = true,
+                    isError = wipInvalid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = if (wipInvalid) {
+                        { Text(stringResource(R.string.workflow_wip_error)) }
+                    } else {
+                        null
+                    },
+                )
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = { onSetWipLimit(status.id, wipValue) },
+                    enabled = !wipInvalid && wipValue != status.wipLimit,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("save-workflow-wip-${status.id.value}"),
+                ) {
+                    Text(stringResource(R.string.workflow_wip_save))
+                }
             }
         }
     }
