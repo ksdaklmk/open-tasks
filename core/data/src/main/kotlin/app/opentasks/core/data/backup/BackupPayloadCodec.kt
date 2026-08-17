@@ -484,6 +484,11 @@ private fun validateTaskChildren(
             require(projects.containsKey(projectId)) { "Activity project does not exist" }
         }
     }
+    recordsByFamily.getValue(BackupRecordFamily.MY_DAY).forEach { entry ->
+        require(tasks.containsKey(entry.requiredValue("taskId"))) {
+            "My Day task does not exist"
+        }
+    }
 }
 
 private fun validateDependencies(

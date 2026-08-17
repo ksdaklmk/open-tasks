@@ -5,6 +5,7 @@ import app.opentasks.core.data.db.AttachmentEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -269,6 +270,24 @@ class BackupSnapshotCodecTest {
             "vault-alpha",
             BackupSnapshotCodec.decode(BackupSnapshotCodec.encode(payload)).vaultId,
         )
+    }
+
+    @Test
+    fun myDayRecordRequiresItsTaskToExistInTheSnapshot() {
+        val original = BackupPayloadTestFixtures.snapshot()
+        val forExistingTask = MyDayEntryEntity(taskId = "task-1", rank = "a0").toBackupRecordV1()
+        val forMissingTask = MyDayEntryEntity(taskId = "task-ghost", rank = "a0").toBackupRecordV1()
+
+        val valid = original.copy(records = original.records + forExistingTask)
+        assertEquals(
+            "vault-alpha",
+            BackupSnapshotCodec.decode(BackupSnapshotCodec.encode(valid)).vaultId,
+        )
+
+        val invalid = original.copy(records = original.records + forMissingTask)
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupSnapshotCodec.encode(invalid)
+        }
     }
 
     @Test
