@@ -135,14 +135,12 @@ test-source edit.
   a `libs.versions.toml` or workflow edit, so merging any of them before the
   tag restarts the qualification chain. Merge them as one batch afterwards.
 - After the tag, the ordered remaining work is Stage 9 (the single Room v10
-  wave) and then repository-wide Unicode tag-identity hardening. **Stage 9 may
-  be started before the tag, but only as far as documentation.** It has no
-  detailed design or plan yet, so its first three phases — brainstorming, the
-  design spec, and the implementation plan — touch only
-  `docs/superpowers/specs/` and `docs/superpowers/plans/` and do not trip the
-  invariant. Do that work on a `stage-9` branch so `main` stays pinned at the
-  candidate; a branch push triggers no CI under the current triggers.
-  Stage 9 *implementation* waits for `v1.2.0`.
+  wave) and then repository-wide Unicode tag-identity hardening. **Stage 9's
+  documentation phases are complete on the `stage-9` branch** (see the
+  "Stage 9 planned" checkpoint below): brainstorm rulings, the approved
+  design spec, and the reviewed implementation plan, all docs-only, with
+  `main` still pinned at the candidate. Stage 9 *implementation* waits for
+  `v1.2.0`; the chosen execution mode is subagent-driven development.
 - Preserve the unrelated user state exactly: modified
   `docs/superpowers/plans/2026-07-30-stage-3-google-drive-backup-recovery-plan.md`,
   deleted
@@ -150,6 +148,48 @@ test-source edit.
   untracked `.kotlin/` plus `artifacts/`. The detailed execution ledger is the
   ignored
   `.superpowers/sdd/2026-08-14-stage-8-planning-surfaces-plan/progress.md`.
+
+## Stage 9 planned — spec and implementation plan on `stage-9` — 17 August 2026
+
+Stage 9 (board flow and automation, the single Room v10 wave) finished
+its three documentation phases on the `stage-9` branch, cut from the
+checkpoint commit so `main` stays pinned at the release candidate. Both
+documents are user-approved:
+
+- Spec (`a83b95c`):
+  `docs/superpowers/specs/2026-08-17-stage-9-board-flow-automation-design.md`.
+  Brainstorm rulings recorded there: rule menu trimmed to three
+  (auto-remove completed from My Day; on-enter add-tag / add-to-My-Day /
+  set-due; stale marking), stale as a pure projection with no write,
+  My Day persistent with dimmed completed and a rollover sweep,
+  Home's Today-focus replaced by My Day, subtasks one level deep with
+  confirm-on-parent-completion and subtree binning, rule evaluation
+  repository-internal in the trigger's transaction and generation, and
+  dual-arity WORKFLOW_STATUS records inside backup format v1.
+- Plan (`8a90458`):
+  `docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`.
+  Seventeen tasks: Tasks 1–5 are the v10 wave (migration with a stamped
+  row marker, dual-arity amendment, `AUTOMATION_RULE` and `MY_DAY`
+  families appended after `TOMBSTONE`, My Day and rule commands in both
+  engines), then WIP limits, subtasks, My Day surfaces, engine plus
+  stale plus editor, and qualification ending in sideload release
+  1.3.0. A verification pass against the live code fixed two critical
+  drafting defects before commit: the migration byte-capture must read
+  `workflow_statuses` with explicit v9 columns (the `SELECT *` helper
+  cannot byte-match across `ADD COLUMN`), and the engine's composed
+  undo must flatten a trigger `UndoBatch` and extend
+  `rejectUndoCommand` (which fails closed on unknown undo shapes) with
+  `RemoveTaskFromMyDay`.
+
+**Execution decision (user, 17 August): subagent-driven development** —
+fresh implementer subagent per task with independent review between
+tasks; implementers must not spawn further subagents.
+
+The plan's start gate governs the resume: tag `v1.2.0` first (billing
+lock above), merge Dependabot #14–#19 with green checks, merge
+`stage-9` into `main`, record the audit base SHA in the plan's ignored
+ledger, then dispatch Task 1 via superpowers:subagent-driven-development.
+Until that gate clears, no production, build, or test-source edit.
 
 ## Superseded checkpoint — reviews and host gates green, one connected failure open, 16 August 2026
 
