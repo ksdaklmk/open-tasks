@@ -59,6 +59,24 @@ object SubtaskRules {
         }
 }
 
+/**
+ * Orders a bin batch's undo so that within any subtree the parent's
+ * [DomainCommand.RestoreTask] precedes its children's, regardless of the
+ * caller's original ordering. Depth is exactly one level, so a single
+ * partition on "is this task's own parent also being restored" is enough --
+ * no topological sort needed. A child replayed while its parent is still
+ * binned would otherwise self-detach (the Task 9 restore rule). Shared by
+ * both engines' `deleteTasks` bulk handler; pure `List<Task>` in,
+ * `List<DomainCommand>` out, no storage dependency.
+ */
+fun parentFirstRestoreInverses(deleting: List<Task>): List<DomainCommand> {
+    val deletingIds = deleting.mapTo(hashSetOf(), Task::id)
+    val (childrenInSet, everythingElse) = deleting.partition {
+        it.parentTaskId != null && it.parentTaskId in deletingIds
+    }
+    return (everythingElse + childrenInSet).map { DomainCommand.RestoreTask(it.id) }
+}
+
 /** Shared inline-feedback text for a [SubtaskViolation], identical in both engines. */
 fun subtaskViolationMessage(violation: SubtaskViolation): String = when (violation) {
     SubtaskViolation.SELF -> "A task cannot be its own subtask."

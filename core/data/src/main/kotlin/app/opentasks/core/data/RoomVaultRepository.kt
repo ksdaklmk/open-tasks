@@ -55,6 +55,7 @@ import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ProjectTemplatePlanner
 import app.opentasks.core.domain.myDayRankBetween
 import app.opentasks.core.domain.myDayRankForIndex
+import app.opentasks.core.domain.parentFirstRestoreInverses
 import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.SubtaskRules
@@ -1972,17 +1973,7 @@ class RoomVaultRepository(
                 at = command.deletedAt,
             )
         }
-        // Per subtree the parent's inverse must precede its children's: a
-        // child replayed while its parent is still binned would self-detach
-        // (the Task 9 restore rule). Depth is exactly one level, so a single
-        // partition on "is this child's own parent also in this batch" is
-        // enough -- no topological sort needed.
-        val (childrenInSet, everythingElse) = deleting.partition {
-            it.parentTaskId != null && it.parentTaskId in deletingIds
-        }
-        val inverses = (everythingElse + childrenInSet).map<Task, DomainCommand> { task ->
-            DomainCommand.RestoreTask(task.id)
-        }
+        val inverses = parentFirstRestoreInverses(deleting)
         return CommandResult.Success(
             message = "${bulkTasksLabel(deleting.size)} moved to the Bin",
             undo = DomainCommand.UndoBatch(inverses)
@@ -2396,14 +2387,22 @@ class RoomVaultRepository(
                 at = command.deletedAt,
             )
         }
-        // UndoBatch replays in list order: parent first, then children, so no
-        // child ever restores under a still-binned parent and self-detaches.
-        val inverses: List<DomainCommand> =
-            listOf(DomainCommand.RestoreTask(task.id)) +
-                children.map { DomainCommand.RestoreTask(TaskId(it.id)) }
         return CommandResult.Success(
             message = "Task moved to the Bin",
-            undo = DomainCommand.UndoBatch(inverses),
+            undo = if (children.isEmpty()) {
+                // No subtree: keep the plain single-command undo shape and
+                // its "Task restored" message for the common, high-frequency
+                // childless delete.
+                DomainCommand.RestoreTask(task.id)
+            } else {
+                // UndoBatch replays in list order: parent first, then
+                // children, so no child ever restores under a still-binned
+                // parent and self-detaches.
+                DomainCommand.UndoBatch(
+                    listOf(DomainCommand.RestoreTask(task.id)) +
+                        children.map { DomainCommand.RestoreTask(TaskId(it.id)) },
+                )
+            },
         )
     }
 
@@ -2413,11 +2412,18 @@ class RoomVaultRepository(
         val deletedAt = task.deletedAt ?: return CommandResult.Success("Task is already restored")
         // A live parent restores its subtree via the parent-first UndoBatch;
         // a still-binned (or already-purged) parent means this child would
-        // otherwise pop back up attached to an invisible parent, so detach
-        // it explicitly in this same write.
+        // otherwise pop back up attached to an invisible parent, and a live
+        // parent that moved to another project while the child was binned
+        // (liveChildren excludes binned rows, so it moves without the child)
+        // would leave a cross-project link -- SubtaskRules.CROSS_PROJECT --
+        // so detach in either case, explicitly, in this same write.
         val parentId = task.parentTaskId
         val parent = parentId?.let { database.taskDao().getById(it.value) }
-        val detach = parentId != null && (parent == null || parent.deletedAtEpochMillis != null)
+        val detach = parentId != null && (
+            parent == null ||
+                parent.deletedAtEpochMillis != null ||
+                parent.projectId != task.projectId?.value
+            )
         persistTask(
             task.copy(
                 deletedAt = null,

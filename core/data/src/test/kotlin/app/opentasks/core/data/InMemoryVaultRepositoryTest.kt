@@ -2257,6 +2257,83 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun restoringABinnedChildDetachesFromAParentThatMovedToAnotherProject() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val destination = OpenTasksFixtures.taxProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+            // Bin the child alone, then move the parent to another project.
+            // liveChildren excludes the already-binned child, so the parent
+            // moves without it and without detaching (it has no parent of
+            // its own).
+            repository.execute(DomainCommand.DeleteTask(child.id))
+            repository.execute(
+                DomainCommand.MoveTasksToProject(listOf(parent.id), destination.id),
+            )
+
+            // Restoring the child must detach it: its parent is live, but no
+            // longer in the same project.
+            repository.execute(DomainCommand.RestoreTask(child.id))
+            val restored = repository.currentWorkspace().tasks.first { it.id == child.id }
+            assertNull(restored.deletedAt)
+            assertNull(restored.parentTaskId)
+            assertEquals(project.id, restored.projectId)
+        }
+    }
+
+    @Test
+    fun bulkDeleteRestoresParentBeforeChildRegardlessOfListedOrder() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+            // Child listed first -- the case the parent-first partition
+            // exists for.
+            val deleted = repository.execute(
+                DomainCommand.DeleteTasks(listOf(child.id, parent.id)),
+            )
+            assertTrue(deleted is CommandResult.Success)
+            val afterDelete = repository.currentWorkspace().tasks
+            assertNotNull(afterDelete.first { it.id == parent.id }.deletedAt)
+            assertNotNull(afterDelete.first { it.id == child.id }.deletedAt)
+
+            repository.execute(requireNotNull((deleted as CommandResult.Success).undo))
+            val restored = repository.currentWorkspace().tasks
+            assertNull(restored.first { it.id == parent.id }.deletedAt)
+            assertNull(restored.first { it.id == child.id }.deletedAt)
+            assertEquals(parent.id, restored.first { it.id == child.id }.parentTaskId)
+        }
+    }
+
+    @Test
+    fun deletingAChildlessTaskKeepsThePlainRestoreUndoAndMessage() = runBlocking {
+        withTimeout(5_000) {
+            val task = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+            val result = repository.execute(DomainCommand.DeleteTask(task.id))
+                as CommandResult.Success
+            assertEquals(DomainCommand.RestoreTask(task.id), result.undo)
+
+            val undone = repository.execute(requireNotNull(result.undo)) as CommandResult.Success
+            assertEquals("Task restored", undone.message)
+        }
+    }
+
+    @Test
     fun createTaskWithParentInheritsProjectAndValidates() = runBlocking {
         withTimeout(5_000) {
             val repository = InMemoryVaultRepository()
