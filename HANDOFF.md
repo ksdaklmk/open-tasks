@@ -67,9 +67,12 @@ gate-green but has NOT been reviewed.**
    is load-bearing: it wires the confirm dialogs for
    `OPEN_SUBTASKS_CONFIRM_REQUIRED`, which Task 9 made reachable but
    which **no product surface can currently satisfy** — completing a
-   parent with open subtasks is a dead-end toast from Tasks, Board, the
-   widget and reminder actions until Task 11 lands. The stage must not
-   ship before it does.
+   parent with open subtasks is a dead end from Tasks, Board, the widget
+   and reminder actions until Task 11 lands. The stage must not ship
+   before it does. Note Task 11 closes the **in-app** dead end only; the
+   widget and reminder paths keep degrading silently, which is ruled
+   by-design because neither has ever surfaced any rejection (see the
+   ledger for the verified precedent).
 4. Carry the ledger's live carry-forward notes into their dispatches:
    the codec-authority note into Task 14; `AutomationEngine.kt` already
    EXISTS so Task 14 modifies rather than creates it; and the
