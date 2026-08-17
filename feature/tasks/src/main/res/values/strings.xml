@@ -84,4 +84,7 @@
     <string name="subtask_attach_existing">Attach existing</string>
     <string name="subtask_detach_description">Remove %1$s as a subtask</string>
     <string name="subtask_parent_breadcrumb">Subtask of “%1$s”</string>
+    <string name="subtask_complete_action">Complete %1$s</string>
+    <string name="subtask_reopen_action">Reopen %1$s</string>
+    <string name="subtask_open_action">Open %1$s</string>
 </resources>

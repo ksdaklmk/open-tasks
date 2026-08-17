@@ -640,7 +640,7 @@ fun OpenTasksApp(
         // attach candidates, per `SubtaskRules` -- neither rule is
         // re-derived here. `parentOfTask` is the resolved parent record when
         // the selected task is itself a subtask.
-        val selectedSubtasks = remember(snapshot.tasks, selectedTask) {
+        val selectedSubtasks = remember(snapshot.tasks, selectedTask, tasksArrangement) {
             selectedTask?.let { task ->
                 snapshot.tasks
                     .filter { it.parentTaskId == task.id && it.deletedAt == null }

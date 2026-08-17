@@ -3599,9 +3599,9 @@ private fun SubtasksSection(
                             Icons.Rounded.Check
                         },
                         contentDescription = if (child.isCompleted) {
-                            "Reopen ${child.title}"
+                            stringResource(R.string.subtask_reopen_action, child.title)
                         } else {
-                            "Complete ${child.title}"
+                            stringResource(R.string.subtask_complete_action, child.title)
                         },
                         tint = if (child.isCompleted) {
                             MaterialTheme.colorScheme.tertiary
@@ -3616,7 +3616,10 @@ private fun SubtasksSection(
                         .weight(1f)
                         .clickable(
                             role = Role.Button,
-                            onClickLabel = "Open ${child.title}",
+                            onClickLabel = stringResource(
+                                R.string.subtask_open_action,
+                                child.title,
+                            ),
                             onClick = { onOpenSubtask(child.id) },
                         )
                         .padding(vertical = 12.dp),
