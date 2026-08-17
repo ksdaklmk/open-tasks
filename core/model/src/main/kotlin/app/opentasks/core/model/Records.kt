@@ -350,3 +350,5 @@ data class AutomationRule(
 )
 
 data class MyDayEntry(val taskId: TaskId, val rank: String)
+
+data class SubtaskRollup(val completed: Int, val total: Int)

@@ -2021,6 +2021,67 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun setTaskParentGuardsAttachDetachAndUndo() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null && it.parentTaskId == null
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            val other = candidates[2]
+
+            val attached = repository.execute(
+                DomainCommand.SetTaskParent(child.id, parent.id),
+            )
+            assertTrue(attached is CommandResult.Success)
+            assertEquals(
+                parent.id,
+                repository.currentWorkspace().tasks
+                    .first { it.id == child.id }.parentTaskId,
+            )
+
+            // One level: the child cannot become a parent, and the parent
+            // cannot become someone's child.
+            assertEquals(
+                RejectionReason.SUBTASK_PARENT_INVALID,
+                (repository.execute(DomainCommand.SetTaskParent(other.id, child.id))
+                    as CommandResult.Rejected).reason,
+            )
+            assertEquals(
+                RejectionReason.SUBTASK_PARENT_INVALID,
+                (repository.execute(DomainCommand.SetTaskParent(parent.id, other.id))
+                    as CommandResult.Rejected).reason,
+            )
+
+            // Undo restores the previous (null) parent.
+            repository.execute(requireNotNull((attached as CommandResult.Success).undo))
+            assertNull(
+                repository.currentWorkspace().tasks
+                    .first { it.id == child.id }.parentTaskId,
+            )
+        }
+    }
+
+    @Test
+    fun createTaskWithParentInheritsProjectAndValidates() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val parent = repository.currentWorkspace().tasks.first {
+                it.projectId != null && it.deletedAt == null && it.parentTaskId == null
+            }
+            val created = repository.execute(
+                DomainCommand.CreateTask(title = "Subtask", parentTaskId = parent.id),
+            )
+            assertTrue(created is CommandResult.Success)
+            val child = repository.currentWorkspace().tasks.first { it.title == "Subtask" }
+            assertEquals(parent.id, child.parentTaskId)
+            assertEquals(parent.projectId, child.projectId)
+        }
+    }
+
+    @Test
     fun projectTemplateCaptureInstantiationAndDeleteUndoPreserveReusableStructure() = runBlocking {
         val sourceProject = OpenTasksFixtures.snapshot.projects.first()
         val templateId = TemplateId("template-client")

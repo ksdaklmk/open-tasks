@@ -209,6 +209,7 @@ sealed interface DomainCommand {
         val tagNames: List<String> = emptyList(),
         val estimate: Duration? = null,
         val recurrence: RecurrenceRule? = null,
+        val parentTaskId: TaskId? = null,
     ) : DomainCommand
 
     data class DuplicateTask(val taskId: TaskId) : DomainCommand
@@ -293,6 +294,11 @@ sealed interface DomainCommand {
         val taskId: TaskId,
         val dependsOnTaskId: TaskId,
         val present: Boolean,
+    ) : DomainCommand
+
+    data class SetTaskParent(
+        val taskId: TaskId,
+        val parentTaskId: TaskId?,
     ) : DomainCommand
 
     data class ChangeTaskStatus(
@@ -588,6 +594,7 @@ enum class RejectionReason {
     AUTOMATION_RULE_INVALID,
     WIP_LIMIT_CONFIRM_REQUIRED,
     WIP_LIMIT_INVALID,
+    SUBTASK_PARENT_INVALID,
 }
 
 interface VaultRepository {

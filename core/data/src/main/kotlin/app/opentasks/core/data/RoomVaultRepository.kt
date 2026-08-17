@@ -57,6 +57,9 @@ import app.opentasks.core.domain.myDayRankBetween
 import app.opentasks.core.domain.myDayRankForIndex
 import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
+import app.opentasks.core.domain.SubtaskRules
+import app.opentasks.core.domain.SubtaskViolation
+import app.opentasks.core.domain.subtaskViolationMessage
 import app.opentasks.core.domain.toCommandRejection
 import app.opentasks.core.domain.TrashPolicy
 import app.opentasks.core.domain.TimerRules
@@ -261,6 +264,7 @@ class RoomVaultRepository(
                 is DomainCommand.SetTaskTag -> setTaskTag(command)
                 is DomainCommand.CreateAndAssignTag -> createAndAssignTag(command)
                 is DomainCommand.SetTaskDependency -> setTaskDependency(command)
+                is DomainCommand.SetTaskParent -> setTaskParent(command)
                 is DomainCommand.ChangeTaskStatus -> changeTaskStatus(command)
                 is DomainCommand.RestoreTaskStatus -> restoreTaskStatus(command)
                 is DomainCommand.CompleteTask -> completeTask(command)
@@ -1351,7 +1355,30 @@ class RoomVaultRepository(
     }
 
     private suspend fun createTask(command: DomainCommand.CreateTask): CommandResult {
-        command.projectId?.let { projectId ->
+        var effectiveProjectId = command.projectId
+        val parentTaskId = command.parentTaskId
+        if (parentTaskId != null) {
+            val parentTask = currentTask(parentTaskId)
+                ?: return CommandResult.Rejected(
+                    RejectionReason.NOT_FOUND,
+                    "That parent task no longer exists.",
+                )
+            val violation = SubtaskRules.parentViolation(
+                tasks = mutableWorkspace.value.tasks,
+                // The new task has no id in the snapshot yet, so only
+                // PARENT_MISSING_OR_BINNED and PARENT_IS_A_SUBTASK can fire.
+                taskId = TaskId(""),
+                parentTaskId = parentTaskId,
+            )
+            if (violation != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(violation),
+                )
+            }
+            effectiveProjectId = parentTask.projectId
+        }
+        effectiveProjectId?.let { projectId ->
             val project = database.workspaceDao().getProjectById(projectId.value)
             if (project == null || project.archivedAtEpochMillis != null) {
                 return CommandResult.Rejected(
@@ -1361,7 +1388,7 @@ class RoomVaultRepository(
             }
         }
         val initialStatus = database.workspaceDao()
-            .getWorkflowStatuses(command.projectId?.value)
+            .getWorkflowStatuses(effectiveProjectId?.value)
             .firstOrNull {
                 it.semanticStatus == SemanticStatus.BACKLOG.name &&
                     it.archivedAtEpochMillis == null
@@ -1444,7 +1471,8 @@ class RoomVaultRepository(
         val base = Task(
             id = taskId,
             workspaceId = OpenTasksFixtures.workspaceId,
-            projectId = command.projectId,
+            projectId = effectiveProjectId,
+            parentTaskId = parentTaskId,
             statusId = initialStatus.id,
             semanticStatus = initialStatus.semanticStatus,
             title = title,
@@ -3065,6 +3093,45 @@ class RoomVaultRepository(
         return CommandResult.Success(
             message = if (command.present) "Dependency added" else "Dependency removed",
             undo = command.copy(present = !command.present),
+        )
+    }
+
+    private suspend fun setTaskParent(command: DomainCommand.SetTaskParent): CommandResult {
+        val task = currentTask(command.taskId)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        if (task.parentTaskId == command.parentTaskId) {
+            return CommandResult.Success("Subtask link is unchanged")
+        }
+        val parentId = command.parentTaskId
+        if (parentId != null) {
+            val violation = SubtaskRules.parentViolation(
+                tasks = mutableWorkspace.value.tasks,
+                taskId = task.id,
+                parentTaskId = parentId,
+            )
+            if (violation != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(violation),
+                )
+            }
+            // The snapshot can lag the live row inside this transaction, so
+            // re-verify the parent still exists and isn't binned directly.
+            val liveParent = database.taskDao().getById(parentId.value)
+            if (liveParent == null || liveParent.deletedAtEpochMillis != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(SubtaskViolation.PARENT_MISSING_OR_BINNED),
+                )
+            }
+        }
+        persistTask(
+            task.copy(parentTaskId = parentId, revision = nextRevision(task)),
+            "parent",
+        )
+        return CommandResult.Success(
+            message = if (parentId == null) "Subtask detached" else "Subtask attached",
+            undo = DomainCommand.SetTaskParent(task.id, task.parentTaskId),
         )
     }
 

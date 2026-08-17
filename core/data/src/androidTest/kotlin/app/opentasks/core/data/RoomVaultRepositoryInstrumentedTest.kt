@@ -2710,6 +2710,76 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun setTaskParentGuardsAttachDetachAndUndo() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
+        val project = OpenTasksFixtures.studioProject
+        val candidates = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count {
+                    it.projectId == project.id && it.deletedAt == null && it.parentTaskId == null
+                } >= 3
+            }.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null && it.parentTaskId == null
+            }
+        }
+        val parent = candidates[0]
+        val child = candidates[1]
+        val other = candidates[2]
+
+        val attached = repository!!.execute(
+            DomainCommand.SetTaskParent(child.id, parent.id),
+        )
+        assertTrue(attached is CommandResult.Success)
+        val afterAttach = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.parentTaskId == parent.id
+            }
+        }
+        assertEquals(parent.id, afterAttach.tasks.first { it.id == child.id }.parentTaskId)
+
+        // One level: the child cannot become a parent, and the parent
+        // cannot become someone's child.
+        assertEquals(
+            RejectionReason.SUBTASK_PARENT_INVALID,
+            (repository!!.execute(DomainCommand.SetTaskParent(other.id, child.id))
+                as CommandResult.Rejected).reason,
+        )
+        assertEquals(
+            RejectionReason.SUBTASK_PARENT_INVALID,
+            (repository!!.execute(DomainCommand.SetTaskParent(parent.id, other.id))
+                as CommandResult.Rejected).reason,
+        )
+
+        // Undo restores the previous (null) parent.
+        repository!!.execute(requireNotNull((attached as CommandResult.Success).undo))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.parentTaskId == null
+            }
+        }
+        Unit
+    }
+
+    @Test
+    fun createTaskWithParentInheritsProjectAndValidates() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
+        val parent = repository!!.currentWorkspace().tasks.first {
+            it.projectId != null && it.deletedAt == null && it.parentTaskId == null
+        }
+        val created = repository!!.execute(
+            DomainCommand.CreateTask(title = "Subtask", parentTaskId = parent.id),
+        )
+        assertTrue(created is CommandResult.Success)
+        val child = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Subtask" }
+            }.tasks.first { it.title == "Subtask" }
+        }
+        assertEquals(parent.id, child.parentTaskId)
+        assertEquals(parent.projectId, child.projectId)
+    }
+
+    @Test
     fun taskEditBootstrapsStateAndCommitsOneGenerationAtomically() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-29T10:00:00Z") })
         val task = repository!!.currentWorkspace().tasks.first()
