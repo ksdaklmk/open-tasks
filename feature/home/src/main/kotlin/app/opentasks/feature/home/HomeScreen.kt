@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,9 +16,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,19 +29,37 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import app.opentasks.core.designsystem.OpenTasksColors
 import app.opentasks.core.designsystem.ProjectProgressRow
+import app.opentasks.core.designsystem.RootDragPreview
+import app.opentasks.core.designsystem.RootDragState
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.designsystem.TaskRow
+import app.opentasks.core.designsystem.dragTargetAt
+import app.opentasks.core.designsystem.rootLongPressDragSource
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.ProjectId
@@ -59,95 +81,275 @@ fun HomeScreen(
     insightsSummary: InsightsSnapshot,
     onOpenInsights: () -> Unit,
     onToggleTimer: () -> Unit,
+    onRemoveFromMyDay: (TaskId) -> Unit,
+    onMoveMyDayEntry: (taskId: TaskId, afterTaskId: TaskId?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 16.dp,
-            top = 12.dp,
-            end = 16.dp,
-            bottom = 112.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item {
-            HomeHeader(snapshot, onOpenSearch)
-        }
+    val myDayRowBounds = remember { mutableStateMapOf<TaskId, Rect>() }
+    var myDayBounds by remember { mutableStateOf(Rect.Zero) }
+    var myDayDrag by remember { mutableStateOf<RootDragState<Task>?>(null) }
+    val currentOnMoveMyDayEntry by rememberUpdatedState(onMoveMyDayEntry)
 
-        item {
-            Spacer(Modifier.height(16.dp))
-            SectionHeader(
-                title = "Today focus",
-                supportingText = snapshot.overdueCount
-                    .takeIf { it > 0 }
-                    ?.let { count ->
-                        "$count overdue ${if (count == 1) "item" else "items"}"
-                    },
-                action = {
-                    TextButton(onClick = onPlanToday) {
-                        Text("Plan")
-                    }
-                },
-            )
-        }
+    fun myDayDropTarget(drag: RootDragState<Task>): TaskId? = dragTargetAt(
+        positionInRoot = drag.positionInRoot,
+        targets = snapshot.myDayTasks.map { it.id },
+        bounds = myDayRowBounds,
+        eligible = { it != drag.payload.id },
+    )
 
-        items(snapshot.focusTasks, key = { it.id.value }) { task ->
-            TaskRow(
-                task = task,
-                projectName = projectNames[task.projectId] ?: "Inbox",
-                selected = false,
-                onSelect = { onOpenTask(task.id) },
-                onComplete = { onCompleteTask(task) },
-            )
+    fun finishMyDayDrag() {
+        val drag = myDayDrag
+        val target = drag?.let(::myDayDropTarget)
+        if (drag != null && target != null) {
+            val hoveredIndex = snapshot.myDayTasks.indexOfFirst { it.id == target }
+            val afterTaskId = snapshot.myDayTasks.getOrNull(hoveredIndex - 1)?.id
+            currentOnMoveMyDayEntry(drag.payload.id, afterTaskId)
         }
+        myDayDrag = null
+    }
 
-        snapshot.activeTimer?.let { timer ->
+    Box(modifier = modifier.onGloballyPositioned { myDayBounds = it.boundsInRoot() }) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = 16.dp,
+                top = 12.dp,
+                end = 16.dp,
+                bottom = 112.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                HomeHeader(snapshot, onOpenSearch)
+            }
+
             item {
                 Spacer(Modifier.height(16.dp))
-                ActiveTimer(
-                    title = timer.taskTitle,
-                    project = timer.projectName,
-                    elapsed = buildString {
-                        append("%02d".format(timer.elapsed.toHours()))
-                        append(':')
-                        append("%02d".format(timer.elapsed.toMinutesPart()))
-                        append(':')
-                        append("%02d".format(timer.elapsed.toSecondsPart()))
+                SectionHeader(
+                    title = stringResource(R.string.my_day_heading),
+                    supportingText = snapshot.overdueCount
+                        .takeIf { it > 0 }
+                        ?.let { count ->
+                            pluralStringResource(R.plurals.my_day_overdue, count, count)
+                        },
+                    action = {
+                        TextButton(onClick = onPlanToday) {
+                            Text(stringResource(R.string.my_day_plan))
+                        }
                     },
-                    onToggle = onToggleTimer,
                 )
             }
-        }
+            if (snapshot.myDayTasks.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.my_day_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("my-day-empty"),
+                    )
+                }
+            }
+            items(snapshot.myDayTasks, key = { "my-day-${it.id.value}" }) { task ->
+                MyDayRow(
+                    task = task,
+                    order = snapshot.myDayTasks,
+                    projectName = projectNames[task.projectId]
+                        ?: stringResource(R.string.my_day_inbox),
+                    isDragging = myDayDrag?.payload?.id == task.id,
+                    onOpenTask = onOpenTask,
+                    onCompleteTask = onCompleteTask,
+                    onRemoveFromMyDay = onRemoveFromMyDay,
+                    onMoveMyDayEntry = onMoveMyDayEntry,
+                    onDragStart = { positionInRoot, bounds ->
+                        myDayDrag = RootDragState(
+                            payload = task,
+                            sourceBounds = bounds,
+                            startInRoot = positionInRoot,
+                        )
+                    },
+                    onDrag = { delta -> myDayDrag = myDayDrag?.movedBy(delta) },
+                    onDragEnd = ::finishMyDayDrag,
+                    onDragCancel = { myDayDrag = null },
+                    modifier = Modifier.onGloballyPositioned {
+                        myDayRowBounds[task.id] = it.boundsInRoot()
+                    },
+                )
+            }
 
-        item {
-            Spacer(Modifier.height(20.dp))
-            SectionHeader(title = "Projects in motion")
-        }
+            snapshot.activeTimer?.let { timer ->
+                item {
+                    Spacer(Modifier.height(16.dp))
+                    ActiveTimer(
+                        title = timer.taskTitle,
+                        project = timer.projectName,
+                        elapsed = buildString {
+                            append("%02d".format(timer.elapsed.toHours()))
+                            append(':')
+                            append("%02d".format(timer.elapsed.toMinutesPart()))
+                            append(':')
+                            append("%02d".format(timer.elapsed.toSecondsPart()))
+                        },
+                        onToggle = onToggleTimer,
+                    )
+                }
+            }
 
-        items(snapshot.projects, key = { it.id.value }) { project ->
-            ProjectProgressRow(
-                project = project,
-                onClick = { onOpenProject(project.id) },
+            item {
+                Spacer(Modifier.height(20.dp))
+                SectionHeader(title = "Projects in motion")
+            }
+
+            items(snapshot.projects, key = { it.id.value }) { project ->
+                ProjectProgressRow(
+                    project = project,
+                    onClick = { onOpenProject(project.id) },
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(20.dp))
+                HomeInsightsSummary(
+                    snapshot = insightsSummary,
+                    onOpenInsights = onOpenInsights,
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(20.dp))
+                SectionHeader(title = "Coming up")
+            }
+
+            items(snapshot.upcomingTasks, key = { "upcoming-${it.id.value}" }) { task ->
+                UpcomingRow(task, projectNames[task.projectId] ?: "Inbox") {
+                    onOpenTask(task.id)
+                }
+            }
+        }
+        myDayDrag?.let { drag ->
+            RootDragPreview(
+                state = drag,
+                containerBounds = myDayBounds,
+                modifier = Modifier
+                    .zIndex(1f)
+                    .testTag("my-day-drag-preview-${drag.payload.id.value}")
+                    .clearAndSetSemantics { },
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = MaterialTheme.shapes.medium,
+                    shadowElevation = 8.dp,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TaskRow(
+                            task = drag.payload,
+                            projectName = projectNames[drag.payload.projectId]
+                                ?: stringResource(R.string.my_day_inbox),
+                            selected = false,
+                            onSelect = {},
+                            onComplete = {},
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(
+                            modifier = Modifier.size(48.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = null)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MyDayRow(
+    task: Task,
+    order: List<Task>,
+    projectName: String,
+    isDragging: Boolean,
+    onOpenTask: (TaskId) -> Unit,
+    onCompleteTask: (Task) -> Unit,
+    onRemoveFromMyDay: (TaskId) -> Unit,
+    onMoveMyDayEntry: (TaskId, TaskId?) -> Unit,
+    onDragStart: (Offset, Rect) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuExpanded by remember(task.id) { mutableStateOf(false) }
+    val index = order.indexOfFirst { it.id == task.id }
+    val menuDescription = stringResource(R.string.my_day_menu_description, task.title)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = if (isDragging) 0f else 1f }
+            .rootLongPressDragSource(
+                key = task.id,
+                onStart = onDragStart,
+                onDrag = onDrag,
+                onDrop = onDragEnd,
+                onCancel = onDragCancel,
             )
-        }
-
-        item {
-            Spacer(Modifier.height(20.dp))
-            HomeInsightsSummary(
-                snapshot = insightsSummary,
-                onOpenInsights = onOpenInsights,
-            )
-        }
-
-        item {
-            Spacer(Modifier.height(20.dp))
-            SectionHeader(title = "Coming up")
-        }
-
-        items(snapshot.upcomingTasks, key = { "upcoming-${it.id.value}" }) { task ->
-            UpcomingRow(task, projectNames[task.projectId] ?: "Inbox") {
-                onOpenTask(task.id)
+            .testTag("my-day-row-${task.id.value}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TaskRow(
+            task = task,
+            projectName = projectName,
+            selected = false,
+            onSelect = { onOpenTask(task.id) },
+            onComplete = { onCompleteTask(task) },
+            modifier = Modifier
+                .weight(1f)
+                .graphicsLayer { alpha = if (task.isCompleted) 0.5f else 1f },
+        )
+        Column {
+            IconButton(
+                onClick = { menuExpanded = true },
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("my-day-menu-${task.id.value}"),
+            ) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = menuDescription)
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.my_day_move_up)) },
+                    onClick = {
+                        menuExpanded = false
+                        onMoveMyDayEntry(task.id, order.getOrNull(index - 2)?.id)
+                    },
+                    enabled = index > 0,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("my-day-move-up-${task.id.value}"),
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.my_day_move_down)) },
+                    onClick = {
+                        menuExpanded = false
+                        onMoveMyDayEntry(task.id, order.getOrNull(index + 1)?.id)
+                    },
+                    enabled = index in 0 until order.lastIndex,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("my-day-move-down-${task.id.value}"),
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.my_day_remove)) },
+                    onClick = {
+                        menuExpanded = false
+                        onRemoveFromMyDay(task.id)
+                    },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("my-day-remove-${task.id.value}"),
+                )
             }
         }
     }

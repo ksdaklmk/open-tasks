@@ -7,4 +7,16 @@
     <string name="home_insights_minutes">%1$d min</string>
     <string name="home_insights_hours">%1$d h</string>
     <string name="home_insights_hours_minutes">%1$d h %2$d min</string>
+    <string name="my_day_heading">My Day</string>
+    <string name="my_day_plan">Plan</string>
+    <string name="my_day_empty">Nothing planned yet. Use Plan to shape today.</string>
+    <string name="my_day_inbox">Inbox</string>
+    <plurals name="my_day_overdue">
+        <item quantity="one">%1$d overdue item</item>
+        <item quantity="other">%1$d overdue items</item>
+    </plurals>
+    <string name="my_day_menu_description">More options for %1$s</string>
+    <string name="my_day_move_up">Move up</string>
+    <string name="my_day_move_down">Move down</string>
+    <string name="my_day_remove">Remove from My Day</string>
 </resources>

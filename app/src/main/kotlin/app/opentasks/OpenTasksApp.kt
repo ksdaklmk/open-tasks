@@ -1193,6 +1193,16 @@ fun OpenTasksApp(
                                         navigate(MoreRoute)
                                     },
                                     onToggleTimer = viewModel::stopActiveTimer,
+                                    onRemoveFromMyDay = { taskId ->
+                                        viewModel.execute(
+                                            DomainCommand.RemoveTaskFromMyDay(taskId),
+                                        )
+                                    },
+                                    onMoveMyDayEntry = { taskId, afterTaskId ->
+                                        viewModel.execute(
+                                            DomainCommand.MoveMyDayEntry(taskId, afterTaskId),
+                                        )
+                                    },
                                 )
                             }
                             entry<TasksRoute> {
