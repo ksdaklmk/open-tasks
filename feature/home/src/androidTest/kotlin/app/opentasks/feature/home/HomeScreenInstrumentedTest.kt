@@ -1,10 +1,13 @@
 package app.opentasks.feature.home
 
+import android.view.ViewConfiguration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.DurationQuality
@@ -18,6 +21,7 @@ import app.opentasks.core.model.TaskId
 import java.time.Duration
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -92,6 +96,55 @@ class HomeScreenInstrumentedTest {
         composeRule.onNodeWithTag("my-day-menu-${open.id.value}").performClick()
         composeRule.onNodeWithTag("my-day-remove-${open.id.value}").performClick()
         assertEquals(open.id, removed)
+    }
+
+    @Test
+    fun longPressDragOntoOwnSuccessorRowIsANoOp() {
+        // order.getOrNull(hoveredIndex - 1) resolves to the dragged row
+        // itself when it is hovering its own immediate successor (it was
+        // that row's predecessor before the drag started). MoveMyDayEntry
+        // rejects a self-referential afterTaskId, so the drag must skip
+        // dispatch here rather than fire a command the repository refuses.
+        val open = OpenTasksFixtures.tasks.first { !it.isCompleted && it.deletedAt == null }
+        val done = OpenTasksFixtures.tasks.first { it.isCompleted }
+        val snapshot = OpenTasksFixtures.snapshot.home.copy(
+            myDayTasks = listOf(open, done),
+        )
+        var moved: Pair<TaskId, TaskId?>? = null
+        composeRule.setContent {
+            OpenTasksTheme {
+                HomeScreen(
+                    snapshot = snapshot,
+                    projectNames = emptyMap(),
+                    onOpenSearch = {}, onPlanToday = {},
+                    onOpenTask = {}, onCompleteTask = {},
+                    onOpenProject = {},
+                    insightsSummary = OpenTasksFixtures.insightsSummary,
+                    onOpenInsights = {}, onToggleTimer = {},
+                    onRemoveFromMyDay = {},
+                    onMoveMyDayEntry = { id, after -> moved = id to after },
+                )
+            }
+        }
+        val openBounds = composeRule
+            .onNodeWithTag("my-day-row-${open.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val doneBounds = composeRule
+            .onNodeWithTag("my-day-row-${done.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        composeRule.onRoot().performTouchInput {
+            down(openBounds.center)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(doneBounds.center)
+        }
+        composeRule.onNodeWithTag("my-day-drag-preview-${open.id.value}").assertIsDisplayed()
+        composeRule.onRoot().performTouchInput { up() }
+        composeRule.waitForIdle()
+
+        assertNull(moved)
     }
 
     @Test

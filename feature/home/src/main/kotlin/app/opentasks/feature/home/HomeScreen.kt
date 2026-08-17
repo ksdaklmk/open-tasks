@@ -103,7 +103,14 @@ fun HomeScreen(
         if (drag != null && target != null) {
             val hoveredIndex = snapshot.myDayTasks.indexOfFirst { it.id == target }
             val afterTaskId = snapshot.myDayTasks.getOrNull(hoveredIndex - 1)?.id
-            currentOnMoveMyDayEntry(drag.payload.id, afterTaskId)
+            // Hovering the dragged row's own immediate successor resolves
+            // afterTaskId back to the dragged row itself (it was that row's
+            // predecessor before the drag started). MoveMyDayEntry rejects a
+            // self-referential afterTaskId as NOT_FOUND, so treat this as
+            // the same-slot no-op it visually is rather than dispatch it.
+            if (afterTaskId != drag.payload.id) {
+                currentOnMoveMyDayEntry(drag.payload.id, afterTaskId)
+            }
         }
         myDayDrag = null
     }
