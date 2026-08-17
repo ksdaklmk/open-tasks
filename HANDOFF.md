@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused after Task 3 complete, 17 August 2026
+## Current resume point — Stage 9 paused after Task 4 complete, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -32,16 +32,27 @@ per-task completions, rulings, deferred minors).
   (workspaceId resolves in-snapshot, fail closed on encode and on
   decode/import, focused JVM test with RED/GREEN proof). Scoped re-review
   of the fix: APPROVED, 0 Critical, 0 Important.
-- Full CI-equivalent gate is green at `cd0a425`
+- **Task 4 complete** (`414bf36`, review APPROVED 0 Critical / 0
+  Important): MyDayRules (base-36 midpoint ranks with bounded-null
+  fallback, suggestions), five My Day commands in both engines
+  (Add/Remove/Move/Sweep/Restore) with repository-produced Undo and
+  MY_DAY journal records, `HomeSnapshot.myDayTasks` real in both engines,
+  `MY_DAY_LIMIT_REACHED`, and the controller's pre-dispatch append-bound
+  ruling implemented: appends whose naive `rankAfter` rank would exceed
+  the journal codec's 200-char bound full re-rank with
+  `myDayRankForIndex` (the 200-add bound test proves the re-rank ran).
+  Task 1's InMemory My Day purge-parity minor discharged. Two
+  reviewer-accepted parity rulings and two deferred minors are in the
+  ledger.
+- Full CI-equivalent gate is green at `414bf36`
   (`testDebugUnitTest lintDebug :app:assembleDebug`, 553 tasks; `:core:data`
-  679 unit tests). Instrumented suites remain compile-only until the
-  plan's Task 17.
+  683 and `:core:domain` 125 unit tests). Instrumented suites remain
+  compile-only until the plan's Task 17.
 
-**Resume instructions, in order:** (1) dispatch Task 4 (My Day commands —
-its brief is staged in the ledger directory, as is Task 5's; Task 1's
-InMemory purge-parity minor rides Task 4's brief) and continue the plan
-loop task by task; (2) carry into the Task 5 and Task 14 dispatches the
-ledger's carry-forward note (the mutation codec is the sole per-type
+**Resume instructions, in order:** (1) dispatch Task 5 (automation rule
+commands — its brief is staged in the ledger directory) and continue the
+plan loop task by task; (2) carry into the Task 5 and Task 14 dispatches
+the ledger's carry-forward note (the mutation codec is the sole per-type
 rule-config authority — command validation must satisfy it exactly or
 journal encode throws mid-transaction). The five CI-profile-red
 instrumented tests recorded in the release section below are still to be
