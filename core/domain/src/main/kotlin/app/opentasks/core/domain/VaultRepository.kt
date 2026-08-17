@@ -3,6 +3,8 @@ package app.opentasks.core.domain
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleId
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
@@ -491,6 +493,12 @@ sealed interface DomainCommand {
 
     /** Repository-produced Undo only; never constructed by UI code. */
     data class RestoreMyDayEntries(val entries: List<MyDayEntry>) : DomainCommand
+
+    data class CreateAutomationRule(val rule: AutomationRule) : DomainCommand
+
+    data class UpdateAutomationRule(val rule: AutomationRule) : DomainCommand
+
+    data class DeleteAutomationRule(val ruleId: AutomationRuleId) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
@@ -570,6 +578,8 @@ enum class RejectionReason {
     IMPORT_BACKUP_LIMIT_EXCEEDED,
     IMPORT_UNDO_CONFLICT,
     MY_DAY_LIMIT_REACHED,
+    AUTOMATION_RULE_LIMIT_REACHED,
+    AUTOMATION_RULE_INVALID,
 }
 
 interface VaultRepository {

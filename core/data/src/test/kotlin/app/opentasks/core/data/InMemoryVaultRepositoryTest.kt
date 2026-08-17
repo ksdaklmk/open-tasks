@@ -11,6 +11,9 @@ import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
+import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleId
+import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
@@ -2208,6 +2211,204 @@ class InMemoryVaultRepositoryTest {
             val binned = repository.execute(DomainCommand.AddTaskToMyDay(binnedId))
             assertTrue(binned is CommandResult.Rejected)
             assertEquals(RejectionReason.INVALID_STATE, (binned as CommandResult.Rejected).reason)
+        }
+    }
+
+    private fun addTagRule(
+        repository: InMemoryVaultRepository,
+        statusId: WorkflowStatusId,
+        tagId: TagId,
+        enabled: Boolean = true,
+    ): AutomationRule = AutomationRule(
+        id = AutomationRuleId.new(),
+        workspaceId = OpenTasksFixtures.workspaceId,
+        type = AutomationRuleType.ON_ENTER_ADD_TAG,
+        enabled = enabled,
+        statusId = statusId,
+        tagId = tagId,
+    )
+
+    @Test
+    fun automationRuleCrudRoundTripsWithUndo() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val snapshot = repository.currentWorkspace()
+            val rule = addTagRule(
+                repository,
+                statusId = snapshot.workflowStatuses.first().id,
+                tagId = snapshot.tags.first().id,
+            )
+            val created = repository.execute(DomainCommand.CreateAutomationRule(rule))
+            assertTrue(created is CommandResult.Success)
+            assertEquals(listOf(rule), repository.currentWorkspace().automationRules)
+
+            val disabled = rule.copy(enabled = false)
+            val updated = repository.execute(DomainCommand.UpdateAutomationRule(disabled))
+            assertTrue(updated is CommandResult.Success)
+            assertEquals(listOf(disabled), repository.currentWorkspace().automationRules)
+            repository.execute(requireNotNull((updated as CommandResult.Success).undo))
+            assertEquals(listOf(rule), repository.currentWorkspace().automationRules)
+
+            val deleted = repository.execute(DomainCommand.DeleteAutomationRule(rule.id))
+            assertTrue(deleted is CommandResult.Success)
+            assertTrue(repository.currentWorkspace().automationRules.isEmpty())
+            repository.execute(requireNotNull((deleted as CommandResult.Success).undo))
+            assertEquals(listOf(rule), repository.currentWorkspace().automationRules)
+        }
+    }
+
+    @Test
+    fun automationRuleCreateRejectsIdCollisionAndDeleteIsIdempotent() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val snapshot = repository.currentWorkspace()
+            val rule = addTagRule(
+                repository,
+                statusId = snapshot.workflowStatuses.first().id,
+                tagId = snapshot.tags.first().id,
+            )
+            assertTrue(
+                repository.execute(DomainCommand.CreateAutomationRule(rule))
+                    is CommandResult.Success,
+            )
+
+            // Re-creating with an identifier already in use is rejected, and
+            // the existing rule is left untouched.
+            val collision = repository.execute(DomainCommand.CreateAutomationRule(rule))
+            assertTrue(collision is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.INVALID_STATE,
+                (collision as CommandResult.Rejected).reason,
+            )
+            assertEquals(listOf(rule), repository.currentWorkspace().automationRules)
+
+            // Deleting a rule that was never created is an idempotent success.
+            val neverCreated = repository.execute(
+                DomainCommand.DeleteAutomationRule(AutomationRuleId.new()),
+            )
+            assertTrue(neverCreated is CommandResult.Success)
+            assertEquals(
+                "Rule is already removed",
+                (neverCreated as CommandResult.Success).message,
+            )
+            assertEquals(listOf(rule), repository.currentWorkspace().automationRules)
+        }
+    }
+
+    @Test
+    fun automationRuleValidationRejectsBadConfigMissingRefsAndTheBound() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val snapshot = repository.currentWorkspace()
+            val statusId = snapshot.workflowStatuses.first().id
+            val tagId = snapshot.tags.first().id
+
+            // Wrong per-type config: ON_ENTER_ADD_TAG without a tagId.
+            val badConfig = AutomationRule(
+                id = AutomationRuleId.new(),
+                workspaceId = OpenTasksFixtures.workspaceId,
+                type = AutomationRuleType.ON_ENTER_ADD_TAG,
+                enabled = true,
+                statusId = statusId,
+                tagId = null,
+            )
+            val configResult = repository.execute(DomainCommand.CreateAutomationRule(badConfig))
+            assertTrue(configResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                (configResult as CommandResult.Rejected).reason,
+            )
+
+            // Missing references: tagId, statusId, projectId in turn.
+            val missingTag = addTagRule(repository, statusId = statusId, tagId = TagId("missing"))
+            val missingTagResult =
+                repository.execute(DomainCommand.CreateAutomationRule(missingTag))
+            assertTrue(missingTagResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.NOT_FOUND,
+                (missingTagResult as CommandResult.Rejected).reason,
+            )
+
+            val missingStatus = addTagRule(
+                repository,
+                statusId = WorkflowStatusId("missing"),
+                tagId = tagId,
+            )
+            val missingStatusResult =
+                repository.execute(DomainCommand.CreateAutomationRule(missingStatus))
+            assertTrue(missingStatusResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.NOT_FOUND,
+                (missingStatusResult as CommandResult.Rejected).reason,
+            )
+
+            val missingProject = AutomationRule(
+                id = AutomationRuleId.new(),
+                workspaceId = OpenTasksFixtures.workspaceId,
+                type = AutomationRuleType.ON_ENTER_ADD_TAG,
+                enabled = true,
+                projectId = ProjectId("missing"),
+                statusId = statusId,
+                tagId = tagId,
+            )
+            val missingProjectResult =
+                repository.execute(DomainCommand.CreateAutomationRule(missingProject))
+            assertTrue(missingProjectResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.NOT_FOUND,
+                (missingProjectResult as CommandResult.Rejected).reason,
+            )
+
+            // Out-of-range days.
+            val badDueInDays = AutomationRule(
+                id = AutomationRuleId.new(),
+                workspaceId = OpenTasksFixtures.workspaceId,
+                type = AutomationRuleType.ON_ENTER_SET_DUE,
+                enabled = true,
+                statusId = statusId,
+                dueInDays = 366,
+            )
+            val dueResult = repository.execute(DomainCommand.CreateAutomationRule(badDueInDays))
+            assertTrue(dueResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                (dueResult as CommandResult.Rejected).reason,
+            )
+
+            val badThreshold = AutomationRule(
+                id = AutomationRuleId.new(),
+                workspaceId = OpenTasksFixtures.workspaceId,
+                type = AutomationRuleType.STALE_BADGE,
+                enabled = true,
+                thresholdDays = 0,
+            )
+            val thresholdResult =
+                repository.execute(DomainCommand.CreateAutomationRule(badThreshold))
+            assertTrue(thresholdResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                (thresholdResult as CommandResult.Rejected).reason,
+            )
+
+            // None of the rejected attempts above persisted anything.
+            assertTrue(repository.currentWorkspace().automationRules.isEmpty())
+
+            // The bound: 20 valid rules succeed, the 21st hits the limit.
+            repeat(20) {
+                val rule = addTagRule(repository, statusId = statusId, tagId = tagId)
+                assertTrue(
+                    repository.execute(DomainCommand.CreateAutomationRule(rule))
+                        is CommandResult.Success,
+                )
+            }
+            assertEquals(20, repository.currentWorkspace().automationRules.size)
+            val overflow = addTagRule(repository, statusId = statusId, tagId = tagId)
+            val overflowResult = repository.execute(DomainCommand.CreateAutomationRule(overflow))
+            assertTrue(overflowResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_LIMIT_REACHED,
+                (overflowResult as CommandResult.Rejected).reason,
+            )
         }
     }
 

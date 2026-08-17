@@ -41,6 +41,7 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
@@ -278,6 +279,9 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.MoveMyDayEntry -> moveMyDayEntry(command)
             is DomainCommand.SweepMyDay -> sweepMyDay(command)
             is DomainCommand.RestoreMyDayEntries -> restoreMyDayEntries(command)
+            is DomainCommand.CreateAutomationRule -> createAutomationRule(command)
+            is DomainCommand.UpdateAutomationRule -> updateAutomationRule(command)
+            is DomainCommand.DeleteAutomationRule -> deleteAutomationRule(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> =
@@ -3560,6 +3564,128 @@ class InMemoryVaultRepository internal constructor(
         return CommandResult.Success("My Day restored")
     }
 
+    private fun automationRuleConfigRejection(rule: AutomationRule): CommandResult.Rejected? {
+        fun invalid(detail: String) = CommandResult.Rejected(
+            RejectionReason.AUTOMATION_RULE_INVALID,
+            "This rule is not valid: $detail.",
+        )
+        rule.dueInDays?.let { if (it !in 0..365) return invalid("days must be 0–365") }
+        rule.thresholdDays?.let { if (it !in 1..365) return invalid("days must be 1–365") }
+        val requirement = when (rule.type) {
+            AutomationRuleType.ON_ENTER_ADD_TAG ->
+                rule.statusId != null && rule.tagId != null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY ->
+                rule.statusId != null && rule.tagId == null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.ON_ENTER_SET_DUE ->
+                rule.statusId != null && rule.dueInDays != null &&
+                    rule.tagId == null && rule.thresholdDays == null
+            AutomationRuleType.MY_DAY_AUTO_REMOVE ->
+                rule.projectId == null && rule.statusId == null && rule.tagId == null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.STALE_BADGE ->
+                rule.thresholdDays != null && rule.statusId == null &&
+                    rule.tagId == null && rule.dueInDays == null
+        }
+        return if (requirement) null else invalid("its settings do not match its type")
+    }
+
+    private fun automationRuleReferenceRejection(rule: AutomationRule): CommandResult.Rejected? {
+        val current = mutableWorkspace.value
+        if (rule.statusId != null && current.workflowStatuses.none { it.id == rule.statusId }) {
+            return automationRuleNotFound()
+        }
+        if (rule.tagId != null && current.tags.none { it.id == rule.tagId }) {
+            return automationRuleNotFound()
+        }
+        if (rule.projectId != null && current.projects.none { it.id == rule.projectId }) {
+            return automationRuleNotFound()
+        }
+        return null
+    }
+
+    private fun automationRuleNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "That rule refers to something that no longer exists.",
+    )
+
+    private fun automationRuleWorkspaceRejection(rule: AutomationRule): CommandResult.Rejected? =
+        if (rule.workspaceId != OpenTasksFixtures.workspaceId) {
+            CommandResult.Rejected(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                "This rule is not valid: it belongs to a different workspace.",
+            )
+        } else {
+            null
+        }
+
+    private fun createAutomationRule(
+        command: DomainCommand.CreateAutomationRule,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val rule = command.rule
+        automationRuleWorkspaceRejection(rule)?.let { return it }
+        automationRuleConfigRejection(rule)?.let { return it }
+        automationRuleReferenceRejection(rule)?.let { return it }
+        if (current.automationRules.size >= MAX_AUTOMATION_RULES) {
+            return CommandResult.Rejected(
+                RejectionReason.AUTOMATION_RULE_LIMIT_REACHED,
+                "Up to $MAX_AUTOMATION_RULES automation rules.",
+            )
+        }
+        if (current.automationRules.any { it.id == rule.id }) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That automation rule identifier is already in use.",
+            )
+        }
+        publish(tasks = current.tasks, automationRules = current.automationRules + rule)
+        return CommandResult.Success(
+            message = "Automation rule created",
+            undo = DomainCommand.DeleteAutomationRule(rule.id),
+        )
+    }
+
+    private fun updateAutomationRule(
+        command: DomainCommand.UpdateAutomationRule,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val rule = command.rule
+        val existing = current.automationRules.firstOrNull { it.id == rule.id }
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Automation rule no longer exists.",
+            )
+        automationRuleWorkspaceRejection(rule)?.let { return it }
+        automationRuleConfigRejection(rule)?.let { return it }
+        automationRuleReferenceRejection(rule)?.let { return it }
+        publish(
+            tasks = current.tasks,
+            automationRules = current.automationRules.map { if (it.id == rule.id) rule else it },
+        )
+        return CommandResult.Success(
+            message = "Automation rule updated",
+            undo = DomainCommand.UpdateAutomationRule(existing),
+        )
+    }
+
+    private fun deleteAutomationRule(
+        command: DomainCommand.DeleteAutomationRule,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val existing = current.automationRules.firstOrNull { it.id == command.ruleId }
+            ?: return CommandResult.Success("Rule is already removed")
+        publish(
+            tasks = current.tasks,
+            automationRules = current.automationRules.filterNot { it.id == command.ruleId },
+        )
+        return CommandResult.Success(
+            message = "Automation rule deleted",
+            undo = DomainCommand.CreateAutomationRule(existing),
+        )
+    }
+
     private fun validateSavedViewName(name: String): CommandResult.Rejected? = when {
         name.isEmpty() -> CommandResult.Rejected(
             RejectionReason.SAVED_VIEW_NAME_INVALID,
@@ -4046,6 +4172,7 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_SAVED_VIEW_NAME_LENGTH = 64
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
         const val MAX_MY_DAY_ENTRIES = 200
+        const val MAX_AUTOMATION_RULES = 20
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
     }
 }

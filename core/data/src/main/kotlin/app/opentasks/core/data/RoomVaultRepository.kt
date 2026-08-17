@@ -70,6 +70,8 @@ import app.opentasks.core.domain.ImportedTaskReceipt
 import app.opentasks.core.model.ActiveTimerSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityKind
+import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
@@ -296,6 +298,9 @@ class RoomVaultRepository(
                 is DomainCommand.MoveMyDayEntry -> moveMyDayEntry(command)
                 is DomainCommand.SweepMyDay -> sweepMyDay(command)
                 is DomainCommand.RestoreMyDayEntries -> restoreMyDayEntries(command)
+                is DomainCommand.CreateAutomationRule -> createAutomationRule(command)
+                is DomainCommand.UpdateAutomationRule -> updateAutomationRule(command)
+                is DomainCommand.DeleteAutomationRule -> deleteAutomationRule(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -3794,6 +3799,134 @@ class RoomVaultRepository(
         return CommandResult.Success("My Day restored")
     }
 
+    private fun automationRuleConfigRejection(rule: AutomationRule): CommandResult.Rejected? {
+        fun invalid(detail: String) = CommandResult.Rejected(
+            RejectionReason.AUTOMATION_RULE_INVALID,
+            "This rule is not valid: $detail.",
+        )
+        rule.dueInDays?.let { if (it !in 0..365) return invalid("days must be 0–365") }
+        rule.thresholdDays?.let { if (it !in 1..365) return invalid("days must be 1–365") }
+        val requirement = when (rule.type) {
+            AutomationRuleType.ON_ENTER_ADD_TAG ->
+                rule.statusId != null && rule.tagId != null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY ->
+                rule.statusId != null && rule.tagId == null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.ON_ENTER_SET_DUE ->
+                rule.statusId != null && rule.dueInDays != null &&
+                    rule.tagId == null && rule.thresholdDays == null
+            AutomationRuleType.MY_DAY_AUTO_REMOVE ->
+                rule.projectId == null && rule.statusId == null && rule.tagId == null &&
+                    rule.dueInDays == null && rule.thresholdDays == null
+            AutomationRuleType.STALE_BADGE ->
+                rule.thresholdDays != null && rule.statusId == null &&
+                    rule.tagId == null && rule.dueInDays == null
+        }
+        return if (requirement) null else invalid("its settings do not match its type")
+    }
+
+    private suspend fun automationRuleReferenceRejection(
+        rule: AutomationRule,
+    ): CommandResult.Rejected? {
+        val dao = database.workspaceDao()
+        val statusId = rule.statusId
+        if (statusId != null && dao.getWorkflowStatus(statusId.value) == null) {
+            return automationRuleNotFound()
+        }
+        val tagId = rule.tagId
+        if (tagId != null && dao.getTagById(tagId.value) == null) {
+            return automationRuleNotFound()
+        }
+        val projectId = rule.projectId
+        if (projectId != null && dao.getProjectById(projectId.value) == null) {
+            return automationRuleNotFound()
+        }
+        return null
+    }
+
+    private fun automationRuleNotFound(): CommandResult.Rejected = CommandResult.Rejected(
+        RejectionReason.NOT_FOUND,
+        "That rule refers to something that no longer exists.",
+    )
+
+    private fun automationRuleWorkspaceRejection(rule: AutomationRule): CommandResult.Rejected? =
+        if (rule.workspaceId != OpenTasksFixtures.workspaceId) {
+            CommandResult.Rejected(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                "This rule is not valid: it belongs to a different workspace.",
+            )
+        } else {
+            null
+        }
+
+    private suspend fun createAutomationRule(
+        command: DomainCommand.CreateAutomationRule,
+    ): CommandResult {
+        val rule = command.rule
+        automationRuleWorkspaceRejection(rule)?.let { return it }
+        automationRuleConfigRejection(rule)?.let { return it }
+        automationRuleReferenceRejection(rule)?.let { return it }
+        if (database.workspaceDao().getAutomationRules().size >= MAX_AUTOMATION_RULES) {
+            return CommandResult.Rejected(
+                RejectionReason.AUTOMATION_RULE_LIMIT_REACHED,
+                "Up to $MAX_AUTOMATION_RULES automation rules.",
+            )
+        }
+        if (database.workspaceDao().getAutomationRule(rule.id.value) != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "That automation rule identifier is already in use.",
+            )
+        }
+        database.workspaceDao().upsertAutomationRule(rule.toEntity())
+        return CommandResult.Success(
+            message = "Automation rule created",
+            undo = DomainCommand.DeleteAutomationRule(rule.id),
+        )
+    }
+
+    private suspend fun updateAutomationRule(
+        command: DomainCommand.UpdateAutomationRule,
+    ): CommandResult {
+        val rule = command.rule
+        val entity = database.workspaceDao().getAutomationRule(rule.id.value)
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Automation rule no longer exists.",
+            )
+        // A physically present row that fails to decode (e.g. a malformed
+        // persisted AutomationRuleType name — recovered foreign data, same
+        // as buildSnapshot's fail-closed precedent) is preserved untouched
+        // rather than overwritten or used to build an undo.
+        val existing = runCatching { entity.toModel() }.getOrNull()
+            ?: return automationRuleNotFound()
+        automationRuleWorkspaceRejection(rule)?.let { return it }
+        automationRuleConfigRejection(rule)?.let { return it }
+        automationRuleReferenceRejection(rule)?.let { return it }
+        database.workspaceDao().upsertAutomationRule(rule.toEntity())
+        return CommandResult.Success(
+            message = "Automation rule updated",
+            undo = DomainCommand.UpdateAutomationRule(existing),
+        )
+    }
+
+    private suspend fun deleteAutomationRule(
+        command: DomainCommand.DeleteAutomationRule,
+    ): CommandResult {
+        val entity = database.workspaceDao().getAutomationRule(command.ruleId.value)
+            ?: return CommandResult.Success("Rule is already removed")
+        // Same fail-closed precedent as updateAutomationRule and
+        // deleteSavedView: an unreadable row is preserved, not deleted.
+        val existing = runCatching { entity.toModel() }.getOrNull()
+            ?: return automationRuleNotFound()
+        database.workspaceDao().deleteAutomationRule(command.ruleId.value)
+        return CommandResult.Success(
+            message = "Automation rule deleted",
+            undo = DomainCommand.CreateAutomationRule(existing),
+        )
+    }
+
     /**
      * Resolves a saved view the product can actually see. A physically
      * present row whose payload fails the strict codec stays invisible to
@@ -4569,6 +4702,7 @@ class RoomVaultRepository(
         const val MAX_SAVED_VIEW_NAME_LENGTH = 64
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
         const val MAX_MY_DAY_ENTRIES = 200
+        const val MAX_AUTOMATION_RULES = 20
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
