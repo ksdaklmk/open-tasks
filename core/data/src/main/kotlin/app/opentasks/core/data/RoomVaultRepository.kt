@@ -1578,6 +1578,7 @@ class RoomVaultRepository(
                 taskId = command.taskId,
                 statusId = completedStatus.id,
                 acknowledgeBlocked = command.acknowledgeBlocked,
+                acknowledgeOpenSubtasks = command.acknowledgeOpenSubtasks,
                 changedAt = command.completedAt,
             ),
             activityKind = ActivityKind.COMPLETED,
@@ -1603,6 +1604,7 @@ class RoomVaultRepository(
         rejectBulkSelection(ids)?.let { return it }
         val resolved = ids.mapNotNull { currentTask(it) }
         if (resolved.isEmpty()) return bulkTasksNotFound()
+        val idValues = ids.mapTo(hashSetOf(), TaskId::value)
 
         // Full preflight before the first write: the single-task validators,
         // in their order, over the whole resolved set. Writes happen only
@@ -1632,6 +1634,17 @@ class RoomVaultRepository(
                 return CommandResult.Rejected(
                     RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
                     "This task still has unfinished dependencies.",
+                )
+            }
+            if (
+                !command.acknowledgeOpenSubtasks &&
+                database.taskDao().liveChildren(task.id.value).any {
+                    it.id !in idValues && it.semanticStatus != SemanticStatus.COMPLETED.name
+                }
+            ) {
+                return CommandResult.Rejected(
+                    RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                    "This task still has open subtasks.",
                 )
             }
             if (task.statusId == completedStatus.id) continue
@@ -1764,10 +1777,16 @@ class RoomVaultRepository(
     private suspend fun moveTasksToProject(
         command: DomainCommand.MoveTasksToProject,
     ): CommandResult {
-        val ids = command.taskIds.distinct()
-        rejectBulkSelection(ids)?.let { return it }
+        val listedIds = command.taskIds.distinct()
+        rejectBulkSelection(listedIds)?.let { return it }
+        val listed = listedIds.mapNotNull { currentTask(it) }
+        // Listed parents pull their live children into the moved set; the
+        // 200-ID bulk bound above applies only to the listed IDs themselves.
+        val expandedChildren = listed.flatMap { database.taskDao().liveChildren(it.id.value) }
+        val ids = (listedIds + expandedChildren.map { TaskId(it.id) }).distinct()
         val resolved = ids.mapNotNull { currentTask(it) }
         if (resolved.isEmpty()) return bulkTasksNotFound()
+        val resolvedIds = resolved.mapTo(hashSetOf(), Task::id)
 
         val destination = command.projectId?.let { projectId ->
             database.workspaceDao().getProjectById(projectId.value)
@@ -1776,7 +1795,12 @@ class RoomVaultRepository(
                     "That project no longer exists.",
                 )
         }
-        class MovePlan(val task: Task, val status: WorkflowStatus, val reminder: Reminder?)
+        class MovePlan(
+            val task: Task,
+            val status: WorkflowStatus,
+            val reminder: Reminder?,
+            val detach: Boolean,
+        )
         val plans = mutableListOf<MovePlan>()
         for (task in resolved) {
             if (task.projectId == command.projectId) continue
@@ -1797,12 +1821,20 @@ class RoomVaultRepository(
                     RejectionReason.INVALID_STATE,
                     "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
                 )
+            // A moved task whose parent stayed behind in a different project
+            // no longer satisfies the same-project subtask invariant.
+            val parentId = task.parentTaskId
+            val detach = parentId != null && parentId !in resolvedIds && run {
+                val parent = database.taskDao().getById(parentId.value)
+                parent == null || parent.projectId != command.projectId?.value
+            }
             plans += MovePlan(
                 task = task,
                 status = mapped,
                 reminder = database.workspaceDao()
                     .getReminderForTask(task.id.value)
                     ?.toModel(),
+                detach = detach,
             )
         }
 
@@ -1816,6 +1848,7 @@ class RoomVaultRepository(
                     statusId = plan.status.id,
                     semanticStatus = plan.status.semanticStatus,
                     milestoneId = null,
+                    parentTaskId = if (plan.detach) null else task.parentTaskId,
                     revision = nextRevision(task),
                 ).toEntity(),
             )
@@ -1900,8 +1933,13 @@ class RoomVaultRepository(
     }
 
     private suspend fun deleteTasks(command: DomainCommand.DeleteTasks): CommandResult {
-        val ids = command.taskIds.distinct()
-        rejectBulkSelection(ids)?.let { return it }
+        val listedIds = command.taskIds.distinct()
+        rejectBulkSelection(listedIds)?.let { return it }
+        val listed = listedIds.mapNotNull { currentTask(it) }
+        // Listed parents pull their live children into the binned set; the
+        // 200-ID bulk bound above applies only to the listed IDs themselves.
+        val expandedChildren = listed.flatMap { database.taskDao().liveChildren(it.id.value) }
+        val ids = (listedIds + expandedChildren.map { TaskId(it.id) }).distinct()
         val resolved = ids.mapNotNull { currentTask(it) }
         if (resolved.isEmpty()) return bulkTasksNotFound()
 
@@ -1934,12 +1972,20 @@ class RoomVaultRepository(
                 at = command.deletedAt,
             )
         }
-        val inverses = deleting.map<Task, DomainCommand> { task ->
+        // Per subtree the parent's inverse must precede its children's: a
+        // child replayed while its parent is still binned would self-detach
+        // (the Task 9 restore rule). Depth is exactly one level, so a single
+        // partition on "is this child's own parent also in this batch" is
+        // enough -- no topological sort needed.
+        val (childrenInSet, everythingElse) = deleting.partition {
+            it.parentTaskId != null && it.parentTaskId in deletingIds
+        }
+        val inverses = (everythingElse + childrenInSet).map<Task, DomainCommand> { task ->
             DomainCommand.RestoreTask(task.id)
         }
         return CommandResult.Success(
             message = "${bulkTasksLabel(deleting.size)} moved to the Bin",
-            undo = DomainCommand.UndoBatch(inverses.asReversed())
+            undo = DomainCommand.UndoBatch(inverses)
                 .takeIf { inverses.isNotEmpty() },
         )
     }
@@ -2082,6 +2128,16 @@ class RoomVaultRepository(
             return CommandResult.Rejected(
                 RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
                 "This task still has unfinished dependencies.",
+            )
+        }
+        if (
+            status.semanticStatus == SemanticStatus.COMPLETED &&
+            !command.acknowledgeOpenSubtasks &&
+            database.taskDao().openSubtaskCount(task.id.value) > 0
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                "This task still has open subtasks.",
             )
         }
         val limit = status.wipLimit
@@ -2296,14 +2352,26 @@ class RoomVaultRepository(
         if (task.deletedAt != null) {
             return CommandResult.Success("Task is already in the Bin")
         }
+        val children = database.taskDao().liveChildren(task.id.value)
         val updated = task.copy(
             deletedAt = command.deletedAt,
             revision = nextRevision(task, command.deletedAt),
         )
+        val updatedChildren = children.map { child ->
+            val revision = nextRevision(child, command.deletedAt)
+            child.copy(
+                deletedAtEpochMillis = command.deletedAt.toEpochMilli(),
+                revisionWallMillis = revision.wallTimeMillis,
+                revisionLogical = revision.logicalCounter,
+                revisionDeviceId = revision.deviceId.value,
+            )
+        }
+        val binningIds = (listOf(task.id.value) + children.map { it.id }).toHashSet()
         database.withTransaction {
             database.taskDao().upsert(updated.toEntity())
+            updatedChildren.forEach { database.taskDao().upsert(it) }
             database.timeEntryDao().getActive()
-                ?.takeIf { active -> active.taskId == task.id.value }
+                ?.takeIf { active -> active.taskId in binningIds }
                 ?.let { active ->
                     val stoppedAt = maxOf(
                         command.deletedAt.toEpochMilli(),
@@ -2319,9 +2387,23 @@ class RoomVaultRepository(
             body = "Moved to Bin",
             at = command.deletedAt,
         )
+        children.forEach { child ->
+            recordActivity(
+                taskId = TaskId(child.id),
+                projectId = child.projectId?.let(::ProjectId),
+                kind = ActivityKind.BINNED,
+                body = "Moved to Bin",
+                at = command.deletedAt,
+            )
+        }
+        // UndoBatch replays in list order: parent first, then children, so no
+        // child ever restores under a still-binned parent and self-detaches.
+        val inverses: List<DomainCommand> =
+            listOf(DomainCommand.RestoreTask(task.id)) +
+                children.map { DomainCommand.RestoreTask(TaskId(it.id)) }
         return CommandResult.Success(
             message = "Task moved to the Bin",
-            undo = DomainCommand.RestoreTask(task.id),
+            undo = DomainCommand.UndoBatch(inverses),
         )
     }
 
@@ -2329,9 +2411,17 @@ class RoomVaultRepository(
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
         val deletedAt = task.deletedAt ?: return CommandResult.Success("Task is already restored")
+        // A live parent restores its subtree via the parent-first UndoBatch;
+        // a still-binned (or already-purged) parent means this child would
+        // otherwise pop back up attached to an invisible parent, so detach
+        // it explicitly in this same write.
+        val parentId = task.parentTaskId
+        val parent = parentId?.let { database.taskDao().getById(it.value) }
+        val detach = parentId != null && (parent == null || parent.deletedAtEpochMillis != null)
         persistTask(
             task.copy(
                 deletedAt = null,
+                parentTaskId = if (detach) null else task.parentTaskId,
                 revision = nextRevision(task),
             ),
             "restore",
@@ -4145,6 +4235,15 @@ class RoomVaultRepository(
             logicalCounter = task.revision.logicalCounter + 1,
         )
     }
+
+    private fun nextRevision(
+        entity: TaskEntity,
+        at: Instant = now(),
+    ): Revision = Revision(
+        deviceId = deviceId,
+        wallTimeMillis = maxOf(entity.revisionWallMillis + 1, at.toEpochMilli()),
+        logicalCounter = entity.revisionLogical + 1,
+    )
 
     private fun nextProjectRevision(
         project: ProjectEntity,

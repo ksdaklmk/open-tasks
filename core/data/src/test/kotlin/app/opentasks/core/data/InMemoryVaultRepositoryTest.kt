@@ -1332,15 +1332,25 @@ class InMemoryVaultRepositoryTest {
 
     @Test
     fun expiryPurgingAParentDetachesItsSurvivingChild() = runBlocking {
-        val parent = OpenTasksFixtures.tasks[2]
+        // The parent starts already binned (rather than binned via
+        // DomainCommand.DeleteTask) so the live child it still points to is
+        // NOT part of Task 9's delete-subtree cascade: this test targets
+        // PurgeExpiredTrash's own orphan-detach behavior in isolation, for a
+        // child that survives its parent's expiry purge unbinned.
+        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
+        val parent = OpenTasksFixtures.tasks[2].copy(deletedAt = deletedAt)
         val child = OpenTasksFixtures.tasks[3].copy(parentTaskId = parent.id)
         val initial = OpenTasksFixtures.snapshot.copy(
-            tasks = OpenTasksFixtures.tasks.map { if (it.id == child.id) child else it },
+            tasks = OpenTasksFixtures.tasks.map {
+                when (it.id) {
+                    parent.id -> parent
+                    child.id -> child
+                    else -> it
+                }
+            },
         )
         val repository = InMemoryVaultRepository(initial = initial)
-        val deletedAt = Instant.parse("2026-06-01T10:00:00Z")
 
-        repository.execute(DomainCommand.DeleteTask(parent.id, deletedAt))
         repository.execute(DomainCommand.PurgeExpiredTrash(Instant.parse("2026-07-02T10:00:00Z")))
 
         assertEquals(
@@ -2061,6 +2071,188 @@ class InMemoryVaultRepositoryTest {
                 repository.currentWorkspace().tasks
                     .first { it.id == child.id }.parentTaskId,
             )
+        }
+    }
+
+    @Test
+    fun completingAParentWithOpenSubtasksNeedsAcknowledgement() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+            val refused = repository.execute(DomainCommand.CompleteTask(parent.id))
+            assertEquals(
+                RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                (refused as CommandResult.Rejected).reason,
+            )
+
+            val acknowledged = repository.execute(
+                DomainCommand.CompleteTask(parent.id, acknowledgeOpenSubtasks = true),
+            )
+            assertTrue(acknowledged is CommandResult.Success)
+            // Children are never touched.
+            assertFalse(
+                repository.currentWorkspace().tasks.first { it.id == child.id }.isCompleted,
+            )
+
+            // Completing the child alone never confirms.
+            assertTrue(
+                repository.execute(DomainCommand.CompleteTask(child.id))
+                    is CommandResult.Success,
+            )
+        }
+    }
+
+    @Test
+    fun bulkCompletionConfirmsOnlyForChildrenOutsideTheSet() = runBlocking {
+        withTimeout(5_000) {
+            val template = OpenTasksFixtures.tasks.first {
+                it.projectId == OpenTasksFixtures.studioProject.id && !it.isCompleted
+            }
+            fun task(id: String, parentTaskId: TaskId?) = template.copy(
+                id = TaskId(id),
+                title = id,
+                parentTaskId = parentTaskId,
+                tagIds = emptySet(),
+                checklist = emptyList(),
+                dependencyIds = emptySet(),
+                blockedBy = emptySet(),
+                completedAt = null,
+                deletedAt = null,
+            )
+            val parentInSet = task("bulk-parent-in-set", null)
+            val childInSet = task("bulk-child-in-set", parentInSet.id)
+            val parentAlone = task("bulk-parent-alone", null)
+            val childOutsideSet = task("bulk-child-outside-set", parentAlone.id)
+            val snapshot = OpenTasksFixtures.snapshot.copy(
+                tasks = OpenTasksFixtures.tasks +
+                    listOf(parentInSet, childInSet, parentAlone, childOutsideSet),
+            )
+            val repository = InMemoryVaultRepository(
+                initial = snapshot,
+                now = { Instant.parse("2026-07-26T10:00:00Z") },
+            )
+
+            // Parent and child both in the set: no confirmation needed.
+            val bothInSet = repository.execute(
+                DomainCommand.CompleteTasks(listOf(parentInSet.id, childInSet.id)),
+            )
+            assertTrue(bothInSet is CommandResult.Success)
+            val afterBothInSet = repository.currentWorkspace().tasks.associateBy { it.id }
+            assertTrue(afterBothInSet.getValue(parentInSet.id).isCompleted)
+            assertTrue(afterBothInSet.getValue(childInSet.id).isCompleted)
+
+            // Parent alone with an open child outside the set: confirmation required.
+            val refused = repository.execute(DomainCommand.CompleteTasks(listOf(parentAlone.id)))
+            assertEquals(
+                RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                (refused as CommandResult.Rejected).reason,
+            )
+            assertFalse(
+                repository.currentWorkspace().tasks
+                    .first { it.id == parentAlone.id }.isCompleted,
+            )
+
+            val acknowledged = repository.execute(
+                DomainCommand.CompleteTasks(
+                    listOf(parentAlone.id),
+                    acknowledgeOpenSubtasks = true,
+                ),
+            )
+            assertTrue(acknowledged is CommandResult.Success)
+            val afterAcknowledged = repository.currentWorkspace().tasks.associateBy { it.id }
+            assertTrue(afterAcknowledged.getValue(parentAlone.id).isCompleted)
+            assertFalse(afterAcknowledged.getValue(childOutsideSet.id).isCompleted)
+        }
+    }
+
+    @Test
+    fun binningAParentTakesTheSubtreeAndRestoreDetaches() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+            val deleted = repository.execute(DomainCommand.DeleteTask(parent.id))
+            assertTrue(deleted is CommandResult.Success)
+            val afterDelete = repository.currentWorkspace().tasks
+            assertNotNull(afterDelete.first { it.id == parent.id }.deletedAt)
+            assertNotNull(afterDelete.first { it.id == child.id }.deletedAt)
+
+            // One undo restores the subtree.
+            repository.execute(requireNotNull((deleted as CommandResult.Success).undo))
+            val restored = repository.currentWorkspace().tasks
+            assertNull(restored.first { it.id == parent.id }.deletedAt)
+            assertNull(restored.first { it.id == child.id }.deletedAt)
+            assertEquals(parent.id, restored.first { it.id == child.id }.parentTaskId)
+
+            // Restoring a child alone from the Bin detaches it.
+            repository.execute(DomainCommand.DeleteTask(parent.id))
+            repository.execute(DomainCommand.RestoreTask(child.id))
+            val detached = repository.currentWorkspace().tasks.first { it.id == child.id }
+            assertNull(detached.deletedAt)
+            assertNull(detached.parentTaskId)
+        }
+    }
+
+    @Test
+    fun movingAParentCarriesChildrenAndMovingAChildAloneDetaches() = runBlocking {
+        withTimeout(5_000) {
+            val project = OpenTasksFixtures.studioProject
+            val destination = OpenTasksFixtures.taxProject
+
+            run {
+                val repository = InMemoryVaultRepository()
+                val candidates = repository.currentWorkspace().tasks.filter {
+                    it.projectId == project.id && it.deletedAt == null &&
+                        !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+                }
+                val parent = candidates[0]
+                val child = candidates[1]
+                repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+                val moved = repository.execute(
+                    DomainCommand.MoveTasksToProject(listOf(parent.id), destination.id),
+                )
+                assertTrue(moved is CommandResult.Success)
+                val afterMove = repository.currentWorkspace().tasks
+                assertEquals(destination.id, afterMove.first { it.id == parent.id }.projectId)
+                assertEquals(destination.id, afterMove.first { it.id == child.id }.projectId)
+                assertEquals(parent.id, afterMove.first { it.id == child.id }.parentTaskId)
+            }
+
+            run {
+                val repository = InMemoryVaultRepository()
+                val candidates = repository.currentWorkspace().tasks.filter {
+                    it.projectId == project.id && it.deletedAt == null &&
+                        !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+                }
+                val parent = candidates[0]
+                val child = candidates[1]
+                repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+
+                val moved = repository.execute(
+                    DomainCommand.MoveTasksToProject(listOf(child.id), destination.id),
+                )
+                assertTrue(moved is CommandResult.Success)
+                val afterMove = repository.currentWorkspace().tasks
+                assertEquals(destination.id, afterMove.first { it.id == child.id }.projectId)
+                assertNull(afterMove.first { it.id == child.id }.parentTaskId)
+                assertEquals(project.id, afterMove.first { it.id == parent.id }.projectId)
+            }
         }
     }
 

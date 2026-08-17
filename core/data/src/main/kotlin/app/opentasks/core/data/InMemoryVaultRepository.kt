@@ -1485,6 +1485,7 @@ class InMemoryVaultRepository internal constructor(
                 taskId = command.taskId,
                 statusId = completedStatus.id,
                 acknowledgeBlocked = command.acknowledgeBlocked,
+                acknowledgeOpenSubtasks = command.acknowledgeOpenSubtasks,
                 changedAt = command.completedAt,
             ),
             activityKind = ActivityKind.COMPLETED,
@@ -1512,6 +1513,7 @@ class InMemoryVaultRepository internal constructor(
         val tasksById = current.tasks.associateBy(Task::id)
         val resolved = ids.mapNotNull(tasksById::get)
         if (resolved.isEmpty()) return bulkTasksNotFound()
+        val idSet = ids.toHashSet()
 
         // Full preflight before the first write: the single-task validators,
         // in their order, over the whole resolved set.
@@ -1530,6 +1532,18 @@ class InMemoryVaultRepository internal constructor(
                 return CommandResult.Rejected(
                     RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
                     "This task still has unfinished dependencies.",
+                )
+            }
+            if (
+                !command.acknowledgeOpenSubtasks &&
+                current.tasks.any {
+                    it.parentTaskId == task.id && it.deletedAt == null &&
+                        it.id !in idSet && it.semanticStatus != SemanticStatus.COMPLETED
+                }
+            ) {
+                return CommandResult.Rejected(
+                    RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                    "This task still has open subtasks.",
                 )
             }
             if (task.statusId == completedStatus.id) continue
@@ -1660,12 +1674,20 @@ class InMemoryVaultRepository internal constructor(
     }
 
     private fun moveTasksToProject(command: DomainCommand.MoveTasksToProject): CommandResult {
-        val ids = command.taskIds.distinct()
-        rejectBulkSelection(ids)?.let { return it }
+        val listedIds = command.taskIds.distinct()
+        rejectBulkSelection(listedIds)?.let { return it }
         val current = mutableWorkspace.value
         val tasksById = current.tasks.associateBy(Task::id)
+        val listed = listedIds.mapNotNull(tasksById::get)
+        // Listed parents pull their live children into the moved set; the
+        // 200-ID bulk bound above applies only to the listed IDs themselves.
+        val expandedChildren = listed.flatMap { parent ->
+            current.tasks.filter { it.parentTaskId == parent.id && it.deletedAt == null }
+        }
+        val ids = (listedIds + expandedChildren.map(Task::id)).distinct()
         val resolved = ids.mapNotNull(tasksById::get)
         if (resolved.isEmpty()) return bulkTasksNotFound()
+        val resolvedIds = resolved.mapTo(hashSetOf(), Task::id)
 
         val destination = command.projectId?.let { projectId ->
             current.projects.firstOrNull { it.id == projectId }
@@ -1674,7 +1696,7 @@ class InMemoryVaultRepository internal constructor(
                     "That project no longer exists.",
                 )
         }
-        class MovePlan(val task: Task, val status: WorkflowStatus)
+        class MovePlan(val task: Task, val status: WorkflowStatus, val detach: Boolean)
         val plans = mutableListOf<MovePlan>()
         for (task in resolved) {
             if (task.projectId == command.projectId) continue
@@ -1692,7 +1714,14 @@ class InMemoryVaultRepository internal constructor(
                 RejectionReason.INVALID_STATE,
                 "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
             )
-            plans += MovePlan(task, mapped)
+            // A moved task whose parent stayed behind in a different project
+            // no longer satisfies the same-project subtask invariant.
+            val parentId = task.parentTaskId
+            val detach = parentId != null && parentId !in resolvedIds && run {
+                val parent = tasksById[parentId]
+                parent == null || parent.projectId != command.projectId
+            }
+            plans += MovePlan(task, mapped, detach)
         }
 
         val destinationName = destination?.name ?: "Inbox"
@@ -1707,6 +1736,7 @@ class InMemoryVaultRepository internal constructor(
                 statusId = plan.status.id,
                 semanticStatus = plan.status.semanticStatus,
                 milestoneId = null,
+                parentTaskId = if (plan.detach) null else task.parentTaskId,
                 revision = nextRevision(task),
             )
             activityEntries = activityEntries.appendedActivity(
@@ -1790,10 +1820,17 @@ class InMemoryVaultRepository internal constructor(
     }
 
     private fun deleteTasks(command: DomainCommand.DeleteTasks): CommandResult {
-        val ids = command.taskIds.distinct()
-        rejectBulkSelection(ids)?.let { return it }
+        val listedIds = command.taskIds.distinct()
+        rejectBulkSelection(listedIds)?.let { return it }
         val current = mutableWorkspace.value
         val tasksById = current.tasks.associateBy(Task::id)
+        val listed = listedIds.mapNotNull(tasksById::get)
+        // Listed parents pull their live children into the binned set; the
+        // 200-ID bulk bound above applies only to the listed IDs themselves.
+        val expandedChildren = listed.flatMap { parent ->
+            current.tasks.filter { it.parentTaskId == parent.id && it.deletedAt == null }
+        }
+        val ids = (listedIds + expandedChildren.map(Task::id)).distinct()
         val resolved = ids.mapNotNull(tasksById::get)
         if (resolved.isEmpty()) return bulkTasksNotFound()
 
@@ -1801,7 +1838,6 @@ class InMemoryVaultRepository internal constructor(
         val deletingIds = deleting.mapTo(hashSetOf(), Task::id)
         val updatedById = linkedMapOf<TaskId, Task>()
         var activityEntries = current.activityEntries
-        val inverses = mutableListOf<DomainCommand>()
         deleting.forEach { task ->
             updatedById[task.id] = task.copy(
                 deletedAt = command.deletedAt,
@@ -1814,7 +1850,6 @@ class InMemoryVaultRepository internal constructor(
                 body = "Moved to Bin",
                 at = command.deletedAt,
             )
-            inverses += DomainCommand.RestoreTask(task.id)
         }
         if (deleting.isNotEmpty()) {
             publish(
@@ -1830,9 +1865,20 @@ class InMemoryVaultRepository internal constructor(
                 at = command.deletedAt,
             )
         }
+        // Per subtree the parent's inverse must precede its children's: a
+        // child replayed while its parent is still binned would self-detach
+        // (the Task 9 restore rule). Depth is exactly one level, so a single
+        // partition on "is this child's own parent also in this batch" is
+        // enough -- no topological sort needed.
+        val (childrenInSet, everythingElse) = deleting.partition {
+            it.parentTaskId != null && it.parentTaskId in deletingIds
+        }
+        val inverses = (everythingElse + childrenInSet).map<Task, DomainCommand> { task ->
+            DomainCommand.RestoreTask(task.id)
+        }
         return CommandResult.Success(
             message = "${bulkTasksLabel(deleting.size)} moved to the Bin",
-            undo = DomainCommand.UndoBatch(inverses.asReversed())
+            undo = DomainCommand.UndoBatch(inverses)
                 .takeIf { inverses.isNotEmpty() },
         )
     }
@@ -1998,6 +2044,19 @@ class InMemoryVaultRepository internal constructor(
             return CommandResult.Rejected(
                 RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
                 "This task still has unfinished dependencies.",
+            )
+        }
+        if (
+            status.semanticStatus == SemanticStatus.COMPLETED &&
+            !command.acknowledgeOpenSubtasks &&
+            current.tasks.any {
+                it.parentTaskId == task.id && it.deletedAt == null &&
+                    it.semanticStatus != SemanticStatus.COMPLETED
+            }
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+                "This task still has open subtasks.",
             )
         }
         val limit = status.wipLimit
@@ -2173,14 +2232,23 @@ class InMemoryVaultRepository internal constructor(
         if (task.deletedAt != null) {
             return CommandResult.Success("Task is already in the Bin")
         }
+        val children = current.tasks.filter { it.parentTaskId == task.id && it.deletedAt == null }
         val updated = task.copy(
             deletedAt = command.deletedAt,
             revision = nextRevision(task, command.deletedAt),
         )
+        val updatedChildren = children.map { child ->
+            child.copy(
+                deletedAt = command.deletedAt,
+                revision = nextRevision(child, command.deletedAt),
+            )
+        }
+        val updatedById = (listOf(updated) + updatedChildren).associateBy(Task::id)
+        val binningIds = updatedById.keys
         publish(
-            tasks = current.tasks.replace(updated),
+            tasks = current.tasks.map { updatedById[it.id] ?: it },
             timeEntries = current.timeEntries.map { entry ->
-                if (entry.taskId == task.id && entry.stoppedAt == null) {
+                if (entry.taskId in binningIds && entry.stoppedAt == null) {
                     entry.copy(stoppedAt = maxOf(command.deletedAt, entry.startedAt))
                 } else {
                     entry
@@ -2195,9 +2263,23 @@ class InMemoryVaultRepository internal constructor(
             body = "Moved to Bin",
             at = command.deletedAt,
         )
+        children.forEach { child ->
+            recordActivity(
+                taskId = child.id,
+                projectId = child.projectId,
+                kind = ActivityKind.BINNED,
+                body = "Moved to Bin",
+                at = command.deletedAt,
+            )
+        }
+        // UndoBatch replays in list order: parent first, then children, so no
+        // child ever restores under a still-binned parent and self-detaches.
+        val inverses: List<DomainCommand> =
+            listOf(DomainCommand.RestoreTask(task.id)) +
+                children.map { DomainCommand.RestoreTask(it.id) }
         return CommandResult.Success(
             message = "Task moved to the Bin",
-            undo = DomainCommand.RestoreTask(task.id),
+            undo = DomainCommand.UndoBatch(inverses),
         )
     }
 
@@ -2206,7 +2288,18 @@ class InMemoryVaultRepository internal constructor(
         val task = current.tasks.firstOrNull { it.id == command.taskId }
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
         val deletedAt = task.deletedAt ?: return CommandResult.Success("Task is already restored")
-        val updated = task.copy(deletedAt = null, revision = nextRevision(task))
+        // A live parent restores its subtree via the parent-first UndoBatch;
+        // a still-binned (or already-purged) parent means this child would
+        // otherwise pop back up attached to an invisible parent, so detach
+        // it explicitly in this same write.
+        val parentId = task.parentTaskId
+        val parent = parentId?.let { id -> current.tasks.firstOrNull { it.id == id } }
+        val detach = parentId != null && (parent == null || parent.deletedAt != null)
+        val updated = task.copy(
+            deletedAt = null,
+            parentTaskId = if (detach) null else task.parentTaskId,
+            revision = nextRevision(task),
+        )
         publish(current.tasks.replace(updated))
         recordActivity(
             taskId = task.id,

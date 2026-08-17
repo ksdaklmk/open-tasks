@@ -306,6 +306,7 @@ sealed interface DomainCommand {
         val statusId: WorkflowStatusId,
         val acknowledgeBlocked: Boolean = false,
         val acknowledgeWipLimit: Boolean = false,
+        val acknowledgeOpenSubtasks: Boolean = false,
         val changedAt: Instant = Instant.now(),
     ) : DomainCommand
 
@@ -320,12 +321,14 @@ sealed interface DomainCommand {
     data class CompleteTask(
         val taskId: TaskId,
         val acknowledgeBlocked: Boolean = false,
+        val acknowledgeOpenSubtasks: Boolean = false,
         val completedAt: Instant = Instant.now(),
     ) : DomainCommand
 
     data class CompleteTasks(
         val taskIds: List<TaskId>,
         val acknowledgeBlocked: Boolean = false,
+        val acknowledgeOpenSubtasks: Boolean = false,
         val completedAt: Instant = Instant.now(),
     ) : DomainCommand
 
@@ -595,6 +598,7 @@ enum class RejectionReason {
     WIP_LIMIT_CONFIRM_REQUIRED,
     WIP_LIMIT_INVALID,
     SUBTASK_PARENT_INVALID,
+    OPEN_SUBTASKS_CONFIRM_REQUIRED,
 }
 
 interface VaultRepository {

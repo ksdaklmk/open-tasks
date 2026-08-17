@@ -2761,6 +2761,240 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun completingAParentWithOpenSubtasksNeedsAcknowledgement() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
+        val project = OpenTasksFixtures.studioProject
+        val candidates = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count {
+                    it.projectId == project.id && it.deletedAt == null &&
+                        !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+                } >= 2
+            }.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+        }
+        val parent = candidates[0]
+        val child = candidates[1]
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.parentTaskId == parent.id
+            }
+        }
+
+        val refused = repository!!.execute(DomainCommand.CompleteTask(parent.id))
+        assertEquals(
+            RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+            (refused as CommandResult.Rejected).reason,
+        )
+
+        val acknowledged = repository!!.execute(
+            DomainCommand.CompleteTask(parent.id, acknowledgeOpenSubtasks = true),
+        )
+        assertTrue(acknowledged is CommandResult.Success)
+        val afterComplete = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parent.id }?.isCompleted == true
+            }
+        }
+        assertFalse(afterComplete.tasks.first { it.id == child.id }.isCompleted)
+
+        assertTrue(
+            repository!!.execute(DomainCommand.CompleteTask(child.id)) is CommandResult.Success,
+        )
+        Unit
+    }
+
+    @Test
+    fun bulkCompletionConfirmsOnlyForChildrenOutsideTheSet() = runBlocking {
+        val template = OpenTasksFixtures.tasks.first {
+            it.projectId == OpenTasksFixtures.studioProject.id && !it.isCompleted
+        }
+        fun task(id: String, parentTaskId: TaskId?) = template.copy(
+            id = TaskId(id),
+            title = id,
+            parentTaskId = parentTaskId,
+            tagIds = emptySet(),
+            checklist = emptyList(),
+            dependencyIds = emptySet(),
+            blockedBy = emptySet(),
+            completedAt = null,
+            deletedAt = null,
+        )
+        val parentInSet = task("bulk-parent-in-set", null)
+        val childInSet = task("bulk-child-in-set", parentInSet.id)
+        val parentAlone = task("bulk-parent-alone", null)
+        val childOutsideSet = task("bulk-child-outside-set", parentAlone.id)
+        val seed = OpenTasksFixtures.snapshot.copy(
+            tasks = OpenTasksFixtures.tasks +
+                listOf(parentInSet, childInSet, parentAlone, childOutsideSet),
+        )
+        openRepository(now = { Instant.parse("2026-07-26T10:00:00Z") }, seedSnapshot = seed)
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.id == childOutsideSet.id }
+            }
+        }
+
+        val bothInSet = repository!!.execute(
+            DomainCommand.CompleteTasks(listOf(parentInSet.id, childInSet.id)),
+        )
+        assertTrue(bothInSet is CommandResult.Success)
+        val afterBothInSet = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parentInSet.id }?.isCompleted == true &&
+                    snapshot.tasks.firstOrNull { it.id == childInSet.id }?.isCompleted == true
+            }
+        }
+        assertTrue(afterBothInSet.tasks.first { it.id == parentInSet.id }.isCompleted)
+
+        val refused = repository!!.execute(DomainCommand.CompleteTasks(listOf(parentAlone.id)))
+        assertEquals(
+            RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED,
+            (refused as CommandResult.Rejected).reason,
+        )
+
+        val acknowledged = repository!!.execute(
+            DomainCommand.CompleteTasks(listOf(parentAlone.id), acknowledgeOpenSubtasks = true),
+        )
+        assertTrue(acknowledged is CommandResult.Success)
+        val afterAcknowledged = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parentAlone.id }?.isCompleted == true
+            }
+        }
+        assertFalse(afterAcknowledged.tasks.first { it.id == childOutsideSet.id }.isCompleted)
+        Unit
+    }
+
+    @Test
+    fun binningAParentTakesTheSubtreeAndRestoreDetaches() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
+        val project = OpenTasksFixtures.studioProject
+        val candidates = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count {
+                    it.projectId == project.id && it.deletedAt == null &&
+                        !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+                } >= 2
+            }.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+        }
+        val parent = candidates[0]
+        val child = candidates[1]
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.parentTaskId == parent.id
+            }
+        }
+
+        val deleted = repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        assertTrue(deleted is CommandResult.Success)
+        val afterDelete = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parent.id }?.deletedAt != null &&
+                    snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt != null
+            }
+        }
+        assertNotNull(afterDelete.tasks.first { it.id == parent.id }.deletedAt)
+        assertNotNull(afterDelete.tasks.first { it.id == child.id }.deletedAt)
+
+        repository!!.execute(requireNotNull((deleted as CommandResult.Success).undo))
+        val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parent.id }?.deletedAt == null &&
+                    snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+            }
+        }
+        assertEquals(parent.id, restored.tasks.first { it.id == child.id }.parentTaskId)
+
+        repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt != null
+            }
+        }
+        repository!!.execute(DomainCommand.RestoreTask(child.id))
+        val detached = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+            }
+        }.tasks.first { it.id == child.id }
+        assertNull(detached.deletedAt)
+        assertNull(detached.parentTaskId)
+    }
+
+    @Test
+    fun movingAParentCarriesChildrenAndMovingAChildAloneDetaches() = runBlocking {
+        openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
+        val destination = OpenTasksFixtures.taxProject
+
+        repository!!.execute(DomainCommand.CreateTask("Move parent"))
+        repository!!.execute(DomainCommand.CreateTask("Move child"))
+        val firstPair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Move parent" } &&
+                    snapshot.tasks.any { it.title == "Move child" }
+            }
+        }.tasks.associateBy { it.title }
+        val parent = checkNotNull(firstPair["Move parent"])
+        val child = checkNotNull(firstPair["Move child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.parentTaskId == parent.id
+            }
+        }
+
+        val moved = repository!!.execute(
+            DomainCommand.MoveTasksToProject(listOf(parent.id), destination.id),
+        )
+        assertTrue(moved is CommandResult.Success)
+        val afterMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == parent.id }?.projectId == destination.id &&
+                    snapshot.tasks.firstOrNull { it.id == child.id }?.projectId == destination.id
+            }
+        }
+        assertEquals(destination.id, afterMove.tasks.first { it.id == child.id }.projectId)
+        assertEquals(parent.id, afterMove.tasks.first { it.id == child.id }.parentTaskId)
+
+        repository!!.execute(DomainCommand.CreateTask("Alone parent"))
+        repository!!.execute(DomainCommand.CreateTask("Alone child"))
+        val secondPair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Alone parent" } &&
+                    snapshot.tasks.any { it.title == "Alone child" }
+            }
+        }.tasks.associateBy { it.title }
+        val aloneParent = checkNotNull(secondPair["Alone parent"])
+        val aloneChild = checkNotNull(secondPair["Alone child"])
+        repository!!.execute(DomainCommand.SetTaskParent(aloneChild.id, aloneParent.id))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.parentTaskId == aloneParent.id
+            }
+        }
+
+        val movedChildAlone = repository!!.execute(
+            DomainCommand.MoveTasksToProject(listOf(aloneChild.id), destination.id),
+        )
+        assertTrue(movedChildAlone is CommandResult.Success)
+        val afterChildMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.projectId == destination.id
+            }
+        }
+        assertNull(afterChildMove.tasks.first { it.id == aloneChild.id }.parentTaskId)
+        assertNull(afterChildMove.tasks.first { it.id == aloneParent.id }.projectId)
+    }
+
+    @Test
     fun createTaskWithParentInheritsProjectAndValidates() = runBlocking {
         openRepository(now = { Instant.parse("2026-07-27T05:00:00Z") })
         val parent = repository!!.currentWorkspace().tasks.first {
@@ -3143,9 +3377,14 @@ class RoomVaultRepositoryInstrumentedTest {
         }.tasks.associateBy { it.title }
         val parent = checkNotNull(tasks["Expired parent"])
         val child = checkNotNull(tasks["Surviving child"])
+        // Bin the parent BEFORE linking the child to it, so Task 9's
+        // delete-subtree cascade (which reads live children at delete time)
+        // does not bin the child too: this test targets PurgeExpiredTrash's
+        // own orphan-detach behavior for a child that survives its parent's
+        // expiry purge unbinned.
+        repository!!.execute(DomainCommand.DeleteTask(parent.id, deletedAt))
         val childEntity = checkNotNull(database!!.taskDao().getById(child.id.value))
         database!!.taskDao().upsert(childEntity.copy(parentTaskId = parent.id.value))
-        repository!!.execute(DomainCommand.DeleteTask(parent.id, deletedAt))
         val before = database!!.backupStateDao().require("vault-primary")
 
         repository!!.execute(DomainCommand.PurgeExpiredTrash(purgedAt))

@@ -112,6 +112,24 @@ interface TaskDao {
         """,
     )
     suspend fun openTaskCountForStatus(statusId: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM tasks
+        WHERE parentTaskId = :taskId AND deletedAtEpochMillis IS NULL
+            AND semanticStatus != 'COMPLETED'
+        """,
+    )
+    suspend fun openSubtaskCount(taskId: String): Int
+
+    @Query(
+        """
+        SELECT * FROM tasks
+        WHERE parentTaskId = :taskId AND deletedAtEpochMillis IS NULL
+        ORDER BY id
+        """,
+    )
+    suspend fun liveChildren(taskId: String): List<TaskEntity>
 }
 
 @Dao
