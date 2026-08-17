@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused mid-Task 10, 17 August 2026
+## Current resume point — Stage 9 paused mid-Task 12, 18 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -14,7 +14,7 @@ continues on `main` (audit base `8d70c96`). The ignored ledger
 remains the authoritative execution record — every ruling, deferred
 minor and carry-forward note lives there, not here.
 
-**Tasks 1–9 are complete with clean reviews. Task 10 is committed and
+**Tasks 1–11 are complete with clean reviews. Task 12 is committed and
 gate-green but has NOT been reviewed.**
 
 - **Tasks 1–4** (`be24440`, `28ea96b`, `6d616a6`…`cd0a425`, `414bf36`) —
@@ -45,56 +45,85 @@ gate-green but has NOT been reviewed.**
   seven handlers in each engine. The Opus review found a real
   cross-project bug the implementer's own reasoning had ruled out; see
   the ledger for the repro and the ruling.
-- **Task 10 committed but UNREVIEWED** (`a6a5ecb`): nesting in
-  `arrangeTasks`, `indentedTaskIds`, list indentation on Tasks and the
-  workbench, and board rollup chips.
+- **Task 10 complete** (`a6a5ecb` + `13a10f1`, review clean after one fix
+  round): nesting in `arrangeTasks`, `indentedTaskIds`, list indentation
+  on Tasks and the workbench, and board rollup chips. The fix corrected a
+  modifier-chain order that put `testTag` outside `padding`.
+- **Task 11 complete** (`d1975eb`, `c7b1e1d`, `2a8514e` + `bc565c6`,
+  review clean after one fix round): task-detail subtasks section, attach
+  and detach flows, parent breadcrumb, and the single and bulk
+  completion-confirm dialogs. This is the task that made the
+  `OPEN_SUBTASKS_CONFIRM_REQUIRED` gate satisfiable. The fix closed a race
+  where an attach/detach rejection resolving after navigation rendered
+  against the wrong task.
+- **Task 12 committed but UNREVIEWED** (`4c9777d` + `a1ffab0`): My Day
+  replaces Today focus on Home, with drag and the 48 dp menu fallback.
 
 ### Resume instructions, in order
 
-1. **Dispatch the Task 10 reviewer first, over `da38d37..a6a5ecb`.**
-   Do not start Task 11 until it passes. Two things the reviewer must be
-   told: **there is no `task-10-report.md`** — the implementer stalled on
-   an infrastructure watchdog immediately before writing it — so the
-   reviewer works from the brief and the diff alone and must treat TDD
-   evidence as unavailable rather than assuming it existed; and the
-   controller, not the implementer, made the commit.
-2. What IS verified about `a6a5ecb`: the full CI-equivalent gate
-   (`testDebugUnitTest lintDebug :app:assembleDebug`) is green at 553
-   tasks, and `:feature:projects` + `:feature:tasks`
-   `compileDebugAndroidTestKotlin` and `:core:domain:testDebugUnitTest`
-   are green. What is NOT verified: anything a review would catch.
-3. Then continue the plan loop at Task 11 (Tasks 11–17 remain). Task 11
-   is load-bearing: it wires the confirm dialogs for
-   `OPEN_SUBTASKS_CONFIRM_REQUIRED`, which Task 9 made reachable but
-   which **no product surface can currently satisfy** — completing a
-   parent with open subtasks is a dead end from Tasks, Board, the widget
-   and reminder actions until Task 11 lands. The stage must not ship
-   before it does. Note what Task 11 does and does not close: it wires
-   the confirm dialogs for **Tasks, Board and Home**. Three surfaces keep
-   their pre-existing degradation — the Today widget and reminder actions
-   (which discard rejections entirely) and the weekly **Review** queue
-   (whose `executeReview` has no rejection special-casing at all). All
-   three already dead-ended on blocked-task completions before Stage 9,
-   so open-subtasks inherits that asymmetry rather than creating it;
-   ruled by-design and parked for final-review triage. See the ledger for
-   the verified precedent on each.
-4. Carry the ledger's live carry-forward notes into their dispatches:
+1. **Dispatch the Task 12 reviewer first, over `36669f1..a1ffab0`.**
+   Do not start Task 13 until it passes. The review package is already
+   written at
+   `.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/review-36669f1..a1ffab0.diff`
+   and `task-12-report.md` exists, so the reviewer gets the normal full
+   inputs. A reviewer was dispatched and stopped mid-run when the session
+   paused; it produced no output, so there is no partial verdict.
+2. **This review needs more than routine attention.** The implementer
+   reported DONE_WITH_CONCERNS: an index bug reached commit despite its
+   own self-review — dragging a My Day row onto its immediate successor
+   computed `afterTaskId == taskId`, which `moveMyDayEntry` rejects as
+   `NOT_FOUND`. It added a guard and a regression test. The reviewer must
+   check that the guard covers every drop position resolving to the
+   dragged row (including first, last, and a drop on the row's own
+   bounds), whether the regression test genuinely exercises that case,
+   and whether sibling boundary off-by-ones exist elsewhere in the drag
+   arithmetic — particularly whether `afterTaskId = null` (move to front)
+   is produced correctly. The full dispatch wording is in the ledger.
+3. What IS verified about `a1ffab0`: the full CI-equivalent gate plus
+   both `compileDebugAndroidTestKotlin` targets are green, twice, with
+   zero warnings. What is NOT verified: anything a review would catch,
+   and all drag behaviour, which is compile-only until Task 17.
+4. Then continue the plan loop at Task 13 (Tasks 13–17 remain).
+5. **Call the advisor before dispatching Task 14** — recorded cadence
+   decision. It is the stage's riskiest work (rule evaluation inside
+   `execute()`, non-reentrant mutex so outputs apply via internal
+   `dispatch()`, opus implementer) and carries two live carry-forwards.
+   The advisor has already caught one over-broad controller ruling this
+   stage.
+6. Carry the ledger's live carry-forward notes into their dispatches:
    the codec-authority note into Task 14; `AutomationEngine.kt` already
    EXISTS so Task 14 modifies rather than creates it; and the
    automation-rule ordering asymmetry between engines into Task 16.
-5. The five CI-profile-red instrumented tests from the 1.2.0 hosted
+7. The five CI-profile-red instrumented tests from the 1.2.0 hosted
    lanes still need hardening. Ruled to run as a dedicated repair
-   dispatch immediately before Task 17, because Tasks 11–16 keep
+   dispatch immediately before Task 17, because Tasks 13–16 keep
    rewriting the same posture-sensitive UI surfaces.
+8. **Before the stage ships**, note what Task 11 did and did not close.
+   It wired the open-subtasks confirm dialogs for **Tasks, Board and
+   Home**. Three surfaces keep their pre-existing degradation — the Today
+   widget and reminder actions (which discard rejections entirely) and
+   the weekly **Review** queue (whose `executeReview` has no rejection
+   special-casing at all). All three already dead-ended on blocked-task
+   completions before Stage 9, so open-subtasks inherits that asymmetry
+   rather than creating it; ruled by-design and parked for final-review
+   triage. The ledger holds the verified precedent for each.
+9. **Point the final whole-branch review at the ledger's deferred-minor
+   and parked lines.** Two Task 9 minors — restore-detach not being
+   undoable, and a detaching move being one-way — were called real
+   asymmetries by their reviewer, and no scheduled task owns them. That
+   pointer is the only mechanism that surfaces them.
 
 ### Session notes worth knowing
 
-- **Infrastructure was the dominant cost this session.** Six agents were
+- **Infrastructure has been the dominant cost.** Nine agents so far were
   killed mid-run by `Your computer went to sleep` API errors or a 600s
   stream watchdog stall. No work was ever lost — the tree was checked
   before each resume and the agents' contexts survived — but each one
   cost a restart. Running `caffeinate -i` (or disabling sleep) would
-  materially speed up the remaining tasks.
+  materially speed up the remaining tasks. One reviewer also burned 49
+  minutes on a 5 KB diff before stalling out; re-dispatching fresh with
+  an explicit "this should take minutes, not an hour" and permission to
+  answer with stated uncertainty fixed it.
 - **One process violation, self-disclosed and cleared.** Task 9's
   implementer launched a read-only Explore subagent mid-task, which its
   dispatch forbade, then discarded the output and redid the check by
