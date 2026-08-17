@@ -69,10 +69,15 @@ gate-green but has NOT been reviewed.**
    which **no product surface can currently satisfy** — completing a
    parent with open subtasks is a dead end from Tasks, Board, the widget
    and reminder actions until Task 11 lands. The stage must not ship
-   before it does. Note Task 11 closes the **in-app** dead end only; the
-   widget and reminder paths keep degrading silently, which is ruled
-   by-design because neither has ever surfaced any rejection (see the
-   ledger for the verified precedent).
+   before it does. Note what Task 11 does and does not close: it wires
+   the confirm dialogs for **Tasks, Board and Home**. Three surfaces keep
+   their pre-existing degradation — the Today widget and reminder actions
+   (which discard rejections entirely) and the weekly **Review** queue
+   (whose `executeReview` has no rejection special-casing at all). All
+   three already dead-ended on blocked-task completions before Stage 9,
+   so open-subtasks inherits that asymmetry rather than creating it;
+   ruled by-design and parked for final-review triage. See the ledger for
+   the verified precedent on each.
 4. Carry the ledger's live carry-forward notes into their dispatches:
    the codec-authority note into Task 14; `AutomationEngine.kt` already
    EXISTS so Task 14 modifies rather than creates it; and the
