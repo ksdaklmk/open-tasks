@@ -89,6 +89,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -235,6 +236,16 @@ fun TasksScreen(
     dependencyError: String? = null,
     onSetTaskDependency: (TaskId, TaskId, Boolean) -> Unit = { _, _, _ -> },
     onClearDependencyError: () -> Unit = {},
+    subtasks: List<Task> = emptyList(),
+    attachableSubtasks: List<Task> = emptyList(),
+    parentOfTask: Task? = null,
+    subtaskError: String? = null,
+    onAddSubtask: (TaskId, String) -> Unit = { _, _ -> },
+    onAttachSubtask: (TaskId, TaskId) -> Unit = { _, _ -> },
+    onDetachSubtask: (TaskId) -> Unit = {},
+    onOpenSubtask: (TaskId) -> Unit = {},
+    onCompleteSubtask: (Task) -> Unit = {},
+    onClearSubtaskError: () -> Unit = {},
     timeEntries: List<TimeEntry> = emptyList(),
     timeEntryConflicts: List<TimeEntryConflict> = emptyList(),
     onAddTimeEntry: (TaskId, TimeEntryEdit) -> Unit = { _, _ -> },
@@ -332,6 +343,18 @@ fun TasksScreen(
                     onSetTaskDependency(selectedTask.id, dependencyId, present)
                 },
                 onClearDependencyError = onClearDependencyError,
+                subtasks = subtasks,
+                attachableSubtasks = attachableSubtasks,
+                parentOfTask = parentOfTask,
+                subtaskError = subtaskError,
+                onAddSubtask = { title -> onAddSubtask(selectedTask.id, title) },
+                onAttachSubtask = { candidateId ->
+                    onAttachSubtask(selectedTask.id, candidateId)
+                },
+                onDetachSubtask = onDetachSubtask,
+                onOpenSubtask = onOpenSubtask,
+                onCompleteSubtask = onCompleteSubtask,
+                onClearSubtaskError = onClearSubtaskError,
                 timeEntries = selectedTimeEntries,
                 timeEntryConflicts = selectedTimeEntryConflicts,
                 onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
@@ -446,6 +469,18 @@ fun TasksScreen(
                             onSetTaskDependency(selectedTask.id, dependencyId, present)
                         },
                         onClearDependencyError = onClearDependencyError,
+                        subtasks = subtasks,
+                        attachableSubtasks = attachableSubtasks,
+                        parentOfTask = parentOfTask,
+                        subtaskError = subtaskError,
+                        onAddSubtask = { title -> onAddSubtask(selectedTask.id, title) },
+                        onAttachSubtask = { candidateId ->
+                            onAttachSubtask(selectedTask.id, candidateId)
+                        },
+                        onDetachSubtask = onDetachSubtask,
+                        onOpenSubtask = onOpenSubtask,
+                        onCompleteSubtask = onCompleteSubtask,
+                        onClearSubtaskError = onClearSubtaskError,
                         timeEntries = selectedTimeEntries,
                         timeEntryConflicts = selectedTimeEntryConflicts,
                         onAddTimeEntry = { onAddTimeEntry(selectedTask.id, it) },
@@ -997,6 +1032,16 @@ private fun TaskDetailPane(
     onCreateAndAssignTag: (String) -> Unit,
     onSetTaskDependency: (TaskId, Boolean) -> Unit,
     onClearDependencyError: () -> Unit,
+    subtasks: List<Task>,
+    attachableSubtasks: List<Task>,
+    parentOfTask: Task?,
+    subtaskError: String?,
+    onAddSubtask: (String) -> Unit,
+    onAttachSubtask: (TaskId) -> Unit,
+    onDetachSubtask: (TaskId) -> Unit,
+    onOpenSubtask: (TaskId) -> Unit,
+    onCompleteSubtask: (Task) -> Unit,
+    onClearSubtaskError: () -> Unit,
     timeEntries: List<TimeEntry>,
     timeEntryConflicts: List<TimeEntryConflict>,
     onAddTimeEntry: (TimeEntryEdit) -> Unit,
@@ -2477,6 +2522,31 @@ private fun TaskDetailPane(
         }
 
         Spacer(Modifier.height(28.dp))
+        if (task.parentTaskId == null) {
+            SubtasksSection(
+                task = task,
+                subtasks = subtasks,
+                attachableSubtasks = attachableSubtasks,
+                subtaskError = subtaskError,
+                onAddSubtask = onAddSubtask,
+                onAttachSubtask = onAttachSubtask,
+                onDetachSubtask = onDetachSubtask,
+                onOpenSubtask = onOpenSubtask,
+                onCompleteSubtask = onCompleteSubtask,
+                onClearSubtaskError = onClearSubtaskError,
+            )
+        } else if (parentOfTask != null) {
+            TextButton(
+                onClick = { onOpenSubtask(parentOfTask.id) },
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("subtask-parent-breadcrumb"),
+            ) {
+                Text(stringResource(R.string.subtask_parent_breadcrumb, parentOfTask.title))
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
         // The detail pane is one call site for every task, so the in-progress
         // note is scoped to the selected one: selecting another task must not
         // leave a draft — or an open edit — pointing at the previous task's
@@ -3480,6 +3550,159 @@ private fun TaskChecklistRow(
                 Icons.Rounded.Delete,
                 contentDescription = "Delete checklist item ${item.text}",
             )
+        }
+    }
+}
+
+@Composable
+private fun SubtasksSection(
+    task: Task,
+    subtasks: List<Task>,
+    attachableSubtasks: List<Task>,
+    subtaskError: String?,
+    onAddSubtask: (String) -> Unit,
+    onAttachSubtask: (TaskId) -> Unit,
+    onDetachSubtask: (TaskId) -> Unit,
+    onOpenSubtask: (TaskId) -> Unit,
+    onCompleteSubtask: (Task) -> Unit,
+    onClearSubtaskError: () -> Unit,
+) {
+    var newSubtaskTitle by rememberSaveable(task.id.value) { mutableStateOf("") }
+    var showAttachMenu by rememberSaveable(task.id.value) { mutableStateOf(false) }
+
+    SectionHeader(
+        title = stringResource(R.string.subtasks_heading),
+        supportingText = stringResource(
+            R.string.subtask_progress,
+            subtasks.count(Task::isCompleted),
+            subtasks.size,
+        ),
+    )
+    if (subtasks.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        subtasks.forEach { child ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { onCompleteSubtask(child) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = if (child.isCompleted) {
+                            Icons.Rounded.CheckCircle
+                        } else {
+                            Icons.Rounded.Check
+                        },
+                        contentDescription = if (child.isCompleted) {
+                            "Reopen ${child.title}"
+                        } else {
+                            "Complete ${child.title}"
+                        },
+                        tint = if (child.isCompleted) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                Text(
+                    child.title,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = "Open ${child.title}",
+                            onClick = { onOpenSubtask(child.id) },
+                        )
+                        .padding(vertical = 12.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                )
+                IconButton(
+                    onClick = { onDetachSubtask(child.id) },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("subtask-detach-${child.id.value}"),
+                ) {
+                    Icon(
+                        Icons.Rounded.Clear,
+                        contentDescription = stringResource(
+                            R.string.subtask_detach_description,
+                            child.title,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = newSubtaskTitle,
+            onValueChange = {
+                newSubtaskTitle = it
+                onClearSubtaskError()
+            },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("subtask-quick-add"),
+            label = { Text(stringResource(R.string.subtask_add_hint)) },
+            supportingText = subtaskError?.let { error -> { Text(error) } },
+            isError = subtaskError != null,
+            singleLine = true,
+        )
+        TextButton(
+            onClick = {
+                val trimmed = newSubtaskTitle.trim()
+                if (trimmed.isNotEmpty()) {
+                    onAddSubtask(trimmed)
+                    newSubtaskTitle = ""
+                }
+            },
+            enabled = newSubtaskTitle.isNotBlank(),
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("subtask-quick-add-confirm"),
+        ) {
+            Text(stringResource(R.string.subtask_add_confirm))
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+    Box {
+        TextButton(
+            onClick = { showAttachMenu = true },
+            enabled = attachableSubtasks.isNotEmpty(),
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .testTag("subtask-attach"),
+        ) {
+            Text(stringResource(R.string.subtask_attach_existing))
+        }
+        DropdownMenu(
+            expanded = showAttachMenu,
+            onDismissRequest = { showAttachMenu = false },
+        ) {
+            attachableSubtasks.forEach { candidate ->
+                DropdownMenuItem(
+                    text = { Text(candidate.title) },
+                    onClick = {
+                        onAttachSubtask(candidate.id)
+                        showAttachMenu = false
+                    },
+                    modifier = Modifier.testTag("subtask-attach-${candidate.id.value}"),
+                )
+            }
         }
     }
 }

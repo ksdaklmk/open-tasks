@@ -76,4 +76,12 @@
     <string name="attachment_retry_action">Try %1$s again</string>
     <string name="attachments_setup_required">Attachment content is kept in your encrypted Google Drive backup. Set that up first, then attachments can be added here.</string>
     <string name="attachments_setup_action">Open Backup &amp; recovery</string>
+
+    <string name="subtasks_heading">Subtasks</string>
+    <string name="subtask_progress">%1$d done of %2$d</string>
+    <string name="subtask_add_hint">Add a subtask</string>
+    <string name="subtask_add_confirm">Add</string>
+    <string name="subtask_attach_existing">Attach existing</string>
+    <string name="subtask_detach_description">Remove %1$s as a subtask</string>
+    <string name="subtask_parent_breadcrumb">Subtask of “%1$s”</string>
 </resources>
