@@ -74,7 +74,18 @@ data class PendingWipMove(
     val statusId: WorkflowStatusId,
 )
 
+data class PendingSubtaskCompletion(
+    val task: Task,
+    val requestedStatusId: WorkflowStatusId?,   // null = CompleteTask
+    val acknowledgeBlocked: Boolean,
+)
+
 data class DependencyFeedback(
+    val taskId: TaskId,
+    val message: String,
+)
+
+data class SubtaskFeedback(
     val taskId: TaskId,
     val message: String,
 )
@@ -104,7 +115,10 @@ class WorkspaceViewModel @Inject constructor(
     private val pendingBlocked = MutableStateFlow<PendingBlockedCompletion?>(null)
     private val pendingBlockedBulk = MutableStateFlow(false)
     private val pendingWip = MutableStateFlow<PendingWipMove?>(null)
+    private val pendingSubtask = MutableStateFlow<PendingSubtaskCompletion?>(null)
+    private val pendingSubtaskBulk = MutableStateFlow(false)
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
+    private val mutableSubtaskFeedback = MutableStateFlow<SubtaskFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
     private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
 
@@ -144,8 +158,11 @@ class WorkspaceViewModel @Inject constructor(
 
     val pendingBlockedCompletion: StateFlow<PendingBlockedCompletion?> = pendingBlocked.asStateFlow()
     val pendingWipMove: StateFlow<PendingWipMove?> = pendingWip.asStateFlow()
+    val pendingSubtaskCompletion: StateFlow<PendingSubtaskCompletion?> = pendingSubtask.asStateFlow()
+    val pendingSubtaskBulkCompletion: StateFlow<Boolean> = pendingSubtaskBulk.asStateFlow()
     val dependencyFeedback: StateFlow<DependencyFeedback?> =
         mutableDependencyFeedback.asStateFlow()
+    val subtaskFeedback: StateFlow<SubtaskFeedback?> = mutableSubtaskFeedback.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -170,12 +187,16 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     fun selectTask(id: TaskId) {
-        if (selectedTaskId.value != id.value) mutableDependencyFeedback.value = null
+        if (selectedTaskId.value != id.value) {
+            mutableDependencyFeedback.value = null
+            mutableSubtaskFeedback.value = null
+        }
         selectionState.selectTask(id)
     }
 
     fun closeTask() {
         mutableDependencyFeedback.value = null
+        mutableSubtaskFeedback.value = null
         selectionState.closeTask()
     }
 
@@ -367,10 +388,16 @@ class WorkspaceViewModel @Inject constructor(
             when (val result = repository.execute(DomainCommand.CompleteTask(task.id))) {
                 is CommandResult.Success -> send(result)
                 is CommandResult.Rejected -> {
-                    if (result.reason == RejectionReason.BLOCKED_TASK_WARNING_REQUIRED) {
-                        pendingBlocked.value = PendingBlockedCompletion(task, null)
-                    } else {
-                        eventChannel.send(WorkspaceEvent.Message(result.message))
+                    when (result.reason) {
+                        RejectionReason.BLOCKED_TASK_WARNING_REQUIRED ->
+                            pendingBlocked.value = PendingBlockedCompletion(task, null)
+                        RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED ->
+                            pendingSubtask.value = PendingSubtaskCompletion(
+                                task = task,
+                                requestedStatusId = null,
+                                acknowledgeBlocked = false,
+                            )
+                        else -> eventChannel.send(WorkspaceEvent.Message(result.message))
                     }
                 }
             }
@@ -406,6 +433,27 @@ class WorkspaceViewModel @Inject constructor(
         mutableDependencyFeedback.value = null
     }
 
+    fun setTaskParent(taskId: TaskId, parentTaskId: TaskId?) {
+        viewModelScope.launch {
+            when (
+                val result = repository.execute(
+                    DomainCommand.SetTaskParent(taskId, parentTaskId),
+                )
+            ) {
+                is CommandResult.Success -> {
+                    mutableSubtaskFeedback.value = null
+                    send(result)
+                }
+                is CommandResult.Rejected ->
+                    mutableSubtaskFeedback.value = SubtaskFeedback(taskId, result.message)
+            }
+        }
+    }
+
+    fun clearSubtaskFeedback() {
+        mutableSubtaskFeedback.value = null
+    }
+
     fun changeTaskStatus(task: Task, statusId: WorkflowStatusId) {
         viewModelScope.launch {
             when (
@@ -420,6 +468,12 @@ class WorkspaceViewModel @Inject constructor(
                             pendingBlocked.value = PendingBlockedCompletion(task, statusId)
                         RejectionReason.WIP_LIMIT_CONFIRM_REQUIRED ->
                             pendingWip.value = PendingWipMove(task, statusId)
+                        RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED ->
+                            pendingSubtask.value = PendingSubtaskCompletion(
+                                task = task,
+                                requestedStatusId = statusId,
+                                acknowledgeBlocked = false,
+                            )
                         else -> eventChannel.send(WorkspaceEvent.Message(result.message))
                     }
                 }
@@ -469,8 +523,44 @@ class WorkspaceViewModel @Inject constructor(
                     clearBulkSelection()
                 }
                 is CommandResult.Rejected -> {
-                    if (result.reason == RejectionReason.BLOCKED_TASK_WARNING_REQUIRED) {
-                        pendingBlockedBulk.value = true
+                    when (result.reason) {
+                        RejectionReason.BLOCKED_TASK_WARNING_REQUIRED ->
+                            pendingBlockedBulk.value = true
+                        RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED ->
+                            pendingSubtaskBulk.value = true
+                        else -> eventChannel.send(WorkspaceEvent.Message(result.message))
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Bypasses [executeBulk]'s generic rejection handling the same way
+     * [confirmBlockedCompletion] bypasses [execute]: the per-task bulk
+     * preflight checks blocked before open subtasks, so acknowledging
+     * blocked here can itself surface [RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED]
+     * for a later task in the selection, which must open the subtask-bulk
+     * dialog rather than fall through to a dead-end snackbar.
+     */
+    fun confirmBlockedBulkCompletion() {
+        if (!pendingBlockedBulk.value) return
+        pendingBlockedBulk.value = false
+        viewModelScope.launch {
+            val result = repository.execute(
+                DomainCommand.CompleteTasks(
+                    taskIds = bulkSelection.value.toList(),
+                    acknowledgeBlocked = true,
+                ),
+            )
+            when (result) {
+                is CommandResult.Success -> {
+                    send(result)
+                    clearBulkSelection()
+                }
+                is CommandResult.Rejected -> {
+                    if (result.reason == RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED) {
+                        pendingSubtaskBulk.value = true
                     } else {
                         eventChannel.send(WorkspaceEvent.Message(result.message))
                     }
@@ -479,26 +569,48 @@ class WorkspaceViewModel @Inject constructor(
         }
     }
 
-    fun confirmBlockedBulkCompletion() {
-        if (!pendingBlockedBulk.value) return
-        pendingBlockedBulk.value = false
-        executeBulk(
-            DomainCommand.CompleteTasks(
-                taskIds = bulkSelection.value.toList(),
-                acknowledgeBlocked = true,
-            ),
-        )
-    }
-
     fun dismissBlockedBulkCompletion() {
         pendingBlockedBulk.value = false
     }
 
+    /**
+     * Blocked-ack is unconditionally true here: the per-task preflight order
+     * (blocked before open subtasks) means this dialog can only appear after
+     * any blocked task in the selection was already confirmed via
+     * [confirmBlockedBulkCompletion], or no task was blocked at all -- either
+     * way the flag is safe to set and is a no-op for a task that was never
+     * blocked.
+     */
+    fun confirmSubtaskBulkCompletion() {
+        if (!pendingSubtaskBulk.value) return
+        pendingSubtaskBulk.value = false
+        executeBulk(
+            DomainCommand.CompleteTasks(
+                taskIds = bulkSelection.value.toList(),
+                acknowledgeBlocked = true,
+                acknowledgeOpenSubtasks = true,
+            ),
+        )
+    }
+
+    fun dismissSubtaskBulkCompletion() {
+        pendingSubtaskBulk.value = false
+    }
+
+    /**
+     * Acknowledging the blocked-task dialog can itself surface the open-
+     * subtasks rejection on re-dispatch (the repository checks blocked
+     * before open subtasks), so this bypasses the generic [execute] and
+     * intercepts [RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED] the same
+     * way [completeTask] and [changeTaskStatus] do -- recording
+     * `acknowledgeBlocked = true` on the resulting [PendingSubtaskCompletion]
+     * so [confirmSubtaskCompletion] can carry it through the final dispatch.
+     */
     fun confirmBlockedCompletion() {
         val pending = pendingBlocked.value ?: return
         pendingBlocked.value = null
-        execute(
-            pending.requestedStatusId?.let { statusId ->
+        viewModelScope.launch {
+            val command = pending.requestedStatusId?.let { statusId ->
                 DomainCommand.ChangeTaskStatus(
                     taskId = pending.task.id,
                     statusId = statusId,
@@ -507,12 +619,55 @@ class WorkspaceViewModel @Inject constructor(
             } ?: DomainCommand.CompleteTask(
                 taskId = pending.task.id,
                 acknowledgeBlocked = true,
-            ),
-        )
+            )
+            when (val result = repository.execute(command)) {
+                is CommandResult.Success -> send(result)
+                is CommandResult.Rejected -> {
+                    if (result.reason == RejectionReason.OPEN_SUBTASKS_CONFIRM_REQUIRED) {
+                        pendingSubtask.value = PendingSubtaskCompletion(
+                            task = pending.task,
+                            requestedStatusId = pending.requestedStatusId,
+                            acknowledgeBlocked = true,
+                        )
+                    } else {
+                        eventChannel.send(WorkspaceEvent.Message(result.message))
+                    }
+                }
+            }
+        }
     }
 
     fun dismissBlockedCompletion() {
         pendingBlocked.value = null
+    }
+
+    /**
+     * Final dispatch once open subtasks are acknowledged, carrying forward
+     * whatever [PendingSubtaskCompletion.acknowledgeBlocked] recorded --
+     * WIP only ever applies to a non-completing move, so no further
+     * confirmation can follow this one.
+     */
+    fun confirmSubtaskCompletion() {
+        val pending = pendingSubtask.value ?: return
+        pendingSubtask.value = null
+        execute(
+            pending.requestedStatusId?.let { statusId ->
+                DomainCommand.ChangeTaskStatus(
+                    taskId = pending.task.id,
+                    statusId = statusId,
+                    acknowledgeBlocked = pending.acknowledgeBlocked,
+                    acknowledgeOpenSubtasks = true,
+                )
+            } ?: DomainCommand.CompleteTask(
+                taskId = pending.task.id,
+                acknowledgeBlocked = pending.acknowledgeBlocked,
+                acknowledgeOpenSubtasks = true,
+            ),
+        )
+    }
+
+    fun dismissSubtaskCompletion() {
+        pendingSubtask.value = null
     }
 
     fun confirmWipMove() {

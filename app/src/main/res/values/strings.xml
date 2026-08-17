@@ -8,6 +8,12 @@
     <string name="wip_confirm_body">“%1$s” already holds its planned number of open tasks. Move this one anyway?</string>
     <string name="wip_confirm_move">Move anyway</string>
     <string name="wip_confirm_keep">Keep it where it is</string>
+    <string name="subtask_confirm_title">Complete with open subtasks?</string>
+    <string name="subtask_confirm_body">“%1$s” still has open subtasks. They stay open if you complete it.</string>
+    <string name="subtask_confirm_complete">Complete anyway</string>
+    <string name="subtask_confirm_keep">Keep open</string>
+    <string name="subtask_confirm_bulk_title">Complete tasks with open subtasks?</string>
+    <string name="subtask_confirm_bulk_body">Some selected tasks still have open subtasks. They stay open if you complete the tasks.</string>
     <string name="quick_add">Quick add</string>
     <string name="quick_add_shortcut">Capture a task</string>
     <string name="quick_add_date_suggestion">Due %1$s</string>

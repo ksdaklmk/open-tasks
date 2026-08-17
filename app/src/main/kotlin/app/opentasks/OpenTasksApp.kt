@@ -125,6 +125,7 @@ import app.opentasks.core.domain.computeProjectTimelineProjection
 import app.opentasks.core.domain.computeScheduleMonthProjection
 import app.opentasks.core.domain.indentedTaskIds
 import app.opentasks.core.domain.planTaskScheduleMove
+import app.opentasks.core.domain.taskComparator
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.MilestoneId
@@ -328,6 +329,9 @@ fun OpenTasksApp(
         val selectedProjectValue by viewModel.selectedProjectId.collectAsStateWithLifecycle()
         val pendingBlocked by viewModel.pendingBlockedCompletion.collectAsStateWithLifecycle()
         val pendingWipMove by viewModel.pendingWipMove.collectAsStateWithLifecycle()
+        val pendingSubtask by viewModel.pendingSubtaskCompletion.collectAsStateWithLifecycle()
+        val pendingSubtaskBulk by
+            viewModel.pendingSubtaskBulkCompletion.collectAsStateWithLifecycle()
         val bulkSelection by viewModel.bulkSelection.collectAsStateWithLifecycle()
         val reviewedTaskIds by viewModel.reviewedTaskIds.collectAsStateWithLifecycle()
         val reviewedProjectIds by viewModel.reviewedProjectIds.collectAsStateWithLifecycle()
@@ -338,6 +342,7 @@ fun OpenTasksApp(
         val pendingBlockedBulk by
             viewModel.pendingBlockedBulkCompletion.collectAsStateWithLifecycle()
         val dependencyFeedback by viewModel.dependencyFeedback.collectAsStateWithLifecycle()
+        val subtaskFeedback by viewModel.subtaskFeedback.collectAsStateWithLifecycle()
         val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
         val focusSession by viewModel.focusSession.collectAsStateWithLifecycle()
         val attachmentStates by attachmentViewModel.rowStates.collectAsStateWithLifecycle()
@@ -631,6 +636,24 @@ fun OpenTasksApp(
             )
         }
         val selectedTask = selectedTaskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
+        // Live children in the same order as the Tasks list, and the current
+        // attach candidates, per `SubtaskRules` -- neither rule is
+        // re-derived here. `parentOfTask` is the resolved parent record when
+        // the selected task is itself a subtask.
+        val selectedSubtasks = remember(snapshot.tasks, selectedTask) {
+            selectedTask?.let { task ->
+                snapshot.tasks
+                    .filter { it.parentTaskId == task.id && it.deletedAt == null }
+                    .sortedWith(taskComparator(tasksArrangement.sort))
+            }.orEmpty()
+        }
+        val selectedAttachableSubtasks = remember(snapshot.tasks, selectedTask) {
+            selectedTask?.let { task -> SubtaskRules.attachableSubtasks(snapshot.tasks, task) }
+                .orEmpty()
+        }
+        val selectedTaskParent = selectedTask?.parentTaskId?.let { parentId ->
+            snapshot.tasks.firstOrNull { it.id == parentId }
+        }
         // Inbox tasks pass `null`, not "Inbox": `calendarEventDraft`'s empty-description
         // case is keyed on a null project name, and `projectNames` has no Inbox entry.
         fun calendarPreviewFor(task: Task): CalendarPreviewState? {
@@ -1284,6 +1307,31 @@ fun OpenTasksApp(
                                         ?.message,
                                     onSetTaskDependency = viewModel::setTaskDependency,
                                     onClearDependencyError = viewModel::clearDependencyFeedback,
+                                    subtasks = selectedSubtasks,
+                                    attachableSubtasks = selectedAttachableSubtasks,
+                                    parentOfTask = selectedTaskParent,
+                                    // Unfiltered by selected task: `setTaskParent`'s rejection
+                                    // is keyed to the acted-on task (the attach candidate or
+                                    // the detached child), never the selected/parent task
+                                    // whose detail pane renders it.
+                                    subtaskError = subtaskFeedback?.message,
+                                    onAddSubtask = { taskId, title ->
+                                        viewModel.execute(
+                                            DomainCommand.CreateTask(
+                                                title = title,
+                                                parentTaskId = taskId,
+                                            ),
+                                        )
+                                    },
+                                    onAttachSubtask = { parentId, candidateId ->
+                                        viewModel.setTaskParent(candidateId, parentId)
+                                    },
+                                    onDetachSubtask = { childId ->
+                                        viewModel.setTaskParent(childId, null)
+                                    },
+                                    onOpenSubtask = viewModel::selectTask,
+                                    onCompleteSubtask = viewModel::completeTask,
+                                    onClearSubtaskError = viewModel::clearSubtaskFeedback,
                                     timeEntries = snapshot.timeEntries,
                                     timeEntryConflicts = snapshot.timeEntryConflicts,
                                     onAddTimeEntry = { taskId, edit ->
@@ -1998,6 +2046,46 @@ fun OpenTasksApp(
                 dismissButton = {
                     TextButton(onClick = viewModel::dismissBlockedBulkCompletion) {
                         Text(stringResource(R.string.bulk_blocked_dismiss))
+                    }
+                },
+            )
+        }
+
+        pendingSubtask?.let { pending ->
+            AlertDialog(
+                onDismissRequest = viewModel::dismissSubtaskCompletion,
+                icon = { Icon(Icons.Rounded.CheckCircle, contentDescription = null) },
+                title = { Text(stringResource(R.string.subtask_confirm_title)) },
+                text = {
+                    Text(stringResource(R.string.subtask_confirm_body, pending.task.title))
+                },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmSubtaskCompletion) {
+                        Text(stringResource(R.string.subtask_confirm_complete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissSubtaskCompletion) {
+                        Text(stringResource(R.string.subtask_confirm_keep))
+                    }
+                },
+            )
+        }
+
+        if (pendingSubtaskBulk) {
+            AlertDialog(
+                onDismissRequest = viewModel::dismissSubtaskBulkCompletion,
+                icon = { Icon(Icons.Rounded.CheckCircle, contentDescription = null) },
+                title = { Text(stringResource(R.string.subtask_confirm_bulk_title)) },
+                text = { Text(stringResource(R.string.subtask_confirm_bulk_body)) },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmSubtaskBulkCompletion) {
+                        Text(stringResource(R.string.subtask_confirm_complete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissSubtaskBulkCompletion) {
+                        Text(stringResource(R.string.subtask_confirm_keep))
                     }
                 },
             )
