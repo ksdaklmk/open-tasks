@@ -1,9 +1,109 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused after Task 4 complete, 17 August 2026
+## Current resume point — Stage 9 paused mid-Task 10, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Where Stage 9 stands
+
+Execution of
+`docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`
+continues on `main` (audit base `8d70c96`). The ignored ledger
+`.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
+remains the authoritative execution record — every ruling, deferred
+minor and carry-forward note lives there, not here.
+
+**Tasks 1–9 are complete with clean reviews. Task 10 is committed and
+gate-green but has NOT been reviewed.**
+
+- **Tasks 1–4** (`be24440`, `28ea96b`, `6d616a6`…`cd0a425`, `414bf36`) —
+  Room v10 boundary, dual-arity WORKFLOW_STATUS, AUTOMATION_RULE and
+  MY_DAY backup families, My Day commands. Recorded in the superseded
+  checkpoint below.
+- **Task 5 complete** (`0bd9232` + `b760c4c`, review clean): automation
+  rule CRUD in both engines with per-type config validation that matches
+  `BackupMutationCodec`'s matrix field for field, workspace and reference
+  checks, the 20-rule bound, and repository-produced undo. Fix round 1
+  extracted the pure validator trio to `core/domain/AutomationEngine.kt`.
+- **Task 6 complete** (`34bdc01`, review APPROVED 0C/0I): WIP limits —
+  `SetWorkflowStatusWipLimit`, `ChangeTaskStatus.acknowledgeWipLimit`,
+  and a confirm-never-block gate in `changeTaskStatus` for non-COMPLETED
+  destinations only. Range rule lives once in
+  `core/domain/WorkflowWipLimit.kt`.
+- **Task 7 complete** (`d982847`, review APPROVED 0C/0I): WIP limits UI —
+  editor field, board column count-against-limit header, and the unified
+  confirm path. Also closed a latent gap where board drops bypassed the
+  blocked-completion confirm.
+- **Task 8 complete** (`8b76136`, review APPROVED 0C/0I): `SubtaskRules`
+  as the single nesting authority (`parentViolation`, `subtaskRollups`,
+  `attachableSubtasks` — signatures are frozen contracts), `SetTaskParent`,
+  and `CreateTask(parent:)` with one-level guards in both engines.
+- **Task 9 complete** (`c699f35` + `da38d37`, review clean after one fix
+  round): subtask semantics — open-subtasks completion confirm, subtree
+  bin cascade with atomic parent-first undo, and move expansion, across
+  seven handlers in each engine. The Opus review found a real
+  cross-project bug the implementer's own reasoning had ruled out; see
+  the ledger for the repro and the ruling.
+- **Task 10 committed but UNREVIEWED** (`a6a5ecb`): nesting in
+  `arrangeTasks`, `indentedTaskIds`, list indentation on Tasks and the
+  workbench, and board rollup chips.
+
+### Resume instructions, in order
+
+1. **Dispatch the Task 10 reviewer first, over `da38d37..a6a5ecb`.**
+   Do not start Task 11 until it passes. Two things the reviewer must be
+   told: **there is no `task-10-report.md`** — the implementer stalled on
+   an infrastructure watchdog immediately before writing it — so the
+   reviewer works from the brief and the diff alone and must treat TDD
+   evidence as unavailable rather than assuming it existed; and the
+   controller, not the implementer, made the commit.
+2. What IS verified about `a6a5ecb`: the full CI-equivalent gate
+   (`testDebugUnitTest lintDebug :app:assembleDebug`) is green at 553
+   tasks, and `:feature:projects` + `:feature:tasks`
+   `compileDebugAndroidTestKotlin` and `:core:domain:testDebugUnitTest`
+   are green. What is NOT verified: anything a review would catch.
+3. Then continue the plan loop at Task 11 (Tasks 11–17 remain). Task 11
+   is load-bearing: it wires the confirm dialogs for
+   `OPEN_SUBTASKS_CONFIRM_REQUIRED`, which Task 9 made reachable but
+   which **no product surface can currently satisfy** — completing a
+   parent with open subtasks is a dead-end toast from Tasks, Board, the
+   widget and reminder actions until Task 11 lands. The stage must not
+   ship before it does.
+4. Carry the ledger's live carry-forward notes into their dispatches:
+   the codec-authority note into Task 14; `AutomationEngine.kt` already
+   EXISTS so Task 14 modifies rather than creates it; and the
+   automation-rule ordering asymmetry between engines into Task 16.
+5. The five CI-profile-red instrumented tests from the 1.2.0 hosted
+   lanes still need hardening. Ruled to run as a dedicated repair
+   dispatch immediately before Task 17, because Tasks 11–16 keep
+   rewriting the same posture-sensitive UI surfaces.
+
+### Session notes worth knowing
+
+- **Infrastructure was the dominant cost this session.** Six agents were
+  killed mid-run by `Your computer went to sleep` API errors or a 600s
+  stream watchdog stall. No work was ever lost — the tree was checked
+  before each resume and the agents' contexts survived — but each one
+  cost a restart. Running `caffeinate -i` (or disabling sleep) would
+  materially speed up the remaining tasks.
+- **One process violation, self-disclosed and cleared.** Task 9's
+  implementer launched a read-only Explore subagent mid-task, which its
+  dispatch forbade, then discarded the output and redid the check by
+  hand. Verified no swarm occurred (one commit in range, clean tree, no
+  stray agents), and the reviewer independently re-verified the
+  underlying cross-module call-site question rather than taking the
+  claim on trust. Keep stating the no-subagents rule in every
+  implementer dispatch.
+- Implementer dispatches now also carry: run every build in the
+  FOREGROUND (one agent lost a whole turn backgrounding its gate build),
+  and distinguish behavioural RED from compile-existence RED in reports.
+
+## Superseded checkpoint — Stage 9 paused after Task 4 complete, 17 August 2026
+
+This section was authoritative until Tasks 5–10 landed. It is retained for
+the Task 1–4 detail and the release record, and is superseded by the
+checkpoint above wherever they conflict.
 
 ### Stage 9 execution state (subagent-driven, paused by owner)
 
@@ -49,14 +149,11 @@ per-task completions, rulings, deferred minors).
   683 and `:core:domain` 125 unit tests). Instrumented suites remain
   compile-only until the plan's Task 17.
 
-**Resume instructions, in order:** (1) dispatch Task 5 (automation rule
-commands — its brief is staged in the ledger directory) and continue the
-plan loop task by task; (2) carry into the Task 5 and Task 14 dispatches
-the ledger's carry-forward note (the mutation codec is the sole per-type
-rule-config authority — command validation must satisfy it exactly or
-journal encode throws mid-transaction). The five CI-profile-red
-instrumented tests recorded in the release section below are still to be
-hardened as repair work during this stage.
+**Superseded resume instructions (do not use — Task 5 is complete; see
+the current checkpoint above):** dispatch Task 5, then continue the plan
+loop task by task, carrying the ledger's codec-authority carry-forward
+note into the Task 5 and Task 14 dispatches. Only the Task 14 half of
+that note is still live.
 
 ### Release 1.2.0 is tagged
 
