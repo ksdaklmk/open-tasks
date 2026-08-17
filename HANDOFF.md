@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused after Task 3 review, 17 August 2026
+## Current resume point — Stage 9 paused after Task 3 complete, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -23,30 +23,29 @@ per-task completions, rulings, deferred minors).
   WORKFLOW_STATUS amendment inside format v1 (9- and 10-field accepted
   forever, encoder emits 10), absence-tolerant import, stage-2 fixtures
   regenerated, OtVault frozen-archive compat proven green.
-- **Task 3 implemented and review-Approved with ONE OPEN Important**
-  (`6d616a6` + `dbda761` + `3a34bd7`): AUTOMATION_RULE and MY_DAY
-  families through every backup layer, StagedVaultVerifier extended
-  (controller ruling — the plan's "needs no change" was wrong), MY_DAY
-  snapshot-level existence check added. **Open finding, already ruled,
-  fix NOT yet dispatched:** `AUTOMATION_RULE` must join
-  `validateWorkspaceOwnedRecords` in `BackupPayloadCodec` (workspaceId
-  resolves in-snapshot, fail closed, one focused JVM test) — a
-  workspace-less rule currently imports and then fails recovery late at
-  the staged-vault equality check with a misattributed error.
-- Full CI-equivalent gate is green at `3a34bd7`
-  (`testDebugUnitTest lintDebug :app:assembleDebug`, 553 tasks).
-  Instrumented suites remain compile-only until the plan's Task 17.
+- **Task 3 complete** (`6d616a6` + `dbda761` + `3a34bd7` + `cd0a425`,
+  review clean): AUTOMATION_RULE and MY_DAY families through every backup
+  layer, StagedVaultVerifier extended (controller ruling — the plan's
+  "needs no change" was wrong), MY_DAY snapshot-level existence check,
+  and fix round 1 landed the review's one open Important: AUTOMATION_RULE
+  joined `validateWorkspaceOwnedRecords` in `BackupPayloadCodec`
+  (workspaceId resolves in-snapshot, fail closed on encode and on
+  decode/import, focused JVM test with RED/GREEN proof). Scoped re-review
+  of the fix: APPROVED, 0 Critical, 0 Important.
+- Full CI-equivalent gate is green at `cd0a425`
+  (`testDebugUnitTest lintDebug :app:assembleDebug`, 553 tasks; `:core:data`
+  679 unit tests). Instrumented suites remain compile-only until the
+  plan's Task 17.
 
-**Resume instructions, in order:** (1) fix round 1 on Task 3 per the
-ruling above, scoped re-review, ledger completion; (2) dispatch Task 4
-(My Day commands — its brief is staged in the ledger directory, as is
-Task 5's) and continue the plan loop task by task; (3) carry into the
-Task 5 and Task 14 dispatches the ledger's carry-forward note (the
-mutation codec is the sole per-type rule-config authority — command
-validation must satisfy it exactly or journal encode throws
-mid-transaction). The five CI-profile-red instrumented tests recorded
-in the release section below are still to be hardened as repair work
-during this stage.
+**Resume instructions, in order:** (1) dispatch Task 4 (My Day commands —
+its brief is staged in the ledger directory, as is Task 5's; Task 1's
+InMemory purge-parity minor rides Task 4's brief) and continue the plan
+loop task by task; (2) carry into the Task 5 and Task 14 dispatches the
+ledger's carry-forward note (the mutation codec is the sole per-type
+rule-config authority — command validation must satisfy it exactly or
+journal encode throws mid-transaction). The five CI-profile-red
+instrumented tests recorded in the release section below are still to be
+hardened as repair work during this stage.
 
 ### Release 1.2.0 is tagged
 
