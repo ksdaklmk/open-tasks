@@ -1,9 +1,52 @@
 # Open Tasks Handoff
 
-## Current resume point — release 1.2.0 tagged, Stage 9 execution next, 17 August 2026
+## Current resume point — Stage 9 paused after Task 3 review, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Stage 9 execution state (subagent-driven, paused by owner)
+
+Execution of
+`docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`
+started on `main` after the tag (audit base `8d70c96`, recorded in the
+ignored ledger
+`.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
+— the ledger is the authoritative execution record: preflight scan,
+per-task completions, rulings, deferred minors).
+
+- **Task 1 complete** (`be24440`, review clean): Room v10 boundary —
+  `automation_rules` + `my_day_entries` tables, `wipLimit` column,
+  `MIGRATION_9_10` with stamped marker, exported `10.json`, models and
+  snapshot fields, purge cleanup hook.
+- **Task 2 complete** (`28ea96b`, review clean): dual-arity
+  WORKFLOW_STATUS amendment inside format v1 (9- and 10-field accepted
+  forever, encoder emits 10), absence-tolerant import, stage-2 fixtures
+  regenerated, OtVault frozen-archive compat proven green.
+- **Task 3 implemented and review-Approved with ONE OPEN Important**
+  (`6d616a6` + `dbda761` + `3a34bd7`): AUTOMATION_RULE and MY_DAY
+  families through every backup layer, StagedVaultVerifier extended
+  (controller ruling — the plan's "needs no change" was wrong), MY_DAY
+  snapshot-level existence check added. **Open finding, already ruled,
+  fix NOT yet dispatched:** `AUTOMATION_RULE` must join
+  `validateWorkspaceOwnedRecords` in `BackupPayloadCodec` (workspaceId
+  resolves in-snapshot, fail closed, one focused JVM test) — a
+  workspace-less rule currently imports and then fails recovery late at
+  the staged-vault equality check with a misattributed error.
+- Full CI-equivalent gate is green at `3a34bd7`
+  (`testDebugUnitTest lintDebug :app:assembleDebug`, 553 tasks).
+  Instrumented suites remain compile-only until the plan's Task 17.
+
+**Resume instructions, in order:** (1) fix round 1 on Task 3 per the
+ruling above, scoped re-review, ledger completion; (2) dispatch Task 4
+(My Day commands — its brief is staged in the ledger directory, as is
+Task 5's) and continue the plan loop task by task; (3) carry into the
+Task 5 and Task 14 dispatches the ledger's carry-forward note (the
+mutation codec is the sole per-type rule-config authority — command
+validation must satisfy it exactly or journal encode throws
+mid-transaction). The five CI-profile-red instrumented tests recorded
+in the release section below are still to be hardened as repair work
+during this stage.
 
 ### Release 1.2.0 is tagged
 
