@@ -313,6 +313,8 @@ internal class DefaultStagedVaultVerifier(
             capture.notes(id).mapTo(this) { it.toBackupRecordV1() }
             importDao.allRetiredBlobSets().mapTo(this) { it.toBackupRecordV1() }
             importDao.allTombstones().mapTo(this) { it.toBackupRecordV1() }
+            capture.automationRules(id).mapTo(this) { it.toBackupRecordV1() }
+            capture.myDayEntries(id).mapTo(this) { it.toBackupRecordV1() }
         }
     }
 
@@ -510,6 +512,7 @@ private fun retentionPurgeRemovals(
             BackupRecordFamily.REMINDER,
             BackupRecordFamily.ATTACHMENT,
             BackupRecordFamily.TIME_ENTRY,
+            BackupRecordFamily.MY_DAY,
             -> BackupRecordFields.of(record).string("taskId") in taskIds
             BackupRecordFamily.ACTIVITY_ENTRY ->
                 BackupRecordFields.of(record).nullableString("taskId")

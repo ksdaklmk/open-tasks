@@ -14,9 +14,11 @@ import app.opentasks.core.data.RoomVaultRepository
 import app.opentasks.core.data.VaultSlot
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -1550,6 +1552,21 @@ class BackupRecordImporterInstrumentedTest {
                 revisionLogical = 10,
                 revisionDeviceId = SOURCE_DEVICE_ID,
             ).toBackupRecordV1(),
+            AutomationRuleEntity(
+                id = AUTOMATION_RULE_ID,
+                workspaceId = WORKSPACE_ID,
+                type = "ON_ENTER_ADD_TAG",
+                enabled = true,
+                projectId = null,
+                statusId = STATUS_ID,
+                tagId = TAG_ID,
+                dueInDays = null,
+                thresholdDays = null,
+            ).toBackupRecordV1(),
+            MyDayEntryEntity(
+                taskId = TASK_ID,
+                rank = "a0",
+            ).toBackupRecordV1(),
         ),
     )
 
@@ -2221,6 +2238,8 @@ class BackupRecordImporterInstrumentedTest {
         BackupRecordFamily.NOTE -> "notes"
         BackupRecordFamily.RETIRED_BLOB_SET -> "retired_blob_sets"
         BackupRecordFamily.TOMBSTONE -> "tombstones"
+        BackupRecordFamily.AUTOMATION_RULE -> "automation_rules"
+        BackupRecordFamily.MY_DAY -> "my_day_entries"
     }
 
     private companion object {
@@ -2249,6 +2268,7 @@ class BackupRecordImporterInstrumentedTest {
         const val SAVED_VIEW_ID = "view-recovered"
         const val TOMBSTONE_OBJECT_ID = "purged-task"
         const val TOMBSTONE_OBJECT_TYPE = "task"
+        const val AUTOMATION_RULE_ID = "rule-recovered"
         const val SOURCE_DEVICE_ID = "device-source"
         const val CONTENT_HASH = "sha256-recovered"
         const val COMPLETE_PROJECT_ID = "project-complete"
