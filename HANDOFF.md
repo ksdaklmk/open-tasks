@@ -1,9 +1,59 @@
 # Open Tasks Handoff
 
-## Current resume point — release 1.2.0 pushed and awaiting one CI re-run, 17 August 2026
+## Current resume point — release 1.2.0 tagged, Stage 9 execution next, 17 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Release 1.2.0 is tagged
+
+- **`v1.2.0` is an annotated tag on `8841fa1` (the qualified candidate),
+  pushed to origin on 17 August 2026.** The tagged SHA was asserted equal
+  to the candidate and to the CI run's `headSha` before pushing. The
+  qualification invalidation invariant is lifted.
+- The GitHub account billing lock was cleared by the owner on 17 August.
+  Android run `31957165017` then executed for real: **attempt 4 and the
+  failed-jobs retry attempt 5 both landed `verify` and `release` green.**
+- **The two hosted instrumented lanes stayed red, deterministically.**
+  Compact API 36 failed the same five tests on both attempts — all
+  posture-sensitive Stage 8 UI tests meeting the generic hosted-AVD
+  screen profile for the first time (the billing lock had blocked every
+  earlier attempt):
+  `ProjectWorkbenchInstrumentedTest.workbenchUsesOpaqueLazyKeysForMilestonesGroupsAndTasks`,
+  `ProjectWorkbenchInstrumentedTest.suppliedWorkbenchGroupsKeepTheirOrderAndListControlsStayStateless`,
+  `ProcessRestorationInstrumentedTest.timelinePresentationAnchorAndSelectionIsolateBetweenProjectsAfterRootRecreation`,
+  `ScheduleScreenInstrumentedTest.expandedWeekTrayDragUsesDayAndRemoveCallbacks`,
+  `ScheduleScreenInstrumentedTest.expandedWeekDragMovesDatedTaskBetweenDays`.
+  The expanded API 37.0 observe-only lane is broadly red (board drag,
+  project notes, fold8 pane-fraction, timeline suites) — **not** its
+  historical single "credential-encrypted storage unavailable"
+  signature; same profile-mismatch class.
+- **Owner ruling, 17 August: tag on the local qualification.** The
+  substantive evidence is the audited local gate — six-module connected
+  suite 453/453 on the API 36 disposable, the full manual acceptance
+  matrix, and the signed sideload smoke — with CI `verify` and `release`
+  green. The five compact-lane tests need CI-profile hardening; that
+  work rides Stage 9 execution (post-tag, no invariant at stake) as a
+  repair task, not a re-qualification.
+
+### Remaining order of work
+
+1. Merge Dependabot #14–#19 as one batch (the instrumented lanes stay
+   red under the same accepted profile gap; require `verify` and
+   `release` green on the post-merge head).
+2. Run the local CI-equivalent gate on the merged `main`
+   (`./gradlew testDebugUnitTest lintDebug :app:assembleDebug`) before
+   any Stage 9 task starts — six dependency bumps land at once.
+3. Record the Stage 9 audit base SHA in
+   `.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`.
+4. Execute the Stage 9 plan subagent-driven (the "Stage 9 planned"
+   checkpoint below holds the spec/plan/decision record). Fold the
+   five-test CI hardening in as repair work during the stage.
+
+## Superseded checkpoint — release 1.2.0 pushed and awaiting one CI re-run, 17 August 2026
+
+This section was authoritative until the tag landed. It is retained for
+chronological context and is superseded by the checkpoint above.
 
 ### Resume in one paragraph
 
