@@ -50,6 +50,7 @@ import app.opentasks.core.model.TemplateId
 import app.opentasks.core.model.TimeEntry
 import app.opentasks.core.model.TimeEntryId
 import app.opentasks.core.model.VaultId
+import app.opentasks.core.model.WorkspaceId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
@@ -3514,6 +3515,45 @@ class RoomVaultRepositoryInstrumentedTest {
             assertEquals(
                 "Rule is already removed",
                 (neverCreated as CommandResult.Success).message,
+            )
+            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+        }
+    }
+
+    @Test
+    fun automationRuleWorkspaceMismatchIsRejectedOnCreateAndUpdate() = runBlocking {
+        val now = Instant.parse("2026-07-26T10:00:00Z")
+        openRepository(now = { now })
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val snapshot = repository!!.currentWorkspace()
+            val statusId = snapshot.workflowStatuses.first().id
+            val tagId = snapshot.tags.first().id
+
+            // Create: a rule stamped with a foreign workspace id is rejected.
+            val foreignCreate = addTagRule(statusId = statusId, tagId = tagId)
+                .copy(workspaceId = WorkspaceId.new())
+            val createResult =
+                repository!!.execute(DomainCommand.CreateAutomationRule(foreignCreate))
+            assertTrue(createResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                (createResult as CommandResult.Rejected).reason,
+            )
+            assertTrue(repository!!.currentWorkspace().automationRules.isEmpty())
+
+            // Update: an existing rule cannot be rewritten into a foreign workspace.
+            val rule = addTagRule(statusId = statusId, tagId = tagId)
+            assertTrue(
+                repository!!.execute(DomainCommand.CreateAutomationRule(rule))
+                    is CommandResult.Success,
+            )
+            val foreignUpdate = rule.copy(workspaceId = WorkspaceId.new())
+            val updateResult =
+                repository!!.execute(DomainCommand.UpdateAutomationRule(foreignUpdate))
+            assertTrue(updateResult is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.AUTOMATION_RULE_INVALID,
+                (updateResult as CommandResult.Rejected).reason,
             )
             assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
         }

@@ -19,6 +19,9 @@ import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ProjectTemplatePlanner
+import app.opentasks.core.domain.automationRuleConfigRejection
+import app.opentasks.core.domain.automationRuleNotFound
+import app.opentasks.core.domain.automationRuleWorkspaceRejection
 import app.opentasks.core.domain.myDayRankBetween
 import app.opentasks.core.domain.myDayRankForIndex
 import app.opentasks.core.domain.planTaskDuplicate
@@ -41,7 +44,6 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.AutomationRule
-import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
@@ -3564,33 +3566,6 @@ class InMemoryVaultRepository internal constructor(
         return CommandResult.Success("My Day restored")
     }
 
-    private fun automationRuleConfigRejection(rule: AutomationRule): CommandResult.Rejected? {
-        fun invalid(detail: String) = CommandResult.Rejected(
-            RejectionReason.AUTOMATION_RULE_INVALID,
-            "This rule is not valid: $detail.",
-        )
-        rule.dueInDays?.let { if (it !in 0..365) return invalid("days must be 0–365") }
-        rule.thresholdDays?.let { if (it !in 1..365) return invalid("days must be 1–365") }
-        val requirement = when (rule.type) {
-            AutomationRuleType.ON_ENTER_ADD_TAG ->
-                rule.statusId != null && rule.tagId != null &&
-                    rule.dueInDays == null && rule.thresholdDays == null
-            AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY ->
-                rule.statusId != null && rule.tagId == null &&
-                    rule.dueInDays == null && rule.thresholdDays == null
-            AutomationRuleType.ON_ENTER_SET_DUE ->
-                rule.statusId != null && rule.dueInDays != null &&
-                    rule.tagId == null && rule.thresholdDays == null
-            AutomationRuleType.MY_DAY_AUTO_REMOVE ->
-                rule.projectId == null && rule.statusId == null && rule.tagId == null &&
-                    rule.dueInDays == null && rule.thresholdDays == null
-            AutomationRuleType.STALE_BADGE ->
-                rule.thresholdDays != null && rule.statusId == null &&
-                    rule.tagId == null && rule.dueInDays == null
-        }
-        return if (requirement) null else invalid("its settings do not match its type")
-    }
-
     private fun automationRuleReferenceRejection(rule: AutomationRule): CommandResult.Rejected? {
         val current = mutableWorkspace.value
         if (rule.statusId != null && current.workflowStatuses.none { it.id == rule.statusId }) {
@@ -3604,21 +3579,6 @@ class InMemoryVaultRepository internal constructor(
         }
         return null
     }
-
-    private fun automationRuleNotFound(): CommandResult.Rejected = CommandResult.Rejected(
-        RejectionReason.NOT_FOUND,
-        "That rule refers to something that no longer exists.",
-    )
-
-    private fun automationRuleWorkspaceRejection(rule: AutomationRule): CommandResult.Rejected? =
-        if (rule.workspaceId != OpenTasksFixtures.workspaceId) {
-            CommandResult.Rejected(
-                RejectionReason.AUTOMATION_RULE_INVALID,
-                "This rule is not valid: it belongs to a different workspace.",
-            )
-        } else {
-            null
-        }
 
     private fun createAutomationRule(
         command: DomainCommand.CreateAutomationRule,
