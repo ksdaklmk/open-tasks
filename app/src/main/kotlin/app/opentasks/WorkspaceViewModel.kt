@@ -433,7 +433,18 @@ class WorkspaceViewModel @Inject constructor(
         mutableDependencyFeedback.value = null
     }
 
+    /**
+     * `subtaskError` renders unfiltered by selected task (its subject is
+     * the acted-on candidate/child, never necessarily the selected/parent
+     * task -- see [SubtaskFeedback]), so unlike [dependencyFeedback] it
+     * cannot rely on a race-proof render-time filter. [contextTaskId]
+     * captures which task's detail pane initiated this call *before* the
+     * suspend point, so a resolution that lands after the person has
+     * since selected a different task (or closed the pane) never writes
+     * -- or wrongly clears -- [mutableSubtaskFeedback] on their behalf.
+     */
     fun setTaskParent(taskId: TaskId, parentTaskId: TaskId?) {
+        val contextTaskId = selectedTaskId.value
         viewModelScope.launch {
             when (
                 val result = repository.execute(
@@ -441,11 +452,15 @@ class WorkspaceViewModel @Inject constructor(
                 )
             ) {
                 is CommandResult.Success -> {
-                    mutableSubtaskFeedback.value = null
+                    if (selectedTaskId.value == contextTaskId) {
+                        mutableSubtaskFeedback.value = null
+                    }
                     send(result)
                 }
                 is CommandResult.Rejected ->
-                    mutableSubtaskFeedback.value = SubtaskFeedback(taskId, result.message)
+                    if (selectedTaskId.value == contextTaskId) {
+                        mutableSubtaskFeedback.value = SubtaskFeedback(taskId, result.message)
+                    }
             }
         }
     }
