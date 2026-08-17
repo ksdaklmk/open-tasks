@@ -1,6 +1,7 @@
 package app.opentasks.core.data.backup
 
 import app.opentasks.core.domain.BackupMutationKind
+import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.RecurrenceFrequency
@@ -422,6 +423,49 @@ internal object BackupMutationCodec {
                 )
                 revision()
             }
+            BackupRecordFamily.AUTOMATION_RULE -> {
+                identifier("workspaceId")
+                val type = requireNotNull(value("type"))
+                require(type in AutomationRuleType.entries.map(AutomationRuleType::name)) {
+                    "type is not an automation rule type"
+                }
+                identifier("projectId")
+                identifier("statusId")
+                identifier("tagId")
+                value("dueInDays")?.let { require(it.toInt() in 0..365) { "dueInDays out of range" } }
+                value("thresholdDays")?.let {
+                    require(it.toInt() in 1..365) { "thresholdDays out of range" }
+                }
+                fun requirePresent(name: String) =
+                    require(value(name) != null) { "$type requires $name" }
+                fun requireAbsent(name: String) =
+                    require(value(name) == null) { "$type forbids $name" }
+                when (AutomationRuleType.valueOf(type)) {
+                    AutomationRuleType.ON_ENTER_ADD_TAG -> {
+                        requirePresent("statusId"); requirePresent("tagId")
+                        requireAbsent("dueInDays"); requireAbsent("thresholdDays")
+                    }
+                    AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY -> {
+                        requirePresent("statusId")
+                        requireAbsent("tagId"); requireAbsent("dueInDays"); requireAbsent("thresholdDays")
+                    }
+                    AutomationRuleType.ON_ENTER_SET_DUE -> {
+                        requirePresent("statusId"); requirePresent("dueInDays")
+                        requireAbsent("tagId"); requireAbsent("thresholdDays")
+                    }
+                    AutomationRuleType.MY_DAY_AUTO_REMOVE -> {
+                        requireAbsent("projectId"); requireAbsent("statusId")
+                        requireAbsent("tagId"); requireAbsent("dueInDays"); requireAbsent("thresholdDays")
+                    }
+                    AutomationRuleType.STALE_BADGE -> {
+                        requirePresent("thresholdDays")
+                        requireAbsent("statusId"); requireAbsent("tagId"); requireAbsent("dueInDays")
+                    }
+                }
+            }
+            BackupRecordFamily.MY_DAY -> {
+                bounded("rank", 200, allowEmpty = false)
+            }
         }
     }
 
@@ -753,6 +797,22 @@ internal object BackupMutationCodec {
                 string("revisionDeviceId"),
             ),
             identityFieldIndexes = listOf(0, 1),
+        ),
+        BackupRecordFamily.AUTOMATION_RULE to RecordSchema(
+            listOf(
+                string("id"),
+                string("workspaceId"),
+                string("type"),
+                boolean("enabled"),
+                string("projectId", nullable = true),
+                string("statusId", nullable = true),
+                string("tagId", nullable = true),
+                int("dueInDays", nullable = true),
+                int("thresholdDays", nullable = true),
+            ),
+        ),
+        BackupRecordFamily.MY_DAY to RecordSchema(
+            listOf(string("taskId"), string("rank")),
         ),
     )
 }

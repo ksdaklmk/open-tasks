@@ -4,9 +4,11 @@ import androidx.room.Dao
 import androidx.room.Query
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -496,6 +498,18 @@ internal interface BackupMutationDao {
         objectId: String,
         objectType: String,
     ): TombstoneEntity?
+
+    @Query("SELECT * FROM automation_rules ORDER BY id")
+    suspend fun automationRules(): List<AutomationRuleEntity>
+
+    @Query("SELECT * FROM automation_rules WHERE id = :id LIMIT 1")
+    suspend fun automationRule(id: String): AutomationRuleEntity?
+
+    @Query("SELECT * FROM my_day_entries ORDER BY taskId")
+    suspend fun myDayEntries(): List<MyDayEntryEntity>
+
+    @Query("SELECT * FROM my_day_entries WHERE taskId = :taskId LIMIT 1")
+    suspend fun myDayEntry(taskId: String): MyDayEntryEntity?
 }
 
 internal data class RevisionedIdRow(
@@ -544,6 +558,8 @@ internal suspend fun BackupMutationDao.snapshots(): List<BackupRecordSnapshot> =
         it.snapshot(BackupRecordFamily.RETIRED_BLOB_SET)
     }
     tombstoneRevisions().mapTo(this) { it.snapshot(BackupRecordFamily.TOMBSTONE) }
+    automationRules().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
+    myDayEntries().mapTo(this) { it.toBackupRecordV1().contentSnapshot() }
 }
 
 internal suspend fun BackupMutationDao.requireRecord(
@@ -599,6 +615,10 @@ internal suspend fun BackupMutationDao.requireRecord(
         BackupRecordFamily.TOMBSTONE -> compositeIds().let { (objectId, objectType) ->
             requireNotNull(tombstone(objectId, objectType)).toBackupRecordV1()
         }
+        BackupRecordFamily.AUTOMATION_RULE ->
+            requireNotNull(automationRule(singleId())).toBackupRecordV1()
+        BackupRecordFamily.MY_DAY ->
+            requireNotNull(myDayEntry(singleId())).toBackupRecordV1()
     }
 }
 

@@ -2,9 +2,11 @@ package app.opentasks.core.data.backup
 
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -80,6 +82,8 @@ enum class BackupRecordFamily {
     NOTE,
     RETIRED_BLOB_SET,
     TOMBSTONE,
+    AUTOMATION_RULE,
+    MY_DAY,
 }
 
 internal fun VaultEntity.toBackupRecordV1(): BackupRecordV1 = record(
@@ -331,6 +335,27 @@ internal fun TombstoneEntity.toBackupRecordV1(): BackupRecordV1 = record(
     longField("revisionWallMillis", revisionWallMillis),
     intField("revisionLogical", revisionLogical),
     stringField("revisionDeviceId", revisionDeviceId),
+)
+
+internal fun AutomationRuleEntity.toBackupRecordV1(): BackupRecordV1 = record(
+    family = BackupRecordFamily.AUTOMATION_RULE,
+    identity = listOf(id),
+    stringField("id", id),
+    stringField("workspaceId", workspaceId),
+    stringField("type", type),
+    booleanField("enabled", enabled),
+    nullableStringField("projectId", projectId),
+    nullableStringField("statusId", statusId),
+    nullableStringField("tagId", tagId),
+    nullableIntField("dueInDays", dueInDays),
+    nullableIntField("thresholdDays", thresholdDays),
+)
+
+internal fun MyDayEntryEntity.toBackupRecordV1(): BackupRecordV1 = record(
+    family = BackupRecordFamily.MY_DAY,
+    identity = listOf(taskId),
+    stringField("taskId", taskId),
+    stringField("rank", rank),
 )
 
 private fun record(

@@ -8,9 +8,11 @@ import androidx.room.withTransaction
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -557,6 +559,27 @@ interface BackupCaptureDao {
 
     @Query(
         """
+        SELECT rule.* FROM automation_rules AS rule
+        INNER JOIN workspaces AS workspace ON workspace.id = rule.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY rule.id
+        """,
+    )
+    suspend fun automationRules(vaultId: String): List<AutomationRuleEntity>
+
+    @Query(
+        """
+        SELECT entry.* FROM my_day_entries AS entry
+        INNER JOIN tasks AS task ON task.id = entry.taskId
+        INNER JOIN workspaces AS workspace ON workspace.id = task.workspaceId
+        WHERE workspace.vaultId = :vaultId
+        ORDER BY entry.taskId
+        """,
+    )
+    suspend fun myDayEntries(vaultId: String): List<MyDayEntryEntity>
+
+    @Query(
+        """
         SELECT COUNT(*) FROM activity_entries AS activity
         WHERE (
             activity.taskId IS NOT NULL
@@ -624,6 +647,19 @@ interface BackupCaptureDao {
         """,
     )
     suspend fun unassignableRetiredBlobSetCount(): Int
+
+    /**
+     * A My Day row whose task is missing entirely is never legal locally —
+     * purge deletes it in the same transaction — so it would otherwise
+     * silently drop from capture through [myDayEntries]'s inner join.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM my_day_entries AS entry
+        WHERE NOT EXISTS (SELECT 1 FROM tasks AS task WHERE task.id = entry.taskId)
+        """,
+    )
+    suspend fun danglingMyDayEntryCount(): Int
 }
 
 internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRecordV1> =
@@ -646,6 +682,7 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         require(ambiguousInboxWorkflowStatusCount(vaultId) == 0) {
             "Inbox workflow cannot be assigned to one workspace"
         }
+        require(danglingMyDayEntryCount() == 0) { "My Day entry has no task" }
         vaults(vaultId).mapTo(this) { it.toBackupRecordV1() }
         workspaces(vaultId).mapTo(this) { it.toBackupRecordV1() }
         members(vaultId).mapTo(this) { it.toBackupRecordV1() }
@@ -666,6 +703,8 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         notes(vaultId).mapTo(this) { it.toBackupRecordV1() }
         retiredBlobSets(vaultId).mapTo(this) { it.toBackupRecordV1() }
         tombstones(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        automationRules(vaultId).mapTo(this) { it.toBackupRecordV1() }
+        myDayEntries(vaultId).mapTo(this) { it.toBackupRecordV1() }
     }
 
 fun interface BackupStateMutation {

@@ -6,9 +6,11 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -97,6 +99,12 @@ internal interface RecoveryImportDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertRetiredBlobSet(value: RetiredBlobSetEntity)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAutomationRule(value: AutomationRuleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMyDayEntry(value: MyDayEntryEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertVault(value: VaultEntity)
 
@@ -156,6 +164,12 @@ internal interface RecoveryImportDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertRetiredBlobSet(value: RetiredBlobSetEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAutomationRule(value: AutomationRuleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMyDayEntry(value: MyDayEntryEntity)
 
     @Query("DELETE FROM vaults WHERE id = :id")
     suspend fun deleteVault(id: String): Int
@@ -222,6 +236,12 @@ internal interface RecoveryImportDao {
     @Query("DELETE FROM retired_blob_sets WHERE blobSetId = :blobSetId")
     suspend fun deleteRetiredBlobSet(blobSetId: String): Int
 
+    @Query("DELETE FROM automation_rules WHERE id = :id")
+    suspend fun deleteAutomationRule(id: String): Int
+
+    @Query("DELETE FROM my_day_entries WHERE taskId = :taskId")
+    suspend fun deleteMyDayEntry(taskId: String): Int
+
     /**
      * Reads every activity entry, unlike Stage 2 capture, which attributes a
      * relationless entry through `backup_journal` evidence a recovered vault
@@ -264,7 +284,9 @@ internal interface RecoveryImportDao {
             (SELECT COUNT(*) FROM saved_views) +
             (SELECT COUNT(*) FROM tombstones) +
             (SELECT COUNT(*) FROM notes) +
-            (SELECT COUNT(*) FROM retired_blob_sets)
+            (SELECT COUNT(*) FROM retired_blob_sets) +
+            (SELECT COUNT(*) FROM automation_rules) +
+            (SELECT COUNT(*) FROM my_day_entries)
         """,
     )
     suspend fun structuredRecordCount(): Int

@@ -146,6 +146,27 @@ function note(
   ]);
 }
 
+function automationRule(id, type, statusId, tagId, dueInDays, thresholdDays) {
+  return record("AUTOMATION_RULE", [id], [
+    stringField("id", id),
+    stringField("workspaceId", "workspace-1"),
+    stringField("type", type),
+    booleanField("enabled", true),
+    nullableStringField("projectId", null),
+    nullableStringField("statusId", statusId),
+    nullableStringField("tagId", tagId),
+    nullableIntField("dueInDays", dueInDays),
+    nullableIntField("thresholdDays", thresholdDays),
+  ]);
+}
+
+function myDayEntry(taskId, rank) {
+  return record("MY_DAY", [taskId], [
+    stringField("taskId", taskId),
+    stringField("rank", rank),
+  ]);
+}
+
 function retiredBlobSet(blobSetId, chunkCount, retiredAt) {
   return record("RETIRED_BLOB_SET", [blobSetId], [
     stringField("blobSetId", blobSetId),
@@ -205,6 +226,8 @@ const familyOrder = [
   "NOTE",
   "RETIRED_BLOB_SET",
   "TOMBSTONE",
+  "AUTOMATION_RULE",
+  "MY_DAY",
 ];
 
 const snapshotRecords = [
@@ -355,6 +378,15 @@ const snapshotRecords = [
     intField("revisionLogical", 0),
     stringField("revisionDeviceId", "device-alpha"),
   ]),
+  automationRule(
+    "rule-1",
+    "ON_ENTER_ADD_TAG",
+    "status-project-started",
+    "tag-1",
+    null,
+    null,
+  ),
+  myDayEntry("task-1", "a0"),
 ].sort((left, right) => {
   const family = familyOrder.indexOf(left.family) -
     familyOrder.indexOf(right.family);

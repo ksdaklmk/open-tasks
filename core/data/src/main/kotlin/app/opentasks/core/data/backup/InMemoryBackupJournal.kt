@@ -181,6 +181,8 @@ internal fun WorkspaceSnapshot.toBackupRecords(
                 revisionDeviceId = retired.revision.deviceId.value,
             ).toBackupRecordV1()
         }
+        automationRules.mapTo(this) { it.toEntity().toBackupRecordV1() }
+        myDay.mapTo(this) { it.toEntity().toBackupRecordV1() }
         tombstones.mapTo(this) { it.toBackupRecordV1() }
     }
 }

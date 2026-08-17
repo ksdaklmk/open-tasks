@@ -4,9 +4,11 @@ import androidx.room.withTransaction
 import app.opentasks.core.crypto.VaultKeyEnvelope
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -278,6 +280,16 @@ internal class RoomBackupRecordImporter(
                     entity.bodyCiphertext.fill(0)
                 }
             }
+            BackupRecordFamily.AUTOMATION_RULE -> fields.toAutomationRuleEntity().let { entity ->
+                if (replace) {
+                    importDao.upsertAutomationRule(entity)
+                } else {
+                    importDao.insertAutomationRule(entity)
+                }
+            }
+            BackupRecordFamily.MY_DAY -> fields.toMyDayEntryEntity().let { entity ->
+                if (replace) importDao.upsertMyDayEntry(entity) else importDao.insertMyDayEntry(entity)
+            }
         }
     }
 
@@ -303,6 +315,8 @@ internal class RoomBackupRecordImporter(
         BackupRecordFamily.TOMBSTONE -> importDao.deleteTombstone(key.first(), key.second())
         BackupRecordFamily.NOTE -> importDao.deleteNote(key.single())
         BackupRecordFamily.RETIRED_BLOB_SET -> importDao.deleteRetiredBlobSet(key.single())
+        BackupRecordFamily.AUTOMATION_RULE -> importDao.deleteAutomationRule(key.single())
+        BackupRecordFamily.MY_DAY -> importDao.deleteMyDayEntry(key.single())
     }
 }
 
@@ -740,6 +754,22 @@ internal fun BackupRecordFields.toNoteEntity(): NoteEntity = NoteEntity(
     revisionLogical = int("revisionLogical"),
     revisionDeviceId = string("revisionDeviceId"),
 )
+
+internal fun BackupRecordFields.toAutomationRuleEntity(): AutomationRuleEntity =
+    AutomationRuleEntity(
+        id = string("id"),
+        workspaceId = string("workspaceId"),
+        type = string("type"),
+        enabled = boolean("enabled"),
+        projectId = nullableString("projectId"),
+        statusId = nullableString("statusId"),
+        tagId = nullableString("tagId"),
+        dueInDays = nullableInt("dueInDays"),
+        thresholdDays = nullableInt("thresholdDays"),
+    )
+
+internal fun BackupRecordFields.toMyDayEntryEntity(): MyDayEntryEntity =
+    MyDayEntryEntity(taskId = string("taskId"), rank = string("rank"))
 
 internal fun BackupRecordFields.toRetiredBlobSetEntity(): RetiredBlobSetEntity = RetiredBlobSetEntity(
     blobSetId = string("blobSetId"),

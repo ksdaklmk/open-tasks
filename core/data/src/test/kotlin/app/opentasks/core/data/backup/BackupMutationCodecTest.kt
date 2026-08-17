@@ -2,9 +2,11 @@ package app.opentasks.core.data.backup
 
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -510,6 +512,18 @@ class BackupMutationCodecTest {
                 "revisionLogical",
                 "revisionDeviceId",
             ),
+            BackupRecordFamily.AUTOMATION_RULE to listOf(
+                "id",
+                "workspaceId",
+                "type",
+                "enabled",
+                "projectId",
+                "statusId",
+                "tagId",
+                "dueInDays",
+                "thresholdDays",
+            ),
+            BackupRecordFamily.MY_DAY to listOf("taskId", "rank"),
         )
         val expectedIdentities = linkedMapOf(
             BackupRecordFamily.VAULT to listOf("vault-1"),
@@ -532,6 +546,8 @@ class BackupMutationCodecTest {
             BackupRecordFamily.NOTE to listOf("note-1"),
             BackupRecordFamily.RETIRED_BLOB_SET to listOf("blob-set-1"),
             BackupRecordFamily.TOMBSTONE to listOf("task-1", "task"),
+            BackupRecordFamily.AUTOMATION_RULE to listOf("rule-1"),
+            BackupRecordFamily.MY_DAY to listOf("task-1"),
         )
 
         assertEquals(BackupRecordFamily.entries.toSet(), records.keys)
@@ -714,6 +730,89 @@ class BackupMutationCodecTest {
         }
     }
 
+    @Test
+    fun familyOrdinalsStayFrozenForCanonicalOrdering() {
+        // BackupRecordKey orders by ordinal; historical snapshot bytes
+        // depend on it. New families append after TOMBSTONE, never before.
+        assertEquals(19, BackupRecordFamily.TOMBSTONE.ordinal)
+        assertEquals(20, BackupRecordFamily.AUTOMATION_RULE.ordinal)
+        assertEquals(21, BackupRecordFamily.MY_DAY.ordinal)
+    }
+
+    @Test
+    fun automationRuleRecordValidatesPerTypeConfig() {
+        fun rule(
+            type: String,
+            statusId: String?,
+            tagId: String?,
+            dueInDays: String?,
+            thresholdDays: String?,
+        ): BackupRecordV1 = BackupRecordV1(
+            family = BackupRecordFamily.AUTOMATION_RULE,
+            identity = listOf("rule-1"),
+            fields = listOf(
+                BackupFieldV1("id", BackupFieldType.STRING, "rule-1"),
+                BackupFieldV1("workspaceId", BackupFieldType.STRING, "workspace-1"),
+                BackupFieldV1("type", BackupFieldType.STRING, type),
+                BackupFieldV1("enabled", BackupFieldType.BOOLEAN, "true"),
+                BackupFieldV1("projectId", BackupFieldType.NULL, null),
+                statusId?.let { BackupFieldV1("statusId", BackupFieldType.STRING, it) }
+                    ?: BackupFieldV1("statusId", BackupFieldType.NULL, null),
+                tagId?.let { BackupFieldV1("tagId", BackupFieldType.STRING, it) }
+                    ?: BackupFieldV1("tagId", BackupFieldType.NULL, null),
+                dueInDays?.let { BackupFieldV1("dueInDays", BackupFieldType.INT, it) }
+                    ?: BackupFieldV1("dueInDays", BackupFieldType.NULL, null),
+                thresholdDays?.let { BackupFieldV1("thresholdDays", BackupFieldType.INT, it) }
+                    ?: BackupFieldV1("thresholdDays", BackupFieldType.NULL, null),
+            ),
+        )
+
+        BackupMutationCodec.validateRecord(rule("ON_ENTER_ADD_TAG", "status-1", "tag-1", null, null))
+        BackupMutationCodec.validateRecord(rule("ON_ENTER_ADD_TO_MY_DAY", "status-1", null, null, null))
+        BackupMutationCodec.validateRecord(rule("ON_ENTER_SET_DUE", "status-1", null, "3", null))
+        BackupMutationCodec.validateRecord(rule("MY_DAY_AUTO_REMOVE", null, null, null, null))
+        BackupMutationCodec.validateRecord(rule("STALE_BADGE", null, null, null, "14"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(rule("ON_ENTER_ADD_TAG", "status-1", null, null, null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(rule("ON_ENTER_SET_DUE", "status-1", null, "366", null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(rule("STALE_BADGE", null, null, null, "0"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(rule("MY_DAY_AUTO_REMOVE", "status-1", null, null, null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(rule("NOT_A_TYPE", null, null, null, null))
+        }
+    }
+
+    @Test
+    fun myDayRecordValidates() {
+        val record = BackupRecordV1(
+            family = BackupRecordFamily.MY_DAY,
+            identity = listOf("task-1"),
+            fields = listOf(
+                BackupFieldV1("taskId", BackupFieldType.STRING, "task-1"),
+                BackupFieldV1("rank", BackupFieldType.STRING, "a0"),
+            ),
+        )
+        BackupMutationCodec.validateRecord(record)
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupMutationCodec.validateRecord(
+                record.copy(
+                    fields = listOf(
+                        record.fields[0],
+                        BackupFieldV1("rank", BackupFieldType.STRING, ""),
+                    ),
+                ),
+            )
+        }
+    }
+
     private fun canonicalTagJson(): String =
         """{"formatVersion":1,"minimumReaderVersion":1,"mutationKind":"UPSERT",""" +
             """"record":{"family":"TAG","identity":["tag-1"],"fields":[""" +
@@ -874,5 +973,17 @@ class BackupMutationCodecTest {
             .toBackupRecordV1(),
         TombstoneEntity("task-1", "task", 1, 2, 1, 0, "device-1")
             .toBackupRecordV1(),
+        AutomationRuleEntity(
+            id = "rule-1",
+            workspaceId = "workspace-1",
+            type = "ON_ENTER_ADD_TAG",
+            enabled = true,
+            projectId = null,
+            statusId = "status-1",
+            tagId = "tag-1",
+            dueInDays = null,
+            thresholdDays = null,
+        ).toBackupRecordV1(),
+        MyDayEntryEntity(taskId = "task-1", rank = "a0").toBackupRecordV1(),
     )
 }
