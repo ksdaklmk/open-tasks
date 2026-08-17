@@ -612,8 +612,8 @@ private fun TaskListPane(
                     items(group.tasks, key = { "task:${it.id.value}" }) { task ->
                         val indentModifier = if (task.id in indentedTaskIds) {
                             Modifier
-                                .testTag("task-indent-${task.id.value}")
                                 .padding(start = 24.dp)
+                                .testTag("task-indent-${task.id.value}")
                         } else {
                             Modifier
                         }

@@ -187,10 +187,13 @@ class TasksArrangementInstrumentedTest {
             indentedTaskIds = setOf(child.id),
         )
 
+        composeRule.onNodeWithTag("task-indent-${child.id.value}").assertExists()
+        composeRule.onNodeWithTag("task-indent-${parent.id.value}").assertDoesNotExist()
+        // Both titles sit at the same depth inside their own TaskRow, so
+        // comparing title-to-title isolates the indent itself rather than
+        // mixing the outer wrapper's bounds with an inner descendant's.
         val parentLeft = composeRule.onNodeWithText(parent.title).getUnclippedBoundsInRoot().left
-        val childLeft = composeRule
-            .onNodeWithTag("task-indent-${child.id.value}")
-            .getUnclippedBoundsInRoot().left
+        val childLeft = composeRule.onNodeWithText(child.title).getUnclippedBoundsInRoot().left
         assertTrue(childLeft > parentLeft)
     }
 
