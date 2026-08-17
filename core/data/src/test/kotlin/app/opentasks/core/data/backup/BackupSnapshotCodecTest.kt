@@ -2,6 +2,7 @@ package app.opentasks.core.data.backup
 
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MemberEntity
 import app.opentasks.core.data.db.MilestoneEntity
@@ -285,6 +286,44 @@ class BackupSnapshotCodecTest {
         )
 
         val invalid = original.copy(records = original.records + forMissingTask)
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupSnapshotCodec.encode(invalid)
+        }
+    }
+
+    @Test
+    fun automationRuleRecordRequiresItsWorkspaceToExistInTheSnapshot() {
+        val original = BackupPayloadTestFixtures.snapshot()
+        val forExistingWorkspace = AutomationRuleEntity(
+            id = "automation-rule-1",
+            workspaceId = "workspace-1",
+            type = "MY_DAY_AUTO_REMOVE",
+            enabled = true,
+            projectId = null,
+            statusId = null,
+            tagId = null,
+            dueInDays = null,
+            thresholdDays = null,
+        ).toBackupRecordV1()
+        val forMissingWorkspace = AutomationRuleEntity(
+            id = "automation-rule-1",
+            workspaceId = "workspace-ghost",
+            type = "MY_DAY_AUTO_REMOVE",
+            enabled = true,
+            projectId = null,
+            statusId = null,
+            tagId = null,
+            dueInDays = null,
+            thresholdDays = null,
+        ).toBackupRecordV1()
+
+        val valid = original.copy(records = original.records + forExistingWorkspace)
+        assertEquals(
+            "vault-alpha",
+            BackupSnapshotCodec.decode(BackupSnapshotCodec.encode(valid)).vaultId,
+        )
+
+        val invalid = original.copy(records = original.records + forMissingWorkspace)
         assertThrows(IllegalArgumentException::class.java) {
             BackupSnapshotCodec.encode(invalid)
         }

@@ -538,6 +538,7 @@ private fun validateWorkspaceOwnedRecords(
     listOf(
         BackupRecordFamily.TEMPLATE,
         BackupRecordFamily.SAVED_VIEW,
+        BackupRecordFamily.AUTOMATION_RULE,
     ).forEach { family ->
         recordsByFamily.getValue(family).forEach { record ->
             require(workspaces.containsKey(record.requiredValue("workspaceId"))) {
