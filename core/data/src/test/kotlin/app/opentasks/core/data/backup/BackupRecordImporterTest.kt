@@ -50,6 +50,26 @@ class BackupRecordImporterTest {
         assertEquals("The backup vault schema is not readable", failure.message)
     }
 
+    /**
+     * Every other test in this class drives `normalizeForRecovery` off the
+     * live [VAULT_DATABASE_VERSION] constant, so it stays correct no matter
+     * what number that constant holds. This test pins the literal Room v10
+     * boundary: it fails if [VAULT_DATABASE_VERSION] silently drifts away
+     * from 10, which the symbolic tests above could never catch.
+     */
+    @Test
+    fun aRowMarkerAtRoomV10NormalizesAndOneBeyondIsRejected() {
+        assertEquals(10, VAULT_DATABASE_VERSION)
+
+        val normalized = RecoveryImportPlan.normalizeForRecovery(vaultRecord(schemaVersion = 10))
+        assertEquals("10", schemaVersionValue(normalized))
+
+        val failure = assertThrows(IllegalArgumentException::class.java) {
+            RecoveryImportPlan.normalizeForRecovery(vaultRecord(schemaVersion = 11))
+        }
+        assertEquals("The backup vault schema is not readable", failure.message)
+    }
+
     @Test
     fun aZeroRowMarkerIsRejected() {
         // rawVaultRecord bypasses VaultEntity.toBackupRecordV1()'s own

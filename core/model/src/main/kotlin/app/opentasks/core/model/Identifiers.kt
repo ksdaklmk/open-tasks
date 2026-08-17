@@ -103,6 +103,13 @@ value class SavedViewId(val value: String) {
 }
 
 @JvmInline
+value class AutomationRuleId(val value: String) {
+    companion object {
+        fun new(): AutomationRuleId = AutomationRuleId(UUID.randomUUID().toString())
+    }
+}
+
+@JvmInline
 value class DeviceId(val value: String)
 
 @JvmInline

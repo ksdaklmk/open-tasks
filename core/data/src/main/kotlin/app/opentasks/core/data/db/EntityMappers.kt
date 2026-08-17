@@ -5,11 +5,15 @@ import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
+import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleId
+import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.MyDayEntry
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
@@ -161,6 +165,7 @@ internal fun WorkflowStatusEntity.toModel(): WorkflowStatus = WorkflowStatus(
     semanticStatus = SemanticStatus.valueOf(semanticStatus),
     rank = rank,
     archivedAt = archivedAtEpochMillis?.let(Instant::ofEpochMilli),
+    wipLimit = wipLimit,
 )
 
 internal fun WorkflowStatus.toEntity(revision: Revision): WorkflowStatusEntity = WorkflowStatusEntity(
@@ -173,6 +178,7 @@ internal fun WorkflowStatus.toEntity(revision: Revision): WorkflowStatusEntity =
     revisionWallMillis = revision.wallTimeMillis,
     revisionLogical = revision.logicalCounter,
     revisionDeviceId = revision.deviceId.value,
+    wipLimit = wipLimit,
 )
 
 internal fun MilestoneEntity.toModel(): Milestone = Milestone(
@@ -388,3 +394,33 @@ internal fun ActivityEntry.toEntity(): ActivityEntryEntity = ActivityEntryEntity
     bodyCiphertext = body.toByteArray(Charsets.UTF_8),
     createdAtEpochMillis = createdAt.toEpochMilli(),
 )
+
+internal fun AutomationRuleEntity.toModel(): AutomationRule = AutomationRule(
+    id = AutomationRuleId(id),
+    workspaceId = WorkspaceId(workspaceId),
+    type = AutomationRuleType.valueOf(type),
+    enabled = enabled,
+    projectId = projectId?.let(::ProjectId),
+    statusId = statusId?.let(::WorkflowStatusId),
+    tagId = tagId?.let(::TagId),
+    dueInDays = dueInDays,
+    thresholdDays = thresholdDays,
+)
+
+internal fun AutomationRule.toEntity(): AutomationRuleEntity = AutomationRuleEntity(
+    id = id.value,
+    workspaceId = workspaceId.value,
+    type = type.name,
+    enabled = enabled,
+    projectId = projectId?.value,
+    statusId = statusId?.value,
+    tagId = tagId?.value,
+    dueInDays = dueInDays,
+    thresholdDays = thresholdDays,
+)
+
+internal fun MyDayEntryEntity.toModel(): MyDayEntry =
+    MyDayEntry(TaskId(taskId), rank)
+
+internal fun MyDayEntry.toEntity(): MyDayEntryEntity =
+    MyDayEntryEntity(taskId.value, rank)

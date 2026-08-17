@@ -37,11 +37,13 @@ import app.opentasks.core.model.ActiveTimerSnapshot
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
+import app.opentasks.core.model.AutomationRule
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.MyDayEntry
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.OpenTasksFixtures
@@ -3710,6 +3712,8 @@ class InMemoryVaultRepository internal constructor(
         activityEntries: List<ActivityEntry> = mutableWorkspace.value.activityEntries,
         retiredBlobSets: List<RetiredBlobSet> = mutableWorkspace.value.retiredBlobSets,
         savedViews: List<SavedView> = mutableWorkspace.value.savedViews,
+        automationRules: List<AutomationRule> = mutableWorkspace.value.automationRules,
+        myDay: List<MyDayEntry> = mutableWorkspace.value.myDay,
         at: Instant = now(),
     ) {
         val current = mutableWorkspace.value
@@ -3741,6 +3745,8 @@ class InMemoryVaultRepository internal constructor(
             savedViews = savedViews.sortedWith(
                 compareBy<SavedView> { it.name }.thenBy { it.id.value },
             ),
+            automationRules = automationRules,
+            myDay = myDay,
         ).withResolvedDependencyState(rebuildHomeTaskLists = true)
             .withReconciledTimeState(at = at, entries = timeEntries)
     }

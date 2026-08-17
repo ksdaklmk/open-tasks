@@ -351,6 +351,187 @@ class VaultDatabaseMigrationInstrumentedTest {
         migrated.close()
     }
 
+    @Test
+    fun migrate9To10PreservesRowsAddsEmptyTablesAndStampsMarker() {
+        val databaseName = databaseNameV9("preserved")
+        lateinit var before: Map<String, List<List<Any?>>>
+        createV9(databaseName).use { database ->
+            seedVersion9Fixture(database)
+            before = database.captureVersion9Bytes()
+        }
+
+        val migrated = migrateTo10(databaseName)
+
+        // Existing bytes byte-identical. The capture deliberately excludes
+        // `vaults` (the row marker is stamped by design, asserted below)
+        // and reads `workflow_statuses` with EXPLICIT v9 columns, because a
+        // post-migration `SELECT *` would include the new `wipLimit` column
+        // and could never byte-match the pre-migration capture.
+        assertEquals(before, migrated.captureVersion9Bytes())
+        assertEquals(0L, migrated.longValue("SELECT COUNT(*) FROM automation_rules"))
+        assertEquals(0L, migrated.longValue("SELECT COUNT(*) FROM my_day_entries"))
+        assertEquals(
+            0L,
+            migrated.longValue(
+                "SELECT COUNT(*) FROM workflow_statuses WHERE wipLimit IS NOT NULL",
+            ),
+        )
+        // MIGRATION_9_10 stamps the marker (the 7→8 precedent): a v9 app can
+        // never read v10 data anyway, so the recovery refusal becomes a
+        // legible upfront gate instead of a mid-decode field-count error.
+        assertEquals(
+            10L,
+            migrated.longValue("SELECT schemaVersion FROM vaults WHERE id = 'vault-a'"),
+        )
+        assertTrue(
+            migrated.longValue("SELECT schemaVersion FROM vaults WHERE id = 'vault-a'") <=
+                RECOVERED_SCHEMA_VERSION,
+        )
+        migrated.close()
+    }
+
+    private fun databaseNameV9(suffix: String): String =
+        "vault-v9-v10-$suffix.db".also(databaseNames::add)
+
+    private fun createV9(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.createDatabase(databaseName, 9)
+
+    private fun migrateTo10(databaseName: String): SupportSQLiteDatabase =
+        migrationTestHelper.runMigrationsAndValidate(
+            databaseName,
+            10,
+            true,
+            VaultDatabase.MIGRATION_9_10,
+        )
+
+    private fun insertVaultV9(database: SupportSQLiteDatabase, id: String) {
+        database.execSQL(
+            """
+            INSERT INTO vaults (
+                id, storageMode, createdAtEpochMillis, schemaVersion,
+                cryptoVersion, minimumReaderVersion
+            ) VALUES (?, 'LOCAL', 1000, 9, 1, 1)
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    /**
+     * Populates a task, two attachments (one with a `blobSetId`, one
+     * without), one `attachment_transfer` row, one `retired_blob_sets` row,
+     * and one `workflow_statuses` row (9-column insert, no `wipLimit`) so
+     * [migrate9To10PreservesRowsAddsEmptyTablesAndStampsMarker] can prove
+     * the additive 9→10 migration changes no existing byte while starting
+     * the new `automation_rules` and `my_day_entries` tables empty and the
+     * new `wipLimit` column null.
+     */
+    private fun seedVersion9Fixture(database: SupportSQLiteDatabase) {
+        insertVaultV9(database, id = "vault-a")
+        database.execSQL(
+            """
+            INSERT INTO workspaces (id, vaultId, ownerId, name)
+            VALUES ('workspace-a', 'vault-a', 'member-a', 'Workspace A')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            "INSERT INTO members (id, displayName) VALUES ('member-a', 'Member A')",
+        )
+        database.execSQL(
+            """
+            INSERT INTO tasks (
+                id, workspaceId, projectId, parentTaskId, statusId, semanticStatus,
+                title, descriptionCiphertext, priority, startEpochMillis, startZoneId,
+                dueEpochMillis, dueZoneId, recurrenceFrequency, recurrenceInterval,
+                recurrenceWeekdays, recurrenceCount, recurrenceEndDate,
+                recurrenceSeriesId, recurrenceAnchorEpochMillis, recurrenceAnchorZoneId,
+                recurrenceOccurrenceIndex, estimateSeconds, milestoneId,
+                completedAtEpochMillis, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'task-a', 'workspace-a', NULL, NULL, 'workflow-a', 'TODO',
+                'Task A', ?, 'MEDIUM', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x01, 0x02, 0x03)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount, contentHash,
+                blobSetId, chunkCount, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'attachment-blob', 'task-a', ?, 'application/pdf', 9000000, 'hash-a',
+                'blob-set-a', 3, NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x04, 0x05)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachments (
+                id, taskId, displayNameCiphertext, mimeType, byteCount, contentHash,
+                blobSetId, chunkCount, deletedAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES (
+                'attachment-blobless', 'task-a', ?, 'application/octet-stream', 10,
+                'hash-b', NULL, 0, NULL, 11, 1, 'device-a'
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x06)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO attachment_transfer (
+                blobSetId, attachmentId, taskId, phase, displayNameCiphertext, mimeType,
+                declaredByteCount, contentHash, chunkCount, chunkStateEncoded,
+                manifestProviderFileId, createdAtEpochMillis, updatedAtEpochMillis
+            ) VALUES (
+                'blob-set-pending', 'attachment-pending', 'task-a', 'UPLOADING', ?,
+                'application/zip', 4000000, NULL, NULL, '000', NULL, 10, 20
+            )
+            """.trimIndent(),
+            arrayOf<Any?>(byteArrayOf(0x07)),
+        )
+        database.execSQL(
+            """
+            INSERT INTO retired_blob_sets (
+                blobSetId, chunkCount, retiredAtEpochMillis, revisionWallMillis,
+                revisionLogical, revisionDeviceId
+            ) VALUES ('blob-set-retired', 2, 12, 10, 1, 'device-a')
+            """.trimIndent(),
+        )
+        database.execSQL(
+            """
+            INSERT INTO workflow_statuses (
+                id, projectId, name, semanticStatus, rank, archivedAtEpochMillis,
+                revisionWallMillis, revisionLogical, revisionDeviceId
+            ) VALUES (
+                'workflow-a', NULL, 'Todo', 'TODO', 'a0', NULL, 10, 1, 'device-a'
+            )
+            """.trimIndent(),
+        )
+    }
+
+    private fun SupportSQLiteDatabase.captureVersion9Bytes(): Map<String, List<List<Any?>>> =
+        buildMap {
+            listOf("tasks", "attachments", "attachment_transfer", "retired_blob_sets")
+                .forEach { table ->
+                    put(table, captureRows("SELECT * FROM $table ORDER BY rowid"))
+                }
+            // Explicit v9 columns: byte-comparable across the ADD COLUMN.
+            put(
+                "workflow_statuses",
+                captureRows(
+                    "SELECT id, projectId, name, semanticStatus, rank, " +
+                        "archivedAtEpochMillis, revisionWallMillis, " +
+                        "revisionLogical, revisionDeviceId " +
+                        "FROM workflow_statuses ORDER BY rowid",
+                ),
+            )
+        }
+
     private fun databaseNameV8(suffix: String): String =
         "vault-v8-v9-$suffix.db".also(databaseNames::add)
 

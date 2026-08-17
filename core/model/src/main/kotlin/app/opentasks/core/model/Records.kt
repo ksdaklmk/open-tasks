@@ -62,6 +62,7 @@ data class WorkflowStatus(
     val semanticStatus: SemanticStatus,
     val rank: String,
     val archivedAt: Instant? = null,
+    val wipLimit: Int? = null,
 ) {
     companion object {
         fun defaultId(
@@ -327,3 +328,25 @@ data class Tombstone(
     val purgeAfter: Instant,
     val revision: Revision,
 )
+
+enum class AutomationRuleType {
+    ON_ENTER_ADD_TAG,
+    ON_ENTER_ADD_TO_MY_DAY,
+    ON_ENTER_SET_DUE,
+    MY_DAY_AUTO_REMOVE,
+    STALE_BADGE,
+}
+
+data class AutomationRule(
+    val id: AutomationRuleId,
+    val workspaceId: WorkspaceId,
+    val type: AutomationRuleType,
+    val enabled: Boolean,
+    val projectId: ProjectId? = null,
+    val statusId: WorkflowStatusId? = null,
+    val tagId: TagId? = null,
+    val dueInDays: Int? = null,
+    val thresholdDays: Int? = null,
+)
+
+data class MyDayEntry(val taskId: TaskId, val rank: String)

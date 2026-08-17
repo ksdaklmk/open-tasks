@@ -491,6 +491,36 @@ interface WorkspaceDao {
 
     @Query("SELECT COUNT(*) FROM saved_views")
     suspend fun savedViewCount(): Int
+
+    @Query("SELECT * FROM automation_rules ORDER BY id")
+    suspend fun getAutomationRules(): List<AutomationRuleEntity>
+
+    @Query("SELECT * FROM automation_rules ORDER BY id")
+    fun observeAutomationRules(): Flow<List<AutomationRuleEntity>>
+
+    @Query("SELECT * FROM automation_rules WHERE id = :id LIMIT 1")
+    suspend fun getAutomationRule(id: String): AutomationRuleEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAutomationRule(value: AutomationRuleEntity)
+
+    @Query("DELETE FROM automation_rules WHERE id = :id")
+    suspend fun deleteAutomationRule(id: String): Int
+
+    @Query("SELECT * FROM my_day_entries ORDER BY rank, taskId")
+    suspend fun getMyDayEntries(): List<MyDayEntryEntity>
+
+    @Query("SELECT * FROM my_day_entries ORDER BY rank, taskId")
+    fun observeMyDayEntries(): Flow<List<MyDayEntryEntity>>
+
+    @Query("SELECT * FROM my_day_entries WHERE taskId = :taskId LIMIT 1")
+    suspend fun getMyDayEntry(taskId: String): MyDayEntryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMyDayEntry(value: MyDayEntryEntity)
+
+    @Query("DELETE FROM my_day_entries WHERE taskId = :taskId")
+    suspend fun deleteMyDayEntry(taskId: String): Int
 }
 
 @Dao
@@ -582,7 +612,7 @@ interface AttachmentTransferDao {
  * recovery import accepts — reads the same number instead of a copy that can
  * drift out of sync with it.
  */
-internal const val VAULT_DATABASE_VERSION = 9
+internal const val VAULT_DATABASE_VERSION = 10
 
 @Database(
     entities = [
@@ -614,6 +644,8 @@ internal const val VAULT_DATABASE_VERSION = 9
         NoteEntity::class,
         AttachmentTransferEntity::class,
         RetiredBlobSetEntity::class,
+        AutomationRuleEntity::class,
+        MyDayEntryEntity::class,
     ],
     version = VAULT_DATABASE_VERSION,
     exportSchema = true,
@@ -675,6 +707,7 @@ abstract class VaultDatabase : RoomDatabase() {
         workspaceDao().deleteActivityForTask(taskId)
         workspaceDao().deleteTimeForTask(taskId)
         workspaceDao().deleteNotesForTask(taskId)
+        workspaceDao().deleteMyDayEntry(taskId)
         taskDao().deleteById(taskId)
         workspaceDao().upsertTombstone(tombstone)
     }
@@ -703,6 +736,7 @@ abstract class VaultDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
+                    MIGRATION_9_10,
                 )
                 .build()
         }
@@ -1227,6 +1261,26 @@ abstract class VaultDatabase : RoomDatabase() {
                         "`revisionDeviceId` TEXT NOT NULL, " +
                         "PRIMARY KEY(`blobSetId`))",
                 )
+            }
+        }
+
+        internal val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `automation_rules` (" +
+                        "`id` TEXT NOT NULL, `workspaceId` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL, `enabled` INTEGER NOT NULL, " +
+                        "`projectId` TEXT, `statusId` TEXT, `tagId` TEXT, " +
+                        "`dueInDays` INTEGER, `thresholdDays` INTEGER, " +
+                        "PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `my_day_entries` (" +
+                        "`taskId` TEXT NOT NULL, `rank` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`taskId`))",
+                )
+                db.execSQL("ALTER TABLE workflow_statuses ADD COLUMN wipLimit INTEGER")
+                db.execSQL("UPDATE vaults SET schemaVersion = 10 WHERE schemaVersion < 10")
             }
         }
 

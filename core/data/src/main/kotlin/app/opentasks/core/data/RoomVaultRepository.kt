@@ -14,8 +14,10 @@ import app.opentasks.core.data.backup.snapshots
 import app.opentasks.core.data.backup.toBackupRecordV1
 import app.opentasks.core.data.db.ActivityEntryEntity
 import app.opentasks.core.data.db.AttachmentEntity
+import app.opentasks.core.data.db.AutomationRuleEntity
 import app.opentasks.core.data.db.ChecklistItemEntity
 import app.opentasks.core.data.db.MilestoneEntity
+import app.opentasks.core.data.db.MyDayEntryEntity
 import app.opentasks.core.data.db.NoteEntity
 import app.opentasks.core.data.db.ProjectEntity
 import app.opentasks.core.data.db.ReminderEntity
@@ -4106,29 +4108,39 @@ class RoomVaultRepository(
                 combine(
                     combine(
                         combine(
-                            workspaceDao.observeTaskTags(),
-                            workspaceDao.observeChecklistItems(),
-                            workspaceDao.observeReminders(),
-                            observeTimeEntriesWithClock(),
-                            workspaceDao.observeNotes(),
-                        ) { taskTags, checklist, reminders, timeEntries, notes ->
-                            RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                            combine(
+                                combine(
+                                    workspaceDao.observeTaskTags(),
+                                    workspaceDao.observeChecklistItems(),
+                                    workspaceDao.observeReminders(),
+                                    observeTimeEntriesWithClock(),
+                                    workspaceDao.observeNotes(),
+                                ) { taskTags, checklist, reminders, timeEntries, notes ->
+                                    RelationRows(taskTags, checklist, reminders, timeEntries, notes)
+                                },
+                                workspaceDao.observeAttachments(),
+                            ) { rows, attachments ->
+                                rows.copy(attachments = attachments)
+                            },
+                            workspaceDao.observeActivityEntries(),
+                        ) { rows, activityEntries ->
+                            rows.copy(activityEntries = activityEntries)
                         },
-                        workspaceDao.observeAttachments(),
-                    ) { rows, attachments ->
-                        rows.copy(attachments = attachments)
+                        workspaceDao.observeRetiredBlobSets(),
+                    ) { rows, retiredBlobSets ->
+                        rows.copy(retiredBlobSets = retiredBlobSets)
                     },
-                    workspaceDao.observeActivityEntries(),
-                ) { rows, activityEntries ->
-                    rows.copy(activityEntries = activityEntries)
+                    workspaceDao.observeSavedViews(),
+                ) { rows, savedViews ->
+                    rows.copy(savedViews = savedViews)
                 },
-                workspaceDao.observeRetiredBlobSets(),
-            ) { rows, retiredBlobSets ->
-                rows.copy(retiredBlobSets = retiredBlobSets)
+                workspaceDao.observeAutomationRules(),
+            ) { rows, automationRules ->
+                rows.copy(automationRules = automationRules)
             },
-            workspaceDao.observeSavedViews(),
-        ) { rows, savedViews ->
-            rows.copy(savedViews = savedViews)
+            workspaceDao.observeMyDayEntries(),
+        ) { rows, myDayEntries ->
+            rows.copy(myDayEntries = myDayEntries)
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
@@ -4247,6 +4259,13 @@ class RoomVaultRepository(
             savedViews = relations.savedViews.mapNotNull { entity ->
                 runCatching { entity.toModel() }.getOrNull()
             },
+            // A malformed persisted AutomationRuleType name (recovered
+            // foreign data) must not break repository readiness either;
+            // same fail-closed precedent as savedViews above.
+            automationRules = relations.automationRules.mapNotNull { entity ->
+                runCatching { entity.toModel() }.getOrNull()
+            },
+            myDay = relations.myDayEntries.map(MyDayEntryEntity::toModel),
         )
     }
 
@@ -4361,6 +4380,8 @@ class RoomVaultRepository(
         val activityEntries: List<ActivityEntryEntity> = emptyList(),
         val retiredBlobSets: List<RetiredBlobSetEntity> = emptyList(),
         val savedViews: List<SavedViewEntity> = emptyList(),
+        val automationRules: List<AutomationRuleEntity> = emptyList(),
+        val myDayEntries: List<MyDayEntryEntity> = emptyList(),
     )
 
     private data class TimedTimeEntries(

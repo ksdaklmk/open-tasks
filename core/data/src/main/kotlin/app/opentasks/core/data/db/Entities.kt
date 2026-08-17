@@ -58,6 +58,7 @@ data class WorkflowStatusEntity(
     val revisionWallMillis: Long,
     val revisionLogical: Int,
     val revisionDeviceId: String,
+    val wipLimit: Int? = null,
 )
 
 @Entity(tableName = "milestones", primaryKeys = ["id"])
@@ -286,4 +287,23 @@ data class TombstoneEntity(
     val revisionWallMillis: Long,
     val revisionLogical: Int,
     val revisionDeviceId: String,
+)
+
+@Entity(tableName = "automation_rules", primaryKeys = ["id"])
+data class AutomationRuleEntity(
+    val id: String,
+    val workspaceId: String,
+    val type: String,
+    val enabled: Boolean,
+    val projectId: String?,
+    val statusId: String?,
+    val tagId: String?,
+    val dueInDays: Int?,
+    val thresholdDays: Int?,
+)
+
+@Entity(tableName = "my_day_entries", primaryKeys = ["taskId"])
+data class MyDayEntryEntity(
+    val taskId: String,
+    val rank: String,
 )

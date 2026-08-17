@@ -20,6 +20,7 @@ data class HomeSnapshot(
     val projects: List<Project>,
     val activeTimer: ActiveTimerSnapshot?,
     val overdueCount: Int,
+    val myDayTasks: List<Task> = emptyList(),
 )
 
 data class WorkspaceSnapshot(
@@ -38,6 +39,8 @@ data class WorkspaceSnapshot(
     val activityEntries: List<ActivityEntry> = emptyList(),
     val retiredBlobSets: List<RetiredBlobSet> = emptyList(),
     val savedViews: List<SavedView> = emptyList(),
+    val automationRules: List<AutomationRule> = emptyList(),
+    val myDay: List<MyDayEntry> = emptyList(),
 )
 
 data class TimeEntryConflict(
