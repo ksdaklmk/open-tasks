@@ -3673,6 +3673,92 @@ class RoomVaultRepositoryInstrumentedTest {
         }
     }
 
+    @Test
+    fun wipLimitSetClearValidateAndUndo() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            openRepository()
+            val status = repository!!.currentWorkspace().workflowStatuses.first {
+                it.projectId == OpenTasksFixtures.studioProject.id &&
+                    it.semanticStatus == SemanticStatus.STARTED
+            }
+            val set = repository!!.execute(
+                DomainCommand.SetWorkflowStatusWipLimit(status.id, 2),
+            )
+            assertTrue(set is CommandResult.Success)
+            assertEquals(
+                2,
+                repository!!.currentWorkspace().workflowStatuses
+                    .first { it.id == status.id }.wipLimit,
+            )
+            repository!!.execute(requireNotNull((set as CommandResult.Success).undo))
+            assertNull(
+                repository!!.currentWorkspace().workflowStatuses
+                    .first { it.id == status.id }.wipLimit,
+            )
+            assertTrue(
+                repository!!.execute(DomainCommand.SetWorkflowStatusWipLimit(status.id, 0))
+                    is CommandResult.Rejected,
+            )
+            val done = repository!!.currentWorkspace().workflowStatuses.first {
+                it.projectId == status.projectId &&
+                    it.semanticStatus == SemanticStatus.COMPLETED
+            }
+            val onDone = repository!!.execute(DomainCommand.SetWorkflowStatusWipLimit(done.id, 2))
+            assertTrue(onDone is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.WIP_LIMIT_INVALID,
+                (onDone as CommandResult.Rejected).reason,
+            )
+        }
+    }
+
+    @Test
+    fun changeTaskStatusConfirmsOverLimitAndNeverBlocks() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            openRepository()
+            val project = OpenTasksFixtures.studioProject
+            val snapshot = repository!!.currentWorkspace()
+            // Backlog starts empty for the studio project fixture (unlike
+            // Started, which already holds task-proposal), so filling it
+            // from zero below is exact.
+            val backlog = snapshot.workflowStatuses.first {
+                it.projectId == project.id && it.semanticStatus == SemanticStatus.BACKLOG
+            }
+            repository!!.execute(DomainCommand.SetWorkflowStatusWipLimit(backlog.id, 1))
+
+            // Fill the column to its limit with one open task.
+            val movable = snapshot.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.statusId != backlog.id
+            }
+            repository!!.execute(DomainCommand.ChangeTaskStatus(movable[0].id, backlog.id))
+
+            val over = repository!!.execute(
+                DomainCommand.ChangeTaskStatus(movable[1].id, backlog.id),
+            )
+            assertTrue(over is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.WIP_LIMIT_CONFIRM_REQUIRED,
+                (over as CommandResult.Rejected).reason,
+            )
+
+            // Acknowledged, the same move succeeds — soft limit, never a block.
+            val acknowledged = repository!!.execute(
+                DomainCommand.ChangeTaskStatus(
+                    movable[1].id,
+                    backlog.id,
+                    acknowledgeWipLimit = true,
+                ),
+            )
+            assertTrue(acknowledged is CommandResult.Success)
+
+            // Completion is exempt: moving into a COMPLETED column with a
+            // full source column never trips the gate.
+            val completion = repository!!.execute(DomainCommand.CompleteTask(movable[1].id))
+            assertTrue(completion is CommandResult.Success)
+        }
+    }
+
     private fun duplicationSnapshot(): WorkspaceSnapshot {
         val seed = OpenTasksFixtures.snapshot
         val project = OpenTasksFixtures.studioProject

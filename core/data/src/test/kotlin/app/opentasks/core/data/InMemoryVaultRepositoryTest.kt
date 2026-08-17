@@ -1,6 +1,7 @@
 package app.opentasks.core.data
 
 import app.opentasks.core.data.backup.InMemoryBackupJournal
+import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
@@ -2710,6 +2711,117 @@ class InMemoryVaultRepositoryTest {
             listOf(ActivityKind.RECORD_CREATED),
             after.activityEntries.filter { it.taskId == duplicate.id }.map { it.kind },
         )
+    }
+
+    @Test
+    fun wipLimitSetClearValidateAndUndo() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val status = repository.currentWorkspace().workflowStatuses.first {
+                it.projectId == OpenTasksFixtures.studioProject.id &&
+                    it.semanticStatus == SemanticStatus.STARTED
+            }
+            val set = repository.execute(
+                DomainCommand.SetWorkflowStatusWipLimit(status.id, 2),
+            )
+            assertTrue(set is CommandResult.Success)
+            assertEquals(
+                2,
+                repository.currentWorkspace().workflowStatuses
+                    .first { it.id == status.id }.wipLimit,
+            )
+            repository.execute(requireNotNull((set as CommandResult.Success).undo))
+            assertNull(
+                repository.currentWorkspace().workflowStatuses
+                    .first { it.id == status.id }.wipLimit,
+            )
+            assertTrue(
+                repository.execute(DomainCommand.SetWorkflowStatusWipLimit(status.id, 0))
+                    is CommandResult.Rejected,
+            )
+            val done = repository.currentWorkspace().workflowStatuses.first {
+                it.projectId == status.projectId &&
+                    it.semanticStatus == SemanticStatus.COMPLETED
+            }
+            val onDone = repository.execute(DomainCommand.SetWorkflowStatusWipLimit(done.id, 2))
+            assertTrue(onDone is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.WIP_LIMIT_INVALID,
+                (onDone as CommandResult.Rejected).reason,
+            )
+        }
+    }
+
+    @Test
+    fun changeTaskStatusConfirmsOverLimitAndNeverBlocks() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val snapshot = repository.currentWorkspace()
+            // Backlog starts empty for the studio project fixture (unlike
+            // Started, which already holds task-proposal), so filling it
+            // from zero below is exact.
+            val backlog = snapshot.workflowStatuses.first {
+                it.projectId == project.id && it.semanticStatus == SemanticStatus.BACKLOG
+            }
+            repository.execute(DomainCommand.SetWorkflowStatusWipLimit(backlog.id, 1))
+
+            // Fill the column to its limit with one open task.
+            val movable = snapshot.tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.statusId != backlog.id
+            }
+            repository.execute(DomainCommand.ChangeTaskStatus(movable[0].id, backlog.id))
+
+            val over = repository.execute(
+                DomainCommand.ChangeTaskStatus(movable[1].id, backlog.id),
+            )
+            assertTrue(over is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.WIP_LIMIT_CONFIRM_REQUIRED,
+                (over as CommandResult.Rejected).reason,
+            )
+
+            // Acknowledged, the same move succeeds — soft limit, never a block.
+            val acknowledged = repository.execute(
+                DomainCommand.ChangeTaskStatus(
+                    movable[1].id,
+                    backlog.id,
+                    acknowledgeWipLimit = true,
+                ),
+            )
+            assertTrue(acknowledged is CommandResult.Success)
+
+            // Completion is exempt: moving into a COMPLETED column with a
+            // full source column never trips the gate.
+            val completion = repository.execute(DomainCommand.CompleteTask(movable[1].id))
+            assertTrue(completion is CommandResult.Success)
+        }
+    }
+
+    @Test
+    fun setWorkflowStatusWipLimitJournalsWorkflowStatusUpsert() = runBlocking {
+        withTimeout(5_000) {
+            val journal = InMemoryBackupJournal()
+            val repository = InMemoryVaultRepository(backupJournal = journal)
+            val status = repository.currentWorkspace().workflowStatuses.first {
+                it.projectId == OpenTasksFixtures.studioProject.id &&
+                    it.semanticStatus == SemanticStatus.STARTED
+            }
+            val generationBefore = journal.currentGeneration
+            val entriesBefore = journal.entries.size
+
+            val result = repository.execute(
+                DomainCommand.SetWorkflowStatusWipLimit(status.id, 3),
+            )
+
+            assertTrue(result is CommandResult.Success)
+            assertEquals(generationBefore + 1, journal.currentGeneration)
+            val upserts = journal.entries.drop(entriesBefore).filter {
+                it.objectType == "WORKFLOW_STATUS" && it.mutationKind == BackupMutationKind.UPSERT
+            }
+            assertEquals(listOf(status.id.value), upserts.map { it.objectId })
+        }
     }
 
     private fun scheduleRepository(

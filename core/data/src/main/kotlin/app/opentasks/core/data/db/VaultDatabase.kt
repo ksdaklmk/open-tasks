@@ -103,6 +103,15 @@ interface TaskDao {
 
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteById(id: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM tasks
+        WHERE statusId = :statusId AND deletedAtEpochMillis IS NULL
+            AND semanticStatus != 'COMPLETED'
+        """,
+    )
+    suspend fun openTaskCountForStatus(statusId: String): Int
 }
 
 @Dao

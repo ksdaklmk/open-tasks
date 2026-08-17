@@ -32,6 +32,7 @@ import app.opentasks.core.domain.TimerRules
 import app.opentasks.core.domain.validateTaskScheduleState
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.domain.wipLimitRejection
 import app.opentasks.core.data.export.TasksImportPlan
 import app.opentasks.core.data.export.TasksImportPlanResult
 import app.opentasks.core.data.export.buildTasksImportPlan
@@ -218,6 +219,7 @@ class InMemoryVaultRepository internal constructor(
                 restoreArchivedWorkflowStatus(command)
             is DomainCommand.RestoreWorkflowStatuses -> restoreWorkflowStatuses(command)
             is DomainCommand.RemoveWorkflowStatus -> removeWorkflowStatus(command)
+            is DomainCommand.SetWorkflowStatusWipLimit -> setWorkflowStatusWipLimit(command)
             is DomainCommand.CreateMilestone -> createMilestone(command)
             is DomainCommand.UpdateMilestone -> updateMilestone(command)
             is DomainCommand.DeleteMilestone -> deleteMilestone(command)
@@ -992,6 +994,40 @@ class InMemoryVaultRepository internal constructor(
         }
         publishWorkflowStatuses(current.workflowStatuses.filterNot { it.id == status.id })
         return CommandResult.Success("Workflow status removed")
+    }
+
+    private fun setWorkflowStatusWipLimit(
+        command: DomainCommand.SetWorkflowStatusWipLimit,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val original = current.workflowStatuses.firstOrNull { it.id == command.statusId }
+            ?: return CommandResult.Rejected(
+                RejectionReason.NOT_FOUND,
+                "Workflow status no longer exists.",
+            )
+        if (original.archivedAt != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Restore that workflow status before changing its limit.",
+            )
+        }
+        if (original.semanticStatus == SemanticStatus.COMPLETED) {
+            return CommandResult.Rejected(
+                RejectionReason.WIP_LIMIT_INVALID,
+                "Completed columns do not take a limit.",
+            )
+        }
+        wipLimitRejection(command.wipLimit)?.let { return it }
+        if (command.wipLimit == original.wipLimit) {
+            return CommandResult.Success("Limit is unchanged")
+        }
+        publishWorkflowStatuses(
+            current.workflowStatuses.replace(original.copy(wipLimit = command.wipLimit)),
+        )
+        return CommandResult.Success(
+            message = if (command.wipLimit == null) "Limit cleared" else "Limit set",
+            undo = DomainCommand.RestoreWorkflowStatuses(listOf(original)),
+        )
     }
 
     private fun createMilestone(command: DomainCommand.CreateMilestone): CommandResult {
@@ -1935,6 +1971,21 @@ class InMemoryVaultRepository internal constructor(
             return CommandResult.Rejected(
                 RejectionReason.BLOCKED_TASK_WARNING_REQUIRED,
                 "This task still has unfinished dependencies.",
+            )
+        }
+        val limit = status.wipLimit
+        if (
+            limit != null &&
+            status.semanticStatus != SemanticStatus.COMPLETED &&
+            task.statusId != status.id &&
+            !command.acknowledgeWipLimit &&
+            current.tasks.count {
+                it.statusId == status.id && it.deletedAt == null && !it.isCompleted
+            } + 1 > limit
+        ) {
+            return CommandResult.Rejected(
+                RejectionReason.WIP_LIMIT_CONFIRM_REQUIRED,
+                "“${status.name}” is at its limit of $limit open tasks.",
             )
         }
         if (task.statusId == status.id) {

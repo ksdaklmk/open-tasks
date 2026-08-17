@@ -152,6 +152,11 @@ sealed interface DomainCommand {
         val statusId: WorkflowStatusId,
     ) : DomainCommand
 
+    data class SetWorkflowStatusWipLimit(
+        val statusId: WorkflowStatusId,
+        val wipLimit: Int?,          // null clears the limit
+    ) : DomainCommand
+
     data class CreateMilestone(
         val milestoneId: MilestoneId,
         val projectId: ProjectId,
@@ -294,6 +299,7 @@ sealed interface DomainCommand {
         val taskId: TaskId,
         val statusId: WorkflowStatusId,
         val acknowledgeBlocked: Boolean = false,
+        val acknowledgeWipLimit: Boolean = false,
         val changedAt: Instant = Instant.now(),
     ) : DomainCommand
 
@@ -580,6 +586,8 @@ enum class RejectionReason {
     MY_DAY_LIMIT_REACHED,
     AUTOMATION_RULE_LIMIT_REACHED,
     AUTOMATION_RULE_INVALID,
+    WIP_LIMIT_CONFIRM_REQUIRED,
+    WIP_LIMIT_INVALID,
 }
 
 interface VaultRepository {
