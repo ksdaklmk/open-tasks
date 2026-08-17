@@ -56,7 +56,7 @@ function record(family, identity, fields) {
   return { family, identity, fields };
 }
 
-function status(id, projectId, name, semanticStatus, rank, logical) {
+function status(id, projectId, name, semanticStatus, rank, logical, wipLimit = null) {
   return record("WORKFLOW_STATUS", [id], [
     stringField("id", id),
     nullableStringField("projectId", projectId),
@@ -67,6 +67,7 @@ function status(id, projectId, name, semanticStatus, rank, logical) {
     longField("revisionWallMillis", 10),
     intField("revisionLogical", logical),
     stringField("revisionDeviceId", "device-alpha"),
+    nullableIntField("wipLimit", wipLimit),
   ]);
 }
 
@@ -171,6 +172,7 @@ const statuses = semanticStatuses.flatMap((semantic, index) => [
     semantic,
     `a${index}`,
     index,
+    semantic === "STARTED" ? 3 : null,
   ),
   status(
     `status-inbox-${semantic.toLowerCase()}`,

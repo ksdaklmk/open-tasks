@@ -378,6 +378,7 @@ class BackupMutationCodecTest {
                 "revisionWallMillis",
                 "revisionLogical",
                 "revisionDeviceId",
+                "wipLimit",
             ),
             BackupRecordFamily.MILESTONE to listOf(
                 "id",

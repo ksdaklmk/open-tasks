@@ -101,10 +101,14 @@ internal object BackupMutationCodec {
 
     internal fun validateRecord(record: BackupRecordV1) {
         val schema = schemas.getValue(record.family)
-        require(record.fields.size == schema.fields.size) {
+        val minimum = schema.fields.size
+        val maximum = minimum + schema.optionalTrailing.size
+        require(record.fields.size in minimum..maximum) {
             "${record.family} has the wrong field count"
         }
-        record.fields.zip(schema.fields).forEach { (field, expected) ->
+        val expectedFields = schema.fields +
+            schema.optionalTrailing.take(record.fields.size - minimum)
+        record.fields.zip(expectedFields).forEach { (field, expected) ->
             require(field.name == expected.name) {
                 "${record.family} field ${field.name} is out of order"
             }
@@ -193,6 +197,7 @@ internal object BackupMutationCodec {
     private fun validateFamilyValues(record: BackupRecordV1) {
         val fields = record.fields.associateBy(BackupFieldV1::name)
         fun value(name: String): String? = fields.getValue(name).value
+        fun optionalValue(name: String): String? = fields[name]?.value
         fun nonNegativeLong(name: String) {
             value(name)?.let { require(it.toLong() >= 0) { "$name cannot be negative" } }
         }
@@ -281,6 +286,9 @@ internal object BackupMutationCodec {
                 require(value("semanticStatus") in SemanticStatus.entries.map(SemanticStatus::name))
                 bounded("rank", 200, allowEmpty = false)
                 revision()
+                optionalValue("wipLimit")?.let {
+                    require(it.toInt() in 1..200) { "wipLimit out of range" }
+                }
             }
             BackupRecordFamily.MILESTONE -> {
                 identifier("projectId")
@@ -505,6 +513,7 @@ internal object BackupMutationCodec {
     private data class RecordSchema(
         val fields: List<FieldSchema>,
         val identityFieldIndexes: List<Int> = listOf(0),
+        val optionalTrailing: List<FieldSchema> = emptyList(),
     )
 
     private fun string(name: String, nullable: Boolean = false) =
@@ -555,7 +564,7 @@ internal object BackupMutationCodec {
             ),
         ),
         BackupRecordFamily.WORKFLOW_STATUS to RecordSchema(
-            listOf(
+            fields = listOf(
                 string("id"),
                 string("projectId", nullable = true),
                 string("name"),
@@ -566,6 +575,7 @@ internal object BackupMutationCodec {
                 int("revisionLogical"),
                 string("revisionDeviceId"),
             ),
+            optionalTrailing = listOf(int("wipLimit", nullable = true)),
         ),
         BackupRecordFamily.MILESTONE to RecordSchema(
             listOf(

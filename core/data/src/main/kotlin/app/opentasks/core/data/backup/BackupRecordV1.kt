@@ -137,6 +137,7 @@ internal fun WorkflowStatusEntity.toBackupRecordV1(): BackupRecordV1 = record(
     longField("revisionWallMillis", revisionWallMillis),
     intField("revisionLogical", revisionLogical),
     stringField("revisionDeviceId", revisionDeviceId),
+    nullableIntField("wipLimit", wipLimit),
 )
 
 internal fun MilestoneEntity.toBackupRecordV1(): BackupRecordV1 = record(

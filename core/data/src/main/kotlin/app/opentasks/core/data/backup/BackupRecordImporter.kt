@@ -504,6 +504,12 @@ internal class BackupRecordFields private constructor(
 
     fun nullableInt(name: String): Int? = optional(name, BackupFieldType.INT)?.toInt()
 
+    /** Trailing optional field: absent on legacy records, nullable when present. */
+    fun absentOrNullableInt(name: String): Int? {
+        fields[name] ?: return null
+        return nullableInt(name)
+    }
+
     fun boolean(name: String): Boolean =
         required(name, BackupFieldType.BOOLEAN).toBooleanStrict()
 
@@ -587,6 +593,7 @@ internal fun BackupRecordFields.toWorkflowStatusEntity(): WorkflowStatusEntity =
         revisionWallMillis = long("revisionWallMillis"),
         revisionLogical = int("revisionLogical"),
         revisionDeviceId = string("revisionDeviceId"),
+        wipLimit = absentOrNullableInt("wipLimit"),
     )
 
 internal fun BackupRecordFields.toMilestoneEntity(): MilestoneEntity = MilestoneEntity(
