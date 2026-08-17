@@ -44,11 +44,14 @@ import app.opentasks.core.data.db.toModel
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ProjectTemplatePlanner
+import app.opentasks.core.domain.myDayRankBetween
+import app.opentasks.core.domain.myDayRankForIndex
 import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.toCommandRejection
@@ -288,6 +291,11 @@ class RoomVaultRepository(
                 is DomainCommand.UpdateSavedViewQuery -> updateSavedViewQuery(command)
                 is DomainCommand.DeleteSavedView -> deleteSavedView(command)
                 is DomainCommand.RestoreSavedView -> restoreSavedView(command)
+                is DomainCommand.AddTaskToMyDay -> addTaskToMyDay(command)
+                is DomainCommand.RemoveTaskFromMyDay -> removeTaskFromMyDay(command)
+                is DomainCommand.MoveMyDayEntry -> moveMyDayEntry(command)
+                is DomainCommand.SweepMyDay -> sweepMyDay(command)
+                is DomainCommand.RestoreMyDayEntries -> restoreMyDayEntries(command)
             }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> {
@@ -3657,6 +3665,135 @@ class RoomVaultRepository(
         )
     }
 
+    private suspend fun addTaskToMyDay(command: DomainCommand.AddTaskToMyDay): CommandResult {
+        val task = database.taskDao().getById(command.taskId.value)
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        if (task.deletedAtEpochMillis != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Restore that task before planning it.",
+            )
+        }
+        if (database.workspaceDao().getMyDayEntry(command.taskId.value) != null) {
+            return CommandResult.Success("Already on My Day")
+        }
+        val entries = database.workspaceDao().getMyDayEntries()
+        if (entries.size >= MAX_MY_DAY_ENTRIES) {
+            return CommandResult.Rejected(
+                RejectionReason.MY_DAY_LIMIT_REACHED,
+                "My Day holds up to $MAX_MY_DAY_ENTRIES tasks.",
+            )
+        }
+        val last = entries.maxByOrNull(MyDayEntryEntity::rank)?.rank
+        val appended = rankAfter(last)
+        if (appended.length <= MAX_MY_DAY_RANK_LENGTH) {
+            database.workspaceDao().upsertMyDayEntry(
+                MyDayEntryEntity(command.taskId.value, appended),
+            )
+        } else {
+            // Append-bound guard: the sequential ponytail rank would exceed
+            // the journal codec's bound and abort the transaction, so full
+            // re-rank the existing entries in (rank, taskId) order and place
+            // the new entry at the tail index — the move handler's ponytail
+            // fallback applied to appends.
+            entries.forEachIndexed { index, entry ->
+                database.workspaceDao().upsertMyDayEntry(
+                    entry.copy(rank = myDayRankForIndex(index)),
+                )
+            }
+            database.workspaceDao().upsertMyDayEntry(
+                MyDayEntryEntity(command.taskId.value, myDayRankForIndex(entries.size)),
+            )
+        }
+        return CommandResult.Success(
+            message = "Added to My Day",
+            undo = DomainCommand.RemoveTaskFromMyDay(command.taskId),
+        )
+    }
+
+    private suspend fun removeTaskFromMyDay(
+        command: DomainCommand.RemoveTaskFromMyDay,
+    ): CommandResult {
+        val entry = database.workspaceDao().getMyDayEntry(command.taskId.value)
+            ?: return CommandResult.Success("Not on My Day")
+        database.workspaceDao().deleteMyDayEntry(entry.taskId)
+        return CommandResult.Success(
+            message = "Removed from My Day",
+            undo = DomainCommand.RestoreMyDayEntries(listOf(entry.toModel())),
+        )
+    }
+
+    private suspend fun moveMyDayEntry(command: DomainCommand.MoveMyDayEntry): CommandResult {
+        val entries = database.workspaceDao().getMyDayEntries()
+        val moving = entries.firstOrNull { it.taskId == command.taskId.value }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Not on My Day.")
+        val anchored = entries.filterNot { it.taskId == moving.taskId }
+        val anchorIndex = command.afterTaskId?.let { after ->
+            anchored.indexOfFirst { it.taskId == after.value }
+                .takeIf { it >= 0 }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Not on My Day.")
+        }
+        val previousRank = anchorIndex?.let { anchored[it].rank }
+        val nextRank = when (anchorIndex) {
+            null -> anchored.firstOrNull()?.rank
+            else -> anchored.getOrNull(anchorIndex + 1)?.rank
+        }
+        if (previousRank == moving.rank || nextRank == moving.rank) {
+            return CommandResult.Success("My Day order is unchanged")
+        }
+        val between = myDayRankBetween(previousRank, nextRank)
+        return if (between != null) {
+            database.workspaceDao().upsertMyDayEntry(moving.copy(rank = between))
+            CommandResult.Success(
+                message = "My Day reordered",
+                undo = DomainCommand.RestoreMyDayEntries(listOf(moving.toModel())),
+            )
+        } else {
+            // ponytail: midpoint exhausted — deterministic full re-rank in
+            // the same transaction; every row journals once, which is rare
+            // and bounded at 200 rows.
+            val reordered = buildList {
+                addAll(anchored.take(anchorIndex?.plus(1) ?: 0))
+                add(moving)
+                addAll(anchored.drop(anchorIndex?.plus(1) ?: 0))
+            }
+            reordered.forEachIndexed { index, entry ->
+                database.workspaceDao().upsertMyDayEntry(
+                    entry.copy(rank = myDayRankForIndex(index)),
+                )
+            }
+            CommandResult.Success(
+                message = "My Day reordered",
+                undo = DomainCommand.RestoreMyDayEntries(entries.map { it.toModel() }),
+            )
+        }
+    }
+
+    private suspend fun sweepMyDay(command: DomainCommand.SweepMyDay): CommandResult {
+        val entries = database.workspaceDao().getMyDayEntries()
+        val removed = entries.filter { entry ->
+            val task = database.taskDao().getById(entry.taskId)
+            task == null || task.completedAtEpochMillis?.let {
+                it < command.before.toEpochMilli()
+            } == true
+        }
+        removed.forEach { database.workspaceDao().deleteMyDayEntry(it.taskId) }
+        return CommandResult.Success(
+            message = if (removed.isEmpty()) "My Day is up to date" else "My Day tidied",
+            undo = DomainCommand.RestoreMyDayEntries(removed.map { it.toModel() })
+                .takeIf { removed.isNotEmpty() },
+        )
+    }
+
+    private suspend fun restoreMyDayEntries(
+        command: DomainCommand.RestoreMyDayEntries,
+    ): CommandResult {
+        command.entries.forEach { entry ->
+            database.workspaceDao().upsertMyDayEntry(entry.toEntity())
+        }
+        return CommandResult.Success("My Day restored")
+    }
+
     /**
      * Resolves a saved view the product can actually see. A physically
      * present row whose payload fails the strict codec stays invisible to
@@ -4217,6 +4354,11 @@ class RoomVaultRepository(
         val reconciliation = TimerRules.reconcile(timeEntries, currentTime)
         val activeTasks = tasks.filter { it.deletedAt == null }
         val openTasks = activeTasks.filterNot(Task::isCompleted)
+        val tasksById = tasks.associateBy(Task::id)
+        val myDayTasks = relations.myDayEntries
+            .sortedWith(compareBy(MyDayEntryEntity::rank, MyDayEntryEntity::taskId))
+            .mapNotNull { tasksById[TaskId(it.taskId)] }
+            .filter { it.deletedAt == null }
         val home = HomeSnapshot(
             today = LocalDate.ofInstant(currentTime, zoneId()),
             focusTasks = openTasks
@@ -4231,6 +4373,7 @@ class RoomVaultRepository(
             overdueCount = openTasks.count { task ->
                 task.due?.instant?.isBefore(currentTime) == true
             },
+            myDayTasks = myDayTasks,
         )
         return WorkspaceSnapshot(
             home = home,
@@ -4425,6 +4568,7 @@ class RoomVaultRepository(
         const val MAX_SAVED_VIEWS = 20
         const val MAX_SAVED_VIEW_NAME_LENGTH = 64
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
+        const val MAX_MY_DAY_ENTRIES = 200
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
         const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L

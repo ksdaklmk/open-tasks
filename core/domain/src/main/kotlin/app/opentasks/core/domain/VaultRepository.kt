@@ -7,6 +7,7 @@ import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.ChecklistItem
 import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.MyDayEntry
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
@@ -477,6 +478,19 @@ sealed interface DomainCommand {
 
     /** Undo of [DeleteSavedView] only; never constructed by UI code. */
     data class RestoreSavedView(val savedView: SavedView) : DomainCommand
+
+    data class AddTaskToMyDay(val taskId: TaskId) : DomainCommand
+
+    data class RemoveTaskFromMyDay(val taskId: TaskId) : DomainCommand
+
+    /** afterTaskId = null moves the entry to the top. */
+    data class MoveMyDayEntry(val taskId: TaskId, val afterTaskId: TaskId?) : DomainCommand
+
+    /** Removes members completed strictly before [before]. Idempotent. */
+    data class SweepMyDay(val before: Instant) : DomainCommand
+
+    /** Repository-produced Undo only; never constructed by UI code. */
+    data class RestoreMyDayEntries(val entries: List<MyDayEntry>) : DomainCommand
 }
 
 enum class WorkflowMoveDirection {
@@ -555,6 +569,7 @@ enum class RejectionReason {
     IMPORT_STATUS_CONFLICT,
     IMPORT_BACKUP_LIMIT_EXCEEDED,
     IMPORT_UNDO_CONFLICT,
+    MY_DAY_LIMIT_REACHED,
 }
 
 interface VaultRepository {

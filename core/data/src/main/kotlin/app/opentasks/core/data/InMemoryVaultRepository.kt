@@ -13,11 +13,14 @@ import app.opentasks.core.data.db.TombstoneEntity
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ProjectTemplatePlanner
+import app.opentasks.core.domain.myDayRankBetween
+import app.opentasks.core.domain.myDayRankForIndex
 import app.opentasks.core.domain.planTaskDuplicate
 import app.opentasks.core.domain.searchWorkspace
 import app.opentasks.core.domain.toCommandRejection
@@ -270,6 +273,11 @@ class InMemoryVaultRepository internal constructor(
             is DomainCommand.UpdateSavedViewQuery -> updateSavedViewQuery(command)
             is DomainCommand.DeleteSavedView -> deleteSavedView(command)
             is DomainCommand.RestoreSavedView -> restoreSavedView(command)
+            is DomainCommand.AddTaskToMyDay -> addTaskToMyDay(command)
+            is DomainCommand.RemoveTaskFromMyDay -> removeTaskFromMyDay(command)
+            is DomainCommand.MoveMyDayEntry -> moveMyDayEntry(command)
+            is DomainCommand.SweepMyDay -> sweepMyDay(command)
+            is DomainCommand.RestoreMyDayEntries -> restoreMyDayEntries(command)
         }
 
     override suspend fun search(query: SearchQuery): List<SearchResult> =
@@ -2158,6 +2166,7 @@ class InMemoryVaultRepository internal constructor(
             notes = current.notes.filterNot { it.taskId == task.id },
             attachments = current.attachments.filterNot { it.taskId == task.id },
             activityEntries = current.activityEntries.filterNot { it.taskId == task.id },
+            myDay = current.myDay.filterNot { it.taskId == task.id },
             retiredBlobSets = current.retiredBlobSets +
                 current.attachments.retiredBlobSets(setOf(task.id), command.purgedAt),
         )
@@ -2192,6 +2201,7 @@ class InMemoryVaultRepository internal constructor(
                 notes = current.notes.filterNot { it.taskId in expiredIds },
                 attachments = current.attachments.filterNot { it.taskId in expiredIds },
                 activityEntries = current.activityEntries.filterNot { it.taskId in expiredIds },
+                myDay = current.myDay.filterNot { it.taskId in expiredIds },
                 retiredBlobSets = current.retiredBlobSets +
                     current.attachments.retiredBlobSets(expiredIds, command.now),
                 at = command.now,
@@ -3407,6 +3417,149 @@ class InMemoryVaultRepository internal constructor(
         )
     }
 
+    private fun addTaskToMyDay(command: DomainCommand.AddTaskToMyDay): CommandResult {
+        val current = mutableWorkspace.value
+        val task = current.tasks.firstOrNull { it.id == command.taskId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        if (task.deletedAt != null) {
+            return CommandResult.Rejected(
+                RejectionReason.INVALID_STATE,
+                "Restore that task before planning it.",
+            )
+        }
+        if (current.myDay.any { it.taskId == command.taskId }) {
+            return CommandResult.Success("Already on My Day")
+        }
+        if (current.myDay.size >= MAX_MY_DAY_ENTRIES) {
+            return CommandResult.Rejected(
+                RejectionReason.MY_DAY_LIMIT_REACHED,
+                "My Day holds up to $MAX_MY_DAY_ENTRIES tasks.",
+            )
+        }
+        val last = current.myDay.maxByOrNull(MyDayEntry::rank)?.rank
+        val appended = rankAfter(last)
+        val entries = if (appended.length <= MAX_MY_DAY_RANK_LENGTH) {
+            current.myDay + MyDayEntry(command.taskId, appended)
+        } else {
+            // Append-bound guard: the sequential ponytail rank would exceed
+            // the journal codec's bound and abort the transaction, so full
+            // re-rank the existing entries in (rank, taskId) order and place
+            // the new entry at the tail index — the move handler's ponytail
+            // fallback applied to appends.
+            current.myDay.mapIndexed { index, entry ->
+                entry.copy(rank = myDayRankForIndex(index))
+            } + MyDayEntry(command.taskId, myDayRankForIndex(current.myDay.size))
+        }
+        publish(tasks = current.tasks, myDay = entries)
+        return CommandResult.Success(
+            message = "Added to My Day",
+            undo = DomainCommand.RemoveTaskFromMyDay(command.taskId),
+        )
+    }
+
+    private fun removeTaskFromMyDay(
+        command: DomainCommand.RemoveTaskFromMyDay,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val entry = current.myDay.firstOrNull { it.taskId == command.taskId }
+            ?: return CommandResult.Success("Not on My Day")
+        publish(
+            tasks = current.tasks,
+            myDay = current.myDay.filterNot { it.taskId == entry.taskId },
+        )
+        return CommandResult.Success(
+            message = "Removed from My Day",
+            undo = DomainCommand.RestoreMyDayEntries(listOf(entry)),
+        )
+    }
+
+    private fun moveMyDayEntry(command: DomainCommand.MoveMyDayEntry): CommandResult {
+        val current = mutableWorkspace.value
+        val entries = current.myDay
+        val moving = entries.firstOrNull { it.taskId == command.taskId }
+            ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Not on My Day.")
+        val anchored = entries.filterNot { it.taskId == moving.taskId }
+        val anchorIndex = command.afterTaskId?.let { after ->
+            anchored.indexOfFirst { it.taskId == after }
+                .takeIf { it >= 0 }
+                ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Not on My Day.")
+        }
+        val previousRank = anchorIndex?.let { anchored[it].rank }
+        val nextRank = when (anchorIndex) {
+            null -> anchored.firstOrNull()?.rank
+            else -> anchored.getOrNull(anchorIndex + 1)?.rank
+        }
+        if (previousRank == moving.rank || nextRank == moving.rank) {
+            return CommandResult.Success("My Day order is unchanged")
+        }
+        val between = myDayRankBetween(previousRank, nextRank)
+        return if (between != null) {
+            publish(
+                tasks = current.tasks,
+                myDay = entries.map {
+                    if (it.taskId == moving.taskId) moving.copy(rank = between) else it
+                },
+            )
+            CommandResult.Success(
+                message = "My Day reordered",
+                undo = DomainCommand.RestoreMyDayEntries(listOf(moving)),
+            )
+        } else {
+            // ponytail: midpoint exhausted — deterministic full re-rank in
+            // the same command; every row journals once, which is rare
+            // and bounded at 200 rows.
+            val reordered = buildList {
+                addAll(anchored.take(anchorIndex?.plus(1) ?: 0))
+                add(moving)
+                addAll(anchored.drop(anchorIndex?.plus(1) ?: 0))
+            }
+            publish(
+                tasks = current.tasks,
+                myDay = reordered.mapIndexed { index, entry ->
+                    entry.copy(rank = myDayRankForIndex(index))
+                },
+            )
+            CommandResult.Success(
+                message = "My Day reordered",
+                undo = DomainCommand.RestoreMyDayEntries(entries),
+            )
+        }
+    }
+
+    private fun sweepMyDay(command: DomainCommand.SweepMyDay): CommandResult {
+        val current = mutableWorkspace.value
+        val tasksById = current.tasks.associateBy(Task::id)
+        val removed = current.myDay.filter { entry ->
+            val task = tasksById[entry.taskId]
+            task == null || task.completedAt?.let { it.isBefore(command.before) } == true
+        }
+        if (removed.isEmpty()) {
+            return CommandResult.Success("My Day is up to date")
+        }
+        val removedIds = removed.mapTo(hashSetOf(), MyDayEntry::taskId)
+        publish(
+            tasks = current.tasks,
+            myDay = current.myDay.filterNot { it.taskId in removedIds },
+        )
+        return CommandResult.Success(
+            message = "My Day tidied",
+            undo = DomainCommand.RestoreMyDayEntries(removed),
+        )
+    }
+
+    private fun restoreMyDayEntries(
+        command: DomainCommand.RestoreMyDayEntries,
+    ): CommandResult {
+        val current = mutableWorkspace.value
+        val restoredById = command.entries.associateBy(MyDayEntry::taskId)
+        publish(
+            tasks = current.tasks,
+            myDay = current.myDay.filterNot { it.taskId in restoredById.keys } +
+                command.entries,
+        )
+        return CommandResult.Success("My Day restored")
+    }
+
     private fun validateSavedViewName(name: String): CommandResult.Rejected? = when {
         name.isEmpty() -> CommandResult.Rejected(
             RejectionReason.SAVED_VIEW_NAME_INVALID,
@@ -3719,6 +3872,12 @@ class InMemoryVaultRepository internal constructor(
         val current = mutableWorkspace.value
         val home = current.home.copy(
             projects = projects.filter { it.archivedAt == null },
+            myDayTasks = myDay
+                .sortedWith(
+                    compareBy<MyDayEntry>(MyDayEntry::rank).thenBy { it.taskId.value },
+                )
+                .mapNotNull { entry -> tasks.firstOrNull { it.id == entry.taskId } }
+                .filter { it.deletedAt == null },
         )
         mutableWorkspace.value = current.copy(
             home = home,
@@ -3746,7 +3905,9 @@ class InMemoryVaultRepository internal constructor(
                 compareBy<SavedView> { it.name }.thenBy { it.id.value },
             ),
             automationRules = automationRules,
-            myDay = myDay,
+            myDay = myDay.sortedWith(
+                compareBy<MyDayEntry>(MyDayEntry::rank).thenBy { it.taskId.value },
+            ),
         ).withResolvedDependencyState(rebuildHomeTaskLists = true)
             .withReconciledTimeState(at = at, entries = timeEntries)
     }
@@ -3884,6 +4045,7 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_SAVED_VIEWS = 20
         const val MAX_SAVED_VIEW_NAME_LENGTH = 64
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
+        const val MAX_MY_DAY_ENTRIES = 200
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
     }
 }
@@ -3893,16 +4055,21 @@ private fun WorkspaceSnapshot.withResolvedDependencyState(
 ): WorkspaceSnapshot {
     val resolvedTasks = resolveDependencyState(tasks)
     val tasksById = resolvedTasks.associateBy(Task::id)
+    val resolvedMyDayTasks = home.myDayTasks
+        .mapNotNull { tasksById[it.id] }
+        .filter { it.deletedAt == null }
     val resolvedHome = if (rebuildHomeTaskLists) {
         val activeTasks = resolvedTasks.filter { it.deletedAt == null }
         home.copy(
             focusTasks = activeTasks.filterNot(Task::isCompleted).take(3),
             upcomingTasks = activeTasks.filter { it.start != null || it.due != null }.take(3),
+            myDayTasks = resolvedMyDayTasks,
         )
     } else {
         home.copy(
             focusTasks = home.focusTasks.mapNotNull { tasksById[it.id] },
             upcomingTasks = home.upcomingTasks.mapNotNull { tasksById[it.id] },
+            myDayTasks = resolvedMyDayTasks,
         )
     }
     return copy(

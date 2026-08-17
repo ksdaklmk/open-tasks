@@ -3,8 +3,10 @@ package app.opentasks.core.data
 import app.opentasks.core.data.backup.InMemoryBackupJournal
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.WorkflowMoveDirection
+import app.opentasks.core.domain.myDayRankForIndex
 import app.opentasks.core.model.ActivityEntry
 import app.opentasks.core.model.ActivityKind
 import app.opentasks.core.model.Attachment
@@ -13,6 +15,7 @@ import app.opentasks.core.model.BlobSetId
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.MilestoneId
+import app.opentasks.core.model.MyDayEntry
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
 import app.opentasks.core.model.Priority
@@ -2066,6 +2069,146 @@ class InMemoryVaultRepositoryTest {
             DomainCommand.RestoreTemplate(template),
         )
         assertEquals(template.name, repository.observeWorkspace().value.templates.single().name)
+    }
+
+    @Test
+    fun addRemoveAndReorderMyDayEntries() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val tasks = repository.currentWorkspace().tasks.filter { it.deletedAt == null }.take(3)
+            tasks.forEach { task ->
+                assertTrue(
+                    repository.execute(DomainCommand.AddTaskToMyDay(task.id))
+                        is CommandResult.Success,
+                )
+            }
+            assertEquals(
+                tasks.map(Task::id),
+                repository.currentWorkspace().home.myDayTasks.map(Task::id),
+            )
+
+            // Move the last entry to the top.
+            val move = repository.execute(
+                DomainCommand.MoveMyDayEntry(tasks[2].id, afterTaskId = null),
+            )
+            assertTrue(move is CommandResult.Success)
+            assertEquals(
+                listOf(tasks[2].id, tasks[0].id, tasks[1].id),
+                repository.currentWorkspace().home.myDayTasks.map(Task::id),
+            )
+
+            // Undo restores the previous rank.
+            val undo = (move as CommandResult.Success).undo
+            assertTrue(undo is DomainCommand.RestoreMyDayEntries)
+            repository.execute(requireNotNull(undo))
+            assertEquals(
+                tasks.map(Task::id),
+                repository.currentWorkspace().home.myDayTasks.map(Task::id),
+            )
+
+            // Duplicate add is an idempotent success that changes nothing.
+            val duplicate = repository.execute(DomainCommand.AddTaskToMyDay(tasks[0].id))
+            assertTrue(duplicate is CommandResult.Success)
+            assertEquals(3, repository.currentWorkspace().myDay.size)
+
+            // Remove round-trips through its undo.
+            val removed = repository.execute(DomainCommand.RemoveTaskFromMyDay(tasks[1].id))
+            assertTrue(removed is CommandResult.Success)
+            assertEquals(2, repository.currentWorkspace().myDay.size)
+            repository.execute(requireNotNull((removed as CommandResult.Success).undo))
+            assertEquals(3, repository.currentWorkspace().myDay.size)
+        }
+    }
+
+    @Test
+    fun myDayBoundBinFilterAndSweep() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val snapshot = repository.currentWorkspace()
+            val open = snapshot.tasks.first { it.deletedAt == null && !it.isCompleted }
+
+            repository.execute(DomainCommand.AddTaskToMyDay(open.id))
+
+            // Binned member: row retained, projection hides it.
+            repository.execute(DomainCommand.DeleteTask(open.id))
+            assertEquals(1, repository.currentWorkspace().myDay.size)
+            assertTrue(repository.currentWorkspace().home.myDayTasks.isEmpty())
+            repository.execute(DomainCommand.RestoreTask(open.id))
+
+            // Completed member stays visible (dimmed by the UI) until swept.
+            repository.execute(DomainCommand.CompleteTask(open.id))
+            assertEquals(
+                listOf(open.id),
+                repository.currentWorkspace().home.myDayTasks.map(Task::id),
+            )
+            val sweep = repository.execute(
+                DomainCommand.SweepMyDay(before = Instant.parse("2100-01-01T00:00:00Z")),
+            )
+            assertTrue(sweep is CommandResult.Success)
+            assertTrue(repository.currentWorkspace().myDay.isEmpty())
+
+            // Sweeping again is a journal-free no-op.
+            val again = repository.execute(
+                DomainCommand.SweepMyDay(before = Instant.parse("2100-01-01T00:00:00Z")),
+            )
+            assertTrue(again is CommandResult.Success)
+        }
+    }
+
+    @Test
+    fun addToMyDayRejectsBinnedTasksAndTheBound() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            repeat(200) { index ->
+                assertTrue(
+                    repository.execute(DomainCommand.CreateTask(title = "seed-$index"))
+                        is CommandResult.Success,
+                )
+                val seedId = repository.currentWorkspace()
+                    .tasks.single { it.title == "seed-$index" }.id
+                assertTrue(
+                    repository.execute(DomainCommand.AddTaskToMyDay(seedId))
+                        is CommandResult.Success,
+                )
+            }
+
+            // The 200th sequential append exhausts the naive ponytail rank
+            // (one character longer per append): it must have re-ranked the
+            // whole list instead of writing a rank the journal codec
+            // refuses, so every stored rank is an index rank again.
+            assertEquals(
+                List(200) { index -> myDayRankForIndex(index) },
+                repository.currentWorkspace().myDay.map(MyDayEntry::rank),
+            )
+            assertTrue(
+                repository.currentWorkspace().myDay.all {
+                    it.rank.length <= MAX_MY_DAY_RANK_LENGTH
+                },
+            )
+
+            // The 201st add hits the entry bound.
+            assertTrue(
+                repository.execute(DomainCommand.CreateTask(title = "one-too-many"))
+                    is CommandResult.Success,
+            )
+            val overflowId = repository.currentWorkspace()
+                .tasks.single { it.title == "one-too-many" }.id
+            val overflow = repository.execute(DomainCommand.AddTaskToMyDay(overflowId))
+            assertTrue(overflow is CommandResult.Rejected)
+            assertEquals(
+                RejectionReason.MY_DAY_LIMIT_REACHED,
+                (overflow as CommandResult.Rejected).reason,
+            )
+
+            // Binned tasks cannot be planned onto My Day.
+            val binnedId = repository.currentWorkspace().tasks.single { it.title == "seed-0" }.id
+            assertTrue(
+                repository.execute(DomainCommand.DeleteTask(binnedId)) is CommandResult.Success,
+            )
+            val binned = repository.execute(DomainCommand.AddTaskToMyDay(binnedId))
+            assertTrue(binned is CommandResult.Rejected)
+            assertEquals(RejectionReason.INVALID_STATE, (binned as CommandResult.Rejected).reason)
+        }
     }
 
     private fun duplicationSnapshot(): WorkspaceSnapshot {
