@@ -153,6 +153,36 @@ class ProjectWorkbenchInstrumentedTest {
     }
 
     @Test
+    fun workbenchIndentsChildTaskRows() {
+        val project = OpenTasksFixtures.studioProject
+        val base = OpenTasksFixtures.tasks.first { it.projectId == project.id }.copy(
+            completedAt = null,
+            deletedAt = null,
+        )
+        val parent = base.copy(id = TaskId("workbench-parent"), title = "Workbench parent")
+        val child = base.copy(
+            id = TaskId("workbench-child"),
+            title = "Workbench child",
+            parentTaskId = parent.id,
+        )
+
+        setWorkbenchContent(
+            project = project,
+            tasks = listOf(parent, child),
+            groups = listOf(TaskGroup(null, listOf(parent, child))),
+            workbenchIndentedTaskIds = setOf(child.id),
+        )
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasText(child.title))
+        val parentLeft = composeRule.onNodeWithTag("workbench-task-${parent.id.value}")
+            .getUnclippedBoundsInRoot().left
+        val childLeft = composeRule.onNodeWithTag("workbench-task-${child.id.value}")
+            .getUnclippedBoundsInRoot().left
+        assertTrue(childLeft > parentLeft)
+    }
+
+    @Test
     fun suppliedBoardColumnsKeepCardOrderAndBoardSortControlStaysStateless() {
         val project = OpenTasksFixtures.studioProject
         val base = OpenTasksFixtures.tasks.first { it.projectId == project.id }.copy(
@@ -666,6 +696,7 @@ class ProjectWorkbenchInstrumentedTest {
         boardSort: TaskSortKey = TaskSortKey.PRIORITY,
         onBoardSortChange: (TaskSortKey) -> Unit = {},
         initialPresentation: ProjectPresentation = ProjectPresentation.LIST,
+        workbenchIndentedTaskIds: Set<TaskId> = emptySet(),
     ) {
         composeRule.setContent {
             val presentation = remember { mutableStateOf(initialPresentation) }
@@ -679,6 +710,7 @@ class ProjectWorkbenchInstrumentedTest {
                     showDetailPane = false,
                     presentation = presentation.value,
                     workbenchTaskGroups = groups,
+                    workbenchIndentedTaskIds = workbenchIndentedTaskIds,
                     workbenchSort = sort,
                     workbenchGroupBy = groupBy,
                     selectedBoardColumns = boardColumns,

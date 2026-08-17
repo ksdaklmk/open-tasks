@@ -114,6 +114,7 @@ import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.ProjectTimelineProjection
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.SubtaskRollup
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskGroup
 import app.opentasks.core.model.TaskGroupKey
@@ -155,6 +156,8 @@ fun ProjectsScreen(
     timelineProjection: ProjectTimelineProjection? = null,
     boardColumnWidth: Dp = 272.dp,
     workbenchTaskGroups: List<TaskGroup> = emptyList(),
+    workbenchIndentedTaskIds: Set<TaskId> = emptySet(),
+    subtaskRollups: Map<TaskId, SubtaskRollup> = emptyMap(),
     workbenchSort: TaskSortKey = TaskSortKey.DUE,
     workbenchGroupBy: TaskGroupKey? = null,
     selectedBoardColumns: List<BoardColumn> = emptyList(),
@@ -213,6 +216,8 @@ fun ProjectsScreen(
             timelineProjection = timelineProjection,
             boardColumnWidth = boardColumnWidth,
             workbenchTaskGroups = workbenchTaskGroups,
+            workbenchIndentedTaskIds = workbenchIndentedTaskIds,
+            subtaskRollups = subtaskRollups,
             workbenchSort = workbenchSort,
             workbenchGroupBy = workbenchGroupBy,
             selectedBoardColumns = selectedBoardColumns,
@@ -293,6 +298,8 @@ fun ProjectsScreen(
                     timelineProjection = timelineProjection,
                     boardColumnWidth = boardColumnWidth,
                     workbenchTaskGroups = workbenchTaskGroups,
+                    workbenchIndentedTaskIds = workbenchIndentedTaskIds,
+                    subtaskRollups = subtaskRollups,
                     workbenchSort = workbenchSort,
                     workbenchGroupBy = workbenchGroupBy,
                     selectedBoardColumns = selectedBoardColumns,
@@ -438,6 +445,8 @@ private fun ProjectWorkbench(
     timelineProjection: ProjectTimelineProjection?,
     boardColumnWidth: Dp,
     workbenchTaskGroups: List<TaskGroup>,
+    workbenchIndentedTaskIds: Set<TaskId>,
+    subtaskRollups: Map<TaskId, SubtaskRollup>,
     workbenchSort: TaskSortKey,
     workbenchGroupBy: TaskGroupKey?,
     selectedBoardColumns: List<BoardColumn>,
@@ -769,6 +778,7 @@ private fun ProjectWorkbench(
                     onMoveTask = onChangeTaskStatus,
                     onOpenTask = onOpenTask,
                     onDuplicateTask = onDuplicateTask,
+                    subtaskRollups = subtaskRollups,
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
@@ -866,7 +876,15 @@ private fun ProjectWorkbench(
                         }
                     }
                     items(group.tasks, key = { "workbench:task:${it.id.value}" }) { task ->
-                        ProjectTaskRow(task = task, onOpen = { onOpenTask(task.id) })
+                        ProjectTaskRow(
+                            task = task,
+                            onOpen = { onOpenTask(task.id) },
+                            modifier = if (task.id in workbenchIndentedTaskIds) {
+                                Modifier.padding(start = 24.dp)
+                            } else {
+                                Modifier
+                            },
+                        )
                     }
                 }
             }
@@ -2008,9 +2026,10 @@ fun NewProjectSheet(
 private fun ProjectTaskRow(
     task: Task,
     onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("workbench-task-${task.id.value}"),
         color = MaterialTheme.colorScheme.surface,

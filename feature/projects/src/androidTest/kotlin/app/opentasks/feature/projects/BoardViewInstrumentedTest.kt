@@ -13,9 +13,11 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -29,6 +31,7 @@ import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.BoardColumn
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.SemanticStatus
+import app.opentasks.core.model.SubtaskRollup
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkflowStatus
@@ -312,6 +315,45 @@ class BoardViewInstrumentedTest {
         assertEquals(cardBounds.left + dragDelta.x, previewBounds.left, 1f)
         assertTrue(previewBounds.right > boardBounds.right)
 
+        composeRule.onRoot().performTouchInput { up() }
+    }
+
+    @Test
+    fun cardAndDragPreviewShowSubtaskRollupChip() {
+        val task = OpenTasksFixtures.tasks
+            .first { it.id.value == "task-proposal" }
+            .copy(
+                statusId = OpenTasksFixtures.backlog,
+                semanticStatus = SemanticStatus.BACKLOG,
+            )
+        val rollupText = "1/3 subtasks"
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = columnsFor(task),
+                    columnWidth = 272.dp,
+                    onMoveTask = { _, _ -> },
+                    onOpenTask = {},
+                    subtaskRollups = mapOf(task.id to SubtaskRollup(completed = 1, total = 3)),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(rollupText).assertIsDisplayed()
+
+        val cardBounds = composeRule
+            .onNodeWithTag("board-card-${task.id.value}")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        composeRule.onRoot().performTouchInput {
+            down(cardBounds.center)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            moveTo(cardBounds.center + Offset(40f, 0f))
+        }
+        composeRule.onNodeWithTag("board-drag-preview-${task.id.value}").assertIsDisplayed()
+        composeRule.onAllNodesWithText(rollupText).assertCountEquals(2)
         composeRule.onRoot().performTouchInput { up() }
     }
 

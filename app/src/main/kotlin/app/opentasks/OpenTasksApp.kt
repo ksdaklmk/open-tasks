@@ -115,6 +115,7 @@ import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ScheduleMovePlan
 import app.opentasks.core.domain.ScheduleMoveTarget
+import app.opentasks.core.domain.SubtaskRules
 import app.opentasks.core.domain.WorkflowMoveDirection
 import app.opentasks.core.domain.arrangeTasks
 import app.opentasks.core.domain.boardColumns
@@ -122,6 +123,7 @@ import app.opentasks.core.domain.buildReviewQueue
 import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.domain.computeProjectTimelineProjection
 import app.opentasks.core.domain.computeScheduleMonthProjection
+import app.opentasks.core.domain.indentedTaskIds
 import app.opentasks.core.domain.planTaskScheduleMove
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
@@ -131,6 +133,7 @@ import app.opentasks.core.model.ProjectPresentation
 import app.opentasks.core.model.ProjectTimelineWindow
 import app.opentasks.core.model.SavedViewId
 import app.opentasks.core.model.SearchResult
+import app.opentasks.core.model.SubtaskRollup
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskArrangement
 import app.opentasks.core.model.TaskId
@@ -565,6 +568,7 @@ fun OpenTasksApp(
                 clock = projectionClock,
             )
         }
+        val taskIndentedIds = remember(taskGroups) { indentedTaskIds(taskGroups) }
         val workbenchArrangement = selectedProject?.let {
             viewArrangement.workbenchFor(it.id)
         } ?: TaskArrangement()
@@ -585,6 +589,12 @@ fun OpenTasksApp(
                     clock = projectionClock,
                 )
             }.orEmpty()
+        }
+        val workbenchIndentedTaskIds = remember(workbenchTaskGroups) {
+            indentedTaskIds(workbenchTaskGroups)
+        }
+        val subtaskRollups: Map<TaskId, SubtaskRollup> = remember(snapshot.tasks) {
+            SubtaskRules.subtaskRollups(snapshot.tasks)
         }
         val boardSort = selectedProject?.let { project ->
             viewArrangement.boardSortFor(project.id)
@@ -1167,6 +1177,7 @@ fun OpenTasksApp(
                                     tasks = snapshot.tasks,
                                     dueBucketsByTaskId = dueBucketsByTaskId,
                                     taskGroups = taskGroups,
+                                    indentedTaskIds = taskIndentedIds,
                                     taskSort = tasksArrangement.sort,
                                     taskGroupBy = tasksArrangement.groupBy,
                                     onTaskSortChange = { sort ->
@@ -1377,6 +1388,8 @@ fun OpenTasksApp(
                                     timelineProjection = timelineProjection,
                                     boardColumnWidth = boardColumnWidth,
                                     workbenchTaskGroups = workbenchTaskGroups,
+                                    workbenchIndentedTaskIds = workbenchIndentedTaskIds,
+                                    subtaskRollups = subtaskRollups,
                                     workbenchSort = workbenchArrangement.sort,
                                     workbenchGroupBy = workbenchArrangement.groupBy,
                                     selectedBoardColumns = selectedBoardColumns,

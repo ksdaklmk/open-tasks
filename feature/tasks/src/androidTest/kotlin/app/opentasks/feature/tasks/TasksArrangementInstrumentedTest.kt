@@ -172,6 +172,29 @@ class TasksArrangementInstrumentedTest {
     }
 
     @Test
+    fun indentedChildRowSitsInsetFromItsParent() {
+        val base = OpenTasksFixtures.tasks.first().copy(completedAt = null, deletedAt = null)
+        val parent = base.copy(id = TaskId("indent-parent"), title = "Indent parent")
+        val child = base.copy(
+            id = TaskId("indent-child"),
+            title = "Indent child",
+            parentTaskId = parent.id,
+        )
+
+        setContent(
+            tasks = listOf(parent, child),
+            taskGroups = listOf(TaskGroup(null, listOf(parent, child))),
+            indentedTaskIds = setOf(child.id),
+        )
+
+        val parentLeft = composeRule.onNodeWithText(parent.title).getUnclippedBoundsInRoot().left
+        val childLeft = composeRule
+            .onNodeWithTag("task-indent-${child.id.value}")
+            .getUnclippedBoundsInRoot().left
+        assertTrue(childLeft > parentLeft)
+    }
+
+    @Test
     fun controlsAreStatelessAndReportEveryArrangementChoice() {
         val selectedSort = AtomicReference<TaskSortKey?>()
         val selectedGroup = AtomicReference<TaskGroupKey?>()
@@ -236,12 +259,14 @@ class TasksArrangementInstrumentedTest {
         taskGroupBy: TaskGroupKey? = null,
         onTaskSortChange: (TaskSortKey) -> Unit = {},
         onTaskGroupChange: (TaskGroupKey?) -> Unit = {},
+        indentedTaskIds: Set<TaskId> = emptySet(),
     ) {
         composeRule.setContent {
             OpenTasksTheme {
                 TasksScreen(
                     tasks = tasks,
                     taskGroups = taskGroups,
+                    indentedTaskIds = indentedTaskIds,
                     taskSort = taskSort,
                     taskGroupBy = taskGroupBy,
                     onTaskSortChange = onTaskSortChange,

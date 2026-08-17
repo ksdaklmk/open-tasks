@@ -65,6 +65,7 @@ import app.opentasks.core.designsystem.dragTargetAt
 import app.opentasks.core.designsystem.rootLongPressDragSource
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.BoardColumn
+import app.opentasks.core.model.SubtaskRollup
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkflowStatus
@@ -92,6 +93,7 @@ fun BoardView(
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
     onDuplicateTask: (TaskId) -> Unit = {},
+    subtaskRollups: Map<TaskId, SubtaskRollup> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -212,6 +214,7 @@ fun BoardView(
                                     }
                                     BoardTaskCard(
                                         task = task,
+                                        subtaskRollup = subtaskRollups[task.id],
                                         targets = moveTargets(columns, column.status.id),
                                         isDragging = taskDrag != null,
                                         onDragStart = { positionInRoot, cardBounds ->
@@ -256,6 +259,7 @@ fun BoardView(
                 ) {
                     BoardTaskContent(
                         task = drag.payload.task,
+                        subtaskRollup = subtaskRollups[drag.payload.taskId],
                         trailing = {
                             Box(
                                 modifier = Modifier.size(48.dp),
@@ -274,6 +278,7 @@ fun BoardView(
 @Composable
 private fun BoardTaskCard(
     task: Task,
+    subtaskRollup: SubtaskRollup?,
     targets: List<WorkflowStatus>,
     isDragging: Boolean,
     onDragStart: (Offset, Rect) -> Unit,
@@ -320,6 +325,7 @@ private fun BoardTaskCard(
     ) {
         BoardTaskContent(
             task = task,
+            subtaskRollup = subtaskRollup,
             trailing = {
                 Column {
                     IconButton(
@@ -375,6 +381,7 @@ private fun BoardTaskCard(
 @Composable
 private fun BoardTaskContent(
     task: Task,
+    subtaskRollup: SubtaskRollup? = null,
     trailing: @Composable () -> Unit,
 ) {
     val locale = LocalLocale.current.platformLocale
@@ -416,6 +423,17 @@ private fun BoardTaskContent(
                     )
                     Text(
                         stringResource(R.string.board_due_date, date),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                subtaskRollup?.let { rollup ->
+                    Text(
+                        text = stringResource(
+                            R.string.board_subtask_rollup,
+                            rollup.completed,
+                            rollup.total,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

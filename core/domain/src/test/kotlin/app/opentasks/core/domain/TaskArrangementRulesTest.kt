@@ -220,4 +220,96 @@ class TaskArrangementRulesTest {
             cardIds(TaskSortKey.UPDATED),
         )
     }
+
+    @Test
+    fun arrangeTasksNestsChildrenDirectlyUnderTheirParent() {
+        val base = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+        fun task(id: String, title: String, parent: String? = null) = base.copy(
+            id = TaskId(id),
+            title = title,
+            parentTaskId = parent?.let(::TaskId),
+            priority = Priority.NONE,
+            due = null,
+        )
+        val tasks = listOf(
+            task("b-parent", "Beta parent"),
+            task("a-parent", "Alpha parent"),
+            task("z-child", "Zulu child", parent = "a-parent"),
+            task("m-child", "Mike child", parent = "a-parent"),
+            task("orphan-child", "Orphan child", parent = "filtered-out"),
+        )
+        val groups = arrangeTasks(
+            tasks = tasks,
+            arrangement = TaskArrangement(sort = TaskSortKey.TITLE, groupBy = null),
+            projectNames = emptyMap(),
+            clock = Clock.systemUTC(),
+        )
+        assertEquals(
+            listOf("a-parent", "m-child", "z-child", "b-parent", "orphan-child"),
+            groups.single().tasks.map { it.id.value },
+        )
+        assertEquals(
+            setOf(TaskId("m-child"), TaskId("z-child")),
+            indentedTaskIds(groups),
+        )
+    }
+
+    @Test
+    fun childWhoseParentLandsInAnotherGroupRendersFlat() {
+        val base = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+        fun task(id: String, title: String, priority: Priority, parent: String? = null) = base.copy(
+            id = TaskId(id),
+            title = title,
+            parentTaskId = parent?.let(::TaskId),
+            priority = priority,
+            due = null,
+        )
+        val tasks = listOf(
+            task("parent", "High parent", Priority.HIGH),
+            task("child", "Low child", Priority.LOW, parent = "parent"),
+        )
+        val groups = arrangeTasks(
+            tasks = tasks,
+            arrangement = TaskArrangement(sort = TaskSortKey.TITLE, groupBy = TaskGroupKey.PRIORITY),
+            projectNames = emptyMap(),
+            clock = Clock.systemUTC(),
+        )
+        val lowGroup = groups.single { it.value == TaskGroupValue.PriorityValue(Priority.LOW) }
+        assertEquals(listOf(TaskId("child")), lowGroup.tasks.map(Task::id))
+        assertEquals(emptySet<TaskId>(), indentedTaskIds(groups))
+    }
+
+    @Test
+    fun recoveredDeeperTreesClampToASingleIndentLevel() {
+        // grandparent <- parent <- child (legal in recovered foreign data):
+        // order is depth-first under the top ancestor; only tasks whose
+        // parent is present in the group are indented -- one visual level.
+        val base = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+        fun task(id: String, title: String, parent: String? = null) = base.copy(
+            id = TaskId(id),
+            title = title,
+            parentTaskId = parent?.let(::TaskId),
+            priority = Priority.NONE,
+            due = null,
+        )
+        val tasks = listOf(
+            task("grandparent", "Zulu grandparent"),
+            task("parent", "Alpha parent", parent = "grandparent"),
+            task("child", "Mike child", parent = "parent"),
+        )
+        val groups = arrangeTasks(
+            tasks = tasks,
+            arrangement = TaskArrangement(sort = TaskSortKey.TITLE, groupBy = null),
+            projectNames = emptyMap(),
+            clock = Clock.systemUTC(),
+        )
+        assertEquals(
+            listOf("grandparent", "parent", "child"),
+            groups.single().tasks.map { it.id.value },
+        )
+        assertEquals(
+            setOf(TaskId("parent"), TaskId("child")),
+            indentedTaskIds(groups),
+        )
+    }
 }

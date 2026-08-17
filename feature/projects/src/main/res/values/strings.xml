@@ -44,6 +44,7 @@
     <string name="board_priority_medium">Medium</string>
     <string name="board_priority_high">High</string>
     <string name="board_priority_urgent">Urgent</string>
+    <string name="board_subtask_rollup">%1$d/%2$d subtasks</string>
     <string name="timeline_window_range">%1$s to %2$s</string>
     <string name="timeline_previous">Previous four weeks</string>
     <string name="timeline_today">Today</string>

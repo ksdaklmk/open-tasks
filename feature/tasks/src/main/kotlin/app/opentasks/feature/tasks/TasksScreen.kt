@@ -198,6 +198,7 @@ fun TasksScreen(
     tasks: List<Task>,
     dueBucketsByTaskId: Map<TaskId, DueBucket> = emptyMap(),
     taskGroups: List<TaskGroup> = listOf(TaskGroup(value = null, tasks = tasks)),
+    indentedTaskIds: Set<TaskId> = emptySet(),
     taskSort: TaskSortKey = TaskSortKey.DUE,
     taskGroupBy: TaskGroupKey? = null,
     onTaskSortChange: (TaskSortKey) -> Unit = {},
@@ -363,6 +364,7 @@ fun TasksScreen(
         Row(modifier = Modifier.fillMaxSize()) {
             TaskListPane(
                 taskGroups = visibleTaskGroups,
+                indentedTaskIds = indentedTaskIds,
                 projectNames = projectNames,
                 activeProjectIds = activeProjectIds,
                 tags = tags,
@@ -483,6 +485,7 @@ fun TasksScreen(
 @Composable
 private fun TaskListPane(
     taskGroups: List<TaskGroup>,
+    indentedTaskIds: Set<TaskId>,
     projectNames: Map<ProjectId, String>,
     activeProjectIds: Set<ProjectId>,
     tags: List<Tag>,
@@ -607,6 +610,13 @@ private fun TaskListPane(
                         }
                     }
                     items(group.tasks, key = { "task:${it.id.value}" }) { task ->
+                        val indentModifier = if (task.id in indentedTaskIds) {
+                            Modifier
+                                .testTag("task-indent-${task.id.value}")
+                                .padding(start = 24.dp)
+                        } else {
+                            Modifier
+                        }
                         if (selectionMode) {
                             val checked = task.id in selectedBulkIds
                             Row(
@@ -625,7 +635,7 @@ private fun TaskListPane(
                                     onSelect = { onToggleBulkSelection(task.id) },
                                     onComplete = { onCompleteTask(task) },
                                     onLongPress = { onToggleBulkSelection(task.id) },
-                                    modifier = Modifier.weight(1f),
+                                    modifier = indentModifier.weight(1f),
                                 )
                             }
                         } else {
@@ -636,7 +646,7 @@ private fun TaskListPane(
                                 onSelect = { onSelectTask(task.id) },
                                 onComplete = { onCompleteTask(task) },
                                 onLongPress = { onToggleBulkSelection(task.id) },
-                                modifier = Modifier.semantics {
+                                modifier = indentModifier.semantics {
                                     selected = selectedTaskId == task.id
                                 },
                             )
