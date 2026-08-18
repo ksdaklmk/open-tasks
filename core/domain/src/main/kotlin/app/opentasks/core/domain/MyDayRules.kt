@@ -7,6 +7,14 @@ import java.time.ZoneId
 
 const val MAX_MY_DAY_RANK_LENGTH = 200
 
+/**
+ * How many tasks My Day holds. Shared by both vault repository engines and by
+ * the automation engine's ON_ENTER_ADD_TO_MY_DAY verb, so the bound cannot
+ * drift between the handler that rejects at it and the rule that skips below
+ * it.
+ */
+const val MAX_MY_DAY_ENTRIES = 200
+
 private const val RANK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 fun myDayRankForIndex(index: Int): String =

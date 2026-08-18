@@ -13,8 +13,11 @@ import app.opentasks.core.data.db.TombstoneEntity
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.MAX_MY_DAY_ENTRIES
 import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
+import app.opentasks.core.domain.StatusTransitionTrigger
+import app.opentasks.core.domain.evaluateAutomationRules
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ScheduleMoveFailure
@@ -146,7 +149,15 @@ class InMemoryVaultRepository internal constructor(
         val beforeTombstones = tombstones
         val beforeTaskTags = taskTags
         try {
-            val result = dispatch(command)
+            val dispatched = dispatch(command)
+            // Evaluation sits between the dispatch and the reconciliation so
+            // the tag relations and the journal diff both observe the rule
+            // outputs — the trigger and its outputs journal as one generation.
+            val result = if (dispatched is CommandResult.Success) {
+                applyAutomationRules(command, dispatched)
+            } else {
+                dispatched
+            }
             reconcileTaskTags(before, mutableWorkspace.value)
             if (
                 mutableWorkspace.value != before ||
@@ -166,6 +177,81 @@ class InMemoryVaultRepository internal constructor(
             taskTags = beforeTaskTags
             throw failure
         }
+    }
+
+    /**
+     * Applies the automation rules a status entry matched, inside the caller's
+     * execute, and returns the trigger's result with one composed undo.
+     *
+     * Behavioural twin of `RoomVaultRepository.applyAutomationRules`: the same
+     * trigger set, the same ascending rule-id order, the same silent skip of a
+     * rejected output, and the same flattened undo. A transition is recognised
+     * from the repository's own undo, which only the real transition paths
+     * produce and a no-op move omits entirely. Outputs go through the internal
+     * [dispatch] — the write mutex is not reentrant, and internal dispatch does
+     * not re-evaluate — and a throw from an output is deliberately not caught,
+     * so the enclosing execute rolls the whole command back.
+     */
+    private fun applyAutomationRules(
+        command: DomainCommand,
+        result: CommandResult.Success,
+    ): CommandResult.Success {
+        val transitioned: List<TaskId> = when (command) {
+            is DomainCommand.ChangeTaskStatus,
+            is DomainCommand.CompleteTask,
+            ->
+                (result.undo as? DomainCommand.RestoreTaskStatus)
+                    ?.let { listOf(it.taskId) }
+                    .orEmpty()
+            is DomainCommand.CompleteTasks ->
+                (result.undo as? DomainCommand.UndoBatch)
+                    ?.commands
+                    ?.filterIsInstance<DomainCommand.RestoreTaskStatus>()
+                    ?.map(DomainCommand.RestoreTaskStatus::taskId)
+                    ?.asReversed() // stored reversed; recover application order
+                    .orEmpty()
+            else -> emptyList()
+        }
+        if (transitioned.isEmpty()) return result
+        val rules = mutableWorkspace.value.automationRules.filter { it.enabled }
+        // Coupled to the config validator, which forces `statusId == null`
+        // exactly for MY_DAY_AUTO_REMOVE and STALE_BADGE: a future type with a
+        // statusId must move this guard in lockstep.
+        if (rules.none { it.statusId != null }) return result
+
+        val outputUndos = mutableListOf<DomainCommand>()
+        for (taskId in transitioned) {
+            val current = mutableWorkspace.value
+            val task = current.tasks.firstOrNull { it.id == taskId } ?: continue
+            val trigger = StatusTransitionTrigger(
+                task = task,
+                reminder = current.reminders.firstOrNull { it.taskId == taskId },
+                myDayMemberIds = current.myDay.mapTo(hashSetOf(), MyDayEntry::taskId),
+                today = LocalDate.ofInstant(now(), zoneId()),
+                zoneId = zoneId().id,
+            )
+            evaluateAutomationRules(rules, trigger).forEach { output ->
+                val outcome = dispatch(output)
+                if (outcome is CommandResult.Success) {
+                    outcome.undo?.let(outputUndos::add)
+                }
+            }
+        }
+        if (outputUndos.isEmpty()) return result
+        // FLATTEN the trigger's undo: `rejectUndoCommand` preflights only a
+        // fixed set of undo shapes and fails closed on anything else — a
+        // nested UndoBatch would make the whole composed undo unreplayable.
+        // CompleteTasks stores its inverses in reverse application order and
+        // UndoBatch replays in list order, so splicing them after the output
+        // undos preserves exactly the replay the repository intended.
+        val triggerInverses: List<DomainCommand> = when (val undo = result.undo) {
+            null -> emptyList()
+            is DomainCommand.UndoBatch -> undo.commands
+            else -> listOf(undo)
+        }
+        return result.copy(
+            undo = DomainCommand.UndoBatch(outputUndos.asReversed() + triggerInverses),
+        )
     }
 
     private fun reconcileTaskTags(
@@ -1917,11 +2003,14 @@ class InMemoryVaultRepository internal constructor(
      * mirroring the rejection paths of the corresponding handler. The
      * repository only ever stores [DomainCommand.RestoreTaskStatus],
      * [DomainCommand.RestoreTask], [DomainCommand.UpdateTask],
-     * [DomainCommand.SetTaskSchedule], and [DomainCommand.SetTaskTag]; any
-     * other shape fails closed.
+     * [DomainCommand.SetTaskSchedule], [DomainCommand.SetTaskTag], and — from
+     * an automation rule's ON_ENTER_ADD_TO_MY_DAY output —
+     * [DomainCommand.RemoveTaskFromMyDay]; any other shape fails closed.
      */
     private fun rejectUndoCommand(inverse: DomainCommand): CommandResult.Rejected? =
         when (inverse) {
+            // Idempotent: removing an entry that is no longer there succeeds.
+            is DomainCommand.RemoveTaskFromMyDay -> null
             is DomainCommand.RestoreTaskStatus -> {
                 val current = mutableWorkspace.value
                 when {
@@ -4342,7 +4431,6 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_SAVED_VIEWS = 20
         const val MAX_SAVED_VIEW_NAME_LENGTH = 64
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
-        const val MAX_MY_DAY_ENTRIES = 200
         const val MAX_AUTOMATION_RULES = 20
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
     }
