@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused after Task 16, 18 August 2026
+## Current resume point — Stage 9 paused mid pre-17 repair, 18 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -9,15 +9,52 @@ superseded wherever they conflict with this one.
 
 Execution of
 `docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`
-continues on `main` (audit base `8d70c96`). The ignored ledger
+continues on `main` (audit base `8d70c96`, HEAD `c945282`). The ignored
+ledger
 `.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
 remains the authoritative execution record — every ruling, deferred minor
 and carry-forward note lives there, not here. The audit base sits on the
 ledger's LINE 2 (`Audit-base:`), not line 1.
 
-**Tasks 1–16 are complete with clean reviews. Only Task 17 (qualification
-and release 1.3.0) remains, preceded by the recorded repair dispatch and
-advisor call listed under the resume instructions.**
+**Tasks 1–16 are complete with clean reviews. What remains: the pre-17
+repair (dispatched once, failed silently — see below), then Task 17
+(qualification and release 1.3.0), the advisor call, and the final
+whole-branch review.**
+
+### Pre-17 repair state (session 5, 18 August)
+
+The dedicated repair round for the five CI-profile-red instrumented
+tests is PREPARED but NOT EXECUTED:
+
+- **Reproduction infrastructure is built and verified.** The SDK has no
+  cmdline-tools, so `avdmanager` does not exist; a compact-profile
+  scratch AVD `Pixel6_Scratch` was hand-crafted instead (pixel_6
+  profile, 1080×2400 @420 ≈ 411 dp, android-37.0 google_apis_playstore
+  arm64-v8a — config.ini + pointer `.ini` only; the emulator generated
+  its runtime files at first boot). The controller reproduced the CI
+  failures on it with byte-identical signatures:
+  `ScheduleScreenInstrumentedTest` 23 tests / the exact 2 CI failures,
+  `ProjectWorkbenchInstrumentedTest` 14 tests / the exact 2 CI
+  failures. Failure 1 (`ProcessRestorationInstrumentedTest`, :app) was
+  not pre-run. Profile, not API level, is the confirmed failure driver.
+  The AVD was booted `-read-only -no-snapshot-load -no-snapshot-save`
+  and holds no state; it is safe to boot again.
+- **The brief is written and ready** at
+  `.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/repair-brief.md`:
+  test-only scope with stop-and-report on any production defect, the
+  five verbatim CI failure stanzas (also in `repair-ci-failures.md`),
+  boot/animation/class-run commands, hardening rules
+  (scroll-before-assert, bounds-derived drags, explicit layout inputs,
+  never weaken), both-profiles verification (compact GREEN on
+  `Pixel6_Scratch` plus class-scoped regression on `Fold8_Acceptance`),
+  and the full process contract.
+- **The first implementer dispatch FAILED SILENTLY**: the agent
+  completed with an empty result — no commit, no report, no test edits,
+  no tree changes, no emulator left running. Zero work product, so
+  nothing needs salvage or review; the re-dispatch needs no
+  re-verification of the prepared infrastructure above.
+
+### Task completion summary (Tasks 1–16)
 
 - **Tasks 1–11** are summarised in the superseded checkpoint below;
   nothing about their state has changed.
@@ -69,13 +106,17 @@ instrumented addition from Tasks 12–16 remains compile-only until Task
 
 ### Resume instructions, in order
 
-1. **Dispatch the dedicated repair round for the five CI-profile-red
-   instrumented tests BEFORE Task 17** (recorded ruling; the five test
-   names are in the ledger's stage-level repair entry). Tasks 13–16
-   kept rewriting the same posture-sensitive surfaces, which is why the
-   repair was scheduled last.
+1. **Re-dispatch the repair implementer** (sonnet per the model ruling)
+   using `repair-brief.md` — the same dispatch wording as the failed
+   attempt (no-subagents, foreground builds, behavioural-vs-compile-
+   existence RED, scoped git add, commit-early, kill-emulators). Start
+   `caffeinate -i` first if it is not running. After it lands: review
+   the repair diff (the failed dispatch produced nothing to review, so
+   this is a fresh full review, not a re-review), then continue.
+   Boot commands and the one-emulator-at-a-time rule are in the brief;
+   never boot `Pixel_10_Pro_Fold`.
 2. **Then dispatch Task 17** (brief staged: `task-17-brief.md`; BASE is
-   `2a8ea0d` unless repair commits move HEAD). Two corrections to
+   the repair commit unless HEAD moved further). Two corrections to
    carry: the brief's Step 2 reads the audit base with `head -1` on the
    ledger — WRONG, extract the `Audit-base:` value from line 2; and
    Step 3's connected gate runs only on the sole disposable ADB target
@@ -107,7 +148,12 @@ instrumented addition from Tasks 12–16 remains compile-only until Task
 
 ### Session notes worth knowing
 
-- Session 3 (18 August, this checkpoint) ran clean: `caffeinate -i` was
+- Session 5 (18 August evening, this checkpoint) prepared the repair
+  infrastructure and lost one agent to a silent empty-result completion
+  (no output, no work, nothing to salvage — the first loss of its kind;
+  re-dispatch fresh rather than resuming). `caffeinate -i` was running
+  the whole time, so this was not a host-sleep loss.
+- Session 3 (18 August) ran clean: `caffeinate -i` was
   started per the previous session's note and ZERO agents were lost to
   host sleep or watchdog stalls across five full task loops — versus
   nine losses the session before. Keep doing this.
