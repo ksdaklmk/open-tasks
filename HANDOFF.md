@@ -1,11 +1,132 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused mid-Task 12, 18 August 2026
+## Current resume point — Stage 9 paused after Task 16, 18 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
 ### Where Stage 9 stands
+
+Execution of
+`docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`
+continues on `main` (audit base `8d70c96`). The ignored ledger
+`.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
+remains the authoritative execution record — every ruling, deferred minor
+and carry-forward note lives there, not here. The audit base sits on the
+ledger's LINE 2 (`Audit-base:`), not line 1.
+
+**Tasks 1–16 are complete with clean reviews. Only Task 17 (qualification
+and release 1.3.0) remains, preceded by the recorded repair dispatch and
+advisor call listed under the resume instructions.**
+
+- **Tasks 1–11** are summarised in the superseded checkpoint below;
+  nothing about their state has changed.
+- **Task 12 complete** (`4c9777d` + `a1ffab0`, review clean): My Day
+  replaces Today focus on Home, with drag and the 48 dp menu fallback.
+  The reviewer traced the drag arithmetic algebraically: the self-drop
+  guard is a general structural check, the regression test genuinely
+  fails against unguarded code, and `afterTaskId = null` fires exactly
+  for the front position. `HomeSnapshot.focusTasks` turned out to have
+  NO remaining consumer (the widget reads `computeTodayProjection`) —
+  the field stays per plan but is render-dead; parked for final-review
+  triage.
+- **Task 13 complete** (`d2c5d30`, review clean): My Day curation sheet,
+  suggestions, board-card menu and detail-toggle entry points, and the
+  Plan button rewired to the sheet. Exactly one `myDaySuggestions` call
+  site, in `:app`.
+- **Task 14 complete** (`f6d0016` + `0d36217` + `d123cf5`, review clean
+  after one fix round): the automation engine — rule evaluation inside
+  both engines' `execute()` for the three status-transition commands,
+  outputs via internal `dispatch()`, flattened one-batch undo, one
+  journal generation, and `MyDaySweeper` on `MainActivity.onStart`. The
+  pre-dispatch advisor call (recorded cadence) produced eleven binding
+  controller rulings (ledger Rulings A–K), including: never wrap
+  `dispatch(output)` in `runCatching`; SET_DUE outputs set
+  `restorePastReminder = true`; the sweeper gate lives as
+  `myDaySweepEnabled` in core:domain; `MAX_MY_DAY_ENTRIES` moved to
+  `core/domain/MyDayRules.kt`. The opus review verified all seven
+  load-bearing properties against the code; both Important findings
+  were coverage-only, and the fix round extracted
+  `automationTransitionedTaskIds` to core:domain and added two-task
+  `CompleteTasks` coverage.
+- **Task 15 complete** (`4e97d6a` + `5ed996f` + `d17a8b8` + `08dd28d`,
+  review clean after one fix round): `staleTaskIds` pure projection in
+  core:domain plus 18 dp badges on Tasks, board and workbench rows;
+  Home deliberately badge-free. `lastTouched` matches ReviewQueue
+  (`Instant.MIN` sentinel). The fix round added same-scope tie-break
+  coverage.
+- **Task 16 complete** (`2a8ea0d`, review clean): automations editor on
+  More — rule list with enable switch and dialog-guarded delete, a
+  five-type add sheet whose confirm gating mirrors the validator
+  matrix, and render-only broken-reference rows that stay deletable.
+  The section sorts rules by `id.value` ascending (controller ruling),
+  discharging the Task 5 engine-ordering carry-forward. Five cosmetic
+  minors deferred to the ledger.
+
+The full CI-equivalent gate is green at `2a8ea0d`. Every Compose and
+instrumented addition from Tasks 12–16 remains compile-only until Task
+17's device gate.
+
+### Resume instructions, in order
+
+1. **Dispatch the dedicated repair round for the five CI-profile-red
+   instrumented tests BEFORE Task 17** (recorded ruling; the five test
+   names are in the ledger's stage-level repair entry). Tasks 13–16
+   kept rewriting the same posture-sensitive surfaces, which is why the
+   repair was scheduled last.
+2. **Then dispatch Task 17** (brief staged: `task-17-brief.md`; BASE is
+   `2a8ea0d` unless repair commits move HEAD). Two corrections to
+   carry: the brief's Step 2 reads the audit base with `head -1` on the
+   ledger — WRONG, extract the `Audit-base:` value from line 2; and
+   Step 3's connected gate runs only on the sole disposable ADB target
+   started `-read-only -no-snapshot-load -no-snapshot-save`, NEVER the
+   protected `Pixel_10_Pro_Fold` AVD. The SDK is at
+   `~/Library/Android/sdk`; adb/emulator are not on PATH.
+3. **Task 17 carries blocking device gates from Task 14's review**: the
+   instrumented twins
+   `automationRulesFireInsideTheTriggerGenerationAndComposeOneUndo` and
+   `automationMyDayOutputUndoReplaysAndExclusionsNeverFire` must run
+   green on device before the stage closes — the Room evaluation path
+   has zero executed coverage until then.
+4. **Call the advisor BEFORE the final whole-branch review** (cadence
+   trigger 2, recorded in the ledger): the accumulated rulings compound
+   into the release.
+5. **Point the final whole-branch review at the ledger's deferred-minor
+   and parked lines.** Named must-triage items: the two Task 9
+   asymmetries (restore-detach not undoable; a detaching move is
+   one-way), the three surfaces with pre-existing rejection degradation
+   (Today widget, reminder actions, weekly Review queue), render-dead
+   `HomeSnapshot.focusTasks`, the rank-overflow undo asymmetry (a
+   rule-driven My Day add can re-rank up to 200 entries and its undo
+   restores membership, not order), inert-rule invisibility (the
+   ruled-by-design silent no-ops of SET_DUE on completed columns and
+   fired-reminder edge cases), and Task 16's five cosmetic minors
+   (including three 20 dp spacers off the 4 dp scale).
+6. Task 17's Step 5 manual acceptance matrix and the sideload release
+   need the owner at the device — plan that session accordingly.
+
+### Session notes worth knowing
+
+- Session 3 (18 August, this checkpoint) ran clean: `caffeinate -i` was
+  started per the previous session's note and ZERO agents were lost to
+  host sleep or watchdog stalls across five full task loops — versus
+  nine losses the session before. Keep doing this.
+- The advisor cadence paid for itself again: the pre-Task-14 call found
+  a genuinely unwritable test in the plan (internal types), two silent
+  rejection traps that would have gutted SET_DUE rules, and stale line
+  anchors — all ruled before dispatch instead of surfacing as review
+  findings.
+- Keep stating the no-subagents rule, foreground builds, and the
+  behavioural-vs-compile-existence RED distinction in every implementer
+  dispatch; every session-3 implementer complied.
+
+## Superseded checkpoint — Stage 9 paused mid-Task 12, 18 August 2026
+
+This section was authoritative until Tasks 12–16 landed. It is retained for
+the Task 1–11 detail and session notes, and is superseded by the checkpoint
+above wherever they conflict.
+
+### Where Stage 9 stands (as of the Task 12 pause)
 
 Execution of
 `docs/superpowers/plans/2026-08-17-stage-9-board-flow-automation-plan.md`
@@ -59,7 +180,7 @@ gate-green but has NOT been reviewed.**
 - **Task 12 committed but UNREVIEWED** (`4c9777d` + `a1ffab0`): My Day
   replaces Today focus on Home, with drag and the 48 dp menu fallback.
 
-### Resume instructions, in order
+### Superseded resume instructions (do not use — Tasks 12–16 are complete; see the current checkpoint above)
 
 1. **Dispatch the Task 12 reviewer first, over `36669f1..a1ffab0`.**
    Do not start Task 13 until it passes. The review package is already
