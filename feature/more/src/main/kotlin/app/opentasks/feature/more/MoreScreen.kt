@@ -75,17 +75,21 @@ import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.model.AndroidBackupStatus
+import app.opentasks.core.model.AutomationRule
+import app.opentasks.core.model.AutomationRuleId
 import app.opentasks.core.model.InsightsRange
 import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.RecoveryPassphraseValidation
 import app.opentasks.core.model.RemoteBackupStatus
+import app.opentasks.core.model.Tag
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.Template
 import app.opentasks.core.model.TemplateId
+import app.opentasks.core.model.WorkflowStatus
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -100,6 +104,12 @@ fun MoreScreen(
     tasks: List<Task>,
     projects: List<Project>,
     templates: List<Template> = emptyList(),
+    automationRules: List<AutomationRule> = emptyList(),
+    workflowStatuses: List<WorkflowStatus> = emptyList(),
+    tags: List<Tag> = emptyList(),
+    onCreateAutomationRule: (AutomationRule) -> Unit = {},
+    onUpdateAutomationRule: (AutomationRule) -> Unit = {},
+    onDeleteAutomationRule: (AutomationRuleId) -> Unit = {},
     insightsState: InsightsUiState = emptyInsightsUiState(),
     insightsSummary: InsightsSnapshot = insightsState.snapshot,
     openInsights: Boolean = false,
@@ -430,6 +440,19 @@ fun MoreScreen(
                 supportingText = backupStatusSummary(backupStatus),
                 onClick = { destination = MoreDestination.BACKUP_RECOVERY },
                 modifier = Modifier.testTag("open-backup-recovery"),
+            )
+        }
+
+        item {
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            AutomationsSection(
+                rules = automationRules,
+                projects = projects,
+                workflowStatuses = workflowStatuses,
+                tags = tags,
+                onCreateRule = onCreateAutomationRule,
+                onUpdateRule = onUpdateAutomationRule,
+                onDeleteRule = onDeleteAutomationRule,
             )
         }
 

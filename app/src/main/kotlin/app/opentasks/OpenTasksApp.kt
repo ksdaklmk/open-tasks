@@ -1714,6 +1714,18 @@ fun OpenTasksApp(
                                     tasks = snapshot.tasks,
                                     projects = snapshot.projects,
                                     templates = snapshot.templates,
+                                    automationRules = snapshot.automationRules,
+                                    workflowStatuses = snapshot.workflowStatuses,
+                                    tags = snapshot.tags,
+                                    onCreateAutomationRule = { rule ->
+                                        viewModel.execute(DomainCommand.CreateAutomationRule(rule))
+                                    },
+                                    onUpdateAutomationRule = { rule ->
+                                        viewModel.execute(DomainCommand.UpdateAutomationRule(rule))
+                                    },
+                                    onDeleteAutomationRule = { ruleId ->
+                                        viewModel.execute(DomainCommand.DeleteAutomationRule(ruleId))
+                                    },
                                     insightsState = insightsUiState,
                                     insightsSummary = insightsSummary,
                                     openInsights = openInsightsOnMore,

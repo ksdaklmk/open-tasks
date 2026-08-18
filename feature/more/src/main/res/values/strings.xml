@@ -316,4 +316,38 @@
     <string name="privacy_lock_title_privacy_supporting">Keep task titles out of notifications, the Today widget, and recents.</string>
     <string name="privacy_lock_screenshot_title">Block screenshots</string>
     <string name="privacy_lock_screenshot_supporting">Prevent screenshots and screen recording while the app is open.</string>
+
+    <string name="automations_heading">Automations</string>
+    <plurals name="automations_count">
+        <item quantity="one">%1$d of %2$d rule</item>
+        <item quantity="other">%1$d of %2$d rules</item>
+    </plurals>
+    <string name="automation_add">Add</string>
+    <string name="automation_type_add_tag">Add a tag on entering</string>
+    <string name="automation_type_add_my_day">Add to My Day on entering</string>
+    <string name="automation_type_set_due">Set due date on entering</string>
+    <string name="automation_type_sweep">Remove completed from My Day daily</string>
+    <string name="automation_type_stale">Badge stale tasks</string>
+    <string name="automation_broken">This rule points at something that no longer exists</string>
+    <string name="automation_inbox_label">Inbox</string>
+    <plurals name="automation_due_in_days">
+        <item quantity="one">Due in %1$d day</item>
+        <item quantity="other">Due in %1$d days</item>
+    </plurals>
+    <plurals name="automation_after_days">
+        <item quantity="one">After %1$d day</item>
+        <item quantity="other">After %1$d days</item>
+    </plurals>
+    <string name="automation_delete_title">Delete rule?</string>
+    <string name="automation_delete_body">This automation stops applying immediately. Changes it already made are not undone.</string>
+    <string name="automation_delete_confirm">Delete</string>
+    <string name="automation_delete_action">Delete rule</string>
+    <string name="automation_cancel">Cancel</string>
+    <string name="automation_add_heading">Add automation</string>
+    <string name="automation_create_confirm">Create rule</string>
+    <string name="automation_status_placeholder">Choose a status</string>
+    <string name="automation_tag_placeholder">Choose a tag</string>
+    <string name="automation_scope_all">All projects</string>
+    <string name="automation_due_days_label">Days after entering</string>
+    <string name="automation_threshold_days_label">Days without activity</string>
 </resources>
