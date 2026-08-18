@@ -49,6 +49,7 @@ import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.StatusTransitionTrigger
 import app.opentasks.core.domain.evaluateAutomationRules
+import app.opentasks.core.domain.automationTransitionedTaskIds
 import app.opentasks.core.domain.automationRuleConfigRejection
 import app.opentasks.core.domain.automationRuleNotFound
 import app.opentasks.core.domain.automationRuleWorkspaceRejection
@@ -230,10 +231,8 @@ class RoomVaultRepository(
      * Applies the automation rules a status entry matched, inside the caller's
      * transaction, and returns the trigger's result with one composed undo.
      *
-     * A transition is recognised from the repository's own undo rather than
-     * from the command: [DomainCommand.RestoreTaskStatus] is produced only by
-     * the real transition paths, and a no-op move returns no undo at all, so a
-     * task that did not actually change column never registers.
+     * Which tasks transitioned is [automationTransitionedTaskIds]' decision —
+     * pure and shared with the in-memory engine.
      *
      * Outputs go through the internal [dispatch], never [execute] — the write
      * mutex is not reentrant, and internal dispatch does not re-evaluate, so a
@@ -245,22 +244,7 @@ class RoomVaultRepository(
         command: DomainCommand,
         result: CommandResult.Success,
     ): CommandResult.Success {
-        val transitioned: List<TaskId> = when (command) {
-            is DomainCommand.ChangeTaskStatus,
-            is DomainCommand.CompleteTask,
-            ->
-                (result.undo as? DomainCommand.RestoreTaskStatus)
-                    ?.let { listOf(it.taskId) }
-                    .orEmpty()
-            is DomainCommand.CompleteTasks ->
-                (result.undo as? DomainCommand.UndoBatch)
-                    ?.commands
-                    ?.filterIsInstance<DomainCommand.RestoreTaskStatus>()
-                    ?.map(DomainCommand.RestoreTaskStatus::taskId)
-                    ?.asReversed() // stored reversed; recover application order
-                    .orEmpty()
-            else -> emptyList()
-        }
+        val transitioned = automationTransitionedTaskIds(command, result)
         if (transitioned.isEmpty()) return result
         val rules = database.workspaceDao().getAutomationRules()
             .mapNotNull { entity -> runCatching { entity.toModel() }.getOrNull() }

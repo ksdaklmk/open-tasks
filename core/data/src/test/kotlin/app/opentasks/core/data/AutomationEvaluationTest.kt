@@ -28,6 +28,10 @@ import java.time.Instant
 class AutomationEvaluationTest {
     private val now = Instant.parse("2026-07-26T10:00:00Z")
 
+    private companion object {
+        const val SECOND_BULK_TITLE = "Second bulk completion target"
+    }
+
     private fun addTagRule(
         id: String,
         statusId: WorkflowStatusId,
@@ -122,13 +126,26 @@ class AutomationEvaluationTest {
             assertTrue(tag.id in taskById(repository, single.id).tagIds)
             assertEquals(generationBeforeSingle + 1, journal.currentGeneration)
 
-            // …and on the bulk path, whose stored inverses stay replayable.
+            // …and on the bulk path for EVERY member, not just the first: the
+            // per-task loop runs twice, re-reading state between tasks, and
+            // the one composed undo replays across both.
+            assertTrue(
+                repository.execute(
+                    DomainCommand.CreateTask(
+                        title = SECOND_BULK_TITLE,
+                        projectId = single.projectId,
+                    ),
+                ) is CommandResult.Success,
+            )
+            val secondBulk = repository.currentWorkspace().tasks
+                .first { it.title == SECOND_BULK_TITLE }
             val generationBeforeBulk = journal.currentGeneration
             val completedBulk = repository.execute(
-                DomainCommand.CompleteTasks(listOf(bulk.id)),
+                DomainCommand.CompleteTasks(listOf(bulk.id, secondBulk.id)),
             )
             assertTrue(completedBulk is CommandResult.Success)
             assertTrue(tag.id in taskById(repository, bulk.id).tagIds)
+            assertTrue(tag.id in taskById(repository, secondBulk.id).tagIds)
             assertEquals(generationBeforeBulk + 1, journal.currentGeneration)
 
             val undo = requireNotNull((completedBulk as CommandResult.Success).undo)
@@ -136,6 +153,9 @@ class AutomationEvaluationTest {
             val reverted = taskById(repository, bulk.id)
             assertEquals(bulk.statusId, reverted.statusId)
             assertFalse(tag.id in reverted.tagIds)
+            val revertedSecond = taskById(repository, secondBulk.id)
+            assertEquals(secondBulk.statusId, revertedSecond.statusId)
+            assertFalse(tag.id in revertedSecond.tagIds)
         }
     }
 
@@ -176,8 +196,7 @@ class AutomationEvaluationTest {
             assertEquals(destinationProject.id, remapped.projectId)
             assertFalse(tag.id in remapped.tagIds)
 
-            // A recurrence spawn lands in Planned without firing rules, while
-            // the completed occurrence itself still fires its own column's.
+            // A recurrence spawn lands in Planned without firing rules.
             val created = repository.execute(
                 DomainCommand.CreateTask(
                     title = "Weekly review",
@@ -205,7 +224,7 @@ class AutomationEvaluationTest {
     }
 
     @Test
-    fun sweepMyDayCommandIsIdempotentAndRuleGated() = runBlocking {
+    fun sweepMyDayCommandIsIdempotent() = runBlocking {
         withTimeout(5_000) {
             val journal = InMemoryBackupJournal()
             val repository = InMemoryVaultRepository(now = { now }, backupJournal = journal)

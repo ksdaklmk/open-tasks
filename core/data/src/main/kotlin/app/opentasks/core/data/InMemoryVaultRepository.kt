@@ -18,6 +18,7 @@ import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.StatusTransitionTrigger
 import app.opentasks.core.domain.evaluateAutomationRules
+import app.opentasks.core.domain.automationTransitionedTaskIds
 import app.opentasks.core.domain.RecurrenceSeriesMetadata
 import app.opentasks.core.domain.RecurringTaskPlanner
 import app.opentasks.core.domain.ScheduleMoveFailure
@@ -184,34 +185,19 @@ class InMemoryVaultRepository internal constructor(
      * execute, and returns the trigger's result with one composed undo.
      *
      * Behavioural twin of `RoomVaultRepository.applyAutomationRules`: the same
-     * trigger set, the same ascending rule-id order, the same silent skip of a
-     * rejected output, and the same flattened undo. A transition is recognised
-     * from the repository's own undo, which only the real transition paths
-     * produce and a no-op move omits entirely. Outputs go through the internal
-     * [dispatch] — the write mutex is not reentrant, and internal dispatch does
-     * not re-evaluate — and a throw from an output is deliberately not caught,
-     * so the enclosing execute rolls the whole command back.
+     * trigger set — [automationTransitionedTaskIds], shared with the Room
+     * engine — the same ascending rule-id order, the same silent skip of a
+     * rejected output, and the same flattened undo. Outputs go through the
+     * internal [dispatch] — the write mutex is not reentrant, and internal
+     * dispatch does not re-evaluate — and a throw from an output is
+     * deliberately not caught, so the enclosing execute rolls the whole
+     * command back.
      */
     private fun applyAutomationRules(
         command: DomainCommand,
         result: CommandResult.Success,
     ): CommandResult.Success {
-        val transitioned: List<TaskId> = when (command) {
-            is DomainCommand.ChangeTaskStatus,
-            is DomainCommand.CompleteTask,
-            ->
-                (result.undo as? DomainCommand.RestoreTaskStatus)
-                    ?.let { listOf(it.taskId) }
-                    .orEmpty()
-            is DomainCommand.CompleteTasks ->
-                (result.undo as? DomainCommand.UndoBatch)
-                    ?.commands
-                    ?.filterIsInstance<DomainCommand.RestoreTaskStatus>()
-                    ?.map(DomainCommand.RestoreTaskStatus::taskId)
-                    ?.asReversed() // stored reversed; recover application order
-                    .orEmpty()
-            else -> emptyList()
-        }
+        val transitioned = automationTransitionedTaskIds(command, result)
         if (transitioned.isEmpty()) return result
         val rules = mutableWorkspace.value.automationRules.filter { it.enabled }
         // Coupled to the config validator, which forces `statusId == null`

@@ -29,6 +29,42 @@ data class StatusTransitionTrigger(
 )
 
 /**
+ * The tasks a just-applied [command] actually moved into a new status, in the
+ * order the engine applied them, derived from the repository's own undo.
+ *
+ * Two layers gate this deliberately. The command whitelist is the authority on
+ * what counts as a status entry, so a command that merely produces per-task
+ * inverses — a project-move remap, an undo replay — never registers even when
+ * its undo carries a [DomainCommand.RestoreTaskStatus]. Within the whitelist
+ * the undo shape is the evidence: only the real transition paths construct
+ * that inverse, and a no-op move returns no undo at all, so a task that did not
+ * change column is never reported. [DomainCommand.CompleteTasks] stores its
+ * inverses in reverse application order, which is undone here.
+ *
+ * Pure and engine-free, so both vault repository engines share exactly one
+ * copy of the rule.
+ */
+fun automationTransitionedTaskIds(
+    command: DomainCommand,
+    result: CommandResult.Success,
+): List<TaskId> = when (command) {
+    is DomainCommand.ChangeTaskStatus,
+    is DomainCommand.CompleteTask,
+    ->
+        (result.undo as? DomainCommand.RestoreTaskStatus)
+            ?.let { listOf(it.taskId) }
+            .orEmpty()
+    is DomainCommand.CompleteTasks ->
+        (result.undo as? DomainCommand.UndoBatch)
+            ?.commands
+            ?.filterIsInstance<DomainCommand.RestoreTaskStatus>()
+            ?.map(DomainCommand.RestoreTaskStatus::taskId)
+            ?.asReversed() // stored reversed; recover application order
+            .orEmpty()
+    else -> emptyList()
+}
+
+/**
  * Deterministic: matching rules apply in ascending rule-id order. Idempotent
  * verbs skip silently, and so does any verb whose command the repository
  * would reject, so a rule never turns a user's move into a failure. Outputs
@@ -51,6 +87,10 @@ fun evaluateAutomationRules(
     }
     .sortedBy { it.id.value }
     .mapNotNull { rule ->
+        // A fourth verb must emit a command whose success undo is a shape both
+        // engines' `rejectUndoCommand` already preflights: an output undo that
+        // falls through to that function's fail-closed branch would make every
+        // composed undo containing it permanently unreplayable.
         when (rule.type) {
             AutomationRuleType.ON_ENTER_ADD_TAG -> rule.tagId
                 ?.takeIf { it !in trigger.task.tagIds }

@@ -4,6 +4,7 @@ import app.opentasks.core.model.AutomationRule
 import app.opentasks.core.model.AutomationRuleId
 import app.opentasks.core.model.AutomationRuleType
 import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.TagId
 import app.opentasks.core.model.Task
@@ -162,6 +163,87 @@ class AutomationEngineTest {
         assertEquals(
             listOf(DomainCommand.SetTaskTag(task.id, TagId("tag-new"), present = true)),
             outputs,
+        )
+    }
+
+    @Test
+    fun transitionedTaskIdsComeOnlyFromTheThreeTriggerCommands() {
+        val first = TaskId("task-a")
+        val second = TaskId("task-b")
+        fun restore(id: TaskId) = DomainCommand.RestoreTaskStatus(
+            taskId = id,
+            statusId = task.statusId,
+            completedAt = null,
+        )
+
+        // ChangeTaskStatus and CompleteTask each carry one RestoreTaskStatus.
+        assertEquals(
+            listOf(first),
+            automationTransitionedTaskIds(
+                DomainCommand.ChangeTaskStatus(first, task.statusId),
+                CommandResult.Success("Moved", restore(first)),
+            ),
+        )
+        assertEquals(
+            listOf(first),
+            automationTransitionedTaskIds(
+                DomainCommand.CompleteTask(first),
+                CommandResult.Success("Task completed", restore(first)),
+            ),
+        )
+
+        // CompleteTasks stores its inverses in reverse application order; the
+        // derivation must hand them back in the order they were applied.
+        assertEquals(
+            listOf(first, second),
+            automationTransitionedTaskIds(
+                DomainCommand.CompleteTasks(listOf(first, second)),
+                CommandResult.Success(
+                    "2 tasks completed",
+                    DomainCommand.UndoBatch(listOf(restore(second), restore(first))),
+                ),
+            ),
+        )
+
+        // A no-op transition returns no undo at all and never registers.
+        assertTrue(
+            automationTransitionedTaskIds(
+                DomainCommand.ChangeTaskStatus(first, task.statusId),
+                CommandResult.Success("Status is already Backlog"),
+            ).isEmpty(),
+        )
+
+        // The command whitelist, not the undo shape, is the authority: a
+        // project move's per-task inverses never register…
+        assertTrue(
+            automationTransitionedTaskIds(
+                DomainCommand.MoveTasksToProject(listOf(first), ProjectId("project-other")),
+                CommandResult.Success(
+                    "1 task moved",
+                    DomainCommand.UndoBatch(
+                        listOf(
+                            DomainCommand.UpdateTask(
+                                taskId = first,
+                                title = "Moved task",
+                                description = "",
+                                projectId = null,
+                                priority = Priority.NONE,
+                                start = null,
+                                due = null,
+                                recurrence = null,
+                                estimate = null,
+                            ),
+                        ),
+                    ),
+                ),
+            ).isEmpty(),
+        )
+        // …and neither does an undo replay whose own undo is a RestoreTaskStatus.
+        assertTrue(
+            automationTransitionedTaskIds(
+                DomainCommand.RestoreTaskStatus(first, task.statusId, completedAt = null),
+                CommandResult.Success("Status restored", restore(first)),
+            ).isEmpty(),
         )
     }
 
