@@ -1,9 +1,88 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 paused mid pre-17 repair, 18 August 2026
+## Current resume point — Stage 9 qualification gates green, final review in flight, 19 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Where Stage 9 stands
+
+Tasks 1–16, the pre-17 instrumented-test repair, AND Task 17's machine
+gates (Steps 0–3) are complete with clean reviews. The ledger
+`.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
+remains the authoritative execution record (audit base on its LINE 2).
+HEAD at this checkpoint: `86af72b` plus this docs commit. `main` now
+advertises versionName 1.3.0 / versionCode 4 (Ruling L: bump precedes
+the gates so the signed release evidence carries the shipping version;
+the tag does not exist yet).
+
+**Complete this session (session 6, 18–19 Aug):**
+
+- **Pre-17 repair** (`1de535b` + `73b6655`, review clean): five
+  compact-profile tests hardened; compact fully green (9/9, 23/23,
+  14/14). The implementer's Fold8 failures were proven to be
+  boot-configuration artifacts — `Fold8_Acceptance` is a deterministic
+  baseline ONLY under the Stage 8 procedure (`-read-only
+  -no-snapshot-load -no-snapshot-save -no-window -gpu host`); the
+  controller ran Schedule 23/23 three consecutive times on it
+  (Ruling T). Windowed boots of that AVD give false failures.
+- **Pre-17 advisor round** (opus, report:
+  `advisor-pre-17-report.md`; rulings L–S): bump-first ruling; the
+  connected gate is SEVEN modules (`:feature:home` gained its first
+  androidTest source set this stage and NO other gate runs it — its
+  absence from the CI matrix is an explicit carry-forward); scope-scan
+  allowlist; `bash scripts/verify-actions-workflow.sh` (mode 644);
+  `check-schema-drift.sh` deletes 10.json mid-run (recovery:
+  `git checkout -- core/data/schemas`); Step 6 must NEVER
+  `git add docs` (would stage the protected owner entries); the
+  AUTOMATION_RULE capture-vs-read backup-outage trap and the
+  undischarged Task 8→9 deletedAt carry-forward recovered onto the
+  final-review list (Rulings P/Q).
+- **Task 17 Steps 0–3** (`21e3926` bump, `7e7dfb6` + `d01c950`
+  test-only fixes, `86af72b` qualification record; review clean):
+  host gates 1,355/0 + signed minified release APK; all determinism/
+  scope scans clean; seven-module Fold8 gate + ten-class compact gate
+  green; migration 10/10. The Room automation twins failed on first
+  device execution — Ruling U diagnosed the nine Stage 9 twins
+  asserting on naked `currentWorkspace()` reads against the documented
+  decoupled-collector lag; fix round 1 adopted the house await pattern
+  (no assertion weakened, verified by scoped re-review), after which
+  `:core:data` ran 212/0 and **Task 14's blocking Important 1 is
+  DISCHARGED** (both twins PASS, named rows in the record).
+  Qualification evidence: `docs/qualification/stage9-board-flow-automation.md`.
+
+**In flight at this checkpoint:** the final whole-branch review
+(fable, range `8d70c96..86af72b`, package + 20-group triage list at
+`final-review-targets.md` in the ledger directory, report lands at
+`final-review-report.md`). Process on its verdict: at most ONE fix
+wave + one scoped re-review, then adjudicate residuals with ledger
+rulings.
+
+### What remains after the final review
+
+1. Owner-present **Step 5 manual acceptance matrix** (eight rows in the
+   record, plus Ruling R's additions: the inert
+   ON_ENTER_SET_DUE-on-completed-column row, the
+   background/foreground-once instruction on the rollover row).
+2. Owner-present **Step 6 release**: signed sideload per RELEASING.md,
+   `bash scripts/verify-release-apk.sh`, smoke rows recorded in
+   `docs/qualification/release-1.3.0-sideload.md` (a separate
+   obligation from the Step 5 matrix), tag `v1.3.0`, and the push
+   decision (RELEASING.md pushes at tag time; the owner decides).
+   Prerequisite: a 1.2.0 APK built from tag `v1.2.0` in a SEPARATE git
+   worktree (never check out the tag on `main` — the four protected
+   tree entries must survive).
+3. Post-release carry-forward: add `:feature:home:connectedDebugAndroidTest`
+   to the CI connected matrix (`.github/workflows/android.yml` — out of
+   Task 17 scope by ruling).
+
+The four protected working-tree entries (modified Stage 3 plan doc,
+deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)
+remain uncommitted and must stay that way.
+
+## Superseded checkpoint — Stage 9 paused mid pre-17 repair, 18 August 2026
+
+Superseded by the checkpoint above; retained for session-5 detail.
 
 ### Where Stage 9 stands
 
