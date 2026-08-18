@@ -35,6 +35,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.SavedStateHandle
@@ -537,9 +539,37 @@ class ProcessRestorationInstrumentedTest {
             .performScrollToNode(hasTestTag("timeline-next"))
         composeRule.onNodeWithTag("timeline-next").performClick()
 
+        // The row lives inside ProjectTimelineView's own
+        // heightIn(max = 440.dp) LazyColumn, itself nested inside the outer
+        // "project-workbench-list": on a short compact-profile viewport,
+        // performScrollToNode() only scrolls until the row exists in the
+        // semantics tree, which the much taller preceding item can already
+        // satisfy while the row itself is still well below the bottom of
+        // the visible window (confirmed via printToLog: the row's
+        // boundsInRoot stayed hundreds of px past the 2_400px window on
+        // Pixel6_Scratch even after a repeated performScrollToNode() call,
+        // and the inner list's own VerticalScrollAxisRange was already
+        // maxValue=0 -- its handful of dependency-context rows all fit
+        // under 440.dp without needing internal scrolling, so the outer
+        // list is the only thing that still needs to move). Nudge the
+        // outer list down with real swipe gestures -- not a semantics
+        // scroll-to-node search -- until the row is actually displayed.
         composeRule.onNodeWithTag("project-workbench-list")
             .performScrollToNode(hasTestTag("timeline-task-row-${chainTask.id.value}"))
-        composeRule.onNodeWithTag("timeline-task-row-${chainTask.id.value}").performClick()
+        var timelineRowDisplayed = runCatching {
+            composeRule.onNodeWithTag("timeline-task-row-${chainTask.id.value}").assertIsDisplayed()
+        }.isSuccess
+        var timelineScrollAttempts = 0
+        while (!timelineRowDisplayed && timelineScrollAttempts < 10) {
+            composeRule.onNodeWithTag("project-workbench-list").performTouchInput { swipeUp() }
+            timelineRowDisplayed = runCatching {
+                composeRule.onNodeWithTag("timeline-task-row-${chainTask.id.value}").assertIsDisplayed()
+            }.isSuccess
+            timelineScrollAttempts++
+        }
+        composeRule.onNodeWithTag("timeline-task-row-${chainTask.id.value}")
+            .assertIsDisplayed()
+            .performClick()
 
         assertEquals(
             ProjectPresentation.TIMELINE,

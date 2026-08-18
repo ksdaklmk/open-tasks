@@ -661,10 +661,18 @@ class ScheduleScreenInstrumentedTest {
             onRescheduleTask = { taskId, date -> rescheduled.set(taskId to date) },
         )
 
-        beginDrag(
-            from = boundsOf("schedule-task-${task.id.value}").center,
-            to = boundsOf("schedule-column-2026-08-18").center,
-        )
+        // The week-timeline row is horizontally scrolled and only wide
+        // enough on a compact window to show a sliver of the source column,
+        // let alone the target: press on the source first (any point on its
+        // own row is a valid press target, so a partly-clipped bounds read
+        // is fine here), then scroll the target column into view before
+        // reading ITS bounds -- a still-clipped read comes back
+        // (near-)degenerate and cannot land inside the column's real
+        // registered drop bounds.
+        beginDragPress(boundsOf("schedule-task-${task.id.value}").center)
+        composeRule.onNodeWithTag("schedule-drag-preview-${task.id.value}").assertIsDisplayed()
+        composeRule.onNodeWithTag("schedule-column-2026-08-18").performScrollTo()
+        moveDrag(boundsOf("schedule-column-2026-08-18").center)
         composeRule.onNodeWithTag("schedule-drag-preview-${task.id.value}").assertIsDisplayed()
         endDrag()
 
@@ -700,6 +708,18 @@ class ScheduleScreenInstrumentedTest {
             onRemoveTaskSchedule = removed::set,
         )
 
+        // Bounds are read only after scrolling each row/target into view.
+        // schedule-task-week-tray-remindered in particular sits below
+        // dated's row inside Day-17's own vertical scroll: two stacked
+        // ~137.dp task rows overflow the visible column height on a
+        // compact window, so remindered's row can be entirely below the
+        // fold (a degenerate, clip-collapsed bounds read) even though
+        // dated's row above it still fits. SemanticsNode.boundsInRoot is
+        // clip-aware -- see beginDragPress()'s doc comment -- so a
+        // still-clipped read cannot land inside a row's or column's real
+        // registered drag bounds.
+        composeRule.onNodeWithTag("unscheduled-task-${undated.id.value}").performScrollTo()
+        composeRule.onNodeWithTag("schedule-column-$FALLBACK_DATE").performScrollTo()
         beginDrag(
             from = boundsOf("unscheduled-task-${undated.id.value}").center,
             to = boundsOf("schedule-column-$FALLBACK_DATE").center,
@@ -707,6 +727,11 @@ class ScheduleScreenInstrumentedTest {
         endDrag()
         assertEquals(undated.id to FALLBACK_DATE, rescheduled.get())
 
+        // unscheduled-tray is a plain sibling of the horizontally-scrolled
+        // week-timeline Row, never clipped, so it needs no scroll of its
+        // own -- performScrollTo() would throw here (no scrollable
+        // ancestor) rather than no-op.
+        composeRule.onNodeWithTag("schedule-task-${dated.id.value}").performScrollTo()
         beginDrag(
             from = boundsOf("schedule-task-${dated.id.value}").center,
             to = boundsOf("unscheduled-tray").center,
@@ -714,6 +739,7 @@ class ScheduleScreenInstrumentedTest {
         endDrag()
         assertEquals(dated.id, removed.get())
 
+        composeRule.onNodeWithTag("schedule-task-${remindered.id.value}").performScrollTo()
         beginDrag(
             from = boundsOf("schedule-task-${remindered.id.value}").center,
             to = boundsOf("unscheduled-tray").center,
@@ -958,6 +984,38 @@ class ScheduleScreenInstrumentedTest {
             advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
             moveTo(to)
         }
+    }
+
+    // Split beginDrag() into a press phase and a move phase so a caller can
+    // scroll a horizontally-clipped drop target into view in between: once
+    // down() claims the pointer, a later moveTo() is delivered to that same
+    // gesture regardless of where the content underneath has scrolled to,
+    // but the *coordinate* passed to moveTo() must be read only after the
+    // target is actually on screen. SemanticsNode.boundsInRoot (what
+    // boundsOf() reads) is clip-aware -- it degenerates towards Offset.Zero
+    // for a node that is entirely scrolled out of its container, unlike
+    // production's own LayoutCoordinates.boundsInRoot() used to register
+    // drop targets, which is plain geometry and unaffected by clipping.
+    // Reading a clipped node's bounds therefore hands the drag a coordinate
+    // that cannot land inside that target's real registered bounds.
+    private fun beginDragPress(from: Offset) {
+        composeRule.onRoot().performTouchInput {
+            down(from)
+            advanceEventTime(ViewConfiguration.getLongPressTimeout().toLong() + 1)
+            // detectDragGesturesAfterLongPress only evaluates the elapsed
+            // time against a *subsequent* event's timestamp -- advancing
+            // the clock alone never gets checked. beginDrag()'s single
+            // block always had moveTo(to) serve that role; a zero-distance
+            // move here does the same job (below touch slop, so it cannot
+            // read as an early cancel) without pre-empting the real
+            // destination, which moveDrag() delivers separately once it is
+            // read from an on-screen target.
+            moveTo(from)
+        }
+    }
+
+    private fun moveDrag(to: Offset) {
+        composeRule.onRoot().performTouchInput { moveTo(to) }
     }
 
     private fun endDrag() {

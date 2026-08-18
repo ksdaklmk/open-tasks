@@ -22,6 +22,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -145,6 +147,40 @@ class ProjectWorkbenchInstrumentedTest {
             .performScrollToNode(hasTestTag("workbench-view-board"))
         composeRule.onNodeWithTag("workbench-view-board").performClick()
         composeRule.onNodeWithTag("workbench-task-${groupedFirst.id.value}").assertDoesNotExist()
+        // The board lives inside the same outer "project-workbench-list"
+        // item as the toggle above it; scrolling to the toggle only proves
+        // the toggle is visible. performScrollToNode() stops as soon as a
+        // matching node exists anywhere in the tree, which the much taller
+        // preceding content already satisfies while the 440.dp-tall board
+        // columns below it are still clipped by the outer list on a short
+        // compact-profile viewport -- repeating the call is then a no-op.
+        // A full-height swipeUp() overshoots straight past the board's
+        // on-screen window in one step (confirmed: it reached the list's
+        // absolute scroll max with the card still not displayed, now above
+        // the fold instead of below it), so nudge the outer list down in
+        // small, bounded steps, re-settling the board's own horizontal
+        // scroll (board-column) and the column's own card list
+        // (board-card) after each one, until the card is actually
+        // displayed.
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("board-card-${groupedFirst.id.value}"))
+        var boardCardDisplayed = runCatching {
+            composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
+        }.isSuccess
+        var boardScrollAttempts = 0
+        while (!boardCardDisplayed && boardScrollAttempts < 20) {
+            composeRule.onNodeWithTag("project-workbench-list").performTouchInput {
+                swipeUp(startY = center.y + 300f, endY = center.y - 300f)
+            }
+            composeRule.onNodeWithTag("board-column-${groupedFirst.statusId.value}")
+                .performScrollTo()
+            composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}")
+                .performScrollTo()
+            boardCardDisplayed = runCatching {
+                composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
+            }.isSuccess
+            boardScrollAttempts++
+        }
         composeRule.onNodeWithTag("board-column-${groupedFirst.statusId.value}")
             .performScrollTo()
         composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}")
@@ -262,11 +298,30 @@ class ProjectWorkbenchInstrumentedTest {
             ),
         )
 
+        // Each check scrolls to its own target rather than reusing one early
+        // scroll: "project-workbench-list" is a real LazyColumn, and on a
+        // short compact-profile viewport the header/milestone/group rows
+        // between two targets are wide enough apart that an earlier target
+        // gets recycled out of composition by the time a later one is
+        // brought into view -- the fold profile this was written on has
+        // enough viewport height to keep everything composed at once, which
+        // is why this only failed on compact.
         composeRule.onNodeWithTag("project-workbench-list")
             .performScrollToNode(hasText(milestone.name))
         composeRule.onNodeWithText(milestone.name).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(
+                hasText(context.getString(R.string.workbench_group_due_today)) and isHeading(),
+            )
         composeRule.onNodeWithText(context.getString(R.string.workbench_group_due_today))
             .assert(isHeading())
+
+        // The two "Project" headings sandwich sharedIdTask's row, so
+        // scrolling to that row keeps both simultaneously composed for the
+        // single fetchSemanticsNodes() snapshot below.
+        composeRule.onNodeWithTag("project-workbench-list")
+            .performScrollToNode(hasTestTag("workbench-task-${sharedIdTask.id.value}"))
         assertEquals(
             2,
             composeRule.onAllNodes(hasText(context.getString(R.string.workbench_group_project)) and isHeading())
