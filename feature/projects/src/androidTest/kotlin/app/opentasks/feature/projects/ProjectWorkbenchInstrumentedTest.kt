@@ -22,8 +22,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -154,31 +154,38 @@ class ProjectWorkbenchInstrumentedTest {
         // preceding content already satisfies while the 440.dp-tall board
         // columns below it are still clipped by the outer list on a short
         // compact-profile viewport -- repeating the call is then a no-op.
-        // A full-height swipeUp() overshoots straight past the board's
-        // on-screen window in one step (confirmed: it reached the list's
-        // absolute scroll max with the card still not displayed, now above
-        // the fold instead of below it), so nudge the outer list down in
-        // small, bounded steps, re-settling the board's own horizontal
-        // scroll (board-column) and the column's own card list
-        // (board-card) after each one, until the card is actually
-        // displayed.
+        // Nudge the outer list's own ScrollBy semantics action in small,
+        // bounded steps -- not raw swipe gestures, which round-tripped
+        // through the touch-injection pipeline often enough in a tight
+        // loop to leave the emulator's input queue in a state that
+        // intermittently broke an unrelated *later* test's click in the
+        // same class -- re-anchoring on the card with a fresh
+        // performScrollToNode() after each step (its own search can
+        // recover from an overshoot in either direction) before
+        // re-settling the board's own horizontal scroll (board-column)
+        // and the column's own card list (board-card). Any transient "not
+        // found yet" counts as just another failed attempt rather than
+        // aborting the loop -- an in-between step can briefly scroll the
+        // giant single list item (header, milestones, board and all) far
+        // enough that the whole item, board included, drops out of the
+        // outer LazyColumn's own composition window.
         composeRule.onNodeWithTag("project-workbench-list")
             .performScrollToNode(hasTestTag("board-card-${groupedFirst.id.value}"))
-        var boardCardDisplayed = runCatching {
-            composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
-        }.isSuccess
-        var boardScrollAttempts = 0
-        while (!boardCardDisplayed && boardScrollAttempts < 20) {
-            composeRule.onNodeWithTag("project-workbench-list").performTouchInput {
-                swipeUp(startY = center.y + 300f, endY = center.y - 300f)
-            }
+        fun boardCardIsDisplayed() = runCatching {
+            composeRule.onNodeWithTag("project-workbench-list")
+                .performScrollToNode(hasTestTag("board-card-${groupedFirst.id.value}"))
             composeRule.onNodeWithTag("board-column-${groupedFirst.statusId.value}")
                 .performScrollTo()
             composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}")
                 .performScrollTo()
-            boardCardDisplayed = runCatching {
-                composeRule.onNodeWithTag("board-card-${groupedFirst.id.value}").assertIsDisplayed()
-            }.isSuccess
+                .assertIsDisplayed()
+        }.isSuccess
+        var boardCardDisplayed = boardCardIsDisplayed()
+        var boardScrollAttempts = 0
+        while (!boardCardDisplayed && boardScrollAttempts < 20) {
+            composeRule.onNodeWithTag("project-workbench-list")
+                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 150f) }
+            boardCardDisplayed = boardCardIsDisplayed()
             boardScrollAttempts++
         }
         composeRule.onNodeWithTag("board-column-${groupedFirst.statusId.value}")
