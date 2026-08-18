@@ -165,6 +165,7 @@ class BackupRecordImporterInstrumentedTest {
                 "revisionWallMillis" to 1_700_000_000_400L,
                 "revisionLogical" to 4,
                 "revisionDeviceId" to SOURCE_DEVICE_ID,
+                "wipLimit" to null,
             ),
         )
         assertRow(
@@ -400,6 +401,7 @@ class BackupRecordImporterInstrumentedTest {
                 "revisionWallMillis" to 1L,
                 "revisionLogical" to 0,
                 "revisionDeviceId" to SOURCE_DEVICE_ID,
+                "wipLimit" to null,
             ),
         )
         assertRow(
@@ -2197,8 +2199,8 @@ class BackupRecordImporterInstrumentedTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(
                     "asserted columns in $table",
-                    cursor.columnNames.toSortedSet(),
                     expected.keys.toSortedSet(),
+                    cursor.columnNames.toSortedSet(),
                 )
                 expected.forEach { (column, value) ->
                     val index = cursor.getColumnIndexOrThrow(column)

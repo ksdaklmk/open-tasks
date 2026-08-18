@@ -3724,41 +3724,58 @@ class RoomVaultRepositoryInstrumentedTest {
                         is CommandResult.Success,
                 )
             }
-            assertEquals(
-                tasks.map(Task::id),
-                repository!!.currentWorkspace().home.myDayTasks.map(Task::id),
-            )
+            val afterAdds = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.home.myDayTasks.map(Task::id) == tasks.map(Task::id)
+                }
+            }
+            assertEquals(tasks.map(Task::id), afterAdds.home.myDayTasks.map(Task::id))
 
             // Move the last entry to the top.
             val move = repository!!.execute(
                 DomainCommand.MoveMyDayEntry(tasks[2].id, afterTaskId = null),
             )
             assertTrue(move is CommandResult.Success)
-            assertEquals(
-                listOf(tasks[2].id, tasks[0].id, tasks[1].id),
-                repository!!.currentWorkspace().home.myDayTasks.map(Task::id),
-            )
+            val expectedAfterMove = listOf(tasks[2].id, tasks[0].id, tasks[1].id)
+            val afterMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.home.myDayTasks.map(Task::id) == expectedAfterMove
+                }
+            }
+            assertEquals(expectedAfterMove, afterMove.home.myDayTasks.map(Task::id))
 
             // Undo restores the previous rank.
             val undo = (move as CommandResult.Success).undo
             assertTrue(undo is DomainCommand.RestoreMyDayEntries)
             repository!!.execute(checkNotNull(undo))
-            assertEquals(
-                tasks.map(Task::id),
-                repository!!.currentWorkspace().home.myDayTasks.map(Task::id),
-            )
+            val afterUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.home.myDayTasks.map(Task::id) == tasks.map(Task::id)
+                }
+            }
+            assertEquals(tasks.map(Task::id), afterUndo.home.myDayTasks.map(Task::id))
 
             // Duplicate add is an idempotent success that changes nothing.
             val duplicate = repository!!.execute(DomainCommand.AddTaskToMyDay(tasks[0].id))
             assertTrue(duplicate is CommandResult.Success)
-            assertEquals(3, repository!!.currentWorkspace().myDay.size)
+            assertEquals(3, afterUndo.myDay.size)
 
             // Remove round-trips through its undo.
             val removed = repository!!.execute(DomainCommand.RemoveTaskFromMyDay(tasks[1].id))
             assertTrue(removed is CommandResult.Success)
-            assertEquals(2, repository!!.currentWorkspace().myDay.size)
+            val afterRemove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.myDay.size == 2
+                }
+            }
+            assertEquals(2, afterRemove.myDay.size)
             repository!!.execute(checkNotNull((removed as CommandResult.Success).undo))
-            assertEquals(3, repository!!.currentWorkspace().myDay.size)
+            val afterRemoveUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.myDay.size == 3
+                }
+            }
+            assertEquals(3, afterRemoveUndo.myDay.size)
         }
     }
 
@@ -3774,21 +3791,34 @@ class RoomVaultRepositoryInstrumentedTest {
 
             // Binned member: row retained, projection hides it.
             repository!!.execute(DomainCommand.DeleteTask(open.id))
-            assertEquals(1, repository!!.currentWorkspace().myDay.size)
-            assertTrue(repository!!.currentWorkspace().home.myDayTasks.isEmpty())
+            val afterDelete = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.myDay.size == 1 && s.home.myDayTasks.isEmpty()
+                }
+            }
+            assertEquals(1, afterDelete.myDay.size)
+            assertTrue(afterDelete.home.myDayTasks.isEmpty())
             repository!!.execute(DomainCommand.RestoreTask(open.id))
 
             // Completed member stays visible (dimmed by the UI) until swept.
             repository!!.execute(DomainCommand.CompleteTask(open.id))
+            val afterComplete = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.home.myDayTasks.map(Task::id) == listOf(open.id)
+                }
+            }
             assertEquals(
                 listOf(open.id),
-                repository!!.currentWorkspace().home.myDayTasks.map(Task::id),
+                afterComplete.home.myDayTasks.map(Task::id),
             )
             val sweep = repository!!.execute(
                 DomainCommand.SweepMyDay(before = Instant.parse("2100-01-01T00:00:00Z")),
             )
             assertTrue(sweep is CommandResult.Success)
-            assertTrue(repository!!.currentWorkspace().myDay.isEmpty())
+            val afterSweep = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s -> s.myDay.isEmpty() }
+            }
+            assertTrue(afterSweep.myDay.isEmpty())
 
             // Sweeping again is a journal-free no-op.
             val again = repository!!.execute(
@@ -3804,12 +3834,15 @@ class RoomVaultRepositoryInstrumentedTest {
         openRepository(now = { now })
         withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repeat(200) { index ->
-                assertTrue(
+                val created =
                     repository!!.execute(DomainCommand.CreateTask(title = "seed-$index"))
-                        is CommandResult.Success,
-                )
-                val seedId = repository!!.currentWorkspace()
-                    .tasks.single { it.title == "seed-$index" }.id
+                assertTrue(created is CommandResult.Success)
+                // The new task's id rides the command's own synchronous undo
+                // payload rather than a re-observed read, so the 200-iteration
+                // loop carries no dependency on collector propagation speed.
+                val seedId = (
+                    (created as CommandResult.Success).undo as DomainCommand.DeleteTask
+                    ).taskId
                 assertTrue(
                     repository!!.execute(DomainCommand.AddTaskToMyDay(seedId))
                         is CommandResult.Success,
@@ -3820,23 +3853,26 @@ class RoomVaultRepositoryInstrumentedTest {
             // (one character longer per append): it must have re-ranked the
             // whole list instead of writing a rank the journal codec
             // refuses, so every stored rank is an index rank again.
+            val afterSeeding = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { snapshot ->
+                    snapshot.myDay.size == 200
+                }
+            }
             assertEquals(
                 List(200) { index -> myDayRankForIndex(index) },
-                repository!!.currentWorkspace().myDay.map(MyDayEntry::rank),
+                afterSeeding.myDay.map(MyDayEntry::rank),
             )
             assertTrue(
-                repository!!.currentWorkspace().myDay.all {
-                    it.rank.length <= MAX_MY_DAY_RANK_LENGTH
-                },
+                afterSeeding.myDay.all { it.rank.length <= MAX_MY_DAY_RANK_LENGTH },
             )
 
             // The 201st add hits the entry bound.
-            assertTrue(
+            val overflowCreated =
                 repository!!.execute(DomainCommand.CreateTask(title = "one-too-many"))
-                    is CommandResult.Success,
-            )
-            val overflowId = repository!!.currentWorkspace()
-                .tasks.single { it.title == "one-too-many" }.id
+            assertTrue(overflowCreated is CommandResult.Success)
+            val overflowId = (
+                (overflowCreated as CommandResult.Success).undo as DomainCommand.DeleteTask
+                ).taskId
             val overflow = repository!!.execute(DomainCommand.AddTaskToMyDay(overflowId))
             assertTrue(overflow is CommandResult.Rejected)
             assertEquals(
@@ -3844,7 +3880,9 @@ class RoomVaultRepositoryInstrumentedTest {
                 (overflow as CommandResult.Rejected).reason,
             )
 
-            // Binned tasks cannot be planned onto My Day.
+            // Binned tasks cannot be planned onto My Day. "seed-0" has been
+            // stable in the read model since well before the awaits above,
+            // so this lookup carries no propagation risk of its own.
             val binnedId = repository!!.currentWorkspace()
                 .tasks.single { it.title == "seed-0" }.id
             assertTrue(
@@ -3881,20 +3919,45 @@ class RoomVaultRepositoryInstrumentedTest {
             )
             val created = repository!!.execute(DomainCommand.CreateAutomationRule(rule))
             assertTrue(created is CommandResult.Success)
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            val afterCreate = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(rule)
+                }
+            }
+            assertEquals(listOf(rule), afterCreate.automationRules)
 
             val disabled = rule.copy(enabled = false)
             val updated = repository!!.execute(DomainCommand.UpdateAutomationRule(disabled))
             assertTrue(updated is CommandResult.Success)
-            assertEquals(listOf(disabled), repository!!.currentWorkspace().automationRules)
+            val afterUpdate = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(disabled)
+                }
+            }
+            assertEquals(listOf(disabled), afterUpdate.automationRules)
             repository!!.execute(checkNotNull((updated as CommandResult.Success).undo))
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            val afterUpdateUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(rule)
+                }
+            }
+            assertEquals(listOf(rule), afterUpdateUndo.automationRules)
 
             val deleted = repository!!.execute(DomainCommand.DeleteAutomationRule(rule.id))
             assertTrue(deleted is CommandResult.Success)
-            assertTrue(repository!!.currentWorkspace().automationRules.isEmpty())
+            val afterDelete = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules.isEmpty()
+                }
+            }
+            assertTrue(afterDelete.automationRules.isEmpty())
             repository!!.execute(checkNotNull((deleted as CommandResult.Success).undo))
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            val afterDeleteUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(rule)
+                }
+            }
+            assertEquals(listOf(rule), afterDeleteUndo.automationRules)
         }
     }
 
@@ -3912,6 +3975,11 @@ class RoomVaultRepositoryInstrumentedTest {
                 repository!!.execute(DomainCommand.CreateAutomationRule(rule))
                     is CommandResult.Success,
             )
+            val afterCreate = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(rule)
+                }
+            }
 
             // Re-creating with an identifier already in use is rejected, and
             // the existing rule is left untouched.
@@ -3921,7 +3989,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 RejectionReason.INVALID_STATE,
                 (collision as CommandResult.Rejected).reason,
             )
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            assertEquals(listOf(rule), afterCreate.automationRules)
 
             // Deleting a rule that was never created is an idempotent success.
             val neverCreated = repository!!.execute(
@@ -3932,7 +4000,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 "Rule is already removed",
                 (neverCreated as CommandResult.Success).message,
             )
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            assertEquals(listOf(rule), afterCreate.automationRules)
         }
     }
 
@@ -4077,7 +4145,12 @@ class RoomVaultRepositoryInstrumentedTest {
                         is CommandResult.Success,
                 )
             }
-            assertEquals(20, repository!!.currentWorkspace().automationRules.size)
+            val afterTwenty = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules.size == 20
+                }
+            }
+            assertEquals(20, afterTwenty.automationRules.size)
             val overflow = addTagRule(statusId = statusId, tagId = tagId)
             val overflowResult =
                 repository!!.execute(DomainCommand.CreateAutomationRule(overflow))
@@ -4136,12 +4209,17 @@ class RoomVaultRepositoryInstrumentedTest {
             )
             assertTrue(moved is CommandResult.Success)
 
-            val after = repository!!.currentWorkspace().tasks.first { it.id == task.id }
+            val expectedDue = ZonedDateTime.of(2026, 7, 28, 17, 0, 0, 0, zone).toInstant()
+            val afterSnapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    val candidate = s.tasks.firstOrNull { it.id == task.id }
+                    candidate != null && tag.id in candidate.tagIds &&
+                        candidate.due?.instant == expectedDue
+                }
+            }
+            val after = afterSnapshot.tasks.first { it.id == task.id }
             assertTrue(tag.id in after.tagIds)
-            assertEquals(
-                ZonedDateTime.of(2026, 7, 28, 17, 0, 0, 0, zone).toInstant(),
-                checkNotNull(after.due).instant,
-            )
+            assertEquals(expectedDue, checkNotNull(after.due).instant)
             // Trigger and both rule outputs share ONE journal generation.
             assertEquals(
                 generationBefore + 1,
@@ -4152,7 +4230,14 @@ class RoomVaultRepositoryInstrumentedTest {
             val undo = checkNotNull((moved as CommandResult.Success).undo)
             assertTrue(undo is DomainCommand.UndoBatch)
             assertTrue(repository!!.execute(undo) is CommandResult.Success)
-            val reverted = repository!!.currentWorkspace().tasks.first { it.id == task.id }
+            val revertedSnapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    val candidate = s.tasks.firstOrNull { it.id == task.id }
+                    candidate != null && candidate.statusId == task.statusId &&
+                        tag.id !in candidate.tagIds && candidate.due == task.due
+                }
+            }
+            val reverted = revertedSnapshot.tasks.first { it.id == task.id }
             assertEquals(task.statusId, reverted.statusId)
             assertFalse(tag.id in reverted.tagIds)
             assertEquals(task.due, reverted.due)
@@ -4188,24 +4273,32 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.ChangeTaskStatus(task.id, destination.id),
             )
             assertTrue(moved is CommandResult.Success)
-            assertEquals(
-                listOf(task.id),
-                repository!!.currentWorkspace().myDay.map(MyDayEntry::taskId),
-            )
+            val afterMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.myDay.map(MyDayEntry::taskId) == listOf(task.id)
+                }
+            }
+            assertEquals(listOf(task.id), afterMove.myDay.map(MyDayEntry::taskId))
 
             // The RemoveTaskFromMyDay inverse is a newly stored undo shape and
             // must preflight rather than fail closed.
             val undo = checkNotNull((moved as CommandResult.Success).undo)
             assertTrue(repository!!.execute(undo) is CommandResult.Success)
-            assertTrue(repository!!.currentWorkspace().myDay.isEmpty())
+            val afterUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.myDay.isEmpty() &&
+                        s.tasks.firstOrNull { it.id == task.id }?.statusId == task.statusId
+                }
+            }
+            assertTrue(afterUndo.myDay.isEmpty())
             assertEquals(
                 task.statusId,
-                repository!!.currentWorkspace().tasks.first { it.id == task.id }.statusId,
+                afterUndo.tasks.first { it.id == task.id }.statusId,
             )
 
             // A project move remaps onto the destination's matching semantic
             // status without that counting as a status entry.
-            val remapTarget = repository!!.currentWorkspace().tasks.first {
+            val remapTarget = afterUndo.tasks.first {
                 it.deletedAt == null && !it.isCompleted &&
                     it.semanticStatus == SemanticStatus.PLANNED
             }
@@ -4230,12 +4323,17 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.MoveTasksToProject(listOf(remapTarget.id), otherProject.id),
             )
             assertTrue(remapped is CommandResult.Success)
+            val afterRemap = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.tasks.firstOrNull { it.id == remapTarget.id }?.statusId ==
+                        remapStatus.id && s.myDay.isEmpty()
+                }
+            }
             assertEquals(
                 remapStatus.id,
-                repository!!.currentWorkspace().tasks
-                    .first { it.id == remapTarget.id }.statusId,
+                afterRemap.tasks.first { it.id == remapTarget.id }.statusId,
             )
-            assertTrue(repository!!.currentWorkspace().myDay.isEmpty())
+            assertTrue(afterRemap.myDay.isEmpty())
         }
     }
 
@@ -4251,21 +4349,24 @@ class RoomVaultRepositoryInstrumentedTest {
                 DomainCommand.SetWorkflowStatusWipLimit(status.id, 2),
             )
             assertTrue(set is CommandResult.Success)
-            assertEquals(
-                2,
-                repository!!.currentWorkspace().workflowStatuses
-                    .first { it.id == status.id }.wipLimit,
-            )
+            val afterSet = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.workflowStatuses.any { it.id == status.id && it.wipLimit == 2 }
+                }
+            }
+            assertEquals(2, afterSet.workflowStatuses.first { it.id == status.id }.wipLimit)
             repository!!.execute(requireNotNull((set as CommandResult.Success).undo))
-            assertNull(
-                repository!!.currentWorkspace().workflowStatuses
-                    .first { it.id == status.id }.wipLimit,
-            )
+            val afterClear = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.workflowStatuses.any { it.id == status.id && it.wipLimit == null }
+                }
+            }
+            assertNull(afterClear.workflowStatuses.first { it.id == status.id }.wipLimit)
             assertTrue(
                 repository!!.execute(DomainCommand.SetWorkflowStatusWipLimit(status.id, 0))
                     is CommandResult.Rejected,
             )
-            val done = repository!!.currentWorkspace().workflowStatuses.first {
+            val done = afterClear.workflowStatuses.first {
                 it.projectId == status.projectId &&
                     it.semanticStatus == SemanticStatus.COMPLETED
             }
