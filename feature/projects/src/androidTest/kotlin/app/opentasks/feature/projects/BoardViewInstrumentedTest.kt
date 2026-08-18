@@ -398,7 +398,12 @@ class BoardViewInstrumentedTest {
             moveTo(cardBounds.center + Offset(40f, 0f))
         }
         composeRule.onNodeWithTag("board-drag-preview-${task.id.value}").assertIsDisplayed()
-        composeRule.onAllNodesWithText(rollupText).assertCountEquals(2)
+        // The drag preview's own subtree is `clearAndSetSemantics { }` (BoardView.kt,
+        // established since the Stage 6 qualification fix c5c5e11) so its content is
+        // deliberately invisible to semantics queries; only the underlying card's copy
+        // of the chip is discoverable here. That the source card keeps rendering its
+        // rollup chip while its own drag is in flight is what this still proves.
+        composeRule.onAllNodesWithText(rollupText).assertCountEquals(1)
         composeRule.onRoot().performTouchInput { up() }
     }
 
