@@ -51,14 +51,48 @@ the tag does not exist yet).
   DISCHARGED** (both twins PASS, named rows in the record).
   Qualification evidence: `docs/qualification/stage9-board-flow-automation.md`.
 
-**In flight at this checkpoint:** the final whole-branch review
-(fable, range `8d70c96..86af72b`, package + 20-group triage list at
-`final-review-targets.md` in the ledger directory, report lands at
-`final-review-report.md`). Process on its verdict: at most ONE fix
-wave + one scoped re-review, then adjudicate residuals with ledger
-rulings.
+**Final whole-branch review: CLEAN — ready to ship 1.3.0.** The
+review (most capable model, range `8d70c96..86af72b`, report at
+`final-review-report.md` in the ledger directory) returned 0 Critical,
+0 Important, 8 Minor; it verified the four highest-risk surfaces
+(engine write path, subtask cascade, My Day rank arithmetic,
+backup/journal boundary) correct and dual-engine symmetric against
+production source, and re-checked the controller rulings in code. Its
+triage of the 20 deferred items: 0 MUST-FIX, 11 FOLLOW-UP, 9 STANDS.
+No fix wave was needed — Task 17 Step 4's zero-Critical/zero-Important
+criterion is met.
 
-### What remains after the final review
+### Post-release follow-up backlog (from the final review's triage)
+
+None block 1.3.0. In priority order:
+
+1. Add `:feature:home:connectedDebugAndroidTest` to the CI connected
+   matrix (`.github/workflows/android.yml`), updating
+   `scripts/verify-actions-workflow.sh` in the same commit — the FIRST
+   post-release commit; until it lands, Home's instrumented tests run
+   only in local qualification.
+2. AUTOMATION_RULE capture-vs-read asymmetry: an undecodable persisted
+   rule `type` is invisible to the editor/engine but hard-fails ALL
+   snapshot capture. Unreachable from 1.3.0 writes, but a standing
+   constraint on future rule-type additions; decide capture-side
+   handling before any v11 rule work.
+3. Backup-boundary hardening: capture-side dangling guard for
+   `automation_rules` (asymmetric with `danglingMyDayEntryCount`);
+   widen `RecoveryImportDao.danglingReferenceCount()` for the two new
+   tables.
+4. Product polish: restore-detach not undoable / detaching move
+   one-way (Task 9); inert-rule visibility in the automations editor;
+   remove render-dead `HomeSnapshot.focusTasks`;
+   `parentViolation` defence-in-depth on the candidate's `deletedAt`.
+5. Small code/test hygiene: Task 16's 20 dp spacers + divider seam;
+   duplicate testTags (MyDayRow/MyDaySuggestionRow) and the
+   `insightsSummary` file-local fixture; engine-test pinholes
+   (`dueInDays` 0/365 bounds, null-config skips); convert the one
+   remaining naked-`currentWorkspace()` sibling instrumented test to
+   the await pattern; a same-position My Day move journals a
+   redundant rank rewrite.
+
+### What remains — owner-present only
 
 1. Owner-present **Step 5 manual acceptance matrix** (eight rows in the
    record, plus Ruling R's additions: the inert
