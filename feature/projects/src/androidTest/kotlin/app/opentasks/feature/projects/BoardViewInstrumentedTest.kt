@@ -107,6 +107,51 @@ class BoardViewInstrumentedTest {
     }
 
     @Test
+    fun cardMenuAddsToMyDayForNonMembersAndHidesItForMembers() {
+        val task = OpenTasksFixtures.tasks.first { it.id.value == "task-proposal" }
+        val added = AtomicReference<TaskId?>()
+        val backlog = OpenTasksFixtures.workflowStatuses.single {
+            it.id == OpenTasksFixtures.backlog
+        }
+        val myDayMemberIds = mutableStateOf<Set<TaskId>>(emptySet())
+
+        composeRule.setContent {
+            OpenTasksTheme {
+                BoardView(
+                    columns = listOf(
+                        BoardColumn(
+                            status = backlog,
+                            tasks = listOf(
+                                task.copy(
+                                    projectId = OpenTasksFixtures.studioProject.id,
+                                    statusId = backlog.id,
+                                    semanticStatus = backlog.semanticStatus,
+                                ),
+                            ),
+                        ),
+                    ),
+                    columnWidth = 272.dp,
+                    onMoveTask = { _, _ -> },
+                    onOpenTask = {},
+                    onAddTaskToMyDay = added::set,
+                    myDayMemberIds = myDayMemberIds.value,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
+        composeRule.onNodeWithTag("board-my-day-${task.id.value}")
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(task.id, added.get())
+
+        composeRule.runOnIdle { myDayMemberIds.value = setOf(task.id) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("board-move-${task.id.value}").performClick()
+        composeRule.onNodeWithTag("board-my-day-${task.id.value}").assertDoesNotExist()
+    }
+
+    @Test
     fun moveMenuDispatchesTaskAndTargetStatus() {
         val task = OpenTasksFixtures.tasks
             .first { it.id.value == "task-proposal" }

@@ -93,6 +93,8 @@ fun BoardView(
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
     onDuplicateTask: (TaskId) -> Unit = {},
+    onAddTaskToMyDay: (TaskId) -> Unit = {},
+    myDayMemberIds: Set<TaskId> = emptySet(),
     subtaskRollups: Map<TaskId, SubtaskRollup> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
@@ -235,6 +237,8 @@ fun BoardView(
                                         onMoveTask = onMoveTask,
                                         onOpenTask = onOpenTask,
                                         onDuplicateTask = onDuplicateTask,
+                                        onAddTaskToMyDay = onAddTaskToMyDay,
+                                        myDayMemberIds = myDayMemberIds,
                                     )
                                 }
                             }
@@ -288,6 +292,8 @@ private fun BoardTaskCard(
     onMoveTask: (TaskId, WorkflowStatusId) -> Unit,
     onOpenTask: (TaskId) -> Unit,
     onDuplicateTask: (TaskId) -> Unit,
+    onAddTaskToMyDay: (TaskId) -> Unit = {},
+    myDayMemberIds: Set<TaskId> = emptySet(),
 ) {
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
     val moveLabels = targets.map { status ->
@@ -371,6 +377,18 @@ private fun BoardTaskCard(
                                 .semantics { contentDescription = duplicateTaskDescription }
                                 .testTag("board-duplicate-${task.id.value}"),
                         )
+                        if (task.id !in myDayMemberIds) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.board_add_to_my_day)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onAddTaskToMyDay(task.id)
+                                },
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("board-my-day-${task.id.value}"),
+                            )
+                        }
                     }
                 }
             },

@@ -124,6 +124,7 @@ import app.opentasks.core.domain.classifyDueBucket
 import app.opentasks.core.domain.computeProjectTimelineProjection
 import app.opentasks.core.domain.computeScheduleMonthProjection
 import app.opentasks.core.domain.indentedTaskIds
+import app.opentasks.core.domain.myDaySuggestions
 import app.opentasks.core.domain.planTaskScheduleMove
 import app.opentasks.core.domain.taskComparator
 import app.opentasks.core.model.Attachment
@@ -147,6 +148,7 @@ import app.opentasks.core.model.ZonedMoment
 import app.opentasks.digest.DailyDigestCoordinator
 import app.opentasks.digest.DailyDigestNotifications
 import app.opentasks.feature.home.HomeScreen
+import app.opentasks.feature.home.MyDayPlanSheet
 import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
 import app.opentasks.feature.more.ReviewScreen
@@ -467,6 +469,7 @@ fun OpenTasksApp(
             }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
+        var showMyDayPlan by rememberSaveable { mutableStateOf(false) }
         var openInsightsOnMore by rememberSaveable { mutableStateOf(false) }
         var openBackupOnMore by rememberSaveable { mutableStateOf(false) }
         // The task the picker was opened for; a process death between the
@@ -600,6 +603,17 @@ fun OpenTasksApp(
         }
         val subtaskRollups: Map<TaskId, SubtaskRollup> = remember(snapshot.tasks) {
             SubtaskRules.subtaskRollups(snapshot.tasks)
+        }
+        val myDayMemberIds = remember(snapshot.myDay) {
+            snapshot.myDay.mapTo(hashSetOf()) { it.taskId }
+        }
+        val myDaySuggestionsList = remember(snapshot, projectionClock) {
+            myDaySuggestions(
+                snapshot.tasks,
+                snapshot.myDay.mapTo(hashSetOf()) { it.taskId },
+                today,
+                currentDeviceClock(clock, zoneProvider).zone,
+            )
         }
         val boardSort = selectedProject?.let { project ->
             viewArrangement.boardSortFor(project.id)
@@ -1177,7 +1191,7 @@ fun OpenTasksApp(
                                     snapshot = snapshot.home.copy(today = today),
                                     projectNames = projectNames,
                                     onOpenSearch = { showSearch = true },
-                                    onPlanToday = { navigate(TasksRoute) },
+                                    onPlanToday = { showMyDayPlan = true },
                                     onOpenTask = { taskId ->
                                         viewModel.selectTask(taskId)
                                         navigate(TasksRoute)
@@ -1202,6 +1216,10 @@ fun OpenTasksApp(
                                         viewModel.execute(
                                             DomainCommand.MoveMyDayEntry(taskId, afterTaskId),
                                         )
+                                    },
+                                    suggestions = myDaySuggestionsList,
+                                    onAddToMyDay = { taskId ->
+                                        viewModel.execute(DomainCommand.AddTaskToMyDay(taskId))
                                     },
                                 )
                             }
@@ -1431,6 +1449,16 @@ fun OpenTasksApp(
                                             )
                                         }
                                     },
+                                    myDayMemberIds = myDayMemberIds,
+                                    onToggleMyDay = { taskId ->
+                                        viewModel.execute(
+                                            if (taskId in myDayMemberIds) {
+                                                DomainCommand.RemoveTaskFromMyDay(taskId)
+                                            } else {
+                                                DomainCommand.AddTaskToMyDay(taskId)
+                                            },
+                                        )
+                                    },
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -1520,6 +1548,10 @@ fun OpenTasksApp(
                                     onDuplicateTask = { taskId ->
                                         viewModel.execute(DomainCommand.DuplicateTask(taskId))
                                     },
+                                    onAddTaskToMyDay = { taskId ->
+                                        viewModel.execute(DomainCommand.AddTaskToMyDay(taskId))
+                                    },
+                                    myDayMemberIds = myDayMemberIds,
                                     onSelectProject = viewModel::selectProject,
                                     onCloseDetail = viewModel::closeProject,
                                     onUpdateProject = { projectId, edit ->
@@ -1942,6 +1974,24 @@ fun OpenTasksApp(
                 existingProjectNames = snapshot.projects
                     .filter { it.archivedAt == null }
                     .mapTo(linkedSetOf()) { it.name },
+            )
+        }
+
+        if (showMyDayPlan) {
+            MyDayPlanSheet(
+                members = snapshot.home.myDayTasks,
+                suggestions = myDaySuggestionsList,
+                projectNames = projectNames,
+                onDismiss = { showMyDayPlan = false },
+                onAddToMyDay = { taskId ->
+                    viewModel.execute(DomainCommand.AddTaskToMyDay(taskId))
+                },
+                onRemoveFromMyDay = { taskId ->
+                    viewModel.execute(DomainCommand.RemoveTaskFromMyDay(taskId))
+                },
+                onMoveMyDayEntry = { taskId, afterTaskId ->
+                    viewModel.execute(DomainCommand.MoveMyDayEntry(taskId, afterTaskId))
+                },
             )
         }
 

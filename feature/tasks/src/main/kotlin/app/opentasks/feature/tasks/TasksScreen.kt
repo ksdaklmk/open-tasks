@@ -268,6 +268,8 @@ fun TasksScreen(
     onOpenAttachmentSetup: () -> Unit = {},
     onAddToCalendar: (() -> Unit)? = null,
     onStartFocus: ((FocusPresetOption) -> Unit)? = null,
+    myDayMemberIds: Set<TaskId> = emptySet(),
+    onToggleMyDay: (TaskId) -> Unit = {},
     selectedBulkIds: Set<TaskId> = emptySet(),
     onToggleBulkSelection: (TaskId) -> Unit = {},
     onClearBulkSelection: () -> Unit = {},
@@ -378,6 +380,8 @@ fun TasksScreen(
                 hingeExclusionBandDp = hingeExclusionBandDp,
                 onAddToCalendar = onAddToCalendar,
                 onStartFocus = onStartFocus,
+                isOnMyDay = selectedTask.id in myDayMemberIds,
+                onToggleMyDay = { onToggleMyDay(selectedTask.id) },
             )
         }
         return
@@ -506,6 +510,8 @@ fun TasksScreen(
                         hingeExclusionBandDp = hingeExclusionBandDp,
                         onAddToCalendar = onAddToCalendar,
                         onStartFocus = onStartFocus,
+                        isOnMyDay = selectedTask.id in myDayMemberIds,
+                        onToggleMyDay = { onToggleMyDay(selectedTask.id) },
                         modifier = Modifier
                             .weight(1f - listPaneFraction)
                             .testTag("detailPane"),
@@ -1065,6 +1071,8 @@ private fun TaskDetailPane(
     hingeExclusionBandDp: IntRange?,
     onAddToCalendar: (() -> Unit)? = null,
     onStartFocus: ((FocusPresetOption) -> Unit)? = null,
+    isOnMyDay: Boolean = false,
+    onToggleMyDay: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val sheetTopPaddingDp = hingeExclusionBandDp?.last ?: 0
@@ -2641,6 +2649,23 @@ private fun TaskDetailPane(
                     .testTag("duplicate-task"),
             ) {
                 Text(stringResource(R.string.task_duplicate))
+            }
+            TextButton(
+                onClick = onToggleMyDay,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("toggle-my-day"),
+            ) {
+                Text(
+                    stringResource(
+                        if (isOnMyDay) {
+                            R.string.task_remove_from_my_day
+                        } else {
+                            R.string.task_add_to_my_day
+                        },
+                    ),
+                )
             }
             TextButton(
                 onClick = onMoveToTrash,

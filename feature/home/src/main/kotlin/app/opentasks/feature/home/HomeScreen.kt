@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -83,6 +84,8 @@ fun HomeScreen(
     onToggleTimer: () -> Unit,
     onRemoveFromMyDay: (TaskId) -> Unit,
     onMoveMyDayEntry: (taskId: TaskId, afterTaskId: TaskId?) -> Unit,
+    suggestions: List<Task>,
+    onAddToMyDay: (TaskId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val myDayRowBounds = remember { mutableStateMapOf<TaskId, Rect>() }
@@ -147,13 +150,27 @@ fun HomeScreen(
                 )
             }
             if (snapshot.myDayTasks.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.my_day_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag("my-day-empty"),
-                    )
+                if (suggestions.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.my_day_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("my-day-empty"),
+                        )
+                    }
+                } else {
+                    items(
+                        suggestions,
+                        key = { "my-day-empty-suggestion-${it.id.value}" },
+                    ) { task ->
+                        MyDaySuggestionRow(
+                            task = task,
+                            projectName = projectNames[task.projectId]
+                                ?: stringResource(R.string.my_day_inbox),
+                            onAddToMyDay = onAddToMyDay,
+                        )
+                    }
                 }
             }
             items(snapshot.myDayTasks, key = { "my-day-${it.id.value}" }) { task ->
@@ -270,7 +287,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun MyDayRow(
+fun MyDayRow(
     task: Task,
     order: List<Task>,
     projectName: String,
@@ -358,6 +375,42 @@ private fun MyDayRow(
                         .testTag("my-day-remove-${task.id.value}"),
                 )
             }
+        }
+    }
+}
+
+/**
+ * A one-tap suggestion row: title, project, and a trailing 48 dp add
+ * button. Shared by [HomeScreen]'s empty-state fallback and
+ * [MyDayPlanSheet] so both surfaces render suggestions identically.
+ */
+@Composable
+fun MyDaySuggestionRow(
+    task: Task,
+    projectName: String,
+    onAddToMyDay: (TaskId) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val addDescription = stringResource(R.string.my_day_suggestion_add_description, task.title)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(task.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                projectName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
+            onClick = { onAddToMyDay(task.id) },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("my-day-suggestion-add-${task.id.value}"),
+        ) {
+            Icon(Icons.Rounded.Add, contentDescription = addDescription)
         }
     }
 }

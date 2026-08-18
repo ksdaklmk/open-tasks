@@ -83,6 +83,8 @@ class HomeScreenInstrumentedTest {
                     onOpenInsights = {}, onToggleTimer = {},
                     onRemoveFromMyDay = { removed = it },
                     onMoveMyDayEntry = { id, after -> moved = id to after },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
                 )
             }
         }
@@ -123,6 +125,8 @@ class HomeScreenInstrumentedTest {
                     onOpenInsights = {}, onToggleTimer = {},
                     onRemoveFromMyDay = {},
                     onMoveMyDayEntry = { id, after -> moved = id to after },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
                 )
             }
         }
@@ -163,9 +167,40 @@ class HomeScreenInstrumentedTest {
                     onOpenInsights = {}, onToggleTimer = {},
                     onRemoveFromMyDay = {},
                     onMoveMyDayEntry = { _, _ -> },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
                 )
             }
         }
         composeRule.onNodeWithTag("my-day-empty").assertIsDisplayed()
+    }
+
+    @Test
+    fun emptyStateOffersSuggestionsInline() {
+        val suggestion = OpenTasksFixtures.tasks.first { it.id.value == "task-proposal" }
+        var added: TaskId? = null
+        composeRule.setContent {
+            OpenTasksTheme {
+                HomeScreen(
+                    snapshot = OpenTasksFixtures.snapshot.home.copy(
+                        myDayTasks = emptyList(),
+                    ),
+                    projectNames = emptyMap(),
+                    onOpenSearch = {}, onPlanToday = {},
+                    onOpenTask = {}, onCompleteTask = {},
+                    onOpenProject = {},
+                    insightsSummary = OpenTasksFixtures.insightsSummary,
+                    onOpenInsights = {}, onToggleTimer = {},
+                    onRemoveFromMyDay = {},
+                    onMoveMyDayEntry = { _, _ -> },
+                    suggestions = listOf(suggestion),
+                    onAddToMyDay = { added = it },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("my-day-empty").assertDoesNotExist()
+        composeRule.onNodeWithTag("my-day-suggestion-add-${suggestion.id.value}")
+            .performClick()
+        assertEquals(suggestion.id, added)
     }
 }

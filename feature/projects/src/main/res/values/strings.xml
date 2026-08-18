@@ -37,6 +37,7 @@
     <string name="board_move_to_stage">Move %1$s to %2$s</string>
     <string name="board_duplicate_task">Duplicate</string>
     <string name="board_duplicate_task_description">Duplicate %1$s</string>
+    <string name="board_add_to_my_day">Add to My Day</string>
     <string name="board_due_date">Due %1$s</string>
     <string name="board_priority_description">Priority: %1$s</string>
     <string name="board_priority_none">None</string>

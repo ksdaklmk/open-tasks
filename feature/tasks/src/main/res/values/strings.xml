@@ -13,6 +13,8 @@
     <string name="task_editing_state_description">Editing %1$s</string>
     <string name="task_add_to_calendar">Add to calendar</string>
     <string name="task_duplicate">Duplicate task</string>
+    <string name="task_add_to_my_day">Add to My Day</string>
+    <string name="task_remove_from_my_day">Remove from My Day</string>
 
     <string name="task_schedule_start">Start</string>
     <string name="task_schedule_due">Due</string>

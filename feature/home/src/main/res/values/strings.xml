@@ -19,4 +19,7 @@
     <string name="my_day_move_up">Move up</string>
     <string name="my_day_move_down">Move down</string>
     <string name="my_day_remove">Remove from My Day</string>
+    <string name="my_day_plan_title">Plan My Day</string>
+    <string name="my_day_suggestions">Suggested for today</string>
+    <string name="my_day_suggestion_add_description">Add %1$s to My Day</string>
 </resources>
