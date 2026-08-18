@@ -78,5 +78,26 @@ class StaleRulesTest {
             staleTaskIds(listOf(task("old", 15)), emptyList(), listOf(disabledGlobal), now)
                 .isEmpty(),
         )
+        // Duplicate rules at the same scope resolve by lowest rule id: a
+        // 10-day-old task is stale under the 5-day rule but fresh under the
+        // 20-day one, so the outcome pins down which rule actually won.
+        val globalLow = rule("a-global", days = 5)
+        val globalHigh = rule("b-global", days = 20)
+        assertEquals(
+            setOf(TaskId("global-tie")),
+            staleTaskIds(
+                listOf(task("global-tie", 10)),
+                emptyList(), listOf(globalHigh, globalLow), now,
+            ),
+        )
+        val scopedLow = rule("a-scoped", days = 5, projectId = base.projectId)
+        val scopedHigh = rule("b-scoped", days = 20, projectId = base.projectId)
+        assertEquals(
+            setOf(TaskId("scoped-tie")),
+            staleTaskIds(
+                listOf(task("scoped-tie", 10)),
+                emptyList(), listOf(scopedHigh, scopedLow), now,
+            ),
+        )
     }
 }
