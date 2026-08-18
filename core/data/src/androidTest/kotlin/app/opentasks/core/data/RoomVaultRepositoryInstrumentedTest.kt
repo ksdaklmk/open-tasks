@@ -76,6 +76,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
@@ -4085,6 +4086,156 @@ class RoomVaultRepositoryInstrumentedTest {
                 RejectionReason.AUTOMATION_RULE_LIMIT_REACHED,
                 (overflowResult as CommandResult.Rejected).reason,
             )
+        }
+    }
+
+    @Test
+    fun automationRulesFireInsideTheTriggerGenerationAndComposeOneUndo() = runBlocking {
+        val now = Instant.parse("2026-07-26T10:00:00Z")
+        val zone = ZoneId.of("Asia/Bangkok")
+        openRepository(now = { now }, zoneId = { zone })
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val snapshot = repository!!.currentWorkspace()
+            val task = snapshot.tasks.first {
+                it.deletedAt == null && !it.isCompleted && !it.isBlocked
+            }
+            val destination = snapshot.workflowStatuses.first {
+                it.projectId == task.projectId && it.id != task.statusId &&
+                    it.archivedAt == null && it.semanticStatus != SemanticStatus.COMPLETED
+            }
+            val tag = snapshot.tags.first { it.id !in task.tagIds }
+            repository!!.execute(
+                DomainCommand.CreateAutomationRule(
+                    AutomationRule(
+                        id = AutomationRuleId("a-tag"),
+                        workspaceId = OpenTasksFixtures.workspaceId,
+                        type = AutomationRuleType.ON_ENTER_ADD_TAG,
+                        enabled = true,
+                        statusId = destination.id,
+                        tagId = tag.id,
+                    ),
+                ),
+            )
+            repository!!.execute(
+                DomainCommand.CreateAutomationRule(
+                    AutomationRule(
+                        id = AutomationRuleId("b-due"),
+                        workspaceId = OpenTasksFixtures.workspaceId,
+                        type = AutomationRuleType.ON_ENTER_SET_DUE,
+                        enabled = true,
+                        statusId = destination.id,
+                        dueInDays = 2,
+                    ),
+                ),
+            )
+            val generationBefore =
+                database!!.backupStateDao().require("vault-primary").currentGeneration
+
+            val moved = repository!!.execute(
+                DomainCommand.ChangeTaskStatus(task.id, destination.id),
+            )
+            assertTrue(moved is CommandResult.Success)
+
+            val after = repository!!.currentWorkspace().tasks.first { it.id == task.id }
+            assertTrue(tag.id in after.tagIds)
+            assertEquals(
+                ZonedDateTime.of(2026, 7, 28, 17, 0, 0, 0, zone).toInstant(),
+                checkNotNull(after.due).instant,
+            )
+            // Trigger and both rule outputs share ONE journal generation.
+            assertEquals(
+                generationBefore + 1,
+                database!!.backupStateDao().require("vault-primary").currentGeneration,
+            )
+
+            // One undo reverts the move and both rule outputs.
+            val undo = checkNotNull((moved as CommandResult.Success).undo)
+            assertTrue(undo is DomainCommand.UndoBatch)
+            assertTrue(repository!!.execute(undo) is CommandResult.Success)
+            val reverted = repository!!.currentWorkspace().tasks.first { it.id == task.id }
+            assertEquals(task.statusId, reverted.statusId)
+            assertFalse(tag.id in reverted.tagIds)
+            assertEquals(task.due, reverted.due)
+        }
+    }
+
+    @Test
+    fun automationMyDayOutputUndoReplaysAndExclusionsNeverFire() = runBlocking {
+        val now = Instant.parse("2026-07-26T10:00:00Z")
+        openRepository(now = { now })
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            val snapshot = repository!!.currentWorkspace()
+            val task = snapshot.tasks.first {
+                it.deletedAt == null && !it.isCompleted && !it.isBlocked
+            }
+            val destination = snapshot.workflowStatuses.first {
+                it.projectId == task.projectId && it.id != task.statusId &&
+                    it.archivedAt == null && it.semanticStatus != SemanticStatus.COMPLETED
+            }
+            repository!!.execute(
+                DomainCommand.CreateAutomationRule(
+                    AutomationRule(
+                        id = AutomationRuleId("a-my-day"),
+                        workspaceId = OpenTasksFixtures.workspaceId,
+                        type = AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY,
+                        enabled = true,
+                        statusId = destination.id,
+                    ),
+                ),
+            )
+
+            val moved = repository!!.execute(
+                DomainCommand.ChangeTaskStatus(task.id, destination.id),
+            )
+            assertTrue(moved is CommandResult.Success)
+            assertEquals(
+                listOf(task.id),
+                repository!!.currentWorkspace().myDay.map(MyDayEntry::taskId),
+            )
+
+            // The RemoveTaskFromMyDay inverse is a newly stored undo shape and
+            // must preflight rather than fail closed.
+            val undo = checkNotNull((moved as CommandResult.Success).undo)
+            assertTrue(repository!!.execute(undo) is CommandResult.Success)
+            assertTrue(repository!!.currentWorkspace().myDay.isEmpty())
+            assertEquals(
+                task.statusId,
+                repository!!.currentWorkspace().tasks.first { it.id == task.id }.statusId,
+            )
+
+            // A project move remaps onto the destination's matching semantic
+            // status without that counting as a status entry.
+            val remapTarget = repository!!.currentWorkspace().tasks.first {
+                it.deletedAt == null && !it.isCompleted &&
+                    it.semanticStatus == SemanticStatus.PLANNED
+            }
+            val otherProject = snapshot.projects.first { it.id != remapTarget.projectId }
+            val remapStatus = snapshot.workflowStatuses.first {
+                it.projectId == otherProject.id &&
+                    it.semanticStatus == SemanticStatus.PLANNED &&
+                    it.archivedAt == null
+            }
+            repository!!.execute(
+                DomainCommand.CreateAutomationRule(
+                    AutomationRule(
+                        id = AutomationRuleId("b-remap"),
+                        workspaceId = OpenTasksFixtures.workspaceId,
+                        type = AutomationRuleType.ON_ENTER_ADD_TO_MY_DAY,
+                        enabled = true,
+                        statusId = remapStatus.id,
+                    ),
+                ),
+            )
+            val remapped = repository!!.execute(
+                DomainCommand.MoveTasksToProject(listOf(remapTarget.id), otherProject.id),
+            )
+            assertTrue(remapped is CommandResult.Success)
+            assertEquals(
+                remapStatus.id,
+                repository!!.currentWorkspace().tasks
+                    .first { it.id == remapTarget.id }.statusId,
+            )
+            assertTrue(repository!!.currentWorkspace().myDay.isEmpty())
         }
     }
 

@@ -40,6 +40,7 @@ import app.opentasks.feature.more.RecoveryShellScreen
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockScreen
 import app.opentasks.lock.AppLockSettings
+import app.opentasks.myday.MyDaySweeper
 import app.opentasks.reminders.ReminderIntents
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -61,6 +62,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var dailyDigestCoordinator: DailyDigestCoordinator
+
+    @Inject
+    lateinit var myDaySweeper: MyDaySweeper
 
     private var quickAddSignal by mutableIntStateOf(0)
     private var quickAddPrefillText by mutableStateOf<String?>(null)
@@ -327,14 +331,15 @@ class MainActivity : ComponentActivity() {
         // unnecessary: every foregrounding of the app passes through here.
         appLockController.onAppForegrounded()
         lifecycleScope.launch {
-            // Two independent `runCatching`s, not one: a vault that cannot be
-            // opened must not leave the digest alarm unarmed, and a scheduler
-            // failure must not suppress vault initialisation. Re-arming here
-            // settles an alarm the platform dropped -- a force-stop, a
-            // reboot, or a device clock change -- without any receiver of its
-            // own.
+            // Three independent `runCatching`s, not one: a vault that cannot
+            // be opened must not leave the digest alarm unarmed, and neither a
+            // scheduler failure nor the My Day sweep must suppress vault
+            // initialisation. Re-arming here settles an alarm the platform
+            // dropped -- a force-stop, a reboot, or a device clock change --
+            // without any receiver of its own.
             runCatching { vaultRuntimeManager.initialize() }
             runCatching { dailyDigestCoordinator.reconcile() }
+            runCatching { myDaySweeper.sweep() }
         }
     }
 
