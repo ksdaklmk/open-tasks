@@ -126,6 +126,7 @@ import app.opentasks.core.domain.computeScheduleMonthProjection
 import app.opentasks.core.domain.indentedTaskIds
 import app.opentasks.core.domain.myDaySuggestions
 import app.opentasks.core.domain.planTaskScheduleMove
+import app.opentasks.core.domain.staleTaskIds
 import app.opentasks.core.domain.taskComparator
 import app.opentasks.core.model.Attachment
 import app.opentasks.core.model.AttachmentId
@@ -606,6 +607,19 @@ fun OpenTasksApp(
         }
         val myDayMemberIds = remember(snapshot.myDay) {
             snapshot.myDay.mapTo(hashSetOf()) { it.taskId }
+        }
+        val staleIds = remember(
+            snapshot.tasks,
+            snapshot.activityEntries,
+            snapshot.automationRules,
+            projectionClock,
+        ) {
+            staleTaskIds(
+                tasks = snapshot.tasks,
+                activityEntries = snapshot.activityEntries,
+                rules = snapshot.automationRules,
+                now = projectionClock.instant(),
+            )
         }
         val myDaySuggestionsList = remember(snapshot, projectionClock) {
             myDaySuggestions(
@@ -1459,6 +1473,7 @@ fun OpenTasksApp(
                                             },
                                         )
                                     },
+                                    staleTaskIds = staleIds,
                                 )
                             }
                             entry<ProjectsRoute> {
@@ -1661,6 +1676,7 @@ fun OpenTasksApp(
                                     onDeleteNote = { noteId ->
                                         viewModel.execute(DomainCommand.DeleteNote(noteId))
                                     },
+                                    staleTaskIds = staleIds,
                                 )
                             }
                             entry<ScheduleRoute> {

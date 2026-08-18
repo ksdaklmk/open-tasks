@@ -93,6 +93,7 @@ fun TaskRow(
     onComplete: () -> Unit,
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
+    stale: Boolean = false,
 ) {
     val completionLabel = if (task.isCompleted) "Reopen ${task.title}" else "Complete ${task.title}"
     val selectLabel = stringResource(R.string.task_select_action, task.title)
@@ -176,6 +177,15 @@ fun TaskRow(
                             contentDescription = "Blocked",
                             modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (stale) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            Icons.Rounded.Schedule,
+                            contentDescription = stringResource(R.string.task_stale_description),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.secondary,
                         )
                     }
                 }

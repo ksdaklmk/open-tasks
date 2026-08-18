@@ -94,6 +94,7 @@ import androidx.compose.ui.unit.dp
 import app.opentasks.core.designsystem.EmptyState
 import app.opentasks.core.designsystem.NotesTimelineSection
 import app.opentasks.core.designsystem.ProjectProgressRow
+import app.opentasks.core.designsystem.R as DesignSystemR
 import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.designsystem.TimelineIconKind
 import app.opentasks.core.designsystem.TimelineItem
@@ -162,6 +163,7 @@ fun ProjectsScreen(
     workbenchGroupBy: TaskGroupKey? = null,
     selectedBoardColumns: List<BoardColumn> = emptyList(),
     boardSort: TaskSortKey = TaskSortKey.PRIORITY,
+    staleTaskIds: Set<TaskId> = emptySet(),
     onPresentationChange: (ProjectPresentation) -> Unit = {},
     onTimelinePrevious: () -> Unit = {},
     onTimelineToday: () -> Unit = {},
@@ -224,6 +226,7 @@ fun ProjectsScreen(
             workbenchGroupBy = workbenchGroupBy,
             selectedBoardColumns = selectedBoardColumns,
             boardSort = boardSort,
+            staleTaskIds = staleTaskIds,
             onPresentationChange = onPresentationChange,
             onTimelinePrevious = onTimelinePrevious,
             onTimelineToday = onTimelineToday,
@@ -457,6 +460,7 @@ private fun ProjectWorkbench(
     workbenchGroupBy: TaskGroupKey?,
     selectedBoardColumns: List<BoardColumn>,
     boardSort: TaskSortKey,
+    staleTaskIds: Set<TaskId> = emptySet(),
     onPresentationChange: (ProjectPresentation) -> Unit,
     onTimelinePrevious: () -> Unit,
     onTimelineToday: () -> Unit,
@@ -789,6 +793,7 @@ private fun ProjectWorkbench(
                     onAddTaskToMyDay = onAddTaskToMyDay,
                     myDayMemberIds = myDayMemberIds,
                     subtaskRollups = subtaskRollups,
+                    staleTaskIds = staleTaskIds,
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
@@ -894,6 +899,7 @@ private fun ProjectWorkbench(
                             } else {
                                 Modifier
                             },
+                            stale = task.id in staleTaskIds,
                         )
                     }
                 }
@@ -2037,6 +2043,7 @@ private fun ProjectTaskRow(
     task: Task,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    stale: Boolean = false,
 ) {
     Surface(
         modifier = modifier
@@ -2078,11 +2085,26 @@ private fun ProjectTaskRow(
                     .padding(horizontal = 12.dp),
             ) {
                 Text(task.title, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    task.semanticStatus.readableName(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        task.semanticStatus.readableName(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (stale) {
+                        Icon(
+                            Icons.Rounded.Schedule,
+                            contentDescription = stringResource(
+                                DesignSystemR.string.task_stale_description,
+                            ),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
             }
             Icon(
                 Icons.AutoMirrored.Rounded.KeyboardArrowRight,

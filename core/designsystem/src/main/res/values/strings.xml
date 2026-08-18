@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="task_select_action">Select %1$s</string>
+    <string name="task_stale_description">Untouched for a while</string>
 
     <string name="timeline_kind_note">Note</string>
     <string name="timeline_kind_event">Activity</string>

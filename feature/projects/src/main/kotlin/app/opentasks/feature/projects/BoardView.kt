@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import app.opentasks.core.designsystem.R as DesignSystemR
 import app.opentasks.core.designsystem.RootDragPreview
 import app.opentasks.core.designsystem.RootDragState
 import app.opentasks.core.designsystem.dragTargetAt
@@ -96,6 +98,7 @@ fun BoardView(
     onAddTaskToMyDay: (TaskId) -> Unit = {},
     myDayMemberIds: Set<TaskId> = emptySet(),
     subtaskRollups: Map<TaskId, SubtaskRollup> = emptyMap(),
+    staleTaskIds: Set<TaskId> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -239,6 +242,7 @@ fun BoardView(
                                         onDuplicateTask = onDuplicateTask,
                                         onAddTaskToMyDay = onAddTaskToMyDay,
                                         myDayMemberIds = myDayMemberIds,
+                                        stale = task.id in staleTaskIds,
                                     )
                                 }
                             }
@@ -264,6 +268,7 @@ fun BoardView(
                     BoardTaskContent(
                         task = drag.payload.task,
                         subtaskRollup = subtaskRollups[drag.payload.taskId],
+                        stale = drag.payload.taskId in staleTaskIds,
                         trailing = {
                             Box(
                                 modifier = Modifier.size(48.dp),
@@ -294,6 +299,7 @@ private fun BoardTaskCard(
     onDuplicateTask: (TaskId) -> Unit,
     onAddTaskToMyDay: (TaskId) -> Unit = {},
     myDayMemberIds: Set<TaskId> = emptySet(),
+    stale: Boolean = false,
 ) {
     var menuExpanded by remember(task.id) { mutableStateOf(false) }
     val moveLabels = targets.map { status ->
@@ -332,6 +338,7 @@ private fun BoardTaskCard(
         BoardTaskContent(
             task = task,
             subtaskRollup = subtaskRollup,
+            stale = stale,
             trailing = {
                 Column {
                     IconButton(
@@ -400,6 +407,7 @@ private fun BoardTaskCard(
 private fun BoardTaskContent(
     task: Task,
     subtaskRollup: SubtaskRollup? = null,
+    stale: Boolean = false,
     trailing: @Composable () -> Unit,
 ) {
     val locale = LocalLocale.current.platformLocale
@@ -454,6 +462,16 @@ private fun BoardTaskContent(
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (stale) {
+                    Icon(
+                        Icons.Rounded.Schedule,
+                        contentDescription = stringResource(
+                            DesignSystemR.string.task_stale_description,
+                        ),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
                     )
                 }
             }

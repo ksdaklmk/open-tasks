@@ -278,6 +278,7 @@ fun TasksScreen(
     onBulkMoveToProject: (ProjectId?) -> Unit = {},
     onBulkSetTag: (TagId, Boolean) -> Unit = { _, _ -> },
     onBulkDelete: () -> Unit = {},
+    staleTaskIds: Set<TaskId> = emptySet(),
 ) {
     var filter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     val visibleTaskGroups = taskGroups.mapNotNull { group ->
@@ -413,6 +414,7 @@ fun TasksScreen(
                 onBulkMoveToProject = onBulkMoveToProject,
                 onBulkSetTag = onBulkSetTag,
                 onBulkDelete = onBulkDelete,
+                staleTaskIds = staleTaskIds,
                 modifier = if (showDetailPane) {
                     Modifier
                         .weight(listPaneFraction)
@@ -548,6 +550,7 @@ private fun TaskListPane(
     onBulkMoveToProject: (ProjectId?) -> Unit,
     onBulkSetTag: (TagId, Boolean) -> Unit,
     onBulkDelete: () -> Unit,
+    staleTaskIds: Set<TaskId> = emptySet(),
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -677,6 +680,7 @@ private fun TaskListPane(
                                     onComplete = { onCompleteTask(task) },
                                     onLongPress = { onToggleBulkSelection(task.id) },
                                     modifier = indentModifier.weight(1f),
+                                    stale = task.id in staleTaskIds,
                                 )
                             }
                         } else {
@@ -690,6 +694,7 @@ private fun TaskListPane(
                                 modifier = indentModifier.semantics {
                                     selected = selectedTaskId == task.id
                                 },
+                                stale = task.id in staleTaskIds,
                             )
                         }
                     }
