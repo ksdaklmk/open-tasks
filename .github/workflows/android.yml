@@ -90,6 +90,7 @@ jobs:
             :feature:projects:connectedDebugAndroidTest
             :feature:schedule:connectedDebugAndroidTest
             :feature:more:connectedDebugAndroidTest
+            :feature:home:connectedDebugAndroidTest
             --stacktrace
             --continue
       - name: Upload instrumented-test reports
