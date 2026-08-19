@@ -97,12 +97,22 @@ beyond the disposable overlay); the application package was uninstalled
 from both disposable overlays; both emulators were killed cleanly. No
 ADB target or emulator process remains. The protected
 `Pixel_10_Pro_Fold` AVD was never booted. The separate 1.2.0 worktree
-and its keystore copy will be removed after tagging.
+and its keystore copy were removed after tagging (verified gone;
+`main` was never checked out at `v1.2.0`).
 
-## Tag
+## Tag and remote qualification
 
-- Tag `v1.3.0`: created by annotated tag on the commit carrying this
-  record, after every smoke row and extra passed. The push decision is
-  the owner's per `RELEASING.md`.
+- Tag `v1.3.0`: created as an annotated tag on `a6a0e0c` (the commit
+  carrying this record), after every smoke row and extra passed.
+- Pushed to origin on 19 August 2026: `main` (`3abe9cc..a6c8346`, 44
+  commits) and tag `v1.3.0` together, per the owner's decision.
+- Remote run on the release head (`32262267179`): `verify` green
+  (9m43s), `release` green (6m50s), **compact API 36 green**
+  (32m34s — the five posture-sensitive tests that stayed red through
+  1.2.0 now pass; the pre-17 repair is confirmed on hosted runners).
+  The expanded API 37.0 observe-only lane stayed red with its known
+  1.2.0 profile-mismatch class (device uninstall failure cascading
+  into `Unable to resolve activity` across the notes/board/timeline
+  suites); it is not a qualification gate and showed no new signature.
 - Installation on the owner's physical device is owner-controlled and
   outside this qualification.

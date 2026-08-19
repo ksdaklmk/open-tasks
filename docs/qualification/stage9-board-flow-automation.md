@@ -461,10 +461,12 @@ is the one that discharges Task 14 Important 1.
 
 ## Carry-forward
 
-Add `:feature:home:connectedDebugAndroidTest` to the CI connected
-matrix (`.github/workflows/android.yml`). This module has androidTest
-coverage for the first time as of this stage and no existing CI lane
-runs it; wiring CI is out of this task's scope.
+~~Add `:feature:home:connectedDebugAndroidTest` to the CI connected
+matrix (`.github/workflows/android.yml`).~~ **Discharged** as the first
+post-release commit `0b366f0` (19 August 2026): the module joined both
+instrumented lanes, and `scripts/verify-actions-workflow.sh` now
+enforces the full seven-module connected list so no future module with
+androidTest sources can be silently dropped from CI.
 
 ## Step 5 — manual acceptance matrix
 
