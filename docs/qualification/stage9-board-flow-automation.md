@@ -468,12 +468,24 @@ runs it; wiring CI is out of this task's scope.
 
 ## Step 5 — manual acceptance matrix
 
-**Placeholder — owner session.** Not run. Blocked behind Step 4
-(whole-stage review); the `:core:data` fix round above is complete.
+**Accepted — owner session, 19 August 2026.** All eight rows of the
+brief's matrix passed on the owner device: v9→v10 in-place upgrade,
+WIP confirm paths, subtask attach/nesting/cascade/undo semantics,
+My Day curation and rollover sweep (with the background/foreground-once
+instruction from Ruling R), all five automation rule types with the
+on-enter paths from board drag and reminder-notification completion,
+single-undo trigger-plus-effects revert, broken-reference rule
+visibility, stale badges and scope override, digest and Today widget
+regression checks, and the three recovery directions (1.3.0↔1.3.0,
+1.2.0→1.3.0 dual-arity, 1.3.0→1.2.0 legible refusal at the row-marker
+gate). Ruling R's inert ON_ENTER_SET_DUE-on-completed-column row also
+passed (silent no-op, as ruled).
 
 ## Step 6 — release record
 
-**Placeholder — owner session.** Not run. No tag, no signed sideload
-distribution beyond the Step 1 `:app:assembleRelease` gate evidence
-recorded above. `RELEASING.md`'s release steps were not touched by
-this task.
+Complete — 19 August 2026. Signed sideload per `RELEASING.md`:
+7 of 7 smoke rows (including the widget row executed by hand on the
+compact AVD) and 3 of 3 Stage 9 extras on the signed 1.3.0 (4) APK,
+`verify-release-apk` clean, v9→v10 in-place upgrade proven over a
+1.2.0 baseline built in a separate worktree. Full record:
+`docs/qualification/release-1.3.0-sideload.md`.
