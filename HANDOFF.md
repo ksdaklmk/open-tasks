@@ -1,6 +1,71 @@
 # Open Tasks Handoff
 
-## Current resume point — Stage 9 qualification gates green, final review in flight, 19 August 2026
+## Current resume point — Stage 9 shipped as 1.3.0, 19 August 2026
+
+This section is authoritative. Older checkpoints below are historical and are
+superseded wherever they conflict with this one.
+
+### Where Stage 9 stands
+
+**COMPLETE.** Tasks 1–17, the pre-17 repair, the final whole-branch
+review (0 Critical, 0 Important, 8 Minor; 0 MUST-FIX in triage), the
+owner Step 5 manual acceptance matrix, and the Step 6 release are all
+done. The ledger
+`.superpowers/sdd/2026-08-17-stage-9-board-flow-automation-plan/progress.md`
+remains the authoritative execution record.
+
+- HEAD `a6a0e0c` (qualification record), tagged `v1.3.0` (annotated
+  tag, versionName 1.3.0 / versionCode 4).
+- Qualification evidence:
+  `docs/qualification/stage9-board-flow-automation.md` (machine gates,
+  Step 5 acceptance) and
+  `docs/qualification/release-1.3.0-sideload.md` (signed smoke 7/7 —
+  including the widget row executed by hand, closing the 1.2.0 gap —
+  plus 3/3 Stage 9 extras and the v9→v10 in-place upgrade over a 1.2.0
+  baseline built in a separate worktree).
+- Secure cleanup complete: both disposable overlays killed with the
+  package uninstalled, credential cleared, exported archive deleted,
+  worktree and its keystore copy removed, no ADB target or emulator
+  process remains. The protected `Pixel_10_Pro_Fold` AVD was never
+  booted this session.
+- **The push decision is the owner's per RELEASING.md** (`git push
+  origin main v1.3.0`). Nothing else gates it.
+
+### Post-release follow-up backlog (from the final review's triage)
+
+None block 1.3.0. In priority order:
+
+1. Add `:feature:home:connectedDebugAndroidTest` to the CI connected
+   matrix (`.github/workflows/android.yml`), updating
+   `scripts/verify-actions-workflow.sh` in the same commit — the FIRST
+   post-release commit; until it lands, Home's instrumented tests run
+   only in local qualification.
+2. AUTOMATION_RULE capture-vs-read asymmetry: an undecodable persisted
+   rule `type` is invisible to the editor/engine but hard-fails ALL
+   snapshot capture. Unreachable from 1.3.0 writes, but a standing
+   constraint on future rule-type additions; decide capture-side
+   handling before any v11 rule work.
+3. Backup-boundary hardening: capture-side dangling guard for
+   `automation_rules` (asymmetric with `danglingMyDayEntryCount`);
+   widen `RecoveryImportDao.danglingReferenceCount()` for the two new
+   tables.
+4. Product polish: restore-detach not undoable / detaching move
+   one-way (Task 9); inert-rule visibility in the automations editor;
+   remove render-dead `HomeSnapshot.focusTasks`;
+   `parentViolation` defence-in-depth on the candidate's `deletedAt`.
+5. Small code/test hygiene: Task 16's 20 dp spacers + divider seam;
+   duplicate testTags (MyDayRow/MyDaySuggestionRow) and the
+   `insightsSummary` file-local fixture; engine-test pinholes
+   (`dueInDays` 0/365 bounds, null-config skips); convert the one
+   remaining naked-`currentWorkspace()` sibling instrumented test to
+   the await pattern; a same-position My Day move journals a
+   redundant rank rewrite.
+
+The four protected working-tree entries (modified Stage 3 plan doc,
+deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)
+remain uncommitted and must stay that way.
+
+## Superseded checkpoint — Stage 9 qualification gates green, final review in flight, 19 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
