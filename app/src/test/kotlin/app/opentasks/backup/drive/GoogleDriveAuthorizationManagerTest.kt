@@ -14,6 +14,7 @@ import app.opentasks.core.data.backup.drive.DriveTransportException
 import app.opentasks.core.data.backup.drive.DriveTransportFailureCategory
 import java.io.File
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -328,6 +329,47 @@ class GoogleDriveAuthorizationManagerTest {
     }
 
     @Test
+    fun authorizeFailureReportsRejectedWithoutThrowing() = runBlocking {
+        val manager = manager(
+            permissionId = "account-a",
+            authorizeFailure = IllegalStateException("identity failed"),
+        )
+
+        val result = manager.authorize(
+            DriveAuthorizationMode.EXPLICIT_ACCOUNT,
+            expectedAccountDigest = null,
+        )
+
+        assertEquals(
+            DriveAuthorizationResult.Unavailable(
+                DriveAuthorizationUnavailableReason.REJECTED,
+            ),
+            result,
+        )
+        assertEquals(0, manager.transportCount)
+    }
+
+    @Test
+    fun authorizeCancellationStillPropagates() {
+        val cancellation = CancellationException("identity cancelled")
+        val manager = manager(
+            permissionId = "account-a",
+            authorizeFailure = cancellation,
+        )
+
+        val thrown = assertThrows(CancellationException::class.java) {
+            runBlocking {
+                manager.authorize(
+                    DriveAuthorizationMode.EXPLICIT_ACCOUNT,
+                    expectedAccountDigest = null,
+                )
+            }
+        }
+
+        assertSame(cancellation, thrown)
+    }
+
+    @Test
     fun revokeAccessUsesTheSessionAccountAndExactlyTheGrantedScopeThenCloses() = runBlocking {
         val account = Account("revoke-account", "com.google")
         val manager = manager(permissionId = "account-a", account = account)
@@ -420,6 +462,7 @@ class GoogleDriveAuthorizationManagerTest {
         account: Account? = Account("account", "type"),
         hasResolution: Boolean = false,
         permissionIdFailure: DriveTransportException? = null,
+        authorizeFailure: Exception? = null,
         resultFromIntentFailure: Exception? = null,
         revokeFailure: Exception? = null,
     ): RecordingAuthorizationManager {
@@ -429,7 +472,12 @@ class GoogleDriveAuthorizationManagerTest {
             hasResolution = hasResolution,
             pendingIntent = null,
         )
-        val identity = FakeDriveIdentityBoundary(outcome, resultFromIntentFailure, revokeFailure)
+        val identity = FakeDriveIdentityBoundary(
+            outcome = outcome,
+            authorizeFailure = authorizeFailure,
+            resultFromIntentFailure = resultFromIntentFailure,
+            revokeFailure = revokeFailure,
+        )
         val transports = mutableListOf<TrackingCreateOnlyDriveTransport>()
         val delegate = DefaultGoogleDriveAuthorizationManager(
             identity = identity,
@@ -453,6 +501,7 @@ class GoogleDriveAuthorizationManagerTest {
 
     private class FakeDriveIdentityBoundary(
         private val outcome: DriveAuthorizationOutcome,
+        private val authorizeFailure: Exception? = null,
         private val resultFromIntentFailure: Exception? = null,
         private val revokeFailure: Exception? = null,
     ) : DriveIdentityBoundary {
@@ -464,6 +513,7 @@ class GoogleDriveAuthorizationManagerTest {
 
         override suspend fun authorize(spec: DriveAuthorizationRequestSpec): DriveAuthorizationOutcome {
             authorizeSpecs += spec
+            authorizeFailure?.let { throw it }
             return outcome
         }
 

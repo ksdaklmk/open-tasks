@@ -18,6 +18,7 @@ import com.google.android.gms.tasks.Task
 import java.security.MessageDigest
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** Whether authorization may show account-selection UI or must stay silent. */
@@ -226,12 +227,18 @@ class DefaultGoogleDriveAuthorizationManager internal constructor(
         mode: DriveAuthorizationMode,
         expectedAccountDigest: ByteArray?,
     ): DriveAuthorizationResult {
-        val outcome = identity.authorize(
-            DriveAuthorizationRequestSpec(
-                scopes = listOf(DRIVE_APPDATA_SCOPE),
-                promptSelectAccount = mode == DriveAuthorizationMode.EXPLICIT_ACCOUNT,
-            ),
-        )
+        val outcome = try {
+            identity.authorize(
+                DriveAuthorizationRequestSpec(
+                    scopes = listOf(DRIVE_APPDATA_SCOPE),
+                    promptSelectAccount = mode == DriveAuthorizationMode.EXPLICIT_ACCOUNT,
+                ),
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return unavailable(DriveAuthorizationUnavailableReason.REJECTED)
+        }
         return resolveOutcome(mode, outcome, expectedAccountDigest)
     }
 
