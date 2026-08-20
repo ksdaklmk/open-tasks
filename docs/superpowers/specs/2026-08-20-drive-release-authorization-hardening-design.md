@@ -1,8 +1,8 @@
 # Drive Release Authorization Hardening
 
 Date: 2026-08-20. Execution status updated: 2026-08-21. Status: user-approved
-design and implementation plan; Preflight and Tasks 1–4 are complete and
-review-clean; execution is paused before Task 5.
+design and implementation plan; Preflight and Tasks 1–5 are complete and
+review-clean; execution is paused before Task 6's owner/security gate.
 Authority: this spec covers the physical-release Google Drive connection
 failure reported against signed sideload release 1.3.0. It is independent of
 the completed Stage 9 plan. The compact-lane naked-read repair in `HANDOFF.md`
@@ -14,8 +14,10 @@ Implementation plan:
 development. Runtime commits `67820e7` and `875c80e` implement the two bounded
 failure paths, and `da02ddc` adds the permanent signed-release gate. The
 combined focused suite passed and the Task 4 review reported no findings. No
-release candidate or owner-controlled qualification step has started; resume
-at Task 5 only on the owner's explicit instruction.
+owner-controlled qualification step has started. Task 5 produced the exact
+uncommitted 1.3.1 / versionCode 5 signed candidate: the final host gate,
+separate release assembly, APK verifier, and independent review all passed.
+Resume at Task 6 only on the owner's explicit instruction.
 
 ## Problem
 

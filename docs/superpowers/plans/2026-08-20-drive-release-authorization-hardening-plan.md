@@ -26,15 +26,17 @@ component, database change, or backup-format change.
 **Spec:**
 `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
 
-**Execution Status (2026-08-21):** Preflight and Tasks 1–4 are complete and
-review-clean; execution is paused by the owner before Task 5. Runtime commits
+**Execution Status (2026-08-21):** Preflight and Tasks 1–5 are complete and
+review-clean; execution is paused by the owner before Task 6. Runtime commits
 `67820e7` and `875c80e` bound initial identity failures and consume incomplete
 launcher results. Commit `da02ddc` makes the signed owner-present Drive check a
 permanent pre-tag gate. The combined focused suite passed, and the Task 4
 review of `816e134..da02ddc` returned 0 Critical, 0 Important, and 0 Minor
-findings. No version bump, release candidate, Cloud mutation, device
+findings. Task 5's final host gate, separate signed release assembly, APK
+verifier, and independent review passed for the exact uncommitted 1.3.1 /
+versionCode 5 candidate. No certificate inspection, Cloud mutation, device
 qualification, qualification record, tag, or push has started. Resume at Task
-5 only on the owner's explicit instruction.
+6 only on the owner's explicit instruction.
 
 ## Global Constraints
 
@@ -640,7 +642,7 @@ that passes the final host and APK gates.
 The version bump intentionally remains uncommitted through Tasks 6–8. The
 release process commits it together with observed qualification evidence.
 
-- [ ] **Step 1: Set the patch release identity**
+- [x] **Step 1: Set the patch release identity**
 
 Change only these two values:
 
@@ -649,7 +651,7 @@ versionCode = 5
 versionName = "1.3.1"
 ```
 
-- [ ] **Step 2: Verify signing setup is local and ignored**
+- [x] **Step 2: Verify signing setup is local and ignored**
 
 ```bash
 test -f keystore.properties
@@ -660,7 +662,7 @@ git status --short
 Expected: `keystore.properties` exists and is ignored. Do not open or print it.
 The protected entries plus `app/build.gradle.kts` are unstaged.
 
-- [ ] **Step 3: Run the final host gate**
+- [x] **Step 3: Run the final host gate**
 
 ```bash
 ./gradlew testDebugUnitTest lintDebug :app:assembleDebug
@@ -669,7 +671,7 @@ The protected entries plus `app/build.gradle.kts` are unstaged.
 Expected: all unit tests, lint, and the debug assembly pass. Any failure blocks
 the release candidate.
 
-- [ ] **Step 4: Build and verify release separately**
+- [x] **Step 4: Build and verify release separately**
 
 ```bash
 ./gradlew :app:assembleRelease
@@ -683,7 +685,7 @@ non-debuggable packaging, no debug qualification activity, and only
 `auth/drive.appdata`. Retain the APK SHA-256 and byte count for the
 qualification record; neither is private.
 
-- [ ] **Step 5: Keep the candidate uncommitted**
+- [x] **Step 5: Keep the candidate uncommitted**
 
 ```bash
 git diff --check
@@ -693,6 +695,14 @@ git status --short
 
 Expected: the build-file diff contains only the two version values. Do not
 commit or tag yet.
+
+**Execution checkpoint (2026-08-21):** Task 5 is complete and independently
+review-clean. The host gate, separate release assembly, and APK verifier
+passed. The exact candidate is 16,595,239 bytes with SHA-256
+`a3bd0ad3169189469c5a1ff7311bec56f82019caa67b8eb40728bb0d1c3ab066`.
+The version bump remains unstaged and uncommitted. The owner instructed a pause
+before Task 6; no certificate inspection, Cloud mutation, AVD/ADB action, or
+physical-device qualification has started.
 
 ### Task 6: Complete the Owner-Present Google Cloud Gate
 
@@ -1023,8 +1033,8 @@ unstaged.
 - [x] Every incomplete Activity Result calls `rejectResolution()`.
 - [x] Rejection consumes pending work and shows the existing actionable state.
 - [x] All five new JVM cases and all existing focused tests pass.
-- [ ] Full host gate and separately invoked signed release build pass.
-- [ ] APK verifier confirms 1.3.1/5, non-debuggable packaging, and sole
+- [x] Full host gate and separately invoked signed release build pass.
+- [x] APK verifier confirms 1.3.1/5, non-debuggable packaging, and sole
   `drive.appdata` scope.
 - [ ] Google Cloud Android client, Drive API, and consent audience gates pass.
 - [ ] Disposable sideload smoke passes 7/7 and is cleaned up safely.
