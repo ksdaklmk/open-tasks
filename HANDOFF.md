@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Drive 1.3.1 plan approved; execution paused, 20 August 2026
+## Current resume point — compact prerequisite green; Drive 1.3.1 execution paused, 20 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -9,10 +9,12 @@ superseded wherever they conflict with this one.
 
 The owner approved the Drive release-authorization design and implementation
 plan, selected **subagent-driven development**, and then explicitly paused the
-work before execution. Do not initialize this plan's SDD workspace or ledger,
-dispatch an implementer/reviewer, run its preflight, edit implementation or
-release files, configure Google Cloud, build/install an APK, or use ADB until
-the owner explicitly asks to resume.
+work before execution. After the separate compact-CI prerequisite was repaired
+and verified, the owner instructed this documentation update and another
+pause. Do not initialize this plan's SDD workspace or ledger, dispatch an
+implementer/reviewer, run its preflight, edit implementation or release files,
+configure Google Cloud, build/install an APK, or use ADB until the owner
+explicitly asks to resume.
 
 No implementation task or preflight step has started. No SDD workspace or
 ledger exists for this plan. On resume, use
@@ -51,6 +53,16 @@ remains the authoritative execution record.
   lanes, and `scripts/verify-actions-workflow.sh` now enforces the full
   seven-module connected list (mode 644 preserved). Backlog item 1
   discharged.
+- **The compact-CI prerequisite is closed.** Two test-only commits landed:
+  `670d915` awaits the Room workspace collector after the successful
+  automation-rule create, and `3e1a5a7` awaits the recovery candidate UI
+  after portable discovery starts on `Dispatchers.Default`. Run
+  `32382258182` on `3e1a5a7` finished with `verify` green (2m04s), `release`
+  green (6m28s), and **compact API 36 green** (28m02s; all seven modules,
+  495 tests, 2 established skips, 0 failures). The expanded API 37.0
+  observe-only lane again failed in its known emulator/profile class: Android
+  system services disappeared before test execution, yielding zero-test
+  infrastructure failures rather than an app regression signal.
 - Secure cleanup complete: both disposable overlays killed with the
   package uninstalled, credential cleared, exported archive deleted,
   worktree and its keystore copy removed, no ADB target or emulator
@@ -85,58 +97,50 @@ AVD and the physical Fold before tagging.
   (`116b599`).
 - Execution mode: subagent-driven, selected by the owner; paused before the
   plan's Preflight Gate.
-- Local `main` contains the design and plan commits; neither is pushed.
-  `origin/main` remains `f92c711` at this checkpoint.
-- No runtime/test/release implementation file has changed. The app remains
+- `origin/main` contains `3e1a5a7`; the approved design, plan, pause handoff,
+  and both prerequisite test repairs are pushed. This documentation-only
+  checkpoint remains local unless the owner separately approves another push.
+- No Drive runtime/test/release implementation file has changed. The app remains
   1.3.0 / versionCode 4; no `v1.3.1` tag or qualification record exists.
 - `RELEASING.md` has not yet gained the owner-present Drive gate; that is
   Task 3 of the implementation plan, not planning work.
 
 ### Exact resume sequence
 
-1. First complete the separate compact-lane naked-read repair below. It is a
-   prerequisite, not part of the Drive patch: use the established await
-   pattern in the one failing instrumented test and commit the test-only
-   change. Obtain the required owner approval before pushing, then require the
-   compact API 36 CI lane to pass.
-2. Re-read the approved Drive spec and plan. Confirm the four protected
-   working-tree entries are unchanged and the compact prerequisite is green.
-3. Start `superpowers:subagent-driven-development`: resolve this plan's
+1. Re-read the approved Drive spec and plan. Confirm the four protected
+   working-tree entries are unchanged, `main` still contains `3e1a5a7`, and
+   compact API 36 run `32382258182` remains the green prerequisite proof.
+2. Start `superpowers:subagent-driven-development`: resolve this plan's
    ignored SDD workspace, create its identified ledger, run the complete
    preflight consistency table, and record the implementation base.
-4. Execute the plan task-by-task. Fresh implementers must not spawn their own
+3. Execute the plan task-by-task. Fresh implementers must not spawn their own
    agents; every implementation task receives an independent spec/quality
    review and the documented fix loop before the next task.
-5. Stop at the plan's owner/security gates. The release certificate is
+4. Stop at the plan's owner/security gates. The release certificate is
    inspected only by the owner outside captured output; Cloud identifiers,
    accounts, fingerprints, tokens, and Drive IDs never enter chat or git.
-6. Never uninstall or clear `app.opentasks` on the Fold, never run connected
+5. Never uninstall or clear `app.opentasks` on the Fold, never run connected
    suites there, and never select restore/preserve during qualification.
-7. Even after all 1.3.1 gates pass, create and push `v1.3.1` only after a
+6. Even after all 1.3.1 gates pass, create and push `v1.3.1` only after a
    fresh explicit owner release decision.
 
-### Open item — compact lane red on the CI-matrix commit
+### Closed item — compact prerequisite verified
 
-Run `32265891863` (on `0b366f0`) failed ONE compact API 36 test:
-`RoomVaultRepositoryInstrumentedTest.automationRuleWorkspaceMismatchIsRejectedOnCreateAndUpdate`
-(the rejected foreign-workspace create/update twin; final assertion at
-`RoomVaultRepositoryInstrumentedTest.kt:4042`). Diagnosis is
-conclusive, not speculative: this is EXACTLY the naked-`currentWorkspace()`
-sibling the Task 17 fix-round re-review flagged ("hasn't been observed
-to fail yet" — task-17-fix1-re-review.md, out-of-scope observation).
-The added Home module shifted lane timing and surfaced the propagation
-race. The expanded lane's red on the same run is its known
-observe-only class, unrelated.
+Run `32265891863` on `0b366f0` exposed the remaining naked
+`currentWorkspace()` sibling in
+`RoomVaultRepositoryInstrumentedTest.automationRuleWorkspaceMismatchIsRejectedOnCreateAndUpdate`.
+Commit `670d915` converted only the post-success read to the established
+`observeWorkspace()` await pattern. Run `32379099144` confirmed that test
+green, then exposed an independent app-test race:
+`MainActivityRecoveryRestorationInstrumentedTest.productionRecoveryRouteClearsPassphraseAfterActivityRecreation`
+asserted the candidate passphrase field immediately after portable discovery
+was launched on `Dispatchers.Default`. Commit `3e1a5a7` added the existing
+Compose condition-wait pattern before the unchanged assertion.
 
-**Fix (test-only, next action):** convert the test to the house await
-pattern from `d01c950` — after the successful `CreateAutomationRule`,
-await `observeWorkspace().filterNotNull().first { it.automationRules ==
-listOf(rule) }` into an `afterCreate` snapshot (mirroring
-`automationRuleCreateRejectsIdCollisionAndDeleteIsIdempotent`
-directly above), then assert both post-rejection reads against
-`afterCreate` instead of naked `currentWorkspace()` reads. No
-assertion is weakened — same values, awaited. Then re-run the compact
-lane on CI and require green.
+Local Android-test compilation passed after each repair. Hosted run
+`32382258182` is the final proof: compact API 36 green, 495 tests across seven
+modules, 2 established skips, 0 failures. Both changes are test-only; no
+production assertion or behavior was weakened or changed.
 
 ### Post-release follow-up backlog (from the final review's triage)
 
@@ -144,9 +148,9 @@ None block 1.3.0. In priority order:
 
 1. ~~CI connected matrix~~ **DONE** (`0b366f0`, plus the seven-module
    enforcement in `scripts/verify-actions-workflow.sh`).
-2. The compact-lane naked-read repair above — was backlog item 5's
-   "convert the one remaining naked-`currentWorkspace()` sibling";
-   now an observed CI failure and the immediate next commit.
+2. ~~Compact-lane naked-read repair~~ **DONE** (`670d915`), with the
+   independently surfaced recovery discovery wait closed by `3e1a5a7`; hosted
+   compact proof is run `32382258182`.
 3. AUTOMATION_RULE capture-vs-read asymmetry: an undecodable persisted
    rule `type` is invisible to the editor/engine but hard-fails ALL
    snapshot capture. Unreachable from 1.3.0 writes, but a standing

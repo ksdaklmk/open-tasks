@@ -29,15 +29,16 @@ component, database change, or backup-format change.
 **Execution Status (2026-08-20):** Approved for subagent-driven development,
 then explicitly paused by the owner before the Preflight Gate. No task,
 preflight step, SDD workspace, ledger, implementer, or reviewer has started.
+The separate compact prerequisite is now satisfied by test-only commits
+`670d915` and `3e1a5a7`, with compact API 36 green in run `32382258182`.
 Resume only on the owner's explicit instruction; this documentation checkpoint
-does not satisfy any checkbox below.
+does not start the Preflight Gate or any implementation task.
 
 ## Global Constraints
 
-- **Start gate:** the compact API 36 naked-`currentWorkspace()` test repair in
-  `HANDOFF.md` is a separate prerequisite. Do not begin Task 1 until that
-  test-only repair is committed and its compact CI lane is green. Do not edit
-  that instrumented test as part of this plan.
+- **Start gate (satisfied):** the separate compact API 36 test repairs are
+  committed as `670d915` and `3e1a5a7`; run `32382258182` is green. Do not edit
+  either instrumented test as part of this plan.
 - Work directly on `main`, as required by `CLAUDE.md`. Record the start commit
   before Task 1 so the final review has an exact range.
 - Preserve the four user-owned working-tree entries: the modified Stage 3
@@ -1013,7 +1014,8 @@ unstaged.
 
 ## Completion Checklist
 
-- [ ] Compact API 36 prerequisite repair is committed and green.
+- [x] Compact API 36 prerequisite repairs are committed and green
+  (`670d915`, `3e1a5a7`; run `32382258182`).
 - [ ] Initial identity exceptions map to `Unavailable(REJECTED)`.
 - [ ] `CancellationException` still propagates.
 - [ ] Every incomplete Activity Result calls `rejectResolution()`.

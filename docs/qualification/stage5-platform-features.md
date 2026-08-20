@@ -248,3 +248,21 @@ result handling. These are recorded product boundaries, not defects; see
 Samsung Remote Test Lab RTL remains externally blocked pending Samsung
 developer-account approval and is unchanged by this qualification. Play
 Console work remains externally pending.
+
+## Post-release hosted recovery-test closure — 20 August 2026
+
+Adding `:feature:home` to the hosted connected matrix changed compact-lane
+timing and later exposed a second test-only race in the already qualified
+`MainActivityRecoveryRestorationInstrumentedTest.productionRecoveryRouteClearsPassphraseAfterActivityRecreation`.
+The original clean app-lock baseline remains necessary and correct. The new
+failure occurred after the recovery shell was visible: the test clicked
+portable discovery, which runs on `Dispatchers.Default`, then immediately
+asserted the candidate passphrase field before discovery could publish the
+candidate presentation.
+
+Commit `3e1a5a7` adds only the repository's existing Compose condition wait for
+the passphrase node before preserving all original input and recreation
+assertions. `:app:compileDebugAndroidTestKotlin` passed locally. Hosted run
+`32382258182` then completed the app module with 94 tests, 2 established skips,
+and 0 failures; the complete compact API 36 seven-module lane was green. No
+production code or Stage 5 behavior changed.

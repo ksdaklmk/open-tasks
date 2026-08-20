@@ -468,6 +468,24 @@ instrumented lanes, and `scripts/verify-actions-workflow.sh` now
 enforces the full seven-module connected list so no future module with
 androidTest sources can be silently dropped from CI.
 
+### Post-release hosted compact closure — 20 August 2026
+
+Run `32265891863` on the matrix commit exposed the one rejection/no-op sibling
+that still read `currentWorkspace()` immediately after its preceding successful
+automation-rule create:
+`automationRuleWorkspaceMismatchIsRejectedOnCreateAndUpdate`. Commit `670d915`
+awaits the successful rule in `observeWorkspace()` once, then keeps both
+rejection assertions exact against that stable snapshot. Run `32379099144`
+confirmed this named test green; its later failure was an unrelated app recovery
+UI wait, closed test-only by `3e1a5a7`.
+
+Final hosted proof is run `32382258182` on `3e1a5a7`: compact API 36 finished
+all seven connected modules with 495 tests, 2 established skips, and 0
+failures; `:core:data` was 212/212. `verify` and `release` were also green. The
+expanded API 37.0 observe-only lane again lost Android system services before
+test execution, its known emulator/profile failure class, and supplied no app
+regression signal.
+
 ## Step 5 — manual acceptance matrix
 
 **Accepted — owner session, 19 August 2026.** All eight rows of the
