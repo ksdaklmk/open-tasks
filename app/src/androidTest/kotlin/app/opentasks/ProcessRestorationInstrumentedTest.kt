@@ -27,6 +27,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -709,6 +710,10 @@ class MainActivityRecoveryRestorationInstrumentedTest {
     fun productionRecoveryRouteClearsPassphraseAfterActivityRecreation() {
         composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
         composeRule.onNodeWithTag("recovery-portable").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("recovery-passphrase")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         val passphrase = composeRule.onNodeWithTag("recovery-passphrase")
             .assertIsDisplayed()
         passphrase.performTextReplacement("process private passphrase")
