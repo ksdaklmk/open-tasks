@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current resume point — Drive Tasks 1–4 review-clean; paused before release candidate, 20 August 2026
+## Current resume point — Drive Tasks 1–4 review-clean; paused before release candidate, 21 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -105,9 +105,9 @@ The release-candidate and owner-controlled qualification half has not started.
   suite passed at `da02ddc`. Independent per-task reviews and Task 4's exact
   `816e134..da02ddc` whole-patch review all returned 0 Critical, 0 Important,
   and 0 Minor findings; the Task 4 checklist passed 11/11.
-- `origin/main` remains at `3e1a5a7`. Local `main` is six commits ahead: the
+- `origin/main` remains at `3e1a5a7`. Local `main` is seven commits ahead: the
   prior compact-documentation checkpoint `816e134`, the three implementation
-  commits, and the two pause-documentation commits. None has been pushed.
+  commits, and the three pause-documentation commits. None has been pushed.
 - The app remains 1.3.0 / versionCode 4. No version bump, release build, APK
   verifier run, Cloud mutation, disposable-AVD smoke, Fold qualification,
   1.3.1 qualification record, tag, or push has started.
