@@ -1,27 +1,25 @@
 # Open Tasks Handoff
 
-## Current resume point — compact prerequisite green; Drive 1.3.1 execution paused, 20 August 2026
+## Current resume point — Drive Tasks 1–4 review-clean; paused before release candidate, 20 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
-### Owner instruction — pause before execution
+### Owner instruction — pause after Task 4
 
-The owner approved the Drive release-authorization design and implementation
-plan, selected **subagent-driven development**, and then explicitly paused the
-work before execution. After the separate compact-CI prerequisite was repaired
-and verified, the owner instructed this documentation update and another
-pause. Do not initialize this plan's SDD workspace or ledger, dispatch an
-implementer/reviewer, run its preflight, edit implementation or release files,
-configure Google Cloud, build/install an APK, or use ADB until the owner
-explicitly asks to resume.
+The owner explicitly resumed the approved Drive release-authorization plan
+through Task 4, requested the handoff and related documentation be updated,
+and instructed another pause. Preflight and Tasks 1–4 are complete. Do not
+start Task 5, change the app version, inspect signing material, build a release
+candidate, configure Google Cloud, build/install an APK, or use ADB until the
+owner explicitly asks to resume.
 
-No implementation task or preflight step has started. No SDD workspace or
-ledger exists for this plan. On resume, use
-`superpowers:subagent-driven-development` with fresh, non-nesting implementers
-and an independent task review after each implementation task. The controller
-works directly on `main` under the repository rule and the already approved
-plan; never run implementation subagents in parallel.
+The plan's SDD workspace and ledger now exist at
+`.superpowers/sdd/2026-08-20-drive-release-authorization-hardening-plan/`.
+On resume, continue at Task 5 with a fresh, non-nesting implementer and an
+independent task review. The controller works directly on `main` under the
+repository rule and the approved plan; never run implementation subagents in
+parallel.
 
 ### Where things stand
 
@@ -77,17 +75,17 @@ an unchanged card. The approved diagnosis has two boundaries:
 1. The working live Drive qualification covered the debug signing identity,
    while the sideload release identity still needs an Android OAuth client
    matching package `app.opentasks` plus its external signing SHA-1.
-2. `OpenTasksApp` discards every non-OK or null-data Activity Result, leaving
-   the ViewModel's pending action and disabled presentation unchanged; an
-   initial identity exception can also disappear through the generic
-   ViewModel operation wrapper.
+2. Before this patch, `OpenTasksApp` discarded every non-OK or null-data
+   Activity Result, leaving the ViewModel's pending action and disabled
+   presentation unchanged; an initial identity exception could also disappear
+   through the generic ViewModel operation wrapper.
 
 The approved solution keeps `AuthorizationClient` and the existing
-`drive.appdata`-only backup architecture. It bounds initial identity failures,
-adds one `rejectResolution()` ViewModel path for incomplete launcher results,
-registers the release OAuth identity through an owner-present Cloud gate, and
-qualifies signed sideload patch release 1.3.1 / versionCode 5 on a disposable
-AVD and the physical Fold before tagging.
+`drive.appdata`-only backup architecture. Its repository half is now complete
+and review-clean: initial identity failures are bounded, one
+`rejectResolution()` ViewModel path consumes incomplete launcher results, and
+the owner-present Cloud and physical-device gate is permanently documented.
+The release-candidate and owner-controlled qualification half has not started.
 
 - Approved design:
   `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
@@ -95,28 +93,38 @@ AVD and the physical Fold before tagging.
 - Approved implementation plan:
   `docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
   (`116b599`).
-- Execution mode: subagent-driven, selected by the owner; paused before the
-  plan's Preflight Gate.
-- `origin/main` contains `3e1a5a7`; the approved design, plan, pause handoff,
-  and both prerequisite test repairs are pushed. This documentation-only
-  checkpoint remains local unless the owner separately approves another push.
-- No Drive runtime/test/release implementation file has changed. The app remains
-  1.3.0 / versionCode 4; no `v1.3.1` tag or qualification record exists.
-- `RELEASING.md` has not yet gained the owner-present Drive gate; that is
-  Task 3 of the implementation plan, not planning work.
+- Execution mode: subagent-driven. Preflight and Tasks 1–4 are complete;
+  paused before Task 5.
+- Implementation base `driveAuthBase`: `816e134`. Task commits:
+  `67820e7` bounds ordinary identity failures while preserving coroutine
+  cancellation; `875c80e` adds one-shot `rejectResolution()` handling and
+  complete launcher-result routing; `da02ddc` adds the permanent
+  owner-present signed Drive release gate to `RELEASING.md`.
+- TDD evidence is recorded in the ignored plan ledger. The combined
+  `GoogleDriveAuthorizationManagerTest` and `EncryptedBackupViewModelTest`
+  suite passed at `da02ddc`. Independent per-task reviews and Task 4's exact
+  `816e134..da02ddc` whole-patch review all returned 0 Critical, 0 Important,
+  and 0 Minor findings; the Task 4 checklist passed 11/11.
+- `origin/main` remains at `3e1a5a7`; the three implementation commits and this
+  documentation checkpoint are local and have not been pushed.
+- The app remains 1.3.0 / versionCode 4. No version bump, release build, APK
+  verifier run, Cloud mutation, disposable-AVD smoke, Fold qualification,
+  1.3.1 qualification record, tag, or push has started.
+- `RELEASING.md` now requires the owner-present Drive gate after disposable
+  smoke and before qualification commit/tag, with `adb install -r` and the
+  physical-workspace safety restrictions.
 
 ### Exact resume sequence
 
-1. Re-read the approved Drive spec and plan. Confirm the four protected
-   working-tree entries are unchanged, `main` still contains `3e1a5a7`, and
-   compact API 36 run `32382258182` remains the green prerequisite proof.
-2. Start `superpowers:subagent-driven-development`: resolve this plan's
-   ignored SDD workspace, create its identified ledger, run the complete
-   preflight consistency table, and record the implementation base.
-3. Execute the plan task-by-task. Fresh implementers must not spawn their own
-   agents; every implementation task receives an independent spec/quality
-   review and the documented fix loop before the next task.
-4. Stop at the plan's owner/security gates. The release certificate is
+1. Re-read the approved Drive spec, plan, and this plan's ignored SDD ledger.
+   Confirm Tasks 1–4 remain complete, the four protected working-tree entries
+   are unchanged, and `main` contains `67820e7`, `875c80e`, and `da02ddc`.
+2. Resume `superpowers:subagent-driven-development` at Task 5. Use a fresh,
+   non-nesting implementer and independent task review; never dispatch
+   implementation tasks in parallel.
+3. Build and verify the exact uncommitted 1.3.1 / versionCode 5 release
+   candidate under Task 5. Do not combine lint and release assembly.
+4. Stop at Task 6's owner/security gate. The release certificate is
    inspected only by the owner outside captured output; Cloud identifiers,
    accounts, fingerprints, tokens, and Drive IDs never enter chat or git.
 5. Never uninstall or clear `app.opentasks` on the Fold, never run connected

@@ -1,7 +1,8 @@
 # Drive Release Authorization Hardening
 
 Date: 2026-08-20. Status: user-approved design and implementation plan;
-execution explicitly paused before preflight.
+Preflight and Tasks 1–4 are complete and review-clean; execution is paused
+before Task 5.
 Authority: this spec covers the physical-release Google Drive connection
 failure reported against signed sideload release 1.3.0. It is independent of
 the completed Stage 9 plan. The compact-lane naked-read repair in `HANDOFF.md`
@@ -10,8 +11,11 @@ remains a separate prerequisite and is not reimplemented here.
 Implementation plan:
 `docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
 (approved-plan commit `116b599`). The owner selected subagent-driven
-development. No plan task, preflight step, SDD workspace, ledger, or subagent
-has started; resume only on the owner's explicit instruction.
+development. Runtime commits `67820e7` and `875c80e` implement the two bounded
+failure paths, and `da02ddc` adds the permanent signed-release gate. The
+combined focused suite passed and the Task 4 review reported no findings. No
+release candidate or owner-controlled qualification step has started; resume
+at Task 5 only on the owner's explicit instruction.
 
 ## Problem
 
@@ -25,12 +29,12 @@ The failure has two boundaries:
    certificate. The signed sideload APK uses a different, user-held release
    certificate. Google requires an Android OAuth client matching both package
    name and signing SHA-1, while production OAuth setup remained an owner gate.
-2. `OpenTasksApp` forwards an authorization result only when its result code is
-   `RESULT_OK` and its data is non-null. Every other outcome is discarded, so
-   `EncryptedBackupViewModel` retains its pending action and continues showing
-   `RemoteBackupStatus.Disabled`. The same ViewModel also swallows an exception
-   thrown by the initial authorization request through its generic operation
-   wrapper.
+2. Before the patch, `OpenTasksApp` forwarded an authorization result only
+   when its result code was `RESULT_OK` and its data was non-null. Every other
+   outcome was discarded, so `EncryptedBackupViewModel` retained its pending
+   action and continued showing `RemoteBackupStatus.Disabled`. The same
+   ViewModel also swallowed an exception thrown by the initial authorization
+   request through its generic operation wrapper.
 
 The 1.3.0 signed smoke verified APK packaging and the presence of the sole
 `drive.appdata` scope, but did not execute release-signed Google authorization.

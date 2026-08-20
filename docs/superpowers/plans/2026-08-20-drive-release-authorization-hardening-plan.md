@@ -26,13 +26,15 @@ component, database change, or backup-format change.
 **Spec:**
 `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
 
-**Execution Status (2026-08-20):** Approved for subagent-driven development,
-then explicitly paused by the owner before the Preflight Gate. No task,
-preflight step, SDD workspace, ledger, implementer, or reviewer has started.
-The separate compact prerequisite is now satisfied by test-only commits
-`670d915` and `3e1a5a7`, with compact API 36 green in run `32382258182`.
-Resume only on the owner's explicit instruction; this documentation checkpoint
-does not start the Preflight Gate or any implementation task.
+**Execution Status (2026-08-20):** Preflight and Tasks 1–4 are complete and
+review-clean; execution is paused by the owner before Task 5. Runtime commits
+`67820e7` and `875c80e` bound initial identity failures and consume incomplete
+launcher results. Commit `da02ddc` makes the signed owner-present Drive check a
+permanent pre-tag gate. The combined focused suite passed, and the Task 4
+review of `816e134..da02ddc` returned 0 Critical, 0 Important, and 0 Minor
+findings. No version bump, release candidate, Cloud mutation, device
+qualification, qualification record, tag, or push has started. Resume at Task
+5 only on the owner's explicit instruction.
 
 ## Global Constraints
 
@@ -108,7 +110,7 @@ External owner-controlled state:
 
 ## Preflight Gate: Finish the Separate Compact-CI Repair
 
-- [ ] **Step 1: Confirm the prerequisite is complete**
+- [x] **Step 1: Confirm the prerequisite is complete**
 
 Read the current resume point and recent history:
 
@@ -123,7 +125,7 @@ lane for that commit is green, and the only unstaged entries are the four
 protected user-owned entries. If either repair or CI proof is missing, stop
 this plan and complete that separate handoff item first.
 
-- [ ] **Step 2: Record the implementation review base**
+- [x] **Step 2: Record the implementation review base**
 
 ```bash
 git rev-parse HEAD
@@ -150,7 +152,7 @@ it into a tracked source file. The whole-change review in Task 4 covers
 bounded rejection for an ordinary identity exception and still propagates
 `CancellationException`.
 
-- [ ] **Step 1: Add the two failing manager tests**
+- [x] **Step 1: Add the two failing manager tests**
 
 Add the cancellation import and these tests beside the existing resolution
 extraction-failure test:
@@ -239,7 +241,7 @@ authorizeFailure?.let { throw it }
 return outcome
 ```
 
-- [ ] **Step 2: Run the manager test and verify the red state**
+- [x] **Step 2: Run the manager test and verify the red state**
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
@@ -250,7 +252,7 @@ Expected: the suite fails because `IllegalStateException("identity failed")`
 escapes `authorizeFailureReportsRejectedWithoutThrowing`. The cancellation
 test should already pass.
 
-- [ ] **Step 3: Implement the bounded identity catch**
+- [x] **Step 3: Implement the bounded identity catch**
 
 Add the cancellation import to the production file:
 
@@ -279,7 +281,7 @@ return resolveOutcome(mode, outcome, expectedAccountDigest)
 
 Do not log or retain the exception. Catch `Exception`, not `Throwable`.
 
-- [ ] **Step 4: Run the focused test and inspect the diff**
+- [x] **Step 4: Run the focused test and inspect the diff**
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
@@ -293,7 +295,7 @@ git diff -- \
 Expected: the complete manager test class passes; the production diff contains
 one bounded catch and one import.
 
-- [ ] **Step 5: Commit only Task 1**
+- [x] **Step 5: Commit only Task 1**
 
 ```bash
 git add \
@@ -323,7 +325,7 @@ Expected staged names: exactly the two Task 1 files.
 the existing authorization-required UI state, and total launcher-result
 routing.
 
-- [ ] **Step 1: Add the three failing ViewModel tests**
+- [x] **Step 1: Add the three failing ViewModel tests**
 
 Add these tests next to the existing resolution tests. They use only helpers
 and imports already present in the class:
@@ -408,7 +410,7 @@ fun rejectingWithoutPendingActionIsNoOp() {
 }
 ```
 
-- [ ] **Step 2: Run the ViewModel test and verify the red state**
+- [x] **Step 2: Run the ViewModel test and verify the red state**
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
@@ -417,7 +419,7 @@ fun rejectingWithoutPendingActionIsNoOp() {
 
 Expected: test compilation fails because `rejectResolution()` does not exist.
 
-- [ ] **Step 3: Implement the one-shot rejection operation**
+- [x] **Step 3: Implement the one-shot rejection operation**
 
 Add this beside `acceptResolution()` and reuse `launchOperation`; add no new
 dispatcher, channel, state type, or copy:
@@ -437,7 +439,7 @@ fun rejectResolution() = launchOperation {
 This runs under the same mutex as connect and re-authorization. A stray call
 returns without changing presentation.
 
-- [ ] **Step 4: Route every launcher result**
+- [x] **Step 4: Route every launcher result**
 
 Replace the nullable success-only chain in `OpenTasksApp` with the complete
 branch:
@@ -457,7 +459,7 @@ Do not create a launcher wrapper or an instrumentation harness. The ViewModel
 contract is covered by JVM tests; real Activity Result wiring is covered by
 the signed Fold gate in Task 8.
 
-- [ ] **Step 5: Run focused tests and compile the app**
+- [x] **Step 5: Run focused tests and compile the app**
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
@@ -473,7 +475,7 @@ git diff -- \
 Expected: all ViewModel tests pass and the app assembles. The runtime diff is
 only the new ViewModel operation plus the launcher branch.
 
-- [ ] **Step 6: Commit only Task 2**
+- [x] **Step 6: Commit only Task 2**
 
 ```bash
 git add \
@@ -499,7 +501,7 @@ physical-device update rules.
 **Produces:** a mandatory pre-tag owner-present Drive gate that remains
 separate from the disposable smoke.
 
-- [ ] **Step 1: Update the per-release order**
+- [x] **Step 1: Update the per-release order**
 
 Keep the existing build and seven-row disposable smoke steps. Insert the
 owner-present Drive gate after disposable smoke and before the qualification
@@ -507,7 +509,7 @@ commit/tag. State that the same qualification record contains both sections.
 Change physical update examples to `adb install -r` and retain the warning
 that uninstalling or clearing data is forbidden on a real workspace.
 
-- [ ] **Step 2: Add the exact owner-present gate**
+- [x] **Step 2: Add the exact owner-present gate**
 
 Add a section with this contract:
 
@@ -557,7 +559,7 @@ the tag.
 Do not add certificate values, screenshots of account UI, or provider details
 to `RELEASING.md`.
 
-- [ ] **Step 3: Verify and commit the release-process change**
+- [x] **Step 3: Verify and commit the release-process change**
 
 ```bash
 rg -n "Owner-present Google Drive gate|adb install -r|Needs re-authorisation|drive.appdata" \
@@ -581,7 +583,7 @@ evidence.
 
 **Produces:** reviewed implementation with zero unresolved blocking findings.
 
-- [ ] **Step 1: Run the combined focused suite**
+- [x] **Step 1: Run the combined focused suite**
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
@@ -593,7 +595,7 @@ git status --short
 
 Expected: both test classes pass. The four protected entries remain unstaged.
 
-- [ ] **Step 2: Review the exact implementation range**
+- [x] **Step 2: Review the exact implementation range**
 
 Use `superpowers:requesting-code-review` against the approved spec, this plan,
 the recorded `driveAuthBase`, and `driveAuthBase..HEAD`. Require checks for:
@@ -610,7 +612,7 @@ the recorded `driveAuthBase`, and `driveAuthBase..HEAD`. Require checks for:
 If execution mode does not authorize a reviewer subagent, perform this same
 checklist inline and record that limitation in the execution notes.
 
-- [ ] **Step 3: Resolve findings before release preparation**
+- [x] **Step 3: Resolve findings before release preparation**
 
 For each valid blocking finding, first add a focused failing test, then make
 the smallest fix, rerun both focused classes, stage only the touched plan
@@ -1016,11 +1018,11 @@ unstaged.
 
 - [x] Compact API 36 prerequisite repairs are committed and green
   (`670d915`, `3e1a5a7`; run `32382258182`).
-- [ ] Initial identity exceptions map to `Unavailable(REJECTED)`.
-- [ ] `CancellationException` still propagates.
-- [ ] Every incomplete Activity Result calls `rejectResolution()`.
-- [ ] Rejection consumes pending work and shows the existing actionable state.
-- [ ] All five new JVM cases and all existing focused tests pass.
+- [x] Initial identity exceptions map to `Unavailable(REJECTED)`.
+- [x] `CancellationException` still propagates.
+- [x] Every incomplete Activity Result calls `rejectResolution()`.
+- [x] Rejection consumes pending work and shows the existing actionable state.
+- [x] All five new JVM cases and all existing focused tests pass.
 - [ ] Full host gate and separately invoked signed release build pass.
 - [ ] APK verifier confirms 1.3.1/5, non-debuggable packaging, and sole
   `drive.appdata` scope.
