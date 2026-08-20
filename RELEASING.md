@@ -44,17 +44,20 @@ and no CI signing; CI builds the release unsigned.
        bash scripts/verify-release-apk.sh
 
 5. Run the smoke checklist below on a disposable AVD. Record the
-   results in `docs/qualification/release-<versionName>-sideload.md`.
-6. Commit the version bump and qualification record, then tag:
+   disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;
+   the same qualification record must also contain the owner-present Drive
+   gate results below.
+6. Run the owner-present Google Drive gate below on the physical device.
+7. Commit the version bump and qualification record, then tag:
 
        git add app/build.gradle.kts \
          docs/qualification/release-<versionName>-sideload.md
        git commit -m "docs: qualify release <versionName> for signed sideload"
        git tag -a v<versionName> -m "Release <versionName>" && git push origin main v<versionName>
 
-7. Install on the real device:
+8. Install on the real device:
 
-       adb install app/build/outputs/apk/release/app-release.apk
+       adb install -r app/build/outputs/apk/release/app-release.apk
 
 ## Smoke checklist (per release, disposable AVD only)
 
@@ -79,6 +82,47 @@ Then, by hand:
 
 Every step must pass before tagging. A failure stops the release; triage
 the defect before any tag is created.
+
+## Owner-present Google Drive gate (per release, physical device only)
+
+This gate is separate from the disposable-AVD smoke. It uses the exact signed
+release APK, the owner-controlled Google account, and that account's hidden
+Drive app-data namespace. Run it before tagging.
+
+Before installation, the owner verifies in Google Cloud that:
+
+1. an Android OAuth client matches package `app.opentasks` and the exact
+   sideload signing SHA-1;
+2. the Google Drive API is enabled;
+3. the selected account is permitted by the OAuth consent audience or test-user
+   list; and
+4. `https://www.googleapis.com/auth/drive.appdata` remains the app's only Drive
+   scope.
+
+The owner may inspect the APK certificate locally with `apksigner`, but must
+not paste or record its fingerprint, account, project, client ID, or signing
+material.
+
+Install over the existing app with the unchanged signing identity:
+
+    adb install -r app/build/outputs/apk/release/app-release.apk
+
+Never uninstall the package, clear its data, or run a connected test suite on
+the physical device. Then:
+
+1. Open Backup & recovery and start Google Drive connection.
+2. Cancel the chooser once. The card must show `Needs re-authorisation` and
+   offer `Re-authorise`.
+3. Re-authorise, select the intended account, and complete consent if shown.
+4. Accept `Preparing` for an empty app-data namespace, or the existing
+   restore/preserve choices when backups already exist.
+5. For a new connection only, force-stop and relaunch; the connection must
+   remain coherent. If existing backups are found, stop after the choices
+   render and select neither action.
+
+Record bounded PASS/FAIL results in the release qualification. A Cloud gate
+failure, silent result, account mismatch, or Drive authorization failure blocks
+the tag.
 
 ## Installing on a device
 
@@ -121,6 +165,6 @@ Troubleshooting:
   file copy), open it from the Files app, and allow "install unknown
   apps" for Files when prompted.
 
-Updates install straight over the top with `adb install` — no
-uninstall, data preserved — because every release is signed with the
-same keystore. That is why the keystore must never be lost.
+Updates install straight over the top with `adb install -r` — no
+uninstall or data clearing, data preserved — because every release is signed
+with the same keystore. That is why the keystore must never be lost.
