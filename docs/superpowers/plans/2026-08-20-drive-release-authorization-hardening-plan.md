@@ -26,6 +26,12 @@ component, database change, or backup-format change.
 **Spec:**
 `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
 
+**Execution Status (2026-08-20):** Approved for subagent-driven development,
+then explicitly paused by the owner before the Preflight Gate. No task,
+preflight step, SDD workspace, ledger, implementer, or reviewer has started.
+Resume only on the owner's explicit instruction; this documentation checkpoint
+does not satisfy any checkbox below.
+
 ## Global Constraints
 
 - **Start gate:** the compact API 36 naked-`currentWorkspace()` test repair in

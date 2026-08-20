@@ -1,9 +1,25 @@
 # Open Tasks Handoff
 
-## Current resume point — 1.3.0 pushed; compact-lane naked-read repair pending, 19 August 2026
+## Current resume point — Drive 1.3.1 plan approved; execution paused, 20 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Owner instruction — pause before execution
+
+The owner approved the Drive release-authorization design and implementation
+plan, selected **subagent-driven development**, and then explicitly paused the
+work before execution. Do not initialize this plan's SDD workspace or ledger,
+dispatch an implementer/reviewer, run its preflight, edit implementation or
+release files, configure Google Cloud, build/install an APK, or use ADB until
+the owner explicitly asks to resume.
+
+No implementation task or preflight step has started. No SDD workspace or
+ledger exists for this plan. On resume, use
+`superpowers:subagent-driven-development` with fresh, non-nesting implementers
+and an independent task review after each implementation task. The controller
+works directly on `main` under the repository rule and the already approved
+plan; never run implementation subagents in parallel.
 
 ### Where things stand
 
@@ -40,6 +56,64 @@ remains the authoritative execution record.
   worktree and its keystore copy removed, no ADB target or emulator
   process remains. The protected `Pixel_10_Pro_Fold` AVD was never
   booted this session.
+
+**A signed-release Google Drive defect is diagnosed and fully planned.** On
+the owner's Samsung Galaxy Z Fold 8, the signed 1.3.0 APK opens Google's
+account chooser from Backup & recovery, but selecting the account returns to
+an unchanged card. The approved diagnosis has two boundaries:
+
+1. The working live Drive qualification covered the debug signing identity,
+   while the sideload release identity still needs an Android OAuth client
+   matching package `app.opentasks` plus its external signing SHA-1.
+2. `OpenTasksApp` discards every non-OK or null-data Activity Result, leaving
+   the ViewModel's pending action and disabled presentation unchanged; an
+   initial identity exception can also disappear through the generic
+   ViewModel operation wrapper.
+
+The approved solution keeps `AuthorizationClient` and the existing
+`drive.appdata`-only backup architecture. It bounds initial identity failures,
+adds one `rejectResolution()` ViewModel path for incomplete launcher results,
+registers the release OAuth identity through an owner-present Cloud gate, and
+qualifies signed sideload patch release 1.3.1 / versionCode 5 on a disposable
+AVD and the physical Fold before tagging.
+
+- Approved design:
+  `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
+  (`36a131f`).
+- Approved implementation plan:
+  `docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
+  (`116b599`).
+- Execution mode: subagent-driven, selected by the owner; paused before the
+  plan's Preflight Gate.
+- Local `main` contains the design and plan commits; neither is pushed.
+  `origin/main` remains `f92c711` at this checkpoint.
+- No runtime/test/release implementation file has changed. The app remains
+  1.3.0 / versionCode 4; no `v1.3.1` tag or qualification record exists.
+- `RELEASING.md` has not yet gained the owner-present Drive gate; that is
+  Task 3 of the implementation plan, not planning work.
+
+### Exact resume sequence
+
+1. First complete the separate compact-lane naked-read repair below. It is a
+   prerequisite, not part of the Drive patch: use the established await
+   pattern in the one failing instrumented test and commit the test-only
+   change. Obtain the required owner approval before pushing, then require the
+   compact API 36 CI lane to pass.
+2. Re-read the approved Drive spec and plan. Confirm the four protected
+   working-tree entries are unchanged and the compact prerequisite is green.
+3. Start `superpowers:subagent-driven-development`: resolve this plan's
+   ignored SDD workspace, create its identified ledger, run the complete
+   preflight consistency table, and record the implementation base.
+4. Execute the plan task-by-task. Fresh implementers must not spawn their own
+   agents; every implementation task receives an independent spec/quality
+   review and the documented fix loop before the next task.
+5. Stop at the plan's owner/security gates. The release certificate is
+   inspected only by the owner outside captured output; Cloud identifiers,
+   accounts, fingerprints, tokens, and Drive IDs never enter chat or git.
+6. Never uninstall or clear `app.opentasks` on the Fold, never run connected
+   suites there, and never select restore/preserve during qualification.
+7. Even after all 1.3.1 gates pass, create and push `v1.3.1` only after a
+   fresh explicit owner release decision.
 
 ### Open item — compact lane red on the CI-matrix commit
 
@@ -92,14 +166,16 @@ None block 1.3.0. In priority order:
    (`dueInDays` 0/365 bounds, null-config skips); a same-position My
    Day move journals a redundant rank rewrite.
 
+Items 3–6 remain outside the security- and release-bounded 1.3.1 patch.
+
 The four protected working-tree entries (modified Stage 3 plan doc,
 deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)
 remain uncommitted and must stay that way.
 
 ## Superseded checkpoint — Stage 9 shipped as 1.3.0, 19 August 2026
 
-This section is authoritative. Older checkpoints below are historical and are
-superseded wherever they conflict with this one.
+This checkpoint is historical and is superseded by the current resume point
+above.
 
 ### Where Stage 9 stands
 

@@ -1,10 +1,17 @@
 # Drive Release Authorization Hardening
 
-Date: 2026-08-20. Status: user-approved design, pre-implementation.
+Date: 2026-08-20. Status: user-approved design and implementation plan;
+execution explicitly paused before preflight.
 Authority: this spec covers the physical-release Google Drive connection
 failure reported against signed sideload release 1.3.0. It is independent of
 the completed Stage 9 plan. The compact-lane naked-read repair in `HANDOFF.md`
 remains a separate prerequisite and is not reimplemented here.
+
+Implementation plan:
+`docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
+(approved-plan commit `116b599`). The owner selected subagent-driven
+development. No plan task, preflight step, SDD workspace, ledger, or subagent
+has started; resume only on the owner's explicit instruction.
 
 ## Problem
 
