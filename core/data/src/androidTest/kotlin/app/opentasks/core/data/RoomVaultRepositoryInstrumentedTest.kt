@@ -4023,7 +4023,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 RejectionReason.AUTOMATION_RULE_INVALID,
                 (createResult as CommandResult.Rejected).reason,
             )
-            assertTrue(repository!!.currentWorkspace().automationRules.isEmpty())
+            assertTrue(snapshot.automationRules.isEmpty())
 
             // Update: an existing rule cannot be rewritten into a foreign workspace.
             val rule = addTagRule(statusId = statusId, tagId = tagId)
@@ -4031,6 +4031,11 @@ class RoomVaultRepositoryInstrumentedTest {
                 repository!!.execute(DomainCommand.CreateAutomationRule(rule))
                     is CommandResult.Success,
             )
+            val afterCreate = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().filterNotNull().first { s ->
+                    s.automationRules == listOf(rule)
+                }
+            }
             val foreignUpdate = rule.copy(workspaceId = WorkspaceId.new())
             val updateResult =
                 repository!!.execute(DomainCommand.UpdateAutomationRule(foreignUpdate))
@@ -4039,7 +4044,7 @@ class RoomVaultRepositoryInstrumentedTest {
                 RejectionReason.AUTOMATION_RULE_INVALID,
                 (updateResult as CommandResult.Rejected).reason,
             )
-            assertEquals(listOf(rule), repository!!.currentWorkspace().automationRules)
+            assertEquals(listOf(rule), afterCreate.automationRules)
         }
     }
 
