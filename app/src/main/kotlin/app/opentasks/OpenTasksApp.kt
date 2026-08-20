@@ -320,8 +320,12 @@ fun OpenTasksApp(
         val backupAuthorizationLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult(),
         ) { result ->
-            result.data?.takeIf { result.resultCode == Activity.RESULT_OK }
-                ?.let(encryptedBackupViewModel::acceptResolution)
+            val data = result.data
+            if (result.resultCode == Activity.RESULT_OK && data != null) {
+                encryptedBackupViewModel.acceptResolution(data)
+            } else {
+                encryptedBackupViewModel.rejectResolution()
+            }
         }
         val insightsSummary by viewModel.insightsSummary.collectAsStateWithLifecycle()
         val insightsUiState by viewModel.insightsUiState.collectAsStateWithLifecycle()

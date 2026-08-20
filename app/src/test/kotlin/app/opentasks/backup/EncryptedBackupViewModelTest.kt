@@ -65,6 +65,84 @@ class EncryptedBackupViewModelTest {
     }
 
     @Test
+    fun rejectingPendingConnectIsActionableAndConsumesResolution() {
+        val pending = pendingIntent()
+        val connectCalls = AtomicInteger()
+        val unexpectedResolvedCall = CountDownLatch(1)
+        val viewModel = viewModel(
+            connect = { _, resolution ->
+                connectCalls.incrementAndGet()
+                if (resolution == null) {
+                    EncryptedBackupActionResult.ResolutionRequired(pending)
+                } else {
+                    unexpectedResolvedCall.countDown()
+                    EncryptedBackupActionResult.Completed
+                }
+            },
+        )
+
+        viewModel.connect()
+        assertSame(pending, takeResolution(viewModel))
+
+        viewModel.rejectResolution()
+
+        val expected = RemoteBackupStatus.ActionRequired(
+            RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+        )
+        assertTrue(waitUntil { viewModel.presentation.value.status == expected })
+
+        viewModel.acceptResolution(Intent())
+        assertFalse(unexpectedResolvedCall.await(250, TimeUnit.MILLISECONDS))
+        assertEquals(1, connectCalls.get())
+    }
+
+    @Test
+    fun rejectingPendingReauthorisationIsActionableWithoutBackupRequest() {
+        val pending = pendingIntent()
+        val reauthoriseCalls = AtomicInteger()
+        val backupRequests = AtomicInteger()
+        val viewModel = viewModel(
+            status = MutableStateFlow(
+                RemoteBackupStatus.ActionRequired(
+                    RemoteBackupFailureCategory.ACCOUNT_MISMATCH,
+                ),
+            ),
+            reauthorise = { resolution ->
+                reauthoriseCalls.incrementAndGet()
+                if (resolution == null) {
+                    EncryptedBackupActionResult.ResolutionRequired(pending)
+                } else {
+                    EncryptedBackupActionResult.Completed
+                }
+            },
+            requestBackupNow = { backupRequests.incrementAndGet() },
+        )
+
+        viewModel.reauthorise()
+        assertSame(pending, takeResolution(viewModel))
+
+        viewModel.rejectResolution()
+
+        val expected = RemoteBackupStatus.ActionRequired(
+            RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+        )
+        assertTrue(waitUntil { viewModel.presentation.value.status == expected })
+        assertEquals(1, reauthoriseCalls.get())
+        assertEquals(0, backupRequests.get())
+    }
+
+    @Test
+    fun rejectingWithoutPendingActionIsNoOp() {
+        val viewModel = viewModel()
+        val before = viewModel.presentation.value
+
+        viewModel.rejectResolution()
+        Thread.sleep(100)
+
+        assertEquals(before, viewModel.presentation.value)
+    }
+
+    @Test
     fun existingBackupOffersRestoreOrAnExplicitSeparateLineage() {
         val separate = AtomicReference<Boolean>()
         val viewModel = viewModel(

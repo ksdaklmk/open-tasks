@@ -91,6 +91,16 @@ class EncryptedBackupViewModel internal constructor(
         acceptAction(connectBackup(false, null), PendingAction.CONNECT)
     }
 
+    fun rejectResolution() = launchOperation {
+        pendingAction ?: return@launchOperation
+        pendingAction = null
+        presented.value = presentation(
+            RemoteBackupStatus.ActionRequired(
+                RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+            ),
+        )
+    }
+
     fun acceptResolution(data: Intent) {
         viewModelScope.launch(Dispatchers.Default) {
             operation.lock()
