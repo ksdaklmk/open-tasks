@@ -105,8 +105,9 @@ The release-candidate and owner-controlled qualification half has not started.
   suite passed at `da02ddc`. Independent per-task reviews and Task 4's exact
   `816e134..da02ddc` whole-patch review all returned 0 Critical, 0 Important,
   and 0 Minor findings; the Task 4 checklist passed 11/11.
-- `origin/main` remains at `3e1a5a7`; the three implementation commits and this
-  documentation checkpoint are local and have not been pushed.
+- `origin/main` remains at `3e1a5a7`. Local `main` is six commits ahead: the
+  prior compact-documentation checkpoint `816e134`, the three implementation
+  commits, and the two pause-documentation commits. None has been pushed.
 - The app remains 1.3.0 / versionCode 4. No version bump, release build, APK
   verifier run, Cloud mutation, disposable-AVD smoke, Fold qualification,
   1.3.1 qualification record, tag, or push has started.
