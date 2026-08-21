@@ -1,8 +1,8 @@
 # Drive Release Authorization Hardening
 
-Date: 2026-08-20. Execution status updated: 2026-08-21. Status: user-approved
-design and implementation plan; Preflight and Tasks 1–6 are complete and
-review-clean; Task 7 is safely stopped incomplete after a partial run.
+Date: 2026-08-20. Execution status updated: 2026-08-21. Status: complete and
+released as 1.3.1; the approved design and implementation plan passed every
+host, disposable-device, Cloud, physical-device, and release gate.
 Authority: this spec covers the physical-release Google Drive connection
 failure reported against signed sideload release 1.3.0. It is independent of
 the completed Stage 9 plan. The compact-lane naked-read repair in `HANDOFF.md`
@@ -15,12 +15,17 @@ development. Runtime commits `67820e7` and `875c80e` implement the two bounded
 failure paths, and `da02ddc` adds the permanent signed-release gate. The
 combined focused suite passed and the Task 4 review reported no findings. No
 private owner-controlled identifier was recorded. Task 5 produced the exact
-uncommitted 1.3.1 / versionCode 5 signed candidate: the final host gate,
-separate release assembly, APK verifier, and independent review all passed.
-Task 6's bounded owner gate is 4/4 PASS. Task 7 passed Rows 1–6 on a disposable
-overlay, but Row 7 was not verified before a safe stop; cleanup is complete
-and the full seven-row smoke must restart from Row 1. The physical Fold gate,
-qualification record, tag, and push have not started.
+1.3.1 / versionCode 5 signed candidate: the final host gate, separate release
+assembly, APK verifier, and independent review all passed. Task 6's bounded
+owner gate passed 4/4, and Task 7's fresh run passed all seven rows on a
+disposable overlay before secure cleanup. Physical qualification exposed and
+fixed one narrow retry regression in `194296e`: after an initial chooser
+cancellation, `Re-authorise` must retry the initial connection rather than an
+existing-lineage authorization. The clean signed candidate passed the post-fix
+host/build/package gates, reached `Backed up` on the Fold, and remained
+coherent there after force-stop and relaunch. Qualification commit `e4d25a9`,
+annotated tag `v1.3.1`, the push, remote run `32468886419`, and handoff commit
+`8d0704c` completed the release.
 
 ## Problem
 
@@ -122,6 +127,16 @@ That reuses the existing “Needs re-authorisation” status and “Re-authorise
 action. A call with no pending action is a no-op. No provider call is made on
 this path. Intentional cancellation deliberately uses this same actionable
 state; no snackbar or new event system is added.
+
+### Rejected initial-connection retry
+
+The pending action's kind survives only long enough to make the visible
+`Re-authorise` action truthful. If the rejected resolution belonged to an
+initial `CONNECT`, that action retries `connectBackup(false, null)`. If it
+belonged to an established-lineage `REAUTHORISE`, it retains the existing
+reauthorization path and backup request. No intent, account, or provider
+identity is persisted, and a process restart still discards this ephemeral UI
+retry context.
 
 ### Initial identity exception
 

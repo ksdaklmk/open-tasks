@@ -26,20 +26,22 @@ component, database change, or backup-format change.
 **Spec:**
 `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
 
-**Execution Status (2026-08-21):** Preflight and Tasks 1–6 are complete and
-review-clean. Runtime commits
+**Execution Status (2026-08-21):** Complete and released as 1.3.1. Preflight
+and Tasks 1–10 are complete and review-clean. Runtime commits
 `67820e7` and `875c80e` bound initial identity failures and consume incomplete
 launcher results. Commit `da02ddc` makes the signed owner-present Drive check a
 permanent pre-tag gate. The combined focused suite passed, and the Task 4
 review of `816e134..da02ddc` returned 0 Critical, 0 Important, and 0 Minor
 findings. Task 5's final host gate, separate signed release assembly, APK
-verifier, and independent review passed for the exact uncommitted 1.3.1 /
-versionCode 5 candidate. Task 6's bounded owner gate is 4/4 PASS. Task 7 was
-safely stopped after Rows 1–6 passed; Row 7 was not verified, the disposable
-overlay and temporary material were fully cleaned, and Task 7 remains
-incomplete. Resume by rerunning all seven rows from Row 1 on a fresh sole
-verified disposable AVD. Physical Fold qualification, the qualification
-record, tag, and push have not started.
+verifier, and independent review passed for the exact 1.3.1 / versionCode 5
+candidate. Task 6's bounded owner gate is 4/4 PASS, and Task 7's fresh complete
+run passed all seven rows and completed secure cleanup. Physical qualification
+exposed one canceled-initial-connect retry defect, fixed with a focused
+regression in `194296e`; the post-fix host gate and exact clean signed candidate
+passed again. Task 8's update, cancellation, authorization, and post-force-stop
+persistence gates passed with `Backed up`. Qualification commit `e4d25a9`, tag
+`v1.3.1`, the push, remote run `32468886419`, and the final handoff commit
+`8d0704c` completed Tasks 9–10.
 
 ## Global Constraints
 
@@ -707,6 +709,13 @@ The version bump remains unstaged and uncommitted. The owner instructed a pause
 before Task 6; no certificate inspection, Cloud mutation, AVD/ADB action, or
 physical-device qualification has started.
 
+**Superseding candidate checkpoint (2026-08-21):** Physical cancellation
+exposed the initial-connect retry defect fixed in `194296e`. The regression,
+full host gate, separate signed assembly, and APK verifier passed. The clean
+current 1.3.1 / versionCode 5 candidate is 16,595,239 bytes with SHA-256
+`99cc4942a23c6a023d987c97f1bcf0b77f2a88fa1977842c573b3ced63cbe676`;
+the version bump remains unstaged and uncommitted.
+
 ### Task 6: Complete the Owner-Present Google Cloud Gate
 
 **Files:** none. This task mutates only owner-controlled Google Cloud state.
@@ -717,7 +726,7 @@ the working debug qualification.
 **Produces:** release OAuth identity accepted for package `app.opentasks`,
 with Drive API and consent audience ready for the Fold account.
 
-- [ ] **Step 1: Have the owner inspect the exact certificate locally**
+- [x] **Step 1: Have the owner inspect the exact certificate locally**
 
 Pause for the owner. On the owner's screen, outside captured agent output, use
 the installed Android tool on the exact candidate:
@@ -730,7 +739,7 @@ the installed Android tool on the exact candidate:
 The owner reads the SHA-1 directly and does not paste it into chat, notes, or a
 tracked file.
 
-- [ ] **Step 2: Configure or verify the Android OAuth client**
+- [x] **Step 2: Configure or verify the Android OAuth client**
 
 In the same Cloud project as the debug qualification, the owner creates or
 verifies one Android OAuth client with:
@@ -741,7 +750,7 @@ verifies one Android OAuth client with:
 No client secret or downloaded credential file is required or accepted by
 this plan.
 
-- [ ] **Step 3: Verify API and consent state**
+- [x] **Step 3: Verify API and consent state**
 
 The owner confirms all three facts in Cloud Console:
 
@@ -765,7 +774,7 @@ checklist.
 **Produces:** seven observed smoke results without touching a protected
 workspace.
 
-- [ ] **Step 1: Establish a sole disposable target**
+- [x] **Step 1: Establish a sole disposable target**
 
 Start the established disposable AVD with all three safety flags:
 
@@ -777,7 +786,7 @@ Before any install, confirm `adb devices` shows exactly one target and
 `adb emu avd name` identifies the expected disposable AVD. Abort if the target
 is physical, `Pixel_10_Pro_Fold`, unknown, persistent, or not the sole target.
 
-- [ ] **Step 2: Install only inside the disposable overlay**
+- [x] **Step 2: Install only inside the disposable overlay**
 
 After the identity check, uninstall any inherited debug package from the
 read-only overlay and install the exact candidate:
@@ -791,7 +800,7 @@ read-only overlay and install the exact candidate:
 These destructive commands are authorized only for the verified disposable
 overlay. Never reuse them on the Fold or protected AVD.
 
-- [ ] **Step 3: Execute all seven smoke rows**
+- [x] **Step 3: Execute all seven smoke rows**
 
 Observe every current `RELEASING.md` row:
 
@@ -806,7 +815,7 @@ Observe every current `RELEASING.md` row:
 No row may be waived. Record only bounded observed facts and synthetic smoke
 content; no account or Drive data is used in this task.
 
-- [ ] **Step 4: Clean up only the disposable overlay**
+- [x] **Step 4: Clean up only the disposable overlay**
 
 Delete the exported archive, clear any temporary screen credential, uninstall
 the app from the verified overlay, and terminate that overlay. Confirm no ADB
@@ -821,14 +830,14 @@ target remains before Task 8. Do not boot or modify `Pixel_10_Pro_Fold`.
 **Produces:** owner-observed cancellation and successful release-signed Drive
 authorization, without destructive local or remote action.
 
-- [ ] **Step 1: Establish the owner-controlled physical target**
+- [x] **Step 1: Establish the owner-controlled physical target**
 
 With every emulator stopped, connect the Fold by USB or wireless debugging.
 The owner confirms `adb devices` has exactly one authorized physical target.
 Do not record its serial. If ADB is unavailable, the owner may use the Files
 installer, but must still install the exact Task 5 APK over the existing app.
 
-- [ ] **Step 2: Update in place**
+- [x] **Step 2: Update in place**
 
 For ADB installation, run:
 
@@ -840,7 +849,7 @@ For ADB installation, run:
 Expected: `Success`, with the 1.3.0 workspace preserved. Stop immediately on a
 signature mismatch; never fix it by uninstalling or clearing data.
 
-- [ ] **Step 3: Prove cancellation is actionable**
+- [x] **Step 3: Prove cancellation is actionable**
 
 On the Fold:
 
@@ -851,7 +860,7 @@ On the Fold:
 
 A silent unchanged card fails the gate.
 
-- [ ] **Step 4: Prove release-signed authorization succeeds**
+- [x] **Step 4: Prove release-signed authorization succeeds**
 
 Tap `Re-authorise`, select the intended account, and complete consent if
 shown. Accept exactly one of these outcomes:
@@ -863,7 +872,7 @@ shown. Accept exactly one of these outcomes:
 An account mismatch, silent return, or authorization/provider failure blocks
 the release. Do not inspect provider identifiers or capture account UI.
 
-- [ ] **Step 5: Check persistence only when a new connection was made**
+- [x] **Step 5: Check persistence only when a new connection was made**
 
 If Task 8 Step 4 reached `Preparing`, force-stop without clearing data:
 
@@ -876,12 +885,27 @@ showed restore/preserve choices, stop in the current session: select neither
 choice and make no claim about those ephemeral choices surviving process
 death.
 
-- [ ] **Step 6: Report only bounded results**
+- [x] **Step 6: Report only bounded results**
 
 Retain these facts for Task 9: in-place update PASS, cancellation PASS,
 authorization PASS with either `Preparing` or choices, and persistence PASS or
 correctly not applicable because choices were shown. Record no account,
 fingerprint, client/project ID, token, Drive object ID, or provider message.
+
+**Safe-stop checkpoint (2026-08-21):** The sole physical target and in-place
+update were verified without uninstall or data clear. Cancellation displayed
+`Needs re-authorisation` with `Re-authorise`. After `194296e`, the corrected
+Cloud client and prepared local recovery envelope, the clean candidate reached
+`Backed up`; authorization is PASS. Temporary bounded diagnostics were removed
+before that final connection. Open Tasks was then force-stopped without
+clearing data and its process absence was verified. Step 5 remains unchecked
+until the owner manually relaunches and observes a coherent persisted state;
+Step 6 and Tasks 9–10 remain pending.
+
+**Superseding completion checkpoint (2026-08-21):** The owner manually
+relaunched after the verified force-stop and the encrypted-backup card remained
+coherent at `Backed up`. Task 8 is complete. Only the bounded PASS results were
+carried into the qualification record; no private identifier was recorded.
 
 ### Task 9: Record and Commit the Qualified 1.3.1 Candidate
 
@@ -895,7 +919,7 @@ fingerprint, client/project ID, token, Drive object ID, or provider message.
 **Produces:** one pre-tag qualification commit containing version 1.3.1/5 and
 complete bounded evidence.
 
-- [ ] **Step 1: Create the qualification record from observed facts**
+- [x] **Step 1: Create the qualification record from observed facts**
 
 Use the structure of `docs/qualification/release-1.3.0-sideload.md`, but write
 only facts observed for the exact 1.3.1 APK. Include:
@@ -916,7 +940,7 @@ only facts observed for the exact 1.3.1 APK. Include:
 Do not copy Stage 9 extras or the 1.2.0 migration row; they are not 1.3.1
 obligations. Do not write a PASS that was not observed.
 
-- [ ] **Step 2: Audit the record for private data and completeness**
+- [x] **Step 2: Audit the record for private data and completeness**
 
 Manually verify the record contains no email/account, device serial, signing
 fingerprint, OAuth client/project identifier, token, Drive identifier,
@@ -932,7 +956,7 @@ git diff --check
 Expected: every required heading/table is present, all required gates are
 bounded and complete, and no whitespace error exists.
 
-- [ ] **Step 3: Re-verify the exact APK immediately before commit**
+- [x] **Step 3: Re-verify the exact APK immediately before commit**
 
 ```bash
 bash scripts/verify-release-apk.sh
@@ -942,7 +966,7 @@ wc -c app/build/outputs/apk/release/app-release.apk
 
 Expected: verifier, hash, and size exactly match the qualification record.
 
-- [ ] **Step 4: Stage only release identity and evidence**
+- [x] **Step 4: Stage only release identity and evidence**
 
 ```bash
 git add app/build.gradle.kts \
@@ -955,13 +979,18 @@ git status --short
 Expected staged names: exactly the two Task 9 files. The four protected
 entries remain unstaged.
 
-- [ ] **Step 5: Commit the qualified candidate**
+- [x] **Step 5: Commit the qualified candidate**
 
 ```bash
 git commit -m "docs: qualify release 1.3.1 for signed sideload"
 ```
 
 Do not tag or push in this step.
+
+**Completion checkpoint (2026-08-21):** Commit `e4d25a9` contains only the
+1.3.1 / versionCode 5 bump and
+`docs/qualification/release-1.3.1-sideload.md`. The exact signed APK was
+re-verified immediately before the scoped commit.
 
 ### Task 10: Release Only on the Owner's Explicit Decision
 
@@ -974,7 +1003,7 @@ Do not tag or push in this step.
 **Produces:** immutable `v1.3.1`, pushed release state, and an accurate live
 handoff.
 
-- [ ] **Step 1: Present the release evidence and ask for the decision**
+- [x] **Step 1: Present the release evidence and ask for the decision**
 
 Report the Task 9 commit, final host gate, verifier, 7/7 disposable smoke,
 Cloud 4/4 gate, Fold cancellation result, Fold success outcome, and protected
@@ -983,7 +1012,7 @@ working-tree status. Ask the owner whether to create and push `v1.3.1`.
 If the owner does not explicitly approve both tag and push, stop with the
 qualified commit untagged.
 
-- [ ] **Step 2: Create and push the immutable release**
+- [x] **Step 2: Create and push the immutable release**
 
 Only after approval:
 
@@ -994,14 +1023,14 @@ git push origin main v1.3.1
 
 Never move or replace `v1.3.0` or `v1.3.1`.
 
-- [ ] **Step 3: Observe remote release checks**
+- [x] **Step 3: Observe remote release checks**
 
 Use the pushed release commit to observe the repository's verify, release,
 and compact API 36 jobs. Record exact run IDs and conclusions. The expanded
 API 37.0 lane retains its documented observe-only policy; any new failure
 signature requires diagnosis before declaring the handoff current.
 
-- [ ] **Step 4: Update the authoritative handoff**
+- [x] **Step 4: Update the authoritative handoff**
 
 Replace the current resume point in `HANDOFF.md` with observed facts:
 
@@ -1014,7 +1043,7 @@ Replace the current resume point in `HANDOFF.md` with observed facts:
 Keep older checkpoints historical. Record no private account, OAuth, signing,
 device, or Drive identifier.
 
-- [ ] **Step 5: Commit and push the handoff update**
+- [x] **Step 5: Commit and push the handoff update**
 
 ```bash
 git add HANDOFF.md
@@ -1026,6 +1055,13 @@ git push origin main
 
 Expected staged name: only `HANDOFF.md`; the four protected entries remain
 unstaged.
+
+**Completion checkpoint (2026-08-21):** After the owner's explicit decision,
+annotated tag `v1.3.1` and `main` were pushed. Remote run `32468886419` was
+green for `verify`, `release`, and compact API 36; the expanded API 37.0
+observe-only failure matched the documented emulator/profile infrastructure
+class. Commit `8d0704c` recorded the released state in `HANDOFF.md` and was
+pushed without touching the protected entries.
 
 ## Completion Checklist
 
@@ -1039,12 +1075,12 @@ unstaged.
 - [x] Full host gate and separately invoked signed release build pass.
 - [x] APK verifier confirms 1.3.1/5, non-debuggable packaging, and sole
   `drive.appdata` scope.
-- [ ] Google Cloud Android client, Drive API, and consent audience gates pass.
-- [ ] Disposable sideload smoke passes 7/7 and is cleaned up safely.
-- [ ] Physical Fold update, cancellation, and authorization gates pass without
+- [x] Google Cloud Android client, Drive API, and consent audience gates pass.
+- [x] Disposable sideload smoke passes 7/7 and is cleaned up safely.
+- [x] Physical Fold update, cancellation, and authorization gates pass without
   uninstall, data clearing, connected tests, or remote mutation.
-- [ ] Qualification record contains only bounded evidence.
-- [ ] Version bump and record are committed before tag creation.
-- [ ] Tag/push occur only after explicit owner approval.
-- [ ] `HANDOFF.md` reflects the released state and remaining backlog.
-- [ ] The four protected working-tree entries remain untouched and unstaged.
+- [x] Qualification record contains only bounded evidence.
+- [x] Version bump and record are committed before tag creation.
+- [x] Tag/push occur only after explicit owner approval.
+- [x] `HANDOFF.md` reflects the released state and remaining backlog.
+- [x] The four protected working-tree entries remain untouched and unstaged.
