@@ -67,6 +67,17 @@ remains the authoritative execution record.
   observe-only lane again failed in its known emulator/profile class: Android
   system services disappeared before test execution, yielding zero-test
   infrastructure failures rather than an app regression signal.
+- **The final Drive records and backup-boundary follow-up are pushed.** Commit
+  `38405e7` finalizes the two stale Drive authorization plan/spec records;
+  `4a8cb8c` adds the required-workspace capture guard for automation rules and
+  extends recovery dangling-reference coverage to automation-rule workspaces
+  and My Day task references. `main` was pushed to origin on 21 August 2026
+  (`8d0704c..4a8cb8c`). Remote run `32483325764` finished with `verify` green,
+  `release` green, and **compact API 36 green**. The expanded API 37.0
+  observe-only lane again lost Android activity/package services,
+  instrumentation aborted with `System has crashed`, and later modules could
+  not install or resolve activities. This matches the established
+  emulator/profile infrastructure class and adds no app-regression signature.
 - Secure cleanup complete: both disposable overlays killed with the
   package uninstalled, credential cleared, exported archive deleted,
   worktree and its keystore copy removed, no ADB target or emulator
@@ -175,7 +186,9 @@ None block 1.3.0. In priority order:
    `automation_rules.workspaceId` and `my_day_entries.taskId`. The three
    focused tests passed RED→GREEN, the full host gate and separate release
    assembly passed, and the complete `:core:data` instrumented suite passed
-   215/215 on the disposable Fold8 AVD.
+   215/215 on the disposable Fold8 AVD. Commit `4a8cb8c` is pushed; hosted run
+   `32483325764` passed `verify`, `release`, and compact API 36, with only the
+   established expanded API 37.0 observe-only infrastructure failure.
 5. Product polish: restore-detach not undoable / detaching move
    one-way (Task 9); inert-rule visibility in the automations editor;
    remove render-dead `HomeSnapshot.focusTasks`;
@@ -187,6 +200,13 @@ None block 1.3.0. In priority order:
    Day move journals a redundant rank rewrite.
 
 Items 3–6 remain outside the security- and release-bounded 1.3.1 patch.
+
+Resume with a bounded design approval for the first sub-item in backlog 5:
+close both Task 9 undo asymmetries (restore-detach not undoable and a
+detaching move being one-way) in the existing dual-engine command flow. No
+implementation for that item has started. Keep backlog 3 deferred until v11
+rule work begins, and do not bundle the other backlog 5 polish items into this
+fix.
 
 The four protected working-tree entries (modified Stage 3 plan doc,
 deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)
