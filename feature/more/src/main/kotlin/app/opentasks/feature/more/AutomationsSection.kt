@@ -54,7 +54,7 @@ import app.opentasks.core.designsystem.SectionHeader
 import app.opentasks.core.model.AutomationRule
 import app.opentasks.core.model.AutomationRuleId
 import app.opentasks.core.model.AutomationRuleType
-import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.PRIMARY_WORKSPACE_ID
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Tag
@@ -444,7 +444,7 @@ private fun AddAutomationRuleSheet(
                         onCreate(
                             AutomationRule(
                                 id = AutomationRuleId.new(),
-                                workspaceId = OpenTasksFixtures.workspaceId,
+                                workspaceId = PRIMARY_WORKSPACE_ID,
                                 type = selectedType,
                                 enabled = true,
                                 projectId = selectedProjectId?.let(::ProjectId),

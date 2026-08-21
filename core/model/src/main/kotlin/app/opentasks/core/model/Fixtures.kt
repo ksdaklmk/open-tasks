@@ -7,7 +7,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 object OpenTasksFixtures {
-    val workspaceId = WorkspaceId("workspace-primary")
+    val workspaceId = PRIMARY_WORKSPACE_ID
     private val deviceId = DeviceId("fixture-device")
     private val revision = Revision(deviceId, 1_722_000_000_000, 0)
 
@@ -228,3 +228,6 @@ object OpenTasksFixtures {
         notes = notes,
     )
 }
+
+val openTasksFixtureSnapshot: WorkspaceSnapshot
+    get() = OpenTasksFixtures.snapshot

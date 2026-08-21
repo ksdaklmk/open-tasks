@@ -12,6 +12,7 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.Note
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.WorkspaceSnapshot
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -53,6 +54,7 @@ class RoomNoteCommandInstrumentedTest {
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("note-instrumented-test-device"),
+            seedSnapshot = OpenTasksFixtures.snapshot,
         )
     }
 

@@ -390,6 +390,34 @@ class RoomVaultRepositoryInstrumentedTest {
     }
 
     @Test
+    fun defaultSeedCreatesOnlyWorkspaceAndInboxWorkflow() = runBlocking {
+        database = VaultDatabase.create(context, databaseName, databaseKey)
+        repository = RoomVaultRepository(
+            database = database!!,
+            deviceId = DeviceId("instrumented-test-device"),
+        )
+
+        val snapshot = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.currentWorkspace()
+        }
+
+        assertEquals(1, database!!.workspaceDao().workspaceCount())
+        assertEquals(WorkflowStatus.defaults(null), snapshot.workflowStatuses)
+        assertTrue(snapshot.tasks.isEmpty())
+        assertTrue(snapshot.projects.isEmpty())
+        assertTrue(snapshot.tags.isEmpty())
+        assertTrue(snapshot.savedViews.isEmpty())
+        assertTrue(snapshot.templates.isEmpty())
+        assertTrue(snapshot.milestones.isEmpty())
+        assertTrue(snapshot.reminders.isEmpty())
+        assertTrue(snapshot.notes.isEmpty())
+        assertTrue(snapshot.attachments.isEmpty())
+        assertTrue(snapshot.timeEntries.isEmpty())
+        assertTrue(snapshot.activityEntries.isEmpty())
+        assertTrue(snapshot.automationRules.isEmpty())
+    }
+
+    @Test
     fun taskAndOutboxSurviveEncryptedDatabaseRestart() = runBlocking {
         openRepository()
         val result = repository!!.execute(DomainCommand.CreateTask(PERSISTED_TITLE))

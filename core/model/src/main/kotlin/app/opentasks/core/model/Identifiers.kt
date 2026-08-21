@@ -17,6 +17,8 @@ value class WorkspaceId(val value: String) {
     }
 }
 
+val PRIMARY_WORKSPACE_ID = WorkspaceId("workspace-primary")
+
 @JvmInline
 value class MemberId(val value: String) {
     companion object {

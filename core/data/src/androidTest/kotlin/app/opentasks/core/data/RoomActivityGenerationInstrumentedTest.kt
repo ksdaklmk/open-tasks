@@ -9,6 +9,7 @@ import app.opentasks.core.data.db.VaultDatabase
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.SemanticStatus
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -39,6 +40,7 @@ class RoomActivityGenerationInstrumentedTest {
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("activity-instrumented-test-device"),
+            seedSnapshot = OpenTasksFixtures.snapshot,
         )
     }
 

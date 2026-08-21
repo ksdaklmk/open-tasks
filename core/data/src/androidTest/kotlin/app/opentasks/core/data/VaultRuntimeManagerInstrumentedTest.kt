@@ -7,11 +7,16 @@ import app.opentasks.core.crypto.CryptoContext
 import app.opentasks.core.crypto.TinkVaultCrypto
 import app.opentasks.core.crypto.VaultCrypto
 import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.domain.CommandResult
+import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.model.BackupGeneration
+import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.VaultId
+import app.opentasks.core.model.WorkflowStatus
 import java.io.File
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -95,6 +100,40 @@ class VaultRuntimeManagerInstrumentedTest {
         assertTrue(databaseFile("open_tasks.db").isFile)
         assertTrue(keyStore().containsAlias(LEGACY_DATABASE_ALIAS))
         assertTrue(storageSnapshot().preferenceKeys.contains("vault_keys/$LEGACY_CIPHERTEXT_KEY"))
+    }
+
+    @Test
+    fun newVaultAcceptsFirstInboxTask() = runBlocking {
+        val title = "First Inbox task"
+        val manager = manager()
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+        withTimeout(TIMEOUT_MILLIS) { manager.createNewVault() }
+
+        val result = manager.requireActive().repository.execute(
+            DomainCommand.CreateTask(title),
+        )
+        assertTrue(result is CommandResult.Success)
+        val created = withTimeout(TIMEOUT_MILLIS) {
+            manager.requireActive().repository.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == title }
+            }
+        }.tasks.single { it.title == title }
+        assertEquals(null, created.projectId)
+        assertEquals(SemanticStatus.BACKLOG, created.semanticStatus)
+        assertEquals(
+            WorkflowStatus.defaultId(null, SemanticStatus.BACKLOG),
+            created.statusId,
+        )
+
+        manager.close()
+        withTimeout(TIMEOUT_MILLIS) { manager.initialize() }
+
+        val reopened = withTimeout(TIMEOUT_MILLIS) {
+            manager.requireActive().repository.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.id == created.id }
+            }
+        }
+        assertEquals(created, reopened.tasks.single { it.id == created.id })
     }
 
     @Test

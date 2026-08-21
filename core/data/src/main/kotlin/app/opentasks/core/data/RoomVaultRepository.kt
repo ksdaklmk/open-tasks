@@ -90,7 +90,7 @@ import app.opentasks.core.model.Milestone
 import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
-import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.PRIMARY_WORKSPACE_ID
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
@@ -152,7 +152,7 @@ class RoomVaultRepository(
     private val deviceId: DeviceId,
     private val now: () -> Instant = Instant::now,
     private val zoneId: () -> ZoneId = ZoneId::systemDefault,
-    private val seedSnapshot: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
+    private val seedSnapshot: WorkspaceSnapshot? = null,
     private val backupJournalAppendBoundary: BackupJournalAppendBoundary =
         BackupJournalAppendBoundary { dao, entity -> dao.insert(entity) },
 ) : VaultRepository, AutoCloseable {
@@ -407,7 +407,7 @@ class RoomVaultRepository(
             val result = buildTasksImportPlan(
                 rows = command.rows,
                 snapshot = current,
-                workspaceId = OpenTasksFixtures.workspaceId,
+                workspaceId = PRIMARY_WORKSPACE_ID,
                 revision = revision,
                 at = at,
                 freshId = { UUID.randomUUID().toString() },
@@ -661,7 +661,7 @@ class RoomVaultRepository(
         val createdAt = now()
         val project = Project(
             id = command.projectId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             name = name,
             summary = summary,
             status = command.health,
@@ -707,7 +707,7 @@ class RoomVaultRepository(
             )
         }
         if (
-            database.workspaceDao().templateCount(OpenTasksFixtures.workspaceId.value) >=
+            database.workspaceDao().templateCount(PRIMARY_WORKSPACE_ID.value) >=
             MAX_TEMPLATES
         ) {
             return CommandResult.Rejected(
@@ -807,7 +807,7 @@ class RoomVaultRepository(
         val newTags = mutableListOf<Tag>()
         requestedTagNames.forEach { tagName ->
             val existing = database.workspaceDao().findTagByName(
-                OpenTasksFixtures.workspaceId.value,
+                PRIMARY_WORKSPACE_ID.value,
                 tagName,
             )?.toModel()
             val tag = existing ?: Tag(
@@ -879,14 +879,14 @@ class RoomVaultRepository(
         }
         val name = command.template.name.trim()
         validateTemplateName(name)?.let { return it }
-        if (command.template.workspaceId != OpenTasksFixtures.workspaceId) {
+        if (command.template.workspaceId != PRIMARY_WORKSPACE_ID) {
             return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "That template belongs to a different workspace.",
             )
         }
         if (
-            database.workspaceDao().templateCount(OpenTasksFixtures.workspaceId.value) >=
+            database.workspaceDao().templateCount(PRIMARY_WORKSPACE_ID.value) >=
             MAX_TEMPLATES
         ) {
             return CommandResult.Rejected(
@@ -1533,7 +1533,7 @@ class RoomVaultRepository(
         val missingTagNames = mutableListOf<String>()
         for (name in uniqueTagNames.values) {
             val existing = database.workspaceDao()
-                .findTagByName(OpenTasksFixtures.workspaceId.value, name)
+                .findTagByName(PRIMARY_WORKSPACE_ID.value, name)
                 ?.toModel()
             if (existing == null) missingTagNames += name else existingTags += existing
         }
@@ -1542,11 +1542,11 @@ class RoomVaultRepository(
         val createdAt = now()
         val taskId = TaskId.new()
         val freshTags = missingTagNames.map { name ->
-            Tag(TagId(UUID.randomUUID().toString()), OpenTasksFixtures.workspaceId, name)
+            Tag(TagId(UUID.randomUUID().toString()), PRIMARY_WORKSPACE_ID, name)
         }
         val base = Task(
             id = taskId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             projectId = effectiveProjectId,
             parentTaskId = parentTaskId,
             statusId = initialStatus.id,
@@ -3876,7 +3876,7 @@ class RoomVaultRepository(
         }
         val view = SavedView(
             id = command.savedViewId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             name = name,
             query = query,
         )
@@ -3941,7 +3941,7 @@ class RoomVaultRepository(
         }
         val name = command.savedView.name.trim()
         validateSavedViewName(name)?.let { return it }
-        if (command.savedView.workspaceId != OpenTasksFixtures.workspaceId) {
+        if (command.savedView.workspaceId != PRIMARY_WORKSPACE_ID) {
             return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "That saved search belongs to a different workspace.",
@@ -4562,7 +4562,7 @@ class RoomVaultRepository(
         excluding: ProjectId? = null,
     ): CommandResult.Rejected? {
         val existing = database.workspaceDao().findActiveProjectByName(
-            workspaceId = OpenTasksFixtures.workspaceId.value,
+            workspaceId = PRIMARY_WORKSPACE_ID.value,
             name = name,
         )
         return if (existing != null && existing.id != excluding?.value) {
@@ -4592,7 +4592,7 @@ class RoomVaultRepository(
             )
         }
         val existing = database.workspaceDao().findTemplateByName(
-            OpenTasksFixtures.workspaceId.value,
+            PRIMARY_WORKSPACE_ID.value,
             name,
         )
         return if (existing != null && existing.id != excluding?.value) {
@@ -4611,10 +4611,10 @@ class RoomVaultRepository(
         val taskDao = database.taskDao()
         val workspaceDao = database.workspaceDao()
         val base = combine(
-            taskDao.observeAll(OpenTasksFixtures.workspaceId.value),
-            workspaceDao.observeProjects(OpenTasksFixtures.workspaceId.value),
+            taskDao.observeAll(PRIMARY_WORKSPACE_ID.value),
+            workspaceDao.observeProjects(PRIMARY_WORKSPACE_ID.value),
             workspaceDao.observeMilestones(),
-            workspaceDao.observeTags(OpenTasksFixtures.workspaceId.value),
+            workspaceDao.observeTags(PRIMARY_WORKSPACE_ID.value),
             workspaceDao.observeDependencies(),
         ) { tasks, projects, milestones, tags, dependencies ->
             BaseRows(tasks, projects, milestones, tags, dependencies)
@@ -4622,7 +4622,7 @@ class RoomVaultRepository(
         val baseWithWorkflow = combine(
             combine(
                 base,
-                workspaceDao.observeTemplates(OpenTasksFixtures.workspaceId.value),
+                workspaceDao.observeTemplates(PRIMARY_WORKSPACE_ID.value),
             ) { rows, templates ->
                 rows.copy(
                     templates = templates.mapNotNull { entity ->
@@ -4811,7 +4811,10 @@ class RoomVaultRepository(
             val workspaceDao = database.workspaceDao()
             if (workspaceDao.workspaceCount() > 0) return@withTransaction
 
-            val seedRevision = seedSnapshot.tasks.firstOrNull()?.revision
+            val seed = seedSnapshot ?: emptySnapshot().copy(
+                workflowStatuses = WorkflowStatus.defaults(null),
+            )
+            val seedRevision = seed.tasks.firstOrNull()?.revision
                 ?: Revision(deviceId, now().toEpochMilli(), 0)
             workspaceDao.insertVault(
                 VaultEntity(
@@ -4829,42 +4832,42 @@ class RoomVaultRepository(
             workspaceDao.insertMember(MemberEntity(OWNER_ID, "You"))
             workspaceDao.insertWorkspace(
                 WorkspaceEntity(
-                    id = OpenTasksFixtures.workspaceId.value,
+                    id = PRIMARY_WORKSPACE_ID.value,
                     vaultId = VAULT_ID.value,
                     ownerId = OWNER_ID,
                     name = "Open Tasks",
                 ),
             )
-            workspaceDao.insertProjects(seedSnapshot.projects.map { it.toEntity(seedRevision) })
+            workspaceDao.insertProjects(seed.projects.map { it.toEntity(seedRevision) })
             workspaceDao.insertWorkflowStatuses(
-                seedSnapshot.workflowStatuses.map { it.toEntity(seedRevision) },
+                seed.workflowStatuses.map { it.toEntity(seedRevision) },
             )
             workspaceDao.insertMilestones(
-                seedSnapshot.milestones.map { it.toEntity(seedRevision) },
+                seed.milestones.map { it.toEntity(seedRevision) },
             )
-            workspaceDao.insertTags(seedSnapshot.tags.map { it.toEntity() })
-            workspaceDao.insertTasks(seedSnapshot.tasks.map(Task::toEntity))
-            workspaceDao.insertDependencies(seedSnapshot.tasks.flatMap(Task::dependencyEntities))
-            workspaceDao.insertTaskTags(seedSnapshot.tasks.flatMap(Task::tagEntities))
-            workspaceDao.insertChecklistItems(seedSnapshot.tasks.flatMap(Task::checklistEntities))
-            seedSnapshot.reminders.forEach { reminder ->
+            workspaceDao.insertTags(seed.tags.map { it.toEntity() })
+            workspaceDao.insertTasks(seed.tasks.map(Task::toEntity))
+            workspaceDao.insertDependencies(seed.tasks.flatMap(Task::dependencyEntities))
+            workspaceDao.insertTaskTags(seed.tasks.flatMap(Task::tagEntities))
+            workspaceDao.insertChecklistItems(seed.tasks.flatMap(Task::checklistEntities))
+            seed.reminders.forEach { reminder ->
                 workspaceDao.upsertReminder(reminder.toEntity())
             }
-            seedSnapshot.notes.forEach { note ->
+            seed.notes.forEach { note ->
                 workspaceDao.upsertNote(note.toEntity())
             }
-            seedSnapshot.timeEntries.forEach { entry ->
+            seed.timeEntries.forEach { entry ->
                 workspaceDao.insertTimeEntry(entry.toEntity())
             }
-            seedSnapshot.attachments.forEach { attachment ->
+            seed.attachments.forEach { attachment ->
                 workspaceDao.upsertAttachment(attachment.toEntity())
             }
-            seedSnapshot.activityEntries.forEach { entry ->
+            seed.activityEntries.forEach { entry ->
                 workspaceDao.upsertActivityEntry(entry.toEntity())
             }
-            seedSnapshot.home.activeTimer
+            seed.home.activeTimer
                 ?.takeUnless { timer ->
-                    seedSnapshot.timeEntries.any { it.id == timer.entryId }
+                    seed.timeEntries.any { it.id == timer.entryId }
                 }
                 ?.let { timer ->
                 workspaceDao.insertTimeEntry(

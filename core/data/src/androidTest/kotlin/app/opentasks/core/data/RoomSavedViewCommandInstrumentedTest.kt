@@ -13,6 +13,7 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.DueBucket
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.SavedView
@@ -61,6 +62,7 @@ class RoomSavedViewCommandInstrumentedTest {
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("saved-view-instrumented-test-device"),
+            seedSnapshot = OpenTasksFixtures.snapshot,
         )
     }
 

@@ -2,7 +2,7 @@ package app.opentasks.core.domain
 
 import app.opentasks.core.model.AutomationRule
 import app.opentasks.core.model.AutomationRuleType
-import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.PRIMARY_WORKSPACE_ID
 import app.opentasks.core.model.Reminder
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
@@ -169,9 +169,9 @@ fun automationRuleConfigRejection(rule: AutomationRule): CommandResult.Rejected?
     return if (requirement) null else invalid("its settings do not match its type")
 }
 
-/** Every automation rule must belong to the single fixture workspace. */
+/** Every automation rule must belong to the primary workspace. */
 fun automationRuleWorkspaceRejection(rule: AutomationRule): CommandResult.Rejected? =
-    if (rule.workspaceId != OpenTasksFixtures.workspaceId) {
+    if (rule.workspaceId != PRIMARY_WORKSPACE_ID) {
         CommandResult.Rejected(
             RejectionReason.AUTOMATION_RULE_INVALID,
             "This rule is not valid: it belongs to a different workspace.",

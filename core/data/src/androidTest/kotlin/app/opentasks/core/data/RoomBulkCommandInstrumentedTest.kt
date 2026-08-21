@@ -8,6 +8,7 @@ import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.WorkspaceSnapshot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -43,6 +44,7 @@ class RoomBulkCommandInstrumentedTest {
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("bulk-instrumented-test-device"),
+            seedSnapshot = OpenTasksFixtures.snapshot,
         )
     }
 

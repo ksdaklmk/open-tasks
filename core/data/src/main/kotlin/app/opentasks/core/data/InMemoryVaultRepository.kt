@@ -60,7 +60,7 @@ import app.opentasks.core.model.MilestoneId
 import app.opentasks.core.model.MyDayEntry
 import app.opentasks.core.model.Note
 import app.opentasks.core.model.NoteId
-import app.opentasks.core.model.OpenTasksFixtures
+import app.opentasks.core.model.PRIMARY_WORKSPACE_ID
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
@@ -86,6 +86,7 @@ import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.core.model.openTasksFixtureSnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -102,7 +103,7 @@ import java.util.Locale
 import java.util.UUID
 
 class InMemoryVaultRepository internal constructor(
-    initial: WorkspaceSnapshot = OpenTasksFixtures.snapshot,
+    initial: WorkspaceSnapshot = openTasksFixtureSnapshot,
     private val now: () -> Instant = Instant::now,
     private val backupJournal: InMemoryBackupJournal = InMemoryBackupJournal(),
     sourceDeviceId: DeviceId? = null,
@@ -375,7 +376,7 @@ class InMemoryVaultRepository internal constructor(
             val result = buildTasksImportPlan(
                 rows = command.rows,
                 snapshot = current,
-                workspaceId = OpenTasksFixtures.workspaceId,
+                workspaceId = PRIMARY_WORKSPACE_ID,
                 revision = revision,
                 at = at,
                 freshId = { UUID.randomUUID().toString() },
@@ -484,7 +485,7 @@ class InMemoryVaultRepository internal constructor(
             add(MemberEntity("member-owner", "You").toBackupRecordV1())
             add(
                 WorkspaceEntity(
-                    id = OpenTasksFixtures.workspaceId.value,
+                    id = PRIMARY_WORKSPACE_ID.value,
                     vaultId = "vault-primary",
                     ownerId = "member-owner",
                     name = "Open Tasks",
@@ -634,7 +635,7 @@ class InMemoryVaultRepository internal constructor(
         validateUniqueActiveProjectName(name)?.let { return it }
         val project = Project(
             id = command.projectId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             name = name,
             summary = summary,
             status = command.health,
@@ -821,7 +822,7 @@ class InMemoryVaultRepository internal constructor(
         }
         val name = command.template.name.trim()
         validateTemplateName(name)?.let { return it }
-        if (command.template.workspaceId != OpenTasksFixtures.workspaceId) {
+        if (command.template.workspaceId != PRIMARY_WORKSPACE_ID) {
             return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "That template belongs to a different workspace.",
@@ -1446,11 +1447,11 @@ class InMemoryVaultRepository internal constructor(
         val createdAt = now()
         val taskId = TaskId.new()
         val freshTags = missingTagNames.map { name ->
-            Tag(TagId(UUID.randomUUID().toString()), OpenTasksFixtures.workspaceId, name)
+            Tag(TagId(UUID.randomUUID().toString()), PRIMARY_WORKSPACE_ID, name)
         }
         val base = Task(
             id = taskId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             projectId = effectiveProjectId,
             parentTaskId = parentTaskId,
             statusId = initialStatus.id,
@@ -3604,7 +3605,7 @@ class InMemoryVaultRepository internal constructor(
         }
         val view = SavedView(
             id = command.savedViewId,
-            workspaceId = OpenTasksFixtures.workspaceId,
+            workspaceId = PRIMARY_WORKSPACE_ID,
             name = name,
             query = query,
         )
@@ -3685,7 +3686,7 @@ class InMemoryVaultRepository internal constructor(
         }
         val name = command.savedView.name.trim()
         validateSavedViewName(name)?.let { return it }
-        if (command.savedView.workspaceId != OpenTasksFixtures.workspaceId) {
+        if (command.savedView.workspaceId != PRIMARY_WORKSPACE_ID) {
             return CommandResult.Rejected(
                 RejectionReason.INVALID_STATE,
                 "That saved search belongs to a different workspace.",

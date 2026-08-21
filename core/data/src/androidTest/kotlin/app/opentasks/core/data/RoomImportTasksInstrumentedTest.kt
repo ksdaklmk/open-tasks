@@ -9,6 +9,7 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.ImportedTaskRow
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -37,6 +38,7 @@ class RoomImportTasksInstrumentedTest {
         repository = RoomVaultRepository(
             database = database!!,
             deviceId = DeviceId("import-instrumented-test-device"),
+            seedSnapshot = OpenTasksFixtures.snapshot,
         )
     }
 
