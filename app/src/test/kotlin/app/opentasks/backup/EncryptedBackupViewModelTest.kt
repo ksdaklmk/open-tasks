@@ -97,6 +97,49 @@ class EncryptedBackupViewModelTest {
     }
 
     @Test
+    fun reauthoriseAfterRejectedConnectRetriesInitialConnection() {
+        val pending = pendingIntent()
+        val connectCalls = AtomicInteger()
+        val blocked = RemoteBackupStatus.ActionRequired(
+            RemoteBackupFailureCategory.LOCAL_STORAGE,
+        )
+        val viewModel = viewModel(
+            connect = { _, _ ->
+                if (connectCalls.incrementAndGet() == 1) {
+                    EncryptedBackupActionResult.ResolutionRequired(pending)
+                } else {
+                    EncryptedBackupActionResult.ConnectResult(
+                        RemoteBackupConnectResult.Connected(
+                            lineageId = CloudLineageId.new(),
+                            generation = BackupGeneration(1),
+                        ),
+                    )
+                }
+            },
+            reauthorise = {
+                EncryptedBackupActionResult.Failed(RemoteBackupFailureCategory.LOCAL_STORAGE)
+            },
+        )
+
+        viewModel.connect()
+        assertSame(pending, takeResolution(viewModel))
+        viewModel.rejectResolution()
+        assertTrue(waitUntil {
+            viewModel.presentation.value.status == RemoteBackupStatus.ActionRequired(
+                RemoteBackupFailureCategory.AUTHORIZATION_REQUIRED,
+            )
+        })
+
+        viewModel.reauthorise()
+
+        assertTrue(waitUntil {
+            viewModel.presentation.value.status == RemoteBackupStatus.Preparing ||
+                viewModel.presentation.value.status == blocked
+        })
+        assertEquals(RemoteBackupStatus.Preparing, viewModel.presentation.value.status)
+    }
+
+    @Test
     fun rejectingPendingReauthorisationIsActionableWithoutBackupRequest() {
         val pending = pendingIntent()
         val reauthoriseCalls = AtomicInteger()

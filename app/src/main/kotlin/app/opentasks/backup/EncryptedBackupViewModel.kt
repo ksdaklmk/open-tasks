@@ -76,6 +76,7 @@ class EncryptedBackupViewModel internal constructor(
     private val operation = Mutex()
     private val presented = MutableStateFlow(presentation(status.value))
     private var pendingAction: PendingAction? = null
+    private var retryAction: PendingAction? = null
 
     val presentation: StateFlow<EncryptedBackupPresentation> = presented.asStateFlow()
     val resolutionEffects = Channel<PendingIntent>(Channel.BUFFERED)
@@ -92,7 +93,7 @@ class EncryptedBackupViewModel internal constructor(
     }
 
     fun rejectResolution() = launchOperation {
-        pendingAction ?: return@launchOperation
+        retryAction = pendingAction ?: return@launchOperation
         pendingAction = null
         presented.value = presentation(
             RemoteBackupStatus.ActionRequired(
@@ -122,9 +123,15 @@ class EncryptedBackupViewModel internal constructor(
     }
 
     fun reauthorise() = launchOperation {
-        val result = reauthoriseBackup(null)
-        acceptAction(result, PendingAction.REAUTHORISE)
-        if (result == EncryptedBackupActionResult.Completed) requestBackupNow()
+        val action = retryAction.also { retryAction = null } ?: PendingAction.REAUTHORISE
+        val result = when (action) {
+            PendingAction.CONNECT -> connectBackup(false, null)
+            PendingAction.REAUTHORISE -> reauthoriseBackup(null)
+        }
+        acceptAction(result, action)
+        if (action == PendingAction.REAUTHORISE && result == EncryptedBackupActionResult.Completed) {
+            requestBackupNow()
+        }
     }
 
     fun backUpNow() {
