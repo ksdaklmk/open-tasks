@@ -1,29 +1,34 @@
 # Open Tasks Handoff
 
-## Current resume point — Drive Tasks 1–5 review-clean; paused at owner gate, 21 August 2026
+## Current resume point — Drive Task 6 complete; Task 7 safely stopped incomplete, 21 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
-### Owner instruction — pause after Task 5
+### Owner instruction — safe stop during Task 7
 
-The owner explicitly resumed the approved Drive release-authorization plan
-through Task 5, requested the handoff and related documentation be updated,
-and instructed another pause. Preflight and Tasks 1–5 are complete. The exact
-uncommitted 1.3.1 / versionCode 5 signed candidate is built and independently
-review-clean. Do not start Task 6, inspect signing material, configure Google
-Cloud, start a disposable AVD, use ADB, install the APK, qualify the Fold,
-record gate results, commit the version bump, tag, or push until the owner
-explicitly asks to resume.
+The owner resumed the approved Drive release-authorization plan. Task 6 is
+complete: Android client, Drive API, consent audience, and least-privilege
+scope are 4/4 PASS, with no private identifier recorded. Task 7 then started
+against the exact uncommitted 1.3.1 / versionCode 5 signed candidate on one
+verified disposable read-only AVD. Rows 1–6 passed, including the encrypted
+archive round-trip, immediate app lock, and a bound Today widget rendering
+`0 open today · 5 overdue`. The real launcher exposed `Capture a task`, but
+the post-tap result was not verified before the owner requested a safe stop;
+Row 7 and Task 7 are therefore **not claimed complete**.
 
-The plan's SDD workspace and ledger now exist at
-`.superpowers/sdd/2026-08-20-drive-release-authorization-hardening-plan/`.
-On resume, continue at Task 6 with the owner present. Task 6 inspects the
-certificate outside captured output and records only four bounded PASS/FAIL
-results. After all four pass, continue serially through Task 7's disposable
-smoke and cleanup, Task 8's physical Fold gate, and Task 9's qualification
-record. The controller works directly on `main` under the repository rule and
-the approved plan; never run implementation subagents in parallel.
+The stopping boundary is clean. The exported archive was deleted, the
+temporary screen credential was cleared, the package was uninstalled, the
+disposable overlay was killed, and the generated host credential helper and
+screenshots were permanently removed. No ADB target or emulator process
+remains, and the protected `Pixel_10_Pro_Fold` AVD was never booted.
+
+On resume, rerun Task 7's complete seven-row smoke from Row 1 on a fresh sole
+verified disposable read-only AVD, then perform the same secure cleanup. Do
+not aggregate the partial run into a 7/7 qualification claim. Task 8's
+physical Fold gate and Tasks 9–10 have not started. The controller works
+directly on `main` under the repository rule and the approved plan; never run
+implementation subagents in parallel.
 
 ### Where things stand
 
@@ -89,8 +94,9 @@ The approved solution keeps `AuthorizationClient` and the existing
 and review-clean: initial identity failures are bounded, one
 `rejectResolution()` ViewModel path consumes incomplete launcher results, and
 the owner-present Cloud and physical-device gate is permanently documented.
-The exact release candidate is also built and review-clean. Owner-controlled
-Cloud and device qualification has not started.
+The exact release candidate is also built and review-clean. The bounded Cloud
+gate is complete; disposable qualification is incomplete and physical-device
+qualification has not started.
 
 - Approved design:
   `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
@@ -98,8 +104,8 @@ Cloud and device qualification has not started.
 - Approved implementation plan:
   `docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
   (`116b599`).
-- Execution mode: subagent-driven. Preflight and Tasks 1–5 are complete;
-  paused before Task 6's owner/security gate.
+- Execution mode: subagent-driven. Preflight and Tasks 1–6 are complete;
+  Task 7 is safely stopped after a partial run and must restart from Row 1.
 - Implementation base `driveAuthBase`: `816e134`. Task commits:
   `67820e7` bounds ordinary identity failures while preserving coroutine
   cancellation; `875c80e` adds one-shot `rejectResolution()` handling and
@@ -118,10 +124,12 @@ Cloud and device qualification has not started.
   Task 5's independent review returned 0 Critical, 0 Important, and 0 Minor
   findings.
 - `origin/main` remains at `3e1a5a7`. After this pause-documentation
-  checkpoint, local `main` is eight commits ahead; none has been pushed. The
+  checkpoint, local `main` is nine commits ahead; none has been pushed. The
   Task 5 version bump remains unstaged and uncommitted as required.
-- No certificate inspection, Cloud mutation, AVD/ADB action, Fold
-  qualification, 1.3.1 qualification record, tag, or push has started.
+- Task 6 recorded only the four bounded 4/4 PASS results. Task 7's first
+  disposable attempt passed Rows 1–6 but did not verify Row 7; its complete
+  secure cleanup is recorded above. No Fold qualification, 1.3.1
+  qualification record, tag, or push has started.
 - `RELEASING.md` now requires the owner-present Drive gate after disposable
   smoke and before qualification commit/tag, with `adb install -r` and the
   physical-workspace safety restrictions.
@@ -129,20 +137,17 @@ Cloud and device qualification has not started.
 ### Exact resume sequence
 
 1. Re-read the approved Drive spec, plan, and this plan's ignored SDD ledger.
-   Confirm Tasks 1–5 remain complete, `app/build.gradle.kts` contains only the
+   Confirm Tasks 1–6 remain complete, `app/build.gradle.kts` contains only the
    unstaged 1.3.1 / versionCode 5 bump, the candidate hash and size still
    match the values above, and the four protected entries are unchanged.
-2. Resume at Task 6 with the owner present. The owner inspects the exact APK
-   certificate outside captured output and verifies the Android client, Drive
-   API, consent audience, and least-privilege scope. Record only four bounded
-   PASS/FAIL results; identifiers and values never enter chat or git.
-3. After Task 6 passes, run Task 7's seven-row smoke on a sole verified
-   disposable read-only AVD and complete its cleanup. Task 6 has no dependency
-   on Task 7 or Task 9, but Task 8 waits for Task 7's no-ADB-target cleanup.
-4. Run Task 8 owner-present on the Fold using an in-place install. Never
+2. Restart Task 7 from Row 1 on a fresh sole verified disposable read-only AVD
+   using the exact Task 5 APK. Require all seven rows to pass in that run, then
+   delete the archive, clear the temporary credential, uninstall the package,
+   kill only the audited overlay, and verify zero ADB targets/processes.
+3. Run Task 8 owner-present on the Fold using an in-place install. Never
    uninstall or clear `app.opentasks`, run connected suites there, or select
    restore/preserve. Task 9 then consumes the bounded Task 5–8 evidence.
-5. Commit the version bump and qualification record only under Task 9. Even
+4. Commit the version bump and qualification record only under Task 9. Even
    after all gates pass, create and push `v1.3.1` only after a fresh explicit
    owner release decision in Task 10.
 

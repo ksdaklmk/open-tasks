@@ -26,17 +26,20 @@ component, database change, or backup-format change.
 **Spec:**
 `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
 
-**Execution Status (2026-08-21):** Preflight and Tasks 1–5 are complete and
-review-clean; execution is paused by the owner before Task 6. Runtime commits
+**Execution Status (2026-08-21):** Preflight and Tasks 1–6 are complete and
+review-clean. Runtime commits
 `67820e7` and `875c80e` bound initial identity failures and consume incomplete
 launcher results. Commit `da02ddc` makes the signed owner-present Drive check a
 permanent pre-tag gate. The combined focused suite passed, and the Task 4
 review of `816e134..da02ddc` returned 0 Critical, 0 Important, and 0 Minor
 findings. Task 5's final host gate, separate signed release assembly, APK
 verifier, and independent review passed for the exact uncommitted 1.3.1 /
-versionCode 5 candidate. No certificate inspection, Cloud mutation, device
-qualification, qualification record, tag, or push has started. Resume at Task
-6 only on the owner's explicit instruction.
+versionCode 5 candidate. Task 6's bounded owner gate is 4/4 PASS. Task 7 was
+safely stopped after Rows 1–6 passed; Row 7 was not verified, the disposable
+overlay and temporary material were fully cleaned, and Task 7 remains
+incomplete. Resume by rerunning all seven rows from Row 1 on a fresh sole
+verified disposable AVD. Physical Fold qualification, the qualification
+record, tag, and push have not started.
 
 ## Global Constraints
 
