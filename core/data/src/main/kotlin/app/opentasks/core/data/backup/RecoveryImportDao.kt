@@ -390,7 +390,13 @@ internal interface RecoveryImportDao {
                     AND NOT EXISTS (SELECT 1 FROM tasks AS t WHERE t.id = n.taskId)) +
             (SELECT COUNT(*) FROM notes AS n
                 WHERE n.projectId IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM projects AS p WHERE p.id = n.projectId))
+                    AND NOT EXISTS (SELECT 1 FROM projects AS p WHERE p.id = n.projectId)) +
+            (SELECT COUNT(*) FROM automation_rules AS r
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM workspaces AS w WHERE w.id = r.workspaceId
+                )) +
+            (SELECT COUNT(*) FROM my_day_entries AS e
+                WHERE NOT EXISTS (SELECT 1 FROM tasks AS t WHERE t.id = e.taskId))
         """,
     )
     suspend fun danglingReferenceCount(): Int

@@ -660,6 +660,21 @@ interface BackupCaptureDao {
         """,
     )
     suspend fun danglingMyDayEntryCount(): Int
+
+    /**
+     * A rule whose required workspace is missing would otherwise silently
+     * drop from capture through [automationRules]'s inner join. Optional rule
+     * references remain allowed so broken rules stay visible to the editor.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM automation_rules AS rule
+        WHERE NOT EXISTS (
+            SELECT 1 FROM workspaces AS workspace WHERE workspace.id = rule.workspaceId
+        )
+        """,
+    )
+    suspend fun danglingAutomationRuleWorkspaceCount(): Int
 }
 
 internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRecordV1> =
@@ -681,6 +696,9 @@ internal suspend fun BackupCaptureDao.allRecords(vaultId: String): List<BackupRe
         }
         require(ambiguousInboxWorkflowStatusCount(vaultId) == 0) {
             "Inbox workflow cannot be assigned to one workspace"
+        }
+        require(danglingAutomationRuleWorkspaceCount() == 0) {
+            "Automation rule has no workspace"
         }
         require(danglingMyDayEntryCount() == 0) { "My Day entry has no task" }
         vaults(vaultId).mapTo(this) { it.toBackupRecordV1() }

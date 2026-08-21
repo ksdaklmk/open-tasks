@@ -291,6 +291,30 @@ class RoomBackupCaptureSourceInstrumentedTest {
     }
 
     @Test
+    fun automationRuleWithoutWorkspaceIsRejected() = runBlocking {
+        seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)
+        insert(
+            "automation_rules",
+            "id" to "rule-without-workspace",
+            "workspaceId" to "workspace-missing",
+            "type" to "MY_DAY_AUTO_REMOVE",
+            "enabled" to 1,
+            "projectId" to null,
+            "statusId" to null,
+            "tagId" to null,
+            "dueInDays" to null,
+            "thresholdDays" to null,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                RoomBackupCaptureSource(database, VaultId("vault-alpha")).capture()
+            }
+        }
+        Unit
+    }
+
+    @Test
     fun unrelatedCrossVaultRelationsStillFailClosedWithAmbiguousInboxOwnership() {
         runBlocking {
             seedVaultGraph(scope = "alpha", vaultId = "vault-alpha", generation = 7)

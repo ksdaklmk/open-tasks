@@ -1131,6 +1131,67 @@ class BackupRecordImporterInstrumentedTest {
         Unit
     }
 
+    @Test
+    fun danglingReferenceCountIncludesAutomationRuleWorkspaceFromReplay() = runBlocking {
+        val request = request(
+            snapshot = completeVaultSnapshot(),
+            segments = listOf(
+                segment(
+                    listOf(
+                        recordUpsertEntry(
+                            operationId = "rule-without-workspace",
+                            generation = 13,
+                            sequence = 0,
+                            record = AutomationRuleEntity(
+                                id = "rule-without-workspace",
+                                workspaceId = "workspace-missing",
+                                type = "MY_DAY_AUTO_REMOVE",
+                                enabled = true,
+                                projectId = null,
+                                statusId = null,
+                                tagId = null,
+                                dueInDays = null,
+                                thresholdDays = null,
+                            ).toBackupRecordV1(),
+                        ),
+                    ),
+                ),
+            ),
+            expectedGeneration = BackupGeneration(13),
+        )
+
+        importer.importInto(staging(), request)
+
+        assertEquals(1, staging().recoveryImportDao().danglingReferenceCount())
+    }
+
+    @Test
+    fun danglingReferenceCountIncludesMyDayTaskFromReplay() = runBlocking {
+        val request = request(
+            snapshot = completeVaultSnapshot(),
+            segments = listOf(
+                segment(
+                    listOf(
+                        recordUpsertEntry(
+                            operationId = "my-day-without-task",
+                            generation = 13,
+                            sequence = 0,
+                            record = MyDayEntryEntity(
+                                taskId = "task-missing",
+                                rank = "a0",
+                            ).toBackupRecordV1(),
+                        ),
+                    ),
+                ),
+            ),
+            expectedGeneration = BackupGeneration(13),
+        )
+
+        importer.importInto(staging(), request)
+
+        assertEquals(1, staging().recoveryImportDao().danglingReferenceCount())
+    }
+
     /**
      * The staged record set is read through vault-scoped capture queries, so a
      * row bound to another vault is invisible to them and to every relation

@@ -168,10 +168,14 @@ None block 1.3.0. In priority order:
    snapshot capture. Unreachable from 1.3.0 writes, but a standing
    constraint on future rule-type additions; decide capture-side
    handling before any v11 rule work.
-4. Backup-boundary hardening: capture-side dangling guard for
-   `automation_rules` (asymmetric with `danglingMyDayEntryCount`);
-   widen `RecoveryImportDao.danglingReferenceCount()` for the two new
-   tables.
+4. ~~Backup-boundary hardening~~ **DONE**: capture now rejects an
+   `automation_rules` row whose required workspace is missing, while optional
+   broken rule references retain their editor-visible behavior;
+   `RecoveryImportDao.danglingReferenceCount()` now covers both
+   `automation_rules.workspaceId` and `my_day_entries.taskId`. The three
+   focused tests passed RED→GREEN, the full host gate and separate release
+   assembly passed, and the complete `:core:data` instrumented suite passed
+   215/215 on the disposable Fold8 AVD.
 5. Product polish: restore-detach not undoable / detaching move
    one-way (Task 9); inert-rule visibility in the automations editor;
    remove render-dead `HomeSnapshot.focusTasks`;
