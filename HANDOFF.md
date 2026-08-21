@@ -1,34 +1,31 @@
 # Open Tasks Handoff
 
-## Current resume point — Drive Task 6 complete; Task 7 safely stopped incomplete, 21 August 2026
+## Current state — Drive authorization release 1.3.1 complete, 21 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
-### Owner instruction — safe stop during Task 7
+### Release outcome
 
-The owner resumed the approved Drive release-authorization plan. Task 6 is
-complete: Android client, Drive API, consent audience, and least-privilege
-scope are 4/4 PASS, with no private identifier recorded. Task 7 then started
-against the exact uncommitted 1.3.1 / versionCode 5 signed candidate on one
-verified disposable read-only AVD. Rows 1–6 passed, including the encrypted
-archive round-trip, immediate app lock, and a bound Today widget rendering
-`0 open today · 5 overdue`. The real launcher exposed `Capture a task`, but
-the post-tap result was not verified before the owner requested a safe stop;
-Row 7 and Task 7 are therefore **not claimed complete**.
+The approved Drive release-authorization plan is complete. The physical Fold
+passed the in-place update, actionable canceled chooser, release-signed
+authorization, and post-force-stop persistence gates; after relaunch, Backup &
+recovery remained coherent at `Backed up`. The Cloud gate passed 4/4, the
+fresh disposable signed smoke passed 7/7, secure cleanup completed, and the
+protected `Pixel_10_Pro_Fold` AVD was never booted.
 
-The stopping boundary is clean. The exported archive was deleted, the
-temporary screen credential was cleared, the package was uninstalled, the
-disposable overlay was killed, and the generated host credential helper and
-screenshots were permanently removed. No ADB target or emulator process
-remains, and the protected `Pixel_10_Pro_Fold` AVD was never booted.
+Qualification commit `e4d25a9` carries versionName 1.3.1 / versionCode 5 and
+`docs/qualification/release-1.3.1-sideload.md`. After the owner's explicit
+release decision, annotated tag `v1.3.1` and `main` were pushed to origin on
+21 August 2026 (`3e1a5a7..e4d25a9`).
 
-On resume, rerun Task 7's complete seven-row smoke from Row 1 on a fresh sole
-verified disposable read-only AVD, then perform the same secure cleanup. Do
-not aggregate the partial run into a 7/7 qualification claim. Task 8's
-physical Fold gate and Tasks 9–10 have not started. The controller works
-directly on `main` under the repository rule and the approved plan; never run
-implementation subagents in parallel.
+Remote workflow run `32468886419` on `e4d25a9` finished with `verify` green,
+`release` green, and **compact API 36 green**. The expanded API 37.0
+observe-only lane failed in the already documented emulator/profile class:
+package and activity services broke, instrumentation reported `System has
+crashed`, and later modules could not resolve their activities. Compact ran
+the same seven-module matrix successfully, and the expanded lane showed no new
+app-regression signature.
 
 ### Where things stand
 
@@ -76,7 +73,7 @@ remains the authoritative execution record.
   process remains. The protected `Pixel_10_Pro_Fold` AVD was never
   booted this session.
 
-**A signed-release Google Drive defect is diagnosed and fully planned.** On
+**The signed-release Google Drive defect is fixed and released in 1.3.1.** On
 the owner's Samsung Galaxy Z Fold 8, the signed 1.3.0 APK opens Google's
 account chooser from Backup & recovery, but selecting the account returns to
 an unchanged card. The approved diagnosis has two boundaries:
@@ -89,14 +86,12 @@ an unchanged card. The approved diagnosis has two boundaries:
    presentation unchanged; an initial identity exception could also disappear
    through the generic ViewModel operation wrapper.
 
-The approved solution keeps `AuthorizationClient` and the existing
-`drive.appdata`-only backup architecture. Its repository half is now complete
-and review-clean: initial identity failures are bounded, one
-`rejectResolution()` ViewModel path consumes incomplete launcher results, and
-the owner-present Cloud and physical-device gate is permanently documented.
-The exact release candidate is also built and review-clean. The bounded Cloud
-gate is complete; disposable qualification is incomplete and physical-device
-qualification has not started.
+The released solution keeps `AuthorizationClient` and the existing
+`drive.appdata`-only backup architecture. Initial identity failures are
+bounded, one `rejectResolution()` ViewModel path consumes incomplete launcher
+results, and `194296e` retains whether a rejected resolution belongs to an
+initial connect so `Re-authorise` retries the truthful path. The permanent
+owner-present Cloud and physical-device gate is documented in `RELEASING.md`.
 
 - Approved design:
   `docs/superpowers/specs/2026-08-20-drive-release-authorization-hardening-design.md`
@@ -104,52 +99,42 @@ qualification has not started.
 - Approved implementation plan:
   `docs/superpowers/plans/2026-08-20-drive-release-authorization-hardening-plan.md`
   (`116b599`).
-- Execution mode: subagent-driven. Preflight and Tasks 1–6 are complete;
-  Task 7 is safely stopped after a partial run and must restart from Row 1.
+- Execution: Preflight and Tasks 1–10 are complete. The resumed physical and
+  release gates ran directly from the controller checkout on `main`.
 - Implementation base `driveAuthBase`: `816e134`. Task commits:
   `67820e7` bounds ordinary identity failures while preserving coroutine
   cancellation; `875c80e` adds one-shot `rejectResolution()` handling and
   complete launcher-result routing; `da02ddc` adds the permanent
-  owner-present signed Drive release gate to `RELEASING.md`.
+  owner-present signed Drive release gate to `RELEASING.md`; `194296e` makes
+  rejected initial connections retry the initial-connect path.
 - TDD evidence is recorded in the ignored plan ledger. The combined
   `GoogleDriveAuthorizationManagerTest` and `EncryptedBackupViewModelTest`
   suite passed at `da02ddc`. Independent per-task reviews and Task 4's exact
   `816e134..da02ddc` whole-patch review all returned 0 Critical, 0 Important,
   and 0 Minor findings; the Task 4 checklist passed 11/11.
-- Task 5 changed only `app/build.gradle.kts` to 1.3.1 / versionCode 5 and left
-  it unstaged and uncommitted. The final host gate and separate signed release
-  assembly passed; `scripts/verify-release-apk.sh` passed. The exact candidate
-  is 16,595,239 bytes with SHA-256
-  `a3bd0ad3169189469c5a1ff7311bec56f82019caa67b8eb40728bb0d1c3ab066`.
-  Task 5's independent review returned 0 Critical, 0 Important, and 0 Minor
-  findings.
-- `origin/main` remains at `3e1a5a7`. After this pause-documentation
-  checkpoint, local `main` is nine commits ahead; none has been pushed. The
-  Task 5 version bump remains unstaged and uncommitted as required.
-- Task 6 recorded only the four bounded 4/4 PASS results. Task 7's first
-  disposable attempt passed Rows 1–6 but did not verify Row 7; its complete
-  secure cleanup is recorded above. No Fold qualification, 1.3.1
-  qualification record, tag, or push has started.
+- Task 9 commit `e4d25a9` contains only the 1.3.1 / versionCode 5 bump and the
+  bounded qualification record. The full host gate, separate signed release
+  assembly, and `scripts/verify-release-apk.sh` passed for the exact released
+  candidate: 16,595,239 bytes with SHA-256
+  `99cc4942a23c6a023d987c97f1bcf0b77f2a88fa1977842c573b3ced63cbe676`.
+- Task 6 recorded only the four bounded 4/4 PASS results. Task 7's fresh
+  seven-row run passed 7/7 and completed secure cleanup. Task 8 records
+  in-place update PASS, canceled chooser PASS, and authorization PASS with
+  `Backed up`; after the verified force-stop, relaunch persistence also passed
+  with the card still at `Backed up`.
+- Tag `v1.3.1` points to `e4d25a9`; `main` and the tag are pushed. Remote run
+  `32468886419` is green for `verify`, `release`, and compact API 36. Its
+  expanded API 37.0 failure matches the known observe-only infrastructure
+  class and adds no release-blocking signature.
 - `RELEASING.md` now requires the owner-present Drive gate after disposable
   smoke and before qualification commit/tag, with `adb install -r` and the
   physical-workspace safety restrictions.
+- The four protected working-tree entries remain untouched and unstaged.
 
-### Exact resume sequence
+### Remaining work
 
-1. Re-read the approved Drive spec, plan, and this plan's ignored SDD ledger.
-   Confirm Tasks 1–6 remain complete, `app/build.gradle.kts` contains only the
-   unstaged 1.3.1 / versionCode 5 bump, the candidate hash and size still
-   match the values above, and the four protected entries are unchanged.
-2. Restart Task 7 from Row 1 on a fresh sole verified disposable read-only AVD
-   using the exact Task 5 APK. Require all seven rows to pass in that run, then
-   delete the archive, clear the temporary credential, uninstall the package,
-   kill only the audited overlay, and verify zero ADB targets/processes.
-3. Run Task 8 owner-present on the Fold using an in-place install. Never
-   uninstall or clear `app.opentasks`, run connected suites there, or select
-   restore/preserve. Task 9 then consumes the bounded Task 5–8 evidence.
-4. Commit the version bump and qualification record only under Task 9. Even
-   after all gates pass, create and push `v1.3.1` only after a fresh explicit
-   owner release decision in Task 10.
+No work remains in the 1.3.1 Drive authorization release plan. The open items
+below are post-release follow-ups and do not block the shipped patch.
 
 ### Closed item — compact prerequisite verified
 
