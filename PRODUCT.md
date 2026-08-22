@@ -176,6 +176,39 @@ release evidence live in the Stage 8 qualification record.
   workspaces.
 - Backup failure never blocks local editing, and attachment failure affects
   only the file operation.
+- A fresh installation starts at Welcome and makes no provider discovery or
+  application network call until the person explicitly chooses Google.
+- Account-free local use remains complete. Google authorization is optional
+  and serves encrypted backup/recovery only.
+- A new offline vault contains structural workspace/default workflow records
+  only and no demonstration or user content.
+- Insights may export one self-contained plaintext executive HTML dashboard
+  through person-directed download or share. Aggregate output is the default;
+  task detail requires an explicit opt-in.
+
+### Delivered onboarding, dashboard, and NFR programme
+
+Welcome now offers `Continue with Google`, `Continue offline`, and
+`Restore from this device` without automatic restore discovery. Offline is a
+complete primary path, not a degraded guest mode; Google never becomes
+identity or authority for local records.
+
+Insights generates one polished offline HTML page from its existing selection
+and metric engine. The report presents executive summary, portfolio health,
+milestone risk, overdue ageing, completion, estimate/actual, time allocation,
+blockers, and data caveats. It is downloadable and shareable without Google,
+carries a plaintext disclosure, loads no remote asset, and excludes
+descriptions, notes, attachment names, credentials, and provider metadata even
+when task detail is enabled.
+
+Release-like performance, size, archive/import bounds, dependency checksums,
+SBOMs, CodeQL, and dependency review are now measurable gates. The programme
+adds no telemetry, server, hosted report, reporting database, or parallel
+analytics path. The implemented boundary and remaining external release gates
+are recorded in
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+That programme is paused before release while five validated security
+findings in the same record are remediated.
 
 ## Brand Personality
 

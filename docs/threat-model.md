@@ -417,8 +417,48 @@ qualification is recorded in `docs/qualification/stage8-planning-surfaces.md`
 and `docs/qualification/release-1.2.0-sideload.md`, where remote CI and the
 release tag remain pending. Stage 7's release waivers do not carry into
 Stage 8.
-```
 
+## Implemented onboarding/dashboard/NFR addendum
+
+The following repository controls are implemented. Their external physical,
+provider, browser/accessibility, benchmark, and pushed-CI acceptance remains
+required before a release decision.
+
+| ID | Threat | Implemented control | Residual |
+|---|---|---|---|
+| T39 | A fresh install performs provider work or implies Google is required | No-vault composition renders Welcome with no discovery/network side effect; Google and portable discovery begin only on explicit matching actions; offline creates a structural empty vault | Google Play services outside the process may perform platform work, but Open Tasks initiates no request before opt-in |
+| T40 | Production fixtures disclose or corrupt a new person’s understanding of their data | Runtime code uses a production primary-workspace identity and structural seed only; tests inject fixtures explicitly; fresh-vault content counts are release-gated | Default workflow statuses are structural records required to create the first Inbox task |
+| T41 | Exported dashboard content executes markup/script or loads remote resources | Typed bounded DTO, escaped embedded JSON, CSP, `textContent` rendering, no external URL/network API, hostile-content tests, 10 MiB cap | The file is intentionally plaintext and its recipient/custody is outside the vault after explicit disclosure |
+| T42 | A dashboard leaks excessive workspace detail | Aggregate is default; detail is opt-in and allow-listed; descriptions, notes, activity bodies, attachment names/paths, account/provider data, recovery metadata and keys are always omitted | Project/tag labels and allowed task detail can still be sensitive and are covered by the plaintext disclosure |
+| T43 | A stale notification action mutates a locked vault or an old title remains visible | Concealed notifications omit actions; active reminder notifications are cancelled when the live process observes lock/title concealment | The receiver and widget mutation gate currently read cached lock state; synchronous elapsed-authority remediation is required before release |
+| T44 | Background delay leaves widget actions/titles authorised until the next foreground | One process coroutine expires the current lock in background and drives the existing widget concealment publisher; foreground/unlock/disable/delay changes cancel or reschedule it | Process death cancels that coroutine and can leave external content visible; a durable expiry callback is required before release |
+| T45 | Hostile archive/CSV input exhausts memory/CPU or triggers spreadsheet formulas | 512 MiB archive aggregate cap before body allocation/write, per-frame cancellation, O(1) attachment map, indexed project/tag resolution, 500/1,000 creation caps, and CR/LF formula neutralisation | Legitimate input above a declared product ceiling is rejected rather than partially imported |
+| T46 | Dependency or build-pipeline compromise reaches the signed app | Reviewed full-SHA Actions, CodeQL Java/Kotlin, high/critical dependency review, SHA-256 dependency verification, SBOM, existing crypto/database compatibility gates | The Gradle wrapper distribution is not yet checksum-pinned and the APK verifier does not yet authenticate the expected signer or all split outputs; both are release blockers |
+
+The HTML share cache is limited to `cache/share/reports/` under FileProvider,
+granted read-only to the chosen recipient, and swept on the next report
+operation. Download and share delete partial output on cancellation/failure.
+The current date-only share filename recreates the same FileProvider URI on a
+later same-day share, so an earlier live grant can reach the later report;
+unique share-only staging paths are required before release.
+No dashboard payload enters Android saved state, logs, CI artifacts, backup,
+or Google Drive automatically.
+
+Performance is also a security/availability property: active timers must not
+drive one-second full snapshot rebuilds; search/Insights must cancel stale
+work; archive/import/report memory is bounded; and physical-device benchmark
+evidence must cover the 5,000-record ceiling without OOM or ≥700 ms frames.
+
+Observed local evidence and every unrun external gate are recorded in
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+
+The sealed Standard review
+`df9a41d7-2458-4943-9c5d-957e98d484e9` found zero Critical/High, three
+Medium, and two Low issues. The open boundaries are the Gradle wrapper
+checksum, synchronous external lock authority, process-death-safe external
+concealment, expected release-signer identity across all APKs, and unique
+FileProvider share paths. All five remain release blockers despite their
+calibrated severities.
 
 ## Security acceptance gates
 
@@ -447,3 +487,18 @@ Before production release:
    widget, attachment, and app-lock privacy reviews.
 9. Complete Privacy Policy, OAuth verification, Play Data Safety, signing, and
    store operations outside the repository.
+10. Prove Welcome initiates no provider/network work, offline creation has zero
+    user records, explicit recovery retains rollback/non-overwrite guarantees,
+    and Google remains backup/recovery-only.
+11. Exercise hostile aggregate/detail dashboard content offline, verify CSP
+    and no external resources, prove the 10 MiB/partial-output boundaries, and
+    inspect both SAF and FileProvider custody disclosures.
+12. Prove locked stale reminder actions are inert, background lock expiry
+    conceals widget state, active private notifications are cancelled, and
+    maximum archive/CSV inputs meet their aggregate and creation caps.
+13. Resolve all five findings from scan
+    `df9a41d7-2458-4943-9c5d-957e98d484e9`; then require green
+    CodeQL/high-severity dependency review, Gradle wrapper and dependency
+    checksum verification, expected-signer checks for every APK, SBOM
+    inspection, per-ABI size caps, and fixed physical-device NFR evidence
+    before the programme’s release decision.

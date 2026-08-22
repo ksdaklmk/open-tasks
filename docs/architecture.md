@@ -734,3 +734,64 @@ review, which returned no Critical findings. Device qualification, signing,
 and release records live in `docs/qualification/stage8-planning-surfaces.md`
 and `docs/qualification/release-1.2.0-sideload.md`; remote CI and the release
 tag are recorded there as pending.
+
+## Implemented onboarding, dashboard, and NFR boundary
+
+The implementation follows
+`docs/superpowers/plans/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan.md`.
+
+Vault existence remains the onboarding authority. `VaultRuntimeState.NoVault`
+renders Welcome and performs no discovery. Offline creation continues through
+`VaultRuntimeManager.createNewVault()`, but Room’s production default seed is
+only the vault/member/primary-workspace structure plus
+`WorkflowStatus.defaults(null)`. A production `PRIMARY_WORKSPACE_ID` replaces
+runtime imports of demonstration fixtures; tests may still inject
+`OpenTasksFixtures.snapshot` explicitly. No “welcome seen” preference, account
+table, or identity layer is added.
+
+Drive and portable recovery remain in `RecoveryViewModel` and the existing
+staged activation path. Their work begins only after explicit Welcome actions.
+Google authorization remains a capability for encrypted `drive.appdata`
+backup/recovery and conveys no authority over local records. Unreadable and
+active-replacement states keep the protected recovery shell and never
+overwrite a vault implicitly.
+
+`ExecutiveDashboardHtmlWriter` lives in `core:data` and receives the existing
+`InsightsEngine`. A request freezes `WorkspaceSnapshot`,
+`InsightsSelection`, `Instant`, `ZoneId`, and the detail flag once. One bounded
+typed DTO is serialized into one offline HTML document; no reporting store,
+second metric engine, server, WebView, or web framework exists.
+`VaultTransferViewModel` extends its existing transfer mutex to stream a
+download through SAF or stage one share file under the existing FileProvider.
+Partial plaintext output is deleted on every non-success path.
+
+The repository no longer owns a one-second clock flow. Persisted time-entry
+changes update the snapshot, while Home locally derives running elapsed text.
+Search and Insights use one latest-wins job each and perform CPU work on
+`Dispatchers.Default`. Room FTS and startup deferral remain conditional on
+failed physical measurements.
+
+Release packaging supports arm64-v8a, x86_64, and a universal 64-bit fallback.
+Only proven-unused Bouncy Castle resources are excluded; crypto libraries,
+parameters, and the Tink keep rule remain. A separate `com.android.test`
+Macrobenchmark module and benchmark-only signature-protected fixture receiver
+measure empty/500/5,000-record datasets. Emulator execution is functional
+smoke; fixed API 36 arm64 evidence owns percentile decisions.
+
+Trust-boundary limits are 512 MiB for `.otvault`, 500 new projects and 1,000
+new tags per bounded Tasks CSV import, and 10 MiB for HTML. Reminder and widget
+actions currently consult cached lock state, while background expiry and
+external concealment depend on the live process. Independent review requires
+one synchronous elapsed-authority check and one durable expiry callback before
+release. CodeQL, high-severity dependency review, SHA-256 Gradle dependency
+verification, release SBOM, and per-ABI size checks join the release evidence;
+the Gradle wrapper ZIP and expected APK signer remain unpinned at this pause.
+Room stays v9 and authenticated backup format stays v1.
+
+Local implementation evidence and the still-pending physical/API 36,
+credentialled provider, browser/accessibility, benchmark, and remote-CI gates
+are separated explicitly in
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+That record also carries the five release-blocking findings from sealed scan
+`df9a41d7-2458-4943-9c5d-957e98d484e9`, including same-day FileProvider path
+reuse; Task 12 is paused before their remediation.

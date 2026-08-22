@@ -6,12 +6,14 @@ that adapts from a compact phone window to foldable and tablet workbenches.
 
 ## Current implementation
 
-The repository contains the production foundation and the first local
-workspace slice:
+The repository contains the production offline-first workspace:
 
 - Five-destination adaptive shell: Home, Tasks, Projects, Schedule, and More.
 - Compact navigation bar, medium/expanded navigation rail, and responsive
   list/detail task workbench.
+- A fresh-vault Welcome surface with equal-reach offline, optional Google
+  backup/recovery, and portable-device restore actions. Provider discovery is
+  explicit and an offline vault starts with no demonstration or user records.
 - Real date-derived Schedule views: a compact selected-day agenda and an
   expanded Monday–Sunday timeline with reminder context and an open-only
   unscheduled tray.
@@ -55,8 +57,8 @@ workspace slice:
   Archiving hides a project from active project views and universal project
   search while preserving every assigned task, milestone, and history record.
 - SQLCipher-backed `VaultRepository` with typed commands, immediate updates,
-  search, undo-ready results, immutable `StateFlow` UI state, and a one-time
-  sample-workspace seed.
+  search, undo-ready results, immutable `StateFlow` UI state, and a structural
+  production seed; sample workspaces remain explicit test fixtures.
 - Domain rules for workflows, recurrence, deterministic occurrences,
   dependencies, project progress, Bin retention, and time reconciliation.
 - Room schema and SQLCipher database factory with atomic task, timer, and
@@ -67,9 +69,8 @@ workspace slice:
 - Random 256-bit database key wrapped by a non-exportable Android Keystore key;
   only the AES-GCM envelope is stored in app-private preferences.
 - Tink AES-256-GCM record encryption and Argon2id recovery-key envelopes.
-- Provider-independent bounded cloud-object frames and an authenticated codec
-  that binds complete object identity, plus legacy hybrid logical clock and
-  merge primitives retained as well-tested internal foundations.
+- Provider-independent bounded cloud-object frames and authenticated codecs
+  that bind complete object identity for encrypted backup and recovery.
 - Additive encrypted Room v6 backup generations: accepted local mutations
   append ordered canonical journal rows in the same transaction, while every
   legacy outbox row remains preserved in the now read-only legacy table.
@@ -90,36 +91,27 @@ workspace slice:
 - Process restoration for the top-level route, selected task/project, task
   filters, list/editor scroll, quick-add/search and editor drafts. Active
   timers resume from their encrypted Room time entry and original start time.
+- Insights export of one bounded, self-contained executive HTML dashboard.
+  Aggregate output is the default, task titles are opt-in, remote assets are
+  forbidden, and download/share both disclose that the file is plaintext.
 - UK English is the fixed application locale, including UK spelling,
   day–month dates, 24-hour times and Bin terminology.
 
-The approved programme now keeps encrypted Room as the sole live authority.
+Encrypted Room remains the sole live authority.
 [HANDOFF.md](HANDOFF.md) is the single authoritative checkpoint, completed
-implementation history, and dependency-ordered backlog. Train 0 committed the
-verified P1/P2 baseline, and Train 1 Tasks 1.1–1.5 remain accepted historical
-evidence.
+implementation history, and dependency-ordered backlog. Local encrypted
+generations, portable packages, create-only Google Drive backup/recovery,
+recovery activation, attachments, widgets, import/export, reminders, planning
+surfaces, and executive reporting are implemented. Google remains optional
+and backup/recovery-scoped; release qualification still requires the explicit
+owner-present provider gate.
 
-Stage 2 local backup and the supplementary Android package are implemented.
-Room remains the sole live authority; local generations produce authenticated,
-verified recovery objects and one prepared portable package. Android Auto
-Backup and device transfer may copy only that exact encrypted file. Package
-readiness does not prove an Android upload, and a real encrypted Google
-transport upload/restore remains external qualification. Google authorisation,
-Drive transport, restore activation, writer takeover, remote merge, and
-attachments are not operational.
-
-The runnable app is deliberately a foundation slice, not the completed
-six-stage release. Encrypted task CRUD and core-field editing, project
-workbench editing, project creation and Archive/Restore, Bin/restore
-commands, search, timers, manual time history, and the local backup journal now
-persist across process restarts. Recurrence rules, series metadata, reminders and
-project workflows persist through the encrypted Room store. Transient route,
-selection, filter, scroll and draft context is also restored without
-overwriting unsaved editor text on the first repository emission. Stage 2 has
-copied the preserved legacy outbox into local backup-journal format without
-deleting the original rows. Drive transport, recovery activation, attachments,
-widgets, import/export, the remaining More subfeatures, and Play release
-operations are future milestones.
+The onboarding/dashboard/NFR implementation reached its local machine gates
+and is paused for five validated security remediations. Physical API 36
+performance and fresh-install evidence, credentialled Google restore, manual
+browser/accessibility review, and pushed security workflows also remain
+pending in
+[docs/qualification/onboarding-dashboard-nfr-acceptance.md](docs/qualification/onboarding-dashboard-nfr-acceptance.md).
 
 ## Build
 
@@ -135,12 +127,13 @@ Requirements:
   :feature:tasks:connectedDebugAndroidTest \
   :feature:projects:connectedDebugAndroidTest \
   :feature:schedule:connectedDebugAndroidTest \
-  :feature:more:connectedDebugAndroidTest
+  :feature:more:connectedDebugAndroidTest \
+  :feature:home:connectedDebugAndroidTest
 ./gradlew lintDebug
 ./gradlew :app:assembleDebug
 ```
 
-CI runs the unit/lint/build gate and the six instrumented suites on API 36 and
+CI runs the unit/lint/build gate and the seven instrumented suites on API 36 and
 37 emulators. Local device testing remains required for fold posture, rotation,
 split-screen, large text and assistive-technology acceptance.
 
@@ -160,8 +153,7 @@ Studio. The baseline intentionally adds neither ktlint nor Spotless.
 - `core/domain` — commands, repository contracts, dependency and recurrence rules.
 - `core/data` — Room/SQLCipher schema and local fixture repository.
 - `core/crypto` — Argon2id recovery envelopes and Tink AEAD.
-- `core/sync` — bounded provider-independent object formats and legacy,
-  non-product merge primitives.
+- `core/sync` — bounded provider-independent encrypted object formats.
 - `core/designsystem` — fixed light/dark palette, typography, shapes, and components.
 - `feature/*` — destination-specific Compose UI.
 

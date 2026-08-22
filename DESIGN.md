@@ -500,3 +500,57 @@ These surfaces are implemented and their whole-stage review is closed with
 zero Critical findings. Device confirmation of the drag, time-picker and
 digest legs belongs to the stage qualification record rather than to this
 document; see `docs/qualification/stage8-planning-surfaces.md`.
+
+## First-run and executive dashboard design (implemented)
+
+This design is implemented. The visual and behavioural contract remains
+`docs/superpowers/specs/2026-08-21-offline-onboarding-executive-dashboard-nfr-design.md`.
+
+### Welcome
+
+A missing vault renders Welcome, not recovery discovery. Compact is one calm,
+vertically balanced column; expanded may use a restrained identity/action
+split. Both reuse the light-only charcoal/ember system, system typography,
+dot motif, existing spacing, and 48 dp controls. No new illustration or design
+dependency is required.
+
+The screen contains `Welcome to Open Tasks`, one concise private-local
+workspace sentence, `Continue with Google` with the Google mark, the immediate
+disclosure `Optional — Google Drive is used only for encrypted backup and
+recovery.`, `Continue offline`, and `Restore from this device`. The rejected
+`Works offline` and `Encrypted locally` bubbles do not appear. Google and
+portable discovery begin only from their respective actions.
+
+The layout must preserve complete labels, logical TalkBack/focus order,
+visible keyboard focus, 48 dp targets, and action reachability at 200% font
+across compact, folding, and expanded windows.
+
+### Executive HTML
+
+Insights gains one `Generate executive dashboard` section with an
+off-by-default `Include task details` switch, `Download HTML`, `Share HTML`,
+progress/error state, and a permanent plaintext disclosure. It is not a new
+destination and has no embedded browser preview.
+
+The output is one responsive, semantic, self-contained page. It reuses the
+charcoal/ember palette, tabular numerals, thin rules, and dot runs; it avoids
+pie charts, decorative gradients, card-grid SaaS composition, solid area
+walls, and oversized hero metrics. Its executive story flows from summary
+through portfolio and milestone health, ageing, completion, estimate/actual,
+time allocation, blockers, and data-quality caveats. Project/status/risk
+filters and secondary disclosure work offline; the first useful reading does
+not depend on JavaScript. Budget, cost, team capacity, resource allocation,
+and benefits are labelled as not tracked; unavailable metrics are never
+rendered as invented zeros.
+
+Print styles, reduced motion, keyboard operation, visible focus, text
+alternatives, non-colour states, and 200% browser zoom are release gates.
+Aggregate data is the default. Optional task detail never includes
+descriptions, notes, activity bodies, attachment names, provider IDs, or
+credentials.
+
+Automated Compose and HTML tests cover the implemented layout, semantics,
+focus, hostile content, CSP, print, and reduced-motion contracts. The manual
+two-browser, print-preview, keyboard, zoom, and screen-reader release exercise
+is still pending in
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.

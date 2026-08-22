@@ -4,6 +4,16 @@ Distribution is signed sideload only. There is no Play Console, no AAB,
 and no CI signing; CI builds the release unsigned. Release assembly produces
 arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
 
+The programme-level record at
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md` is implementation
+evidence, not a release waiver. Its pending physical API 36, owner-present
+Google, browser/accessibility, benchmark, and pushed Security workflow gates
+must be completed in the version-specific release record before step 1 below.
+Release is additionally blocked on all five findings from sealed scan
+`df9a41d7-2458-4943-9c5d-957e98d484e9`: Gradle wrapper checksum, synchronous
+external lock authority, process-death-safe concealment, owner-controlled APK
+signer verification across every output, and unique FileProvider share paths.
+
 ## One-time setup
 
 1. Generate the release keystore OUTSIDE the repository:
