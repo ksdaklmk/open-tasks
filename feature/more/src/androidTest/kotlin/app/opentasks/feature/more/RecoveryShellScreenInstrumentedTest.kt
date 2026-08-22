@@ -44,17 +44,40 @@ class RecoveryShellScreenInstrumentedTest {
     val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
 
     @Test
-    fun noVaultOffersBothRecoverySourcesAndStartWithoutRestore() {
+    fun emptyDiscoveryOffersBackAndOfflineWithoutPassphrase() {
+        val back = AtomicInteger()
+        val offline = AtomicInteger()
         composeRule.setContent {
             OpenTasksTheme {
-                RecoveryShellScreen(mode = RecoveryShellMode.NoVault)
+                RecoveryShellScreen(
+                    mode = RecoveryShellMode.NoCandidates,
+                    canStartWithoutRestoring = true,
+                    onBack = { back.incrementAndGet() },
+                    onStartWithoutRestoring = { offline.incrementAndGet() },
+                )
             }
         }
 
-        composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
-        composeRule.onNodeWithTag("recovery-drive").assertHeightIsAtLeast(48.dp)
-        composeRule.onNodeWithTag("recovery-portable").assertHeightIsAtLeast(48.dp)
-        composeRule.onNodeWithText("Start without restoring").assertIsDisplayed()
+        composeRule.onNodeWithText("No encrypted backup found").assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-passphrase").assertDoesNotExist()
+        composeRule.onNodeWithText("Back").performClick()
+        assertEquals(1, back.get())
+        assertEquals(0, offline.get())
+        composeRule.onNodeWithText("Continue offline").performClick()
+        assertEquals(1, back.get())
+        assertEquals(1, offline.get())
+    }
+
+    @Test
+    fun activeReplacementEmptyDiscoveryNeverOffersNewVaultCreation() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                RecoveryShellScreen(mode = RecoveryShellMode.NoCandidates)
+            }
+        }
+
+        composeRule.onNodeWithText("No encrypted backup found").assertIsDisplayed()
+        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
     }
 
     @Test
@@ -67,7 +90,7 @@ class RecoveryShellScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("recovery-drive").assertIsDisplayed()
         composeRule.onNodeWithTag("recovery-portable").assertIsDisplayed()
-        composeRule.onNodeWithText("Start without restoring").assertDoesNotExist()
+        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
     }
 
     @Test
@@ -180,6 +203,6 @@ class RecoveryShellScreenInstrumentedTest {
             .performScrollTo()
             .assertIsDisplayed()
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
-        composeRule.onNodeWithText("Start without restoring").assertDoesNotExist()
+        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
     }
 }

@@ -23,6 +23,89 @@ import sun.misc.Unsafe
 
 class RecoveryViewModelTest {
     @Test
+    fun constructionAndRecreationDoNotDiscoverBackups() {
+        val driveCalls = AtomicInteger()
+        val portableCalls = AtomicInteger()
+        val savedState = SavedStateHandle()
+        val create = {
+            viewModel(
+                savedStateHandle = savedState,
+                discoverDrive = {
+                    driveCalls.incrementAndGet()
+                    RecoveryDiscoveryResult.Candidates(emptyList())
+                },
+                discoverPortable = {
+                    portableCalls.incrementAndGet()
+                    emptyList()
+                },
+            )
+        }
+
+        val first = create()
+        val recreated = create()
+
+        assertEquals(RecoveryPresentation.NoVault, first.presentation.value)
+        assertEquals(RecoveryPresentation.NoVault, recreated.presentation.value)
+        assertEquals(0, driveCalls.get())
+        assertEquals(0, portableCalls.get())
+    }
+
+    @Test
+    fun welcomeActionsCallOnlyTheirMatchingOperations() {
+        val driveCalls = AtomicInteger()
+        val portableCalls = AtomicInteger()
+        val offlineCalls = AtomicInteger()
+        val viewModel = viewModel(
+            discoverDrive = {
+                driveCalls.incrementAndGet()
+                RecoveryDiscoveryResult.Candidates(emptyList())
+            },
+            discoverPortable = {
+                portableCalls.incrementAndGet()
+                emptyList()
+            },
+            createNewVault = { offlineCalls.incrementAndGet() },
+        )
+
+        viewModel.discoverDrive()
+        assertTrue(waitUntil { driveCalls.get() == 1 })
+        assertEquals(0, portableCalls.get())
+        assertEquals(0, offlineCalls.get())
+
+        viewModel.returnToWelcome()
+        viewModel.discoverPortable()
+        assertTrue(waitUntil { portableCalls.get() == 1 })
+        assertEquals(1, driveCalls.get())
+        assertEquals(0, offlineCalls.get())
+
+        viewModel.returnToWelcome()
+        viewModel.startWithoutRestoring()
+        assertTrue(waitUntil { offlineCalls.get() == 1 })
+        assertEquals(1, driveCalls.get())
+        assertEquals(1, portableCalls.get())
+    }
+
+    @Test
+    fun emptyDiscoveryKeepsItsSourceAndBackReturnsToWelcome() {
+        val viewModel = viewModel()
+
+        viewModel.discoverDrive()
+        assertTrue(waitUntil {
+            viewModel.presentation.value ==
+                RecoveryPresentation.NoCandidates(RecoverySource.GOOGLE_DRIVE)
+        })
+
+        viewModel.returnToWelcome()
+        assertEquals(RecoveryPresentation.NoVault, viewModel.presentation.value)
+
+        viewModel.discoverPortable()
+        assertTrue(waitUntil {
+            viewModel.presentation.value ==
+                RecoveryPresentation.NoCandidates(RecoverySource.ANDROID_BACKUP_PACKAGE)
+        })
+    }
+
+    @Test
     fun discoveryShowsOnlyOpaqueHandlesAndSourcesBeforeAuthentication() {
         val viewModel = viewModel(
             discoverDrive = {

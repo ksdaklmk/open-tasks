@@ -200,10 +200,10 @@ class FoldContinuityInstrumentedTest {
         )
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("recovery-shell")
+                composeRule.onAllNodesWithTag("welcome-screen")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithText("Start without restoring").performClick()
+            composeRule.onNodeWithText("Continue offline").performClick()
             ownedVault = awaitCreatedVault()
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 composeRule.onAllNodesWithText("More", useUnmergedTree = true)
@@ -233,10 +233,10 @@ class FoldContinuityInstrumentedTest {
         ).setAction(MainActivity.QUICK_ADD_ACTION)
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("recovery-shell")
+                composeRule.onAllNodesWithTag("welcome-screen")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithText("Start without restoring").performClick()
+            composeRule.onNodeWithText("Continue offline").performClick()
             ownedVault = awaitCreatedVault()
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 composeRule.onAllNodesWithTag("quick-add-title")
@@ -298,12 +298,12 @@ class FoldContinuityInstrumentedTest {
             // instead of retrying it.
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 runCatching {
-                    composeRule.onAllNodesWithTag("recovery-shell")
+                    composeRule.onAllNodesWithTag("welcome-screen")
                         .fetchSemanticsNodes()
                         .isNotEmpty()
                 }.getOrDefault(false)
             }
-            composeRule.onNodeWithText("Start without restoring").performClick()
+            composeRule.onNodeWithText("Continue offline").performClick()
             ownedVault = awaitCreatedVault()
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)

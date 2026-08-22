@@ -31,6 +31,7 @@ sealed interface RecoveryPresentation {
     data object NoVault : RecoveryPresentation
     data object UnreadableVault : RecoveryPresentation
     data object Discovering : RecoveryPresentation
+    data class NoCandidates(val source: RecoverySource) : RecoveryPresentation
     data class Candidates(val values: List<RecoveryCandidateSummary>) : RecoveryPresentation
     data object Authenticating : RecoveryPresentation
     data class TakeoverConfirmation(
@@ -87,7 +88,7 @@ class RecoveryViewModel internal constructor(
 
     fun discoverDrive() = launchOperation {
         presented.value = RecoveryPresentation.Discovering
-        acceptDiscovery(discoverDriveCandidates(null))
+        acceptDiscovery(RecoverySource.GOOGLE_DRIVE, discoverDriveCandidates(null))
     }
 
     fun acceptResolution(data: Intent) {
@@ -95,7 +96,7 @@ class RecoveryViewModel internal constructor(
             operation.lock()
             try {
                 presented.value = RecoveryPresentation.Discovering
-                acceptDiscovery(discoverDriveCandidates(data))
+                acceptDiscovery(RecoverySource.GOOGLE_DRIVE, discoverDriveCandidates(data))
             } finally {
                 operation.unlock()
             }
@@ -104,7 +105,7 @@ class RecoveryViewModel internal constructor(
 
     fun discoverPortable() = launchOperation {
         presented.value = RecoveryPresentation.Discovering
-        showCandidates(discoverPortableCandidates())
+        showCandidates(RecoverySource.ANDROID_BACKUP_PACKAGE, discoverPortableCandidates())
     }
 
     fun restore(handle: String, passphrase: String) = launchOperation {
@@ -130,6 +131,10 @@ class RecoveryViewModel internal constructor(
         presented.value = RecoveryPresentation.Activating
     }
 
+    fun returnToWelcome() {
+        presented.value = RecoveryPresentation.NoVault
+    }
+
     fun retryUnreadableVault() {
         retryUnreadable()
     }
@@ -141,19 +146,26 @@ class RecoveryViewModel internal constructor(
         closeOperations()
     }
 
-    private suspend fun acceptDiscovery(result: RecoveryDiscoveryResult) {
+    private suspend fun acceptDiscovery(
+        source: RecoverySource,
+        result: RecoveryDiscoveryResult,
+    ) {
         when (result) {
-            is RecoveryDiscoveryResult.Candidates -> showCandidates(result.values)
+            is RecoveryDiscoveryResult.Candidates -> showCandidates(source, result.values)
             is RecoveryDiscoveryResult.ResolutionRequired -> resolutionEffects.send(result.pendingIntent)
             is RecoveryDiscoveryResult.Failed ->
                 presented.value = RecoveryPresentation.Failed(result.reason)
         }
     }
 
-    private fun showCandidates(values: List<RecoveryCandidate>) {
-        presented.value = RecoveryPresentation.Candidates(
-            values.map { RecoveryCandidateSummary(it.handle, it.source) },
-        )
+    private fun showCandidates(source: RecoverySource, values: List<RecoveryCandidate>) {
+        presented.value = if (values.isEmpty()) {
+            RecoveryPresentation.NoCandidates(source)
+        } else {
+            RecoveryPresentation.Candidates(
+                values.map { RecoveryCandidateSummary(it.handle, it.source) },
+            )
+        }
     }
 
     private fun acceptRecoveryResult(result: RecoveryResult) {

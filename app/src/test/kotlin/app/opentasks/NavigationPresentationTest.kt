@@ -21,11 +21,7 @@ class NavigationPresentationTest {
     }
 
     @Test
-    fun noVaultAndActiveReplacementUseDistinctRecoveryRoutes() {
-        assertEquals(
-            RecoveryShellMode.NoVault,
-            recoveryShellMode(false, RecoveryPresentation.NoVault, activeReplacement = false),
-        )
+    fun activeReplacementRetainsTheRecoveryShell() {
         assertEquals(
             RecoveryShellMode.ActiveReplacement,
             recoveryShellMode(false, RecoveryPresentation.NoVault, activeReplacement = true),

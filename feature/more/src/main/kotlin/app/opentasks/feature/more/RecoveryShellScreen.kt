@@ -34,10 +34,10 @@ import androidx.compose.ui.unit.dp
 import app.opentasks.core.model.RecoveryFailureCategory
 
 enum class RecoveryShellMode {
-    NoVault,
     ActiveReplacement,
     UnreadableVault,
     Discovering,
+    NoCandidates,
     Candidates,
     Authenticating,
     TakeoverConfirmation,
@@ -62,6 +62,8 @@ fun RecoveryShellScreen(
     onRestore: (String, String) -> Unit = { _, _ -> },
     onConfirmTakeover: () -> Unit = {},
     onStartWithoutRestoring: () -> Unit = {},
+    onBack: () -> Unit = {},
+    canStartWithoutRestoring: Boolean = false,
     onRetryUnreadable: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -87,15 +89,6 @@ fun RecoveryShellScreen(
             )
         }
         when (mode) {
-            RecoveryShellMode.NoVault -> item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RecoverySources(onDiscoverDrive, onDiscoverPortable)
-                    OutlinedButton(
-                        onClick = onStartWithoutRestoring,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text(stringResource(R.string.recovery_start_without_restore)) }
-                }
-            }
             RecoveryShellMode.ActiveReplacement -> item {
                 RecoverySources(onDiscoverDrive, onDiscoverPortable)
             }
@@ -117,6 +110,24 @@ fun RecoveryShellScreen(
             RecoveryShellMode.Authenticating,
             RecoveryShellMode.Activating,
             -> item { CircularProgressIndicator() }
+            RecoveryShellMode.NoCandidates -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        stringResource(R.string.recovery_no_candidates),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text(stringResource(R.string.recovery_back)) }
+                    if (canStartWithoutRestoring) {
+                        Button(
+                            onClick = onStartWithoutRestoring,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.welcome_offline)) }
+                    }
+                }
+            }
             RecoveryShellMode.Candidates -> item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     RecoverySources(onDiscoverDrive, onDiscoverPortable)

@@ -62,10 +62,10 @@ class MainActivityQuickAddInstrumentedTest {
             scenario = ActivityScenario.launch(scenarioIntent)
             scenario.onActivity(first::set)
             composeRule.waitUntil(timeoutMillis = 10_000) {
-                composeRule.onAllNodesWithTag("recovery-shell")
+                composeRule.onAllNodesWithTag("welcome-screen")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
+            composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
             composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
 
             scenario.onActivity { activity ->
@@ -85,7 +85,7 @@ class MainActivityQuickAddInstrumentedTest {
             }
             assertEquals(1, created.get())
             assertSame(first.get(), resumed.get())
-            composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
+            composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
             composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
         } finally {
             try {

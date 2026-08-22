@@ -9,6 +9,7 @@ import android.os.CancellationSignal
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -32,11 +33,13 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.VaultRuntimeState
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.domain.RecoverySource
 import app.opentasks.digest.DailyDigestCoordinator
 import app.opentasks.digest.DailyDigestIntents
 import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
+import app.opentasks.feature.more.WelcomeScreen
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockScreen
 import app.opentasks.lock.AppLockSettings
@@ -255,8 +258,9 @@ class MainActivity : ComponentActivity() {
         val resolutionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult(),
         ) { result ->
-            result.data?.takeIf { result.resultCode == RESULT_OK }
-                ?.let(recoveryViewModel::acceptResolution)
+            result.data?.takeIf { result.resultCode == RESULT_OK }?.let(
+                recoveryViewModel::acceptResolution,
+            ) ?: recoveryViewModel.returnToWelcome()
         }
         LaunchedEffect(recoveryViewModel) {
             for (pendingIntent in recoveryViewModel.resolutionEffects) {
@@ -265,33 +269,57 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-        val mode = recoveryShellMode(
-            runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
-            presentation = presentation,
-            activeReplacement = activeReplacement,
-        )
         val candidates = (presentation as? RecoveryPresentation.Candidates)
             ?.values
-            ?.map { RecoveryShellCandidate(it.handle, it.source.name == "GOOGLE_DRIVE") }
+            ?.map { RecoveryShellCandidate(it.handle, it.source == RecoverySource.GOOGLE_DRIVE) }
             .orEmpty()
+        val showWelcome = runtimeState == VaultRuntimeState.NoVault &&
+            presentation == RecoveryPresentation.NoVault &&
+            !activeReplacement
+        BackHandler(
+            enabled = runtimeState == VaultRuntimeState.NoVault &&
+                presentation != RecoveryPresentation.NoVault,
+            onBack = recoveryViewModel::returnToWelcome,
+        )
+        BackHandler(enabled = activeReplacement) {
+            if (presentation == RecoveryPresentation.NoVault) {
+                activeRecovery = false
+            } else {
+                recoveryViewModel.returnToWelcome()
+            }
+        }
         OpenTasksTheme {
-            RecoveryShellScreen(
-                mode = mode,
-                candidates = candidates,
-                takeoverGeneration =
-                    (presentation as? RecoveryPresentation.TakeoverConfirmation)?.generation,
-                failureReason = (presentation as? RecoveryPresentation.Failed)?.reason,
-                onDiscoverDrive = recoveryViewModel::discoverDrive,
-                onDiscoverPortable = recoveryViewModel::discoverPortable,
-                onRestore = recoveryViewModel::restore,
-                onConfirmTakeover = recoveryViewModel::confirmTakeover,
-                onStartWithoutRestoring = recoveryViewModel::startWithoutRestoring,
-                onRetryUnreadable = {
-                    lifecycleScope.launch {
-                        runCatching { vaultRuntimeManager.initialize() }
-                    }
-                },
-            )
+            if (showWelcome) {
+                WelcomeScreen(
+                    onContinueWithGoogle = recoveryViewModel::discoverDrive,
+                    onContinueOffline = recoveryViewModel::startWithoutRestoring,
+                    onRestoreFromDevice = recoveryViewModel::discoverPortable,
+                )
+            } else {
+                RecoveryShellScreen(
+                    mode = recoveryShellMode(
+                        runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
+                        presentation = presentation,
+                        activeReplacement = activeReplacement,
+                    ),
+                    candidates = candidates,
+                    takeoverGeneration =
+                        (presentation as? RecoveryPresentation.TakeoverConfirmation)?.generation,
+                    failureReason = (presentation as? RecoveryPresentation.Failed)?.reason,
+                    onDiscoverDrive = recoveryViewModel::discoverDrive,
+                    onDiscoverPortable = recoveryViewModel::discoverPortable,
+                    onRestore = recoveryViewModel::restore,
+                    onConfirmTakeover = recoveryViewModel::confirmTakeover,
+                    onStartWithoutRestoring = recoveryViewModel::startWithoutRestoring,
+                    onBack = recoveryViewModel::returnToWelcome,
+                    canStartWithoutRestoring = !activeReplacement,
+                    onRetryUnreadable = {
+                        lifecycleScope.launch {
+                            runCatching { vaultRuntimeManager.initialize() }
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -422,9 +450,9 @@ internal fun recoveryShellMode(
     runtimeRecovering -> RecoveryShellMode.Activating
     presentation == RecoveryPresentation.NoVault && activeReplacement ->
         RecoveryShellMode.ActiveReplacement
-    presentation == RecoveryPresentation.NoVault -> RecoveryShellMode.NoVault
     presentation == RecoveryPresentation.UnreadableVault -> RecoveryShellMode.UnreadableVault
     presentation == RecoveryPresentation.Discovering -> RecoveryShellMode.Discovering
+    presentation is RecoveryPresentation.NoCandidates -> RecoveryShellMode.NoCandidates
     presentation is RecoveryPresentation.Candidates -> RecoveryShellMode.Candidates
     presentation == RecoveryPresentation.Authenticating -> RecoveryShellMode.Authenticating
     presentation == RecoveryPresentation.Activating -> RecoveryShellMode.Activating

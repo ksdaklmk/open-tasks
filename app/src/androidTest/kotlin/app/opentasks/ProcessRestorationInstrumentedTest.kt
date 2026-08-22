@@ -708,8 +708,9 @@ class MainActivityRecoveryRestorationInstrumentedTest {
 
     @Test
     fun productionRecoveryRouteClearsPassphraseAfterActivityRecreation() {
-        composeRule.onNodeWithTag("recovery-shell").assertIsDisplayed()
-        composeRule.onNodeWithTag("recovery-portable").performClick()
+        composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("recovery-shell").assertDoesNotExist()
+        composeRule.onNodeWithText("Restore from this device").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("recovery-passphrase")
                 .fetchSemanticsNodes().isNotEmpty()
