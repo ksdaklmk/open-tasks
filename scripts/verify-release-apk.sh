@@ -3,7 +3,7 @@ set -euo pipefail
 
 export LC_ALL=C
 
-sdk="$HOME/Library/Android/sdk"
+sdk="${OPEN_TASKS_ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
 
 fail() { echo "verify-release-apk FAIL: $1" >&2; exit 1; }
 
