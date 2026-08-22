@@ -120,21 +120,14 @@ import app.opentasks.core.model.ZonedMoment
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -4644,7 +4637,7 @@ class RoomVaultRepository(
                                     workspaceDao.observeTaskTags(),
                                     workspaceDao.observeChecklistItems(),
                                     workspaceDao.observeReminders(),
-                                    observeTimeEntriesWithClock(),
+                                    database.timeEntryDao().observeAll(),
                                     workspaceDao.observeNotes(),
                                 ) { taskTags, checklist, reminders, timeEntries, notes ->
                                     RelationRows(taskTags, checklist, reminders, timeEntries, notes)
@@ -4675,21 +4668,6 @@ class RoomVaultRepository(
         }
         return combine(baseWithWorkflow, relations, ::buildSnapshot)
     }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun observeTimeEntriesWithClock(): Flow<TimedTimeEntries> =
-        database.timeEntryDao().observeAll().flatMapLatest { entries ->
-            if (entries.none { it.stoppedAtEpochMillis == null }) {
-                flowOf(TimedTimeEntries(entries, now()))
-            } else {
-                flow {
-                    while (currentCoroutineContext().isActive) {
-                        emit(TimedTimeEntries(entries, now()))
-                        delay(TIMER_TICK_MILLIS)
-                    }
-                }
-            }
-        }
 
     private fun buildSnapshot(
         base: BaseRows,
@@ -4724,7 +4702,8 @@ class RoomVaultRepository(
         }
         val projects = base.projects.map(ProjectEntity::toModel)
         val projectNames = projects.associateBy(Project::id)
-        val timeEntries = relations.timeEntries.entries.map(TimeEntryEntity::toModel)
+        val currentTime = now()
+        val timeEntries = relations.timeEntries.map(TimeEntryEntity::toModel)
         val activeEntry = timeEntries
             .filter { it.stoppedAt == null }
             .maxWithOrNull(compareBy(TimeEntry::startedAt).thenBy { it.id.value })
@@ -4737,14 +4716,11 @@ class RoomVaultRepository(
                     taskTitle = it.title,
                     projectName = it.projectId?.let(projectNames::get)?.name,
                     startedAt = entry.startedAt,
-                    elapsed = Duration.between(
-                        entry.startedAt,
-                        relations.timeEntries.at,
-                    ).coerceAtLeast(Duration.ZERO),
+                    elapsed = Duration.between(entry.startedAt, currentTime)
+                        .coerceAtLeast(Duration.ZERO),
                 )
             }
         }
-        val currentTime = relations.timeEntries.at
         val reconciliation = TimerRules.reconcile(timeEntries, currentTime)
         val activeTasks = tasks.filter { it.deletedAt == null }
         val openTasks = activeTasks.filterNot(Task::isCompleted)
@@ -4914,7 +4890,7 @@ class RoomVaultRepository(
         val taskTags: List<TaskTagEntity>,
         val checklist: List<ChecklistItemEntity>,
         val reminders: List<ReminderEntity>,
-        val timeEntries: TimedTimeEntries,
+        val timeEntries: List<TimeEntryEntity>,
         val notes: List<NoteEntity> = emptyList(),
         val attachments: List<AttachmentEntity> = emptyList(),
         val activityEntries: List<ActivityEntryEntity> = emptyList(),
@@ -4922,11 +4898,6 @@ class RoomVaultRepository(
         val savedViews: List<SavedViewEntity> = emptyList(),
         val automationRules: List<AutomationRuleEntity> = emptyList(),
         val myDayEntries: List<MyDayEntryEntity> = emptyList(),
-    )
-
-    private data class TimedTimeEntries(
-        val entries: List<TimeEntryEntity>,
-        val at: Instant,
     )
 
     internal companion object {
@@ -4967,7 +4938,6 @@ class RoomVaultRepository(
         const val MAX_SAVED_VIEW_QUERY_LENGTH = 500
         const val MAX_AUTOMATION_RULES = 20
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
-        const val TIMER_TICK_MILLIS = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         val VAULT_ID = VaultId("vault-primary")
         const val TASK_OBJECT_TYPE = "task"

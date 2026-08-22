@@ -1,6 +1,9 @@
 package app.opentasks.feature.home
 
 import android.view.ViewConfiguration
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -18,10 +21,14 @@ import app.opentasks.core.model.InstantRange
 import app.opentasks.core.model.MetricComparison
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.TaskId
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -53,6 +60,16 @@ private val OpenTasksFixtures.insightsSummary: InsightsSnapshot
         ),
     )
 
+private class MutableTestClock(
+    var current: Instant,
+) : Clock() {
+    override fun instant(): Instant = current
+
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+
+    override fun withZone(zone: ZoneId): Clock = Clock.fixed(current, zone)
+}
+
 @RunWith(AndroidJUnit4::class)
 class HomeScreenInstrumentedTest {
     private val composeRule = createComposeRule()
@@ -61,6 +78,78 @@ class HomeScreenInstrumentedTest {
     // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
     val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
+
+    @Test
+    fun activeTimerTicksLocallyWithoutReplacingItsSnapshot() {
+        composeRule.mainClock.autoAdvance = false
+        val timer = checkNotNull(OpenTasksFixtures.snapshot.home.activeTimer)
+        val activeTimer = timer.copy(elapsed = Duration.ZERO)
+        val snapshot = OpenTasksFixtures.snapshot.home.copy(
+            activeTimer = activeTimer,
+        )
+        val clock = MutableTestClock(timer.startedAt)
+        composeRule.setContent {
+            OpenTasksTheme {
+                HomeScreen(
+                    snapshot = snapshot,
+                    projectNames = emptyMap(),
+                    onOpenSearch = {}, onPlanToday = {},
+                    onOpenTask = {}, onCompleteTask = {},
+                    onOpenProject = {},
+                    insightsSummary = OpenTasksFixtures.insightsSummary,
+                    onOpenInsights = {}, onToggleTimer = {},
+                    onRemoveFromMyDay = {},
+                    onMoveMyDayEntry = { _, _ -> },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
+                    clock = clock,
+                )
+            }
+        }
+        composeRule.onNodeWithText("00:00:00").assertIsDisplayed()
+
+        clock.current = timer.startedAt.plusSeconds(2)
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("00:00:02").assertIsDisplayed()
+        assertSame(activeTimer, snapshot.activeTimer)
+    }
+
+    @Test
+    fun removingActiveTimerDisposesItsLocalTicker() {
+        composeRule.mainClock.autoAdvance = false
+        val timer = checkNotNull(OpenTasksFixtures.snapshot.home.activeTimer)
+        var snapshot by mutableStateOf(OpenTasksFixtures.snapshot.home)
+        val clock = MutableTestClock(timer.startedAt.plus(timer.elapsed))
+        composeRule.setContent {
+            OpenTasksTheme {
+                HomeScreen(
+                    snapshot = snapshot,
+                    projectNames = emptyMap(),
+                    onOpenSearch = {}, onPlanToday = {},
+                    onOpenTask = {}, onCompleteTask = {},
+                    onOpenProject = {},
+                    insightsSummary = OpenTasksFixtures.insightsSummary,
+                    onOpenInsights = {}, onToggleTimer = {},
+                    onRemoveFromMyDay = {},
+                    onMoveMyDayEntry = { _, _ -> },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
+                    clock = clock,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Active timer").assertIsDisplayed()
+
+        composeRule.runOnIdle { snapshot = snapshot.copy(activeTimer = null) }
+        clock.current = clock.current.plusSeconds(30)
+        composeRule.mainClock.advanceTimeBy(30_000)
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Active timer").assertDoesNotExist()
+    }
 
     @Test
     fun myDaySectionRendersRankOrderDimsCompletedAndFallsBackToMenu() {

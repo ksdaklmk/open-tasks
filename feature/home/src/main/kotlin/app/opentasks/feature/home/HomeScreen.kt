@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,9 +67,12 @@ import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.ProjectId
 import app.opentasks.core.model.Task
 import app.opentasks.core.model.TaskId
-import java.time.format.DateTimeFormatter
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
@@ -87,6 +91,7 @@ fun HomeScreen(
     suggestions: List<Task>,
     onAddToMyDay: (TaskId) -> Unit,
     modifier: Modifier = Modifier,
+    clock: Clock = Clock.systemDefaultZone(),
 ) {
     val myDayRowBounds = remember { mutableStateMapOf<TaskId, Rect>() }
     var myDayBounds by remember { mutableStateOf(Rect.Zero) }
@@ -202,16 +207,17 @@ fun HomeScreen(
 
             snapshot.activeTimer?.let { timer ->
                 item {
+                    val elapsed = rememberRunningElapsed(timer.startedAt, clock)
                     Spacer(Modifier.height(16.dp))
                     ActiveTimer(
                         title = timer.taskTitle,
                         project = timer.projectName,
                         elapsed = buildString {
-                            append("%02d".format(timer.elapsed.toHours()))
+                            append("%02d".format(elapsed.toHours()))
                             append(':')
-                            append("%02d".format(timer.elapsed.toMinutesPart()))
+                            append("%02d".format(elapsed.toMinutesPart()))
                             append(':')
-                            append("%02d".format(timer.elapsed.toSecondsPart()))
+                            append("%02d".format(elapsed.toSecondsPart()))
                         },
                         onToggle = onToggleTimer,
                     )
@@ -463,6 +469,24 @@ private fun homeDurationText(duration: Duration): String {
             remainingMinutes,
         )
     }
+}
+
+@Composable
+private fun rememberRunningElapsed(
+    startedAt: Instant,
+    clock: Clock,
+): Duration {
+    fun currentElapsed(): Duration = Duration.between(startedAt, clock.instant())
+        .coerceAtLeast(Duration.ZERO)
+
+    var elapsed by remember(startedAt, clock) { mutableStateOf(currentElapsed()) }
+    LaunchedEffect(startedAt, clock) {
+        while (true) {
+            delay(1_000)
+            elapsed = currentElapsed()
+        }
+    }
+    return elapsed
 }
 
 @Composable

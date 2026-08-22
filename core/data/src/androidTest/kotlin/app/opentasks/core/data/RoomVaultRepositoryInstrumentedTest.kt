@@ -55,11 +55,13 @@ import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkflowStatusId
 import app.opentasks.core.model.ZonedMoment
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -78,6 +80,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class RoomVaultRepositoryInstrumentedTest {
@@ -729,6 +732,38 @@ class RoomVaultRepositoryInstrumentedTest {
         assertEquals(task.id, restored.taskId)
         assertEquals(startedAt, restored.startedAt)
         assertEquals(Duration.ofHours(1), restored.elapsed)
+    }
+
+    @Test
+    fun activeTimerDoesNotReemitWorkspaceWithoutADatabaseWrite() = runBlocking {
+        val startedAt = Instant.parse("2026-07-27T03:00:00Z")
+        val currentTime = AtomicReference(startedAt)
+        openRepository(now = currentTime::get)
+        repository!!.execute(DomainCommand.StopTimer)
+        val task = repository!!.currentWorkspace().tasks.first { it.deletedAt == null }
+        repository!!.execute(DomainCommand.StartTimer(task.id, startedAt))
+        val running = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace()
+                .map { it.home.activeTimer }
+                .filterNotNull()
+                .first { it.taskId == task.id }
+        }
+
+        currentTime.set(startedAt.plusSeconds(5))
+        val unexpectedEmission = withTimeoutOrNull(1_500) {
+            repository!!.observeWorkspace().drop(1).first()
+        }
+
+        assertNull(unexpectedEmission)
+        repository!!.execute(DomainCommand.StopTimer)
+        val stopped = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.home.activeTimer == null &&
+                    snapshot.timeEntries.any { it.id == running.entryId && it.stoppedAt != null }
+            }
+        }.timeEntries.single { it.id == running.entryId }
+        currentTime.set(startedAt.plusSeconds(30))
+        assertEquals(Duration.ofSeconds(5), stopped.duration(currentTime.get()))
     }
 
     @Test
