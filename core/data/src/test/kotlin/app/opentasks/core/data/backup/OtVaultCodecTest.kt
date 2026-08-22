@@ -182,6 +182,71 @@ class OtVaultCodecTest {
     }
 
     @Test
+    fun declaredFramesExactlyAtTheAggregateLimitAreAccepted() {
+        val source = CountingInputStream(intBytes(1) + byteArrayOf(7))
+        val budget = ArchiveByteBudget(OtVaultCodec.MAX_ARCHIVE_BYTES - 5)
+
+        val frame = codec.readFrame(source, budget)
+
+        assertArrayEquals(byteArrayOf(7), frame)
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, budget.byteCount)
+        assertEquals(5L, source.bytesRead)
+    }
+
+    @Test
+    fun declaredFrameOneBytePastTheAggregateLimitIsRejectedBeforeItsBody() {
+        val source = CountingInputStream(intBytes(2) + byteArrayOf(7, 8))
+        val budget = ArchiveByteBudget(OtVaultCodec.MAX_ARCHIVE_BYTES - 5)
+
+        assertThrows(OtVaultFormatException::class.java) {
+            codec.readFrame(source, budget)
+        }
+
+        assertEquals(4L, source.bytesRead)
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES - 5, budget.byteCount)
+    }
+
+    @Test
+    fun oversizedDeclaredFrameIsRejectedBeforeAllocationOrBodyRead() {
+        val source = CountingInputStream(intBytes(Int.MAX_VALUE) + ByteArray(64))
+        val budget = ArchiveByteBudget(0)
+
+        assertThrows(OtVaultFormatException::class.java) {
+            codec.readFrame(source, budget)
+        }
+
+        assertEquals(4L, source.bytesRead)
+        assertEquals(0L, budget.byteCount)
+    }
+
+    @Test
+    fun truncatedDeclaredFrameFailsClosed() {
+        val source = CountingInputStream(intBytes(8) + byteArrayOf(1, 2))
+        val budget = ArchiveByteBudget(0)
+
+        assertThrows(OtVaultFormatException::class.java) {
+            codec.readFrame(source, budget)
+        }
+
+        assertEquals(6L, source.bytesRead)
+    }
+
+    @Test
+    fun aggregateLimitAccountsForEveryFramePrefixAndBody() {
+        val frame = intBytes(1) + byteArrayOf(9)
+        val source = CountingInputStream(frame + frame + frame + frame)
+        val budget = ArchiveByteBudget(OtVaultCodec.MAX_ARCHIVE_BYTES - 15)
+
+        repeat(3) { assertArrayEquals(byteArrayOf(9), codec.readFrame(source, budget)) }
+        assertThrows(OtVaultFormatException::class.java) {
+            codec.readFrame(source, budget)
+        }
+
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, budget.byteCount)
+        assertEquals(19L, source.bytesRead)
+    }
+
+    @Test
     fun wrongMagicIsRejected() {
         val key = crypto.createKey()
         try {

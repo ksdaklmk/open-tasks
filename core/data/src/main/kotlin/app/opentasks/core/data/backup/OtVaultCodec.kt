@@ -80,6 +80,24 @@ sealed interface OtVaultReadEvent {
  */
 class OtVaultFormatException(message: String) : Exception(message)
 
+internal class ArchiveByteBudget(initialBytes: Long) {
+    var byteCount: Long = initialBytes
+        private set
+
+    init {
+        if (initialBytes !in 0..OtVaultCodec.MAX_ARCHIVE_BYTES) {
+            throw OtVaultFormatException("Vault archive exceeds its aggregate bound")
+        }
+    }
+
+    fun reserve(byteCount: Long) {
+        if (byteCount < 0 || byteCount > OtVaultCodec.MAX_ARCHIVE_BYTES - this.byteCount) {
+            throw OtVaultFormatException("Vault archive exceeds its aggregate bound")
+        }
+        this.byteCount += byteCount
+    }
+}
+
 /**
  * Reads and writes the frozen `.otvault` v1 archive format.
  *
@@ -96,8 +114,8 @@ class OtVaultFormatException(message: String) : Exception(message)
  * Every frame is encrypted under the content key at an archive-scoped object
  * ID, so no archive object can be replayed into the Stage 3 remote namespace
  * and no remote object can be replayed into an archive. Nothing is buffered
- * beyond the single frame in flight, so archives have no aggregate size bound;
- * the frozen per-frame bounds still apply.
+ * beyond the single frame in flight, and the whole archive is capped at
+ * [MAX_ARCHIVE_BYTES] in addition to the frozen per-frame bounds.
  *
  * [readAll] authenticates every frame before it is delivered, verifies the
  * inventory last — object count, per-object digest, and the header digest —
@@ -305,13 +323,20 @@ class OtVaultCodec(
         header: OtVaultHeaderV1,
         onEvent: (OtVaultReadEvent) -> Unit,
     ) {
+        val budget = canonicalHeaderBytes(header).let { bytes ->
+            try {
+                ArchiveByteBudget(bytes.size.toLong())
+            } finally {
+                bytes.fill(0)
+            }
+        }
         val expectedHeaderDigest = headerDigest(header)
         val observed = mutableListOf<OtVaultInventoryEntryV1>()
         var snapshotRecords = 0L
         var attachmentManifests = 0L
         var inventoryRead = false
         while (!inventoryRead) {
-            val frame = readFrame(source)
+            val frame = readFrame(source, budget)
                 ?: throw OtVaultFormatException("Vault archive ends before its inventory")
             try {
                 decrypt(frame, key).use { decrypted ->
@@ -519,7 +544,10 @@ class OtVaultCodec(
         }
     }
 
-    private fun readFrame(source: InputStream): ByteArray? {
+    internal fun readFrame(
+        source: InputStream,
+        budget: ArchiveByteBudget,
+    ): ByteArray? {
         val first = source.read()
         if (first < 0) return null
         val prefix = ByteArray(LENGTH_PREFIX_BYTES)
@@ -529,6 +557,7 @@ class OtVaultCodec(
         if (length < 1 || length > MAX_FRAME_BYTES) {
             throw OtVaultFormatException("Vault archive object length is outside its bound")
         }
+        budget.reserve(LENGTH_PREFIX_BYTES.toLong() + length)
         return readExact(source, length)
     }
 
@@ -822,6 +851,7 @@ class OtVaultCodec(
         const val MAGIC = "OPEN_TASKS_VAULT"
         const val FORMAT_VERSION = 1
         const val MAX_HEADER_BYTES = 16 * 1024
+        const val MAX_ARCHIVE_BYTES: Long = 512L * 1024 * 1024
 
         /**
          * The chunk domain every archive chunk frame binds.

@@ -3,6 +3,7 @@ package app.opentasks.backup
 import app.opentasks.core.crypto.VaultContentKeyStore
 import app.opentasks.core.data.backup.BackupSnapshotCodec
 import app.opentasks.core.data.backup.OtVaultCodec
+import app.opentasks.core.data.backup.OtVaultFormatException
 import app.opentasks.core.data.backup.OtVaultHeaderV1
 import app.opentasks.core.data.backup.OtVaultInventoryEntryV1
 import app.opentasks.core.data.backup.StructuredBackupCapture
@@ -178,7 +179,7 @@ class OtVaultExporter(
             return genericFailure()
         }
         return try {
-            val counting = CountingOutputStream(destination)
+            val counting = BoundedCountingOutputStream(destination)
             val header = OtVaultHeaderV1(
                 formatVersion = OtVaultCodec.FORMAT_VERSION,
                 vaultId = vaultId,
@@ -289,22 +290,27 @@ class OtVaultExporter(
  */
 internal const val OT_VAULT_EXPORT_FAILED_REASON = "The vault could not be exported."
 
-/** Counts every byte written to [delegate] without buffering any of it. */
-private class CountingOutputStream(private val delegate: OutputStream) : OutputStream() {
+/** Bounds and counts every byte written to [delegate] without buffering it. */
+internal class BoundedCountingOutputStream(
+    private val delegate: OutputStream,
+) : OutputStream() {
     var count = 0L
         private set
 
     override fun write(b: Int) {
+        reserve(1)
         delegate.write(b)
         count += 1
     }
 
     override fun write(b: ByteArray) {
+        reserve(b.size.toLong())
         delegate.write(b)
         count += b.size
     }
 
     override fun write(b: ByteArray, off: Int, len: Int) {
+        reserve(len.toLong())
         delegate.write(b, off, len)
         count += len
     }
@@ -312,6 +318,12 @@ private class CountingOutputStream(private val delegate: OutputStream) : OutputS
     override fun flush() = delegate.flush()
 
     override fun close() = delegate.close()
+
+    private fun reserve(byteCount: Long) {
+        if (byteCount < 0 || byteCount > OtVaultCodec.MAX_ARCHIVE_BYTES - count) {
+            throw OtVaultFormatException("Vault archive exceeds its aggregate bound")
+        }
+    }
 }
 
 /**

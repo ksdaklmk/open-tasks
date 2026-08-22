@@ -192,7 +192,7 @@ class WorkspaceCsvWriter(private val zone: ZoneId) {
     }
 
     companion object {
-        private val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@', '\t')
+        private val FORMULA_PREFIXES = setOf('=', '+', '-', '@', '\t', '\r', '\n')
 
         private val UK_DATE_TIME_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMMM yyyy HH:mm", Locale.UK)

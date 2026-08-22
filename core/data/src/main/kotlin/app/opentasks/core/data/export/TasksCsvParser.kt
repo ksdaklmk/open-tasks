@@ -508,8 +508,15 @@ private fun resolveTaskImport(
     if (rows.size > MAX_IMPORT_ROWS) {
         return invalid(null, RejectionReason.IMPORT_TOO_LARGE, "Import at most $MAX_IMPORT_ROWS tasks.")
     }
-    val newProjects = linkedSetOf<String>()
-    val newTags = linkedSetOf<String>()
+    val activeProjects = snapshot.projects.filter { it.archivedAt == null }
+    val existingProjectsByExact = activeProjects.associateBy(Project::name)
+    val existingProjectsByFolded = activeProjects.associateBy { it.name.folded() }
+    val existingTagsByExact = snapshot.tags.associateBy(Tag::name)
+    val existingTagsByFolded = snapshot.tags.associateBy { it.name.folded() }
+    val newProjectsByExact = linkedMapOf<String, String>()
+    val newProjectsByFolded = linkedMapOf<String, String>()
+    val newTagsByExact = linkedMapOf<String, String>()
+    val newTagsByFolded = linkedMapOf<String, String>()
     val resolved = mutableListOf<ResolvedRow>()
     rows.forEach { row ->
         validateRow(row)?.let { return it }
@@ -517,18 +524,27 @@ private fun resolveTaskImport(
         val project = if (projectName == null) {
             ProjectSelection.Inbox
         } else {
-            snapshot.projects.firstOrNull { it.archivedAt == null && it.name == projectName }
-                ?.let(ProjectSelection::Existing)
-                ?: if (
-                    snapshot.projects.any {
-                        it.archivedAt == null && it.name.equals(projectName, ignoreCase = true)
-                    } || newProjects.any { it.equals(projectName, ignoreCase = true) && it != projectName }
-                ) {
+            val folded = projectName.folded()
+            when {
+                existingProjectsByExact[projectName] != null ->
+                    ProjectSelection.Existing(existingProjectsByExact.getValue(projectName))
+                existingProjectsByFolded[folded] != null ->
                     return collision(row, "project", projectName)
-                } else {
-                    newProjects += projectName
+                newProjectsByExact[projectName] != null ->
+                    ProjectSelection.New(newProjectsByExact.getValue(projectName))
+                newProjectsByFolded[folded] != null ->
+                    return collision(row, "project", projectName)
+                newProjectsByExact.size >= MAX_IMPORTED_NEW_PROJECTS -> return invalid(
+                    row.sourceRowNumber,
+                    RejectionReason.IMPORT_TOO_LARGE,
+                    "Import at most $MAX_IMPORTED_NEW_PROJECTS new projects.",
+                )
+                else -> {
+                    newProjectsByExact[projectName] = projectName
+                    newProjectsByFolded[folded] = projectName
                     ProjectSelection.New(projectName)
                 }
+            }
         }
         val availableStatuses = when (project) {
             is ProjectSelection.Existing -> snapshot.workflowStatuses.filter {
@@ -571,22 +587,37 @@ private fun resolveTaskImport(
         }
         val tags = row.tagNames.map { rawName ->
             val name = rawName.trim()
-            snapshot.tags.firstOrNull { it.name == name }
-                ?.let(TagSelection::Existing)
-                ?: if (
-                    snapshot.tags.any { it.name.equals(name, ignoreCase = true) } ||
-                    newTags.any { it.equals(name, ignoreCase = true) && it != name }
-                ) {
-                    return collision(row, "tag", name)
-                } else {
-                    newTags += name
+            val folded = name.folded()
+            when {
+                existingTagsByExact[name] != null ->
+                    TagSelection.Existing(existingTagsByExact.getValue(name))
+                existingTagsByFolded[folded] != null -> return collision(row, "tag", name)
+                newTagsByExact[name] != null -> TagSelection.New(newTagsByExact.getValue(name))
+                newTagsByFolded[folded] != null -> return collision(row, "tag", name)
+                newTagsByExact.size >= MAX_IMPORTED_NEW_TAGS -> return invalid(
+                    row.sourceRowNumber,
+                    RejectionReason.IMPORT_TOO_LARGE,
+                    "Import at most $MAX_IMPORTED_NEW_TAGS new tags.",
+                )
+                else -> {
+                    newTagsByExact[name] = name
+                    newTagsByFolded[folded] = name
                     TagSelection.New(name)
                 }
+            }
         }
         resolved += ResolvedRow(row, project, status, tags)
     }
-    return ResolutionResult.Ready(ImportResolution(resolved, newProjects.toList(), newTags.toList()))
+    return ResolutionResult.Ready(
+        ImportResolution(
+            resolved,
+            newProjectsByExact.keys.toList(),
+            newTagsByExact.keys.toList(),
+        ),
+    )
 }
+
+private fun String.folded(): String = lowercase(Locale.ROOT)
 
 private fun validateRow(row: ImportedTaskRow): ResolutionResult.Invalid? {
     val estimate = row.estimateMinutes
@@ -671,5 +702,7 @@ private fun invalid(row: Int?, reason: RejectionReason, message: String) =
 private fun malformed(rowNumber: Int, reason: String) = CsvParseResult.Malformed(rowNumber, reason)
 
 private const val MAX_IMPORT_ROWS = 5_000
+private const val MAX_IMPORTED_NEW_PROJECTS = 500
+private const val MAX_IMPORTED_NEW_TAGS = 1_000
 private const val MAX_DURATION_MINUTES = Long.MAX_VALUE / 60
-private val FORMULA_PREFIXES = charArrayOf('=', '+', '-', '@', '\t')
+private val FORMULA_PREFIXES = setOf('=', '+', '-', '@', '\t', '\r', '\n')

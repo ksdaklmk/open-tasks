@@ -11,6 +11,7 @@ import app.opentasks.core.data.backup.BackupFieldV1
 import app.opentasks.core.data.backup.BackupRecordFamily
 import app.opentasks.core.data.backup.BackupRecordV1
 import app.opentasks.core.data.backup.OtVaultCodec
+import app.opentasks.core.data.backup.OtVaultFormatException
 import app.opentasks.core.data.backup.OtVaultReadEvent
 import app.opentasks.core.data.backup.StructuredBackupCapture
 import app.opentasks.core.domain.BackupCaptureSource
@@ -32,6 +33,8 @@ import app.opentasks.core.model.VaultId
 import app.opentasks.core.model.WorkspaceSnapshot
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.security.MessageDigest
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -184,6 +188,38 @@ class OtVaultExporterTest {
         }
     }
 
+    @Test
+    fun aggregateLimitIsCheckedBeforeTheDelegateReceivesAWrite() {
+        val delegate = ByteCountingOutputStream()
+        val bounded = BoundedCountingOutputStream(delegate)
+        val block = ByteArray(1024 * 1024)
+
+        repeat(512) { bounded.write(block) }
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, bounded.count)
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, delegate.count)
+
+        assertThrows(OtVaultFormatException::class.java) { bounded.write(0) }
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, bounded.count)
+        assertEquals(OtVaultCodec.MAX_ARCHIVE_BYTES, delegate.count)
+    }
+
+    @Test
+    fun destinationFailureCannotReturnACompletedExport() = runBlocking {
+        withTimeout(5_000) {
+            val result = exporter(
+                attachments = emptyList(),
+                readChunks = fakeChunkReader(emptyMap(), unfetchable = emptySet()),
+            ).export(
+                destination = object : OutputStream() {
+                    override fun write(b: Int) = throw IOException("destination unavailable")
+                },
+                passphrase = "correct horse battery staple".toCharArray(),
+            )
+
+            assertTrue(result.toString(), result is OtVaultExportResult.Failed)
+        }
+    }
+
     private fun attachment(
         id: String,
         displayName: String,
@@ -304,6 +340,19 @@ class OtVaultExporterTest {
 
         override fun delete(vaultId: VaultId) =
             throw AssertionError("Export must not delete the content key")
+    }
+
+    private class ByteCountingOutputStream : OutputStream() {
+        var count = 0L
+            private set
+
+        override fun write(b: Int) {
+            count += 1
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            count += len
+        }
     }
 
     private companion object {

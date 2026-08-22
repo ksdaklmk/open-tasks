@@ -115,6 +115,24 @@ class WorkspaceCsvWriterTest {
     }
 
     @Test
+    fun carriageReturnAndLineFeedPrefixesAreNeutralised() {
+        val out = StringBuilder()
+        writer.write(
+            CsvTable.TASKS,
+            snapshot(
+                tasks = listOf(
+                    task(id = "task-cr", title = "CR", description = "\r=CMD()"),
+                    task(id = "task-lf", title = "LF", description = "\n+SUM(A1)"),
+                ),
+            ),
+            out,
+        )
+
+        assertTrue(out.contains("\"'\r=CMD()\""))
+        assertTrue(out.contains("\"'\n+SUM(A1)\""))
+    }
+
+    @Test
     fun formulaNeutralisationPreservesLeadingApostropheCount() {
         val out = StringBuilder()
         writer.write(
@@ -376,6 +394,7 @@ class WorkspaceCsvWriterTest {
         start: ZonedMoment? = null,
         deletedAt: Instant? = null,
         tagIds: Set<TagId> = emptySet(),
+        description: String = "",
     ): Task = Task(
         id = TaskId(id),
         workspaceId = workspaceId,
@@ -383,6 +402,7 @@ class WorkspaceCsvWriterTest {
         statusId = statusId,
         semanticStatus = semanticStatus,
         title = title,
+        description = description,
         start = start,
         deletedAt = deletedAt,
         tagIds = tagIds,

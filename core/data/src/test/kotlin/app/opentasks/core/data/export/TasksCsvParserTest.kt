@@ -1,6 +1,8 @@
 package app.opentasks.core.data.export
 
 import app.opentasks.core.model.DeviceId
+import app.opentasks.core.domain.ImportedTaskRow
+import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.HomeSnapshot
 import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
@@ -47,6 +49,24 @@ class TasksCsvParserTest {
         WorkspaceCsvWriter(ZoneId.of("UTC")).write(CsvTable.TASKS, snapshot, out)
 
         assertEquals(titles, parsed(out.toString()).rows.map { it.title })
+    }
+
+    @Test
+    fun carriageReturnAndLineFeedFormulaPrefixesRoundTripLiterally() {
+        val descriptions = listOf("\r=CMD()", "\n+SUM(A1)")
+        val out = StringBuilder()
+
+        WorkspaceCsvWriter(ZoneId.of("UTC")).write(
+            CsvTable.TASKS,
+            snapshot(
+                tasks = descriptions.mapIndexed { index, description ->
+                    task(index, "Task $index", description = description)
+                },
+            ),
+            out,
+        )
+
+        assertEquals(descriptions, parsed(out.toString()).rows.map { it.description })
     }
 
     @Test
@@ -246,6 +266,91 @@ class TasksCsvParserTest {
         assertEquals(statuses.last().name, rows[1].statusName)
     }
 
+    @Test
+    fun exactlyFiveHundredNewProjectsAreAccepted() {
+        val result = previewTasksImport(
+            List(500) { index -> importedRow(index + 1, project = "Project $index") },
+            snapshot(tasks = emptyList()),
+        )
+
+        assertTrue(result.toString(), result is CsvImportPreviewResult.Ready)
+        assertEquals(500, (result as CsvImportPreviewResult.Ready).summary.newProjectCount)
+    }
+
+    @Test
+    fun fiveHundredAndFirstNewProjectIsRejected() {
+        val result = previewTasksImport(
+            List(501) { index -> importedRow(index + 1, project = "Project $index") },
+            snapshot(tasks = emptyList()),
+        )
+
+        assertTrue(result.toString(), result is CsvImportPreviewResult.Invalid)
+        result as CsvImportPreviewResult.Invalid
+        assertEquals(501, result.rowNumber)
+        assertEquals(RejectionReason.IMPORT_TOO_LARGE, result.reason)
+    }
+
+    @Test
+    fun exactlyOneThousandNewTagsAreAccepted() {
+        val result = previewTasksImport(
+            rowsWithUniqueTags(1_000),
+            snapshot(tasks = emptyList()),
+        )
+
+        assertTrue(result.toString(), result is CsvImportPreviewResult.Ready)
+        assertEquals(1_000, (result as CsvImportPreviewResult.Ready).summary.newTagCount)
+    }
+
+    @Test
+    fun oneThousandAndFirstNewTagIsRejected() {
+        val result = previewTasksImport(
+            rowsWithUniqueTags(1_001),
+            snapshot(tasks = emptyList()),
+        )
+
+        assertTrue(result.toString(), result is CsvImportPreviewResult.Invalid)
+        result as CsvImportPreviewResult.Invalid
+        assertEquals(21, result.rowNumber)
+        assertEquals(RejectionReason.IMPORT_TOO_LARGE, result.reason)
+    }
+
+    @Test
+    fun fiveThousandUniqueRowsResolveAtTheExistingRowLimit() {
+        val result = previewTasksImport(
+            List(5_000) { index -> importedRow(index + 1) },
+            snapshot(tasks = emptyList()),
+        )
+
+        assertTrue(result.toString(), result is CsvImportPreviewResult.Ready)
+        assertEquals(5_000, (result as CsvImportPreviewResult.Ready).summary.taskCount)
+    }
+
+    @Test
+    fun exactProposedNamesReuseWhileCaseOnlyNamesStillCollide() {
+        val exact = previewTasksImport(
+            listOf(
+                importedRow(1, project = "Launch", tags = listOf("Ops")),
+                importedRow(2, project = "Launch", tags = listOf("Ops")),
+            ),
+            snapshot(tasks = emptyList()),
+        ) as CsvImportPreviewResult.Ready
+        assertEquals(1, exact.summary.newProjectCount)
+        assertEquals(1, exact.summary.newTagCount)
+
+        val collision = previewTasksImport(
+            listOf(
+                importedRow(1, project = "Launch", tags = listOf("Ops")),
+                importedRow(2, project = "launch", tags = listOf("ops")),
+            ),
+            snapshot(tasks = emptyList()),
+        )
+        assertTrue(collision.toString(), collision is CsvImportPreviewResult.Invalid)
+        assertEquals(
+            RejectionReason.IMPORT_NAME_COLLISION,
+            (collision as CsvImportPreviewResult.Invalid).reason,
+        )
+    }
+
     private fun parsed(source: String): CsvParseResult.Parsed {
         val result = parseTasksCsv(source.toByteArray())
         assertTrue(result.toString(), result is CsvParseResult.Parsed)
@@ -315,6 +420,32 @@ class TasksCsvParserTest {
         completedAt = completedAt,
         revision = revision,
     )
+
+    private fun importedRow(
+        rowNumber: Int,
+        project: String? = null,
+        tags: List<String> = emptyList(),
+    ) = ImportedTaskRow(
+        sourceRowNumber = rowNumber,
+        title = "Task $rowNumber",
+        projectName = project,
+        statusName = null,
+        priority = Priority.NONE,
+        start = null,
+        due = null,
+        completedAt = null,
+        estimateMinutes = null,
+        tagNames = tags,
+        description = "",
+    )
+
+    private fun rowsWithUniqueTags(count: Int): List<ImportedTaskRow> =
+        (0 until count).chunked(50).mapIndexed { rowIndex, tags ->
+            importedRow(
+                rowNumber = rowIndex + 1,
+                tags = tags.map { "Tag $it" },
+            )
+        }
 
     private fun snapshot(
         tasks: List<Task>,

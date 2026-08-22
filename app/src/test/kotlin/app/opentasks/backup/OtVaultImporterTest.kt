@@ -35,13 +35,17 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -135,6 +139,37 @@ class OtVaultImporterTest {
                     preview,
                 )
                 assertEquals(0, authenticatedCodec.decryptions.get())
+                assertEquals(0L, roots.stagedBytes())
+            }
+        }
+    }
+
+    @Test
+    fun cancellationIsCheckedBetweenArchiveFrames() = runBlocking {
+        withTimeout(5_000) {
+            withRoots(GENEROUS_AVAILABLE_BYTES) { roots ->
+                val stageJob = Job()
+                authenticatedCodec.decryptions.set(0)
+                authenticatedCodec.afterDecryption = { count ->
+                    if (count == 1) stageJob.cancel()
+                }
+                var cancelled = false
+
+                try {
+                    withContext(stageJob) {
+                        importer(roots).stage(
+                            ByteArrayInputStream(writeArchive(ATTACHMENTS)),
+                            PASSPHRASE.toCharArray(),
+                        )
+                    }
+                } catch (_: CancellationException) {
+                    cancelled = true
+                } finally {
+                    authenticatedCodec.afterDecryption = null
+                }
+
+                assertTrue(cancelled)
+                assertEquals(1, authenticatedCodec.decryptions.get())
                 assertEquals(0L, roots.stagedBytes())
             }
         }
@@ -405,6 +440,40 @@ class OtVaultImporterTest {
                 assertEquals(0L, roots.stagedBytes())
             }
         }
+    }
+
+    @Test
+    fun duplicateLiveBlobSetIdentityIsRejectedWhileIndexingTheSnapshot() {
+        val first = ATTACHMENTS.first()
+        val duplicate = ArchiveAttachment(
+            id = "attachment-duplicate",
+            displayName = "duplicate.pdf",
+            blobSetId = first.blobSetId,
+            chunks = listOf("duplicate".toByteArray()),
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            indexLiveAttachmentRecords(records(listOf(first, duplicate)))
+        }
+    }
+
+    @Test
+    fun largeAttachmentIndexIsBuiltInOneRecordPass() {
+        val attachments = List(5_000) { index ->
+            archiveAttachment(
+                id = "attachment-$index",
+                displayName = "file-$index.bin",
+                bytes = byteArrayOf((index and 0xff).toByte()),
+            )
+        }
+        val source = records(attachments)
+        val counted = CountingRecordList(source)
+
+        val indexed = indexLiveAttachmentRecords(counted)
+        attachments.forEach { attachment -> assertNotNull(indexed[attachment.blobSetId]) }
+
+        assertEquals(attachments.size, indexed.size)
+        assertEquals(source.size, counted.reads)
     }
 
     @Test
@@ -840,6 +909,7 @@ class OtVaultImporterTest {
         private val delegate: AuthenticatedCloudObjectCodec,
     ) : AuthenticatedCloudObjectCodec {
         val decryptions = AtomicInteger()
+        var afterDecryption: ((Int) -> Unit)? = null
 
         override fun encrypt(
             identity: CloudHeaderIdentity,
@@ -852,8 +922,25 @@ class OtVaultImporterTest {
             totalLength: Long,
             key: VaultKey,
         ): CloudDecodeResult {
-            decryptions.incrementAndGet()
-            return delegate.decrypt(source, totalLength, key)
+            val count = decryptions.incrementAndGet()
+            val result = delegate.decrypt(source, totalLength, key)
+            afterDecryption?.invoke(count)
+            return result
+        }
+    }
+
+    private class CountingRecordList(
+        private val records: List<BackupRecordV1>,
+    ) : AbstractList<BackupRecordV1>() {
+        var reads = 0
+            private set
+
+        override val size: Int
+            get() = records.size
+
+        override fun get(index: Int): BackupRecordV1 {
+            reads += 1
+            return records[index]
         }
     }
 

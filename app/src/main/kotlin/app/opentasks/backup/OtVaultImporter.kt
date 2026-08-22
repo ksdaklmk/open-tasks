@@ -20,6 +20,8 @@ import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * What one staged `.otvault` archive would replace the active vault with.
@@ -143,7 +145,11 @@ class OtVaultImporter(
         clearStagingRoot()
     }
 
-    private fun runStage(source: InputStream, passphrase: CharArray): OtVaultImportPreview {
+    private suspend fun runStage(
+        source: InputStream,
+        passphrase: CharArray,
+    ): OtVaultImportPreview {
+        val stageContext = currentCoroutineContext()
         clearStagingRoot()
         val header = try {
             codec.readHeader(source)
@@ -165,7 +171,11 @@ class OtVaultImporter(
         }
         val reader = ArchiveReader(contentKey, staging, retentionBudgetBytes())
         return try {
-            codec.readAll(source, contentKey, header, reader::accept)
+            codec.readAll(source, contentKey, header) { event ->
+                stageContext.ensureActive()
+                reader.accept(event)
+            }
+            stageContext.ensureActive()
             val snapshot = reader.finish()
             staged = StagedArchive(
                 snapshot = snapshot,
@@ -257,6 +267,7 @@ class OtVaultImporter(
             private set
 
         private var snapshot: BackupSnapshotPayloadV1? = null
+        private var attachmentRecords: Map<BlobSetId, BackupRecordV1>? = null
         private var stagedBytes = 0L
         private var pending: PendingBlobSet? = null
         private val completedBlobSets = mutableSetOf<BlobSetId>()
@@ -266,6 +277,7 @@ class OtVaultImporter(
                 is OtVaultReadEvent.Snapshot -> {
                     require(snapshot == null) { "The archive holds more than one snapshot" }
                     snapshot = event.payload
+                    attachmentRecords = indexLiveAttachmentRecords(event.payload.records)
                 }
 
                 is OtVaultReadEvent.Segment ->
@@ -287,12 +299,9 @@ class OtVaultImporter(
             // Every live attachment the records name must have arrived: an
             // archive is the only copy of the bytes it carries, so one that
             // omits a blob set is incomplete rather than merely smaller.
-            val archived = payload.records
-                .filter { it.family == BackupRecordFamily.ATTACHMENT }
-                .filter { it.field("deletedAtEpochMillis") == null }
-                .mapNotNullTo(mutableSetOf()) { record ->
-                    record.field("blobSetId")?.let(::BlobSetId)
-                }
+            val archived = requireNotNull(attachmentRecords) {
+                "The archive holds no attachment index"
+            }.keys
             require(archived == completedBlobSets) {
                 "The archive attachment inventory does not match its blob sets"
             }
@@ -411,17 +420,12 @@ class OtVaultImporter(
         }
 
         private fun attachmentRecordFor(blobSetId: BlobSetId): BackupRecordV1 {
-            val payload = requireNotNull(snapshot) {
+            requireNotNull(snapshot) {
                 "The archive holds an attachment manifest before its snapshot"
             }
-            val matches = payload.records
-                .filter { it.family == BackupRecordFamily.ATTACHMENT }
-                .filter { it.field("blobSetId") == blobSetId.value }
-                .filter { it.field("deletedAtEpochMillis") == null }
-            require(matches.size == 1) {
+            return requireNotNull(attachmentRecords?.get(blobSetId)) {
                 "The archive holds a blob set no live attachment names"
             }
-            return matches.single()
         }
     }
 
@@ -521,15 +525,35 @@ class OtVaultImporter(
             }
         }
 
-        /** The value of [name], or null when the record holds it as null. */
-        fun BackupRecordV1.field(name: String): String? =
-            fields.firstOrNull { it.name == name }
-                ?.takeIf { it.type != BackupFieldType.NULL }
-                ?.value
-
         fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
     }
 }
+
+internal fun indexLiveAttachmentRecords(
+    records: List<BackupRecordV1>,
+): Map<BlobSetId, BackupRecordV1> = buildMap {
+    records.forEach { record ->
+        if (
+            record.family == BackupRecordFamily.ATTACHMENT &&
+            record.field("deletedAtEpochMillis") == null
+        ) {
+            val blobSetId = BlobSetId(
+                requireNotNull(record.field("blobSetId")) {
+                    "A live archived attachment has no blob set"
+                },
+            )
+            require(put(blobSetId, record) == null) {
+                "The archive repeats a live attachment blob set"
+            }
+        }
+    }
+}
+
+/** The value of [name], or null when the record holds it as null. */
+private fun BackupRecordV1.field(name: String): String? =
+    fields.firstOrNull { it.name == name }
+        ?.takeIf { it.type != BackupFieldType.NULL }
+        ?.value
 
 /** The archive opened, but not with the passphrase the person supplied. */
 internal const val OT_VAULT_IMPORT_PASSPHRASE_REASON =
