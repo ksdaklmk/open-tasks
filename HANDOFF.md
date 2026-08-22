@@ -1,95 +1,180 @@
 # Open Tasks Handoff
 
-## Current state — onboarding/dashboard/NFR paused at security remediation, 22 August 2026
+## Current state — onboarding/dashboard/NFR paused during closing security validation, 22 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
-### Onboarding/dashboard/NFR programme — safe pause after sealed review
+### Onboarding/dashboard/NFR programme — remediation implemented; closing scan not yet closed
 
 Tasks 1–11 of
 `docs/superpowers/plans/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan.md`
 landed directly on `main` as `fea5663`, `38515dc`, `2615ac0`, `2af5802`,
 `58413d4`, `0dea6b3`, `ca890c9`, `6c4fbd4`, `63ecd99`, `5f88a83`, and
-`4b3928f`. Task 12 reached its full local-gate run and independent security
-review, then paused before remediation and final closure.
+`4b3928f`. Task 12 reached its full local-gate run, implemented fixes for all
+five findings from the sealed Standard review (with the real owner-only signer
+proof still blocked), and then paused during validation of five new closing
+diff-scan candidates. The implementation head is
+`e4f9bfcae4ce6f9f8341229b68dffebaff991b85` on `main`.
 
-The delivered programme:
+The original five remediations landed in these reviewed commits:
 
-- starts a missing vault at the charcoal/ember Welcome surface with explicit
-  optional Google, complete offline, and portable-device restore actions;
-- creates only structural workspace/default Inbox status records for a new
-  production vault, with demonstration data confined to tests;
-- keeps Google optional and `drive.appdata` backup/recovery-only;
-- generates one aggregate-by-default, optional-task-title, self-contained
-  executive HTML file and connects SAF download plus read-only FileProvider
-  sharing with a permanent plaintext disclosure;
-- bounds archive, CSV, report, and partial-output work; confines active timer
-  ticks and cancels stale search/Insights work; and
-- adds R8-backed per-ABI packaging, hard size caps, Macrobenchmark gates,
-  dependency checksums, SBOMs, CodeQL, dependency review, and `SECURITY.md`.
+1. `78ea33d` — unique FileProvider staging paths while preserving stable SAF
+   download names;
+2. `3bb60a2` and `939c823` — synchronous elapsed lock authority owned by the
+   reminder and widget action gates;
+3. `bac386f` and `c9974b0` — private AlarmManager-backed external-content
+   concealment with one monotonic deadline calculation;
+4. `a043152` — the independently verified official Gradle 9.7.0 binary
+   distribution checksum plus workflow-policy enforcement; and
+5. `a7ba7da` and `e4f9bfc` — owner-controlled signer authentication for all
+   arm64, x86_64, and universal release APKs, with a fail-closed verifier
+   harness that does not disclose certificate values.
 
-The pre-review Task 12 evidence is green: 1,402 JVM tests, lint/debug assembly,
-release assembly, arm64/universal size gates, workflow policy, checksum
-failure/recovery, 580-component SBOM review, a 14/14 release-like benchmark
-functional run, and a seven-module API 37 fallback run of 510 connected tests
-(508 passed, the two established skips, zero failures). A signed API 37
-airplane-mode smoke showed Welcome, empty offline Home, aggregate HTML
-download, and share-sheet staging. Exact bytes, hashes, commands, device
-profile, exceptions, and artifact paths are in
-`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+Every scoped implementation review and fix-round re-review is clean. The
+ignored SDD ledger and task reports are under
+`.superpowers/sdd/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan/`.
+Do not delete that directory while the programme remains incomplete.
 
-The sealed Standard security review then found **three Medium and two Low
-findings, with zero Critical or High**. Treat all five as release blockers:
-
-1. the Gradle 9.7.0 wrapper ZIP has no `distributionSha256Sum`;
-2. reminder and widget actions can read stale unlocked state after a delayed
-   background expiry;
-3. process death can prevent the expiry coroutine from clearing widget titles
-   and active private reminder notifications;
-4. the release verifier accepts any valid signer and checks only the universal
-   APK; and
-5. a same-day dashboard share recreates a previously granted FileProvider
-   path, allowing an earlier recipient with a live grant to read the later
-   report.
-
-Canonical scan ID: `df9a41d7-2458-4943-9c5d-957e98d484e9`. The sealed local
-report is under
+The original sealed Standard security review found **three Medium and two Low
+findings, with zero Critical or High**. Its canonical scan ID is
+`df9a41d7-2458-4943-9c5d-957e98d484e9`; its local report is under
 `/private/var/folders/cc/zvtsfhf91m747w_86jlft22r0000gn/T/codex-security-scans-Jj7CWg/open-tasks/4b3928ff46e1d0cfb0ce72684f4276488bd97b7e_20260822T072609Z__1usm149/`.
-The durable finding summary is also in the qualification and threat-model
-records, so loss of that temporary directory does not lose the resume state.
+The required `artifacts/fix_report.md` has **not** been written. Record four
+findings as fixed. The signer implementation is complete, but its finding
+remains blocked until the owner runs the real three-APK gate with an
+independently trusted input. Never derive that input from a candidate APK and
+never print it in chat, documentation, process arguments, or logs.
 
-No remediation is partially applied. Resume test-first in this order:
+### Fresh verification at `e4f9bfc`
 
-1. make share-only HTML staging paths unique while leaving SAF download names
-   stable;
-2. add one synchronous elapsed-time authority check in `AppLockController`
-   and route both reminder and widget mutations through it;
-3. reuse `AlarmManager` with a private receiver to durably clear widget titles
-   and active reminders at lock expiry, cancelling the alarm on foreground;
-4. add the independently verified official Gradle 9.7.0 binary checksum and
-   make the workflow verifier reject a missing/malformed pin; and
-5. require an owner-controlled release certificate SHA-256, verify every
-   arm64, x86_64, and universal APK, then record focused failure/success proof.
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace`:
+  PASS; authoritative XML totals are 1,414/1,414 passed across 136 suites,
+  with zero skips, failures, or errors.
+- `./gradlew :app:assembleRelease --stacktrace`: PASS.
+- Workflow, release-APK harness, release-size harness, accepted-size, and
+  benchmark-threshold verifiers: PASS.
+- arm64 APK: 9,852,846 bytes, SHA-256
+  `fcc94a0e51b84c6217695de576ef7862a42ad14a2a0ae11488277958df6b590a`.
+- x86_64 APK: 9,984,216 bytes, SHA-256
+  `6c5bd92aef1b0524044076a094544b2bf714b7c8ba41f44eab1121c0eebf5771`.
+- universal APK: 12,114,299 bytes, SHA-256
+  `1873ae3b257ef0f7e843159661ef0117f070ae31db5981c909078581355a65bd`.
+- `./gradlew cyclonedxBom --stacktrace`: PASS; 580 components; required
+  Room, SQLCipher, and Tink components present. JSON SHA-256 is
+  `1ae1adb90aeb8a5465eaf8a2dd55d465f72d73892eb094fcc6333e7723cad26a`;
+  XML SHA-256 is
+  `2abd206576f17899abaaf94c49846e29625a14ed2b9144364bdc5fa9936e6f15`.
+- Disposable `Pixel6_Scratch`, API 37 arm64, was the sole ADB target and ran
+  headless/read-only with snapshots disabled.
+- `:app:connectedDebugAndroidTest`: PASS; XML is authoritative at 95 tests,
+  93 passed, two established skips, zero failures/errors. Gradle's console
+  `Finished 97 tests` line double-counted the two skipped cases.
+- The earlier unchanged seven-module API 37 run remains 510 total, 508 passed,
+  two established skips, zero failures. Only `:app` changed afterward.
 
-After those fixes, write the required scan fix report, rerun focused tests,
-the full host gate, release assembly/verifiers, and the disposable app
-connected suite, then close Task 12. Do not infer the signer identity from the
-APK being verified; the owner must supply its trusted public fingerprint.
+### Closing diff scan — paused in validation
 
-This is not a release decision. In addition to the five findings, no
-disposable API 36 image or authorised physical threshold device was available;
-no owner credential was used; the
+Closing scan ID: `31e83519-4242-4240-9b61-7cb357b440e8`.
+
+Exact range:
+`8bb2a6675fbf26f9b265306823e86a759bb6dedf..e4f9bfcae4ce6f9b8341229b68dffebaff991b85`.
+
+Scan directory:
+`/private/var/folders/cc/zvtsfhf91m747w_86jlft22r0000gn/T/codex-security-scans-6vXDUJ/open-tasks/e4f9bfcae4ce6f9b8341229b68dffebaff991b85_20260822T140527Z_qp__djef/`.
+
+Preflight, threat-model, and discovery phases are complete. Discovery covered
+all 19 changed files and recorded five candidates. The scan was advanced to
+validation with 5 total / 0 persisted completions. Do not call the advisory
+TAC-status endpoint again; it was checked once and returned `not_granted`.
+That advisory state did not gate the scan.
+
+Independent read-only validation completed locally for all five candidates,
+but **none of the dispositions has been persisted to the scan yet**. All five
+survived as reportable; severity has not been calibrated because attack-path
+analysis has not run:
+
+1. `candidate-4a2ccb9c2d78c2c3` — medium-confidence late biometric success can
+   call `AppLockController.onUnlocked()` after `onStop`, cancel both expiry
+   paths, and republish titles while the activity remains backgrounded.
+2. `candidate-d23431158a225406` — high-confidence reminder-action TOCTOU: the
+   live authority check precedes `RoomVaultRepository` readiness/mutex waits,
+   so a transaction can begin after authority expires.
+3. `candidate-763115ddae2d9ff7` — high-confidence widget-action TOCTOU:
+   generation/authority invalidation does not revoke a completion already
+   waiting to cross the Room mutation boundary.
+4. `candidate-06c83a55b6738660` — high-confidence Gradle migration gap: a
+   valid-looking pre-pin distribution plus `.ok` marker takes the wrapper
+   cache fast path before checksum verification. Clean CI is protected by its
+   changed cache key; persistent local release caches are not.
+5. `candidate-da65747ac45e845a` — high-confidence external-content deadline
+   gap: missing exact-alarm access permits inexact delay, while later access
+   revocation stops the process and cancels the only future exact alarm.
+
+Focused temporary-copy reproductions confirmed candidates 2 and 3. Android
+API 37 framework source confirms candidate 1's queued callback ordering.
+Bundled wrapper bytecode plus official Gradle source confirms candidate 4.
+Official Android alarm behavior plus the repository's maximum-background-
+interval contract confirms candidate 5. No validation agent edited the
+repository or inspected APK certificate data.
+
+### Exact resume sequence
+
+1. Re-read the Codex Security validation, attack-path, severity, reporting,
+   and fix-finding instructions before acting. Preserve the five-candidate
+   instance inventory.
+2. Persist **all five** validation dispositions in one candidate-validation
+   call, then advance validation to 5/5. Do not collapse the reminder and
+   widget instances.
+3. Run attack-path analysis and severity calibration for every surviving
+   candidate, record the paths, draft the semantic report, and complete/read
+   scan `31e83519-4242-4240-9b61-7cb357b440e8` exactly once.
+4. Fix only the completed scan's validated findings, sequentially and
+   test-first. The smallest currently supported root fixes are:
+   - reject `onUnlocked()` while `AppLockController` is backgrounded;
+   - recheck action-specific authority/generation after the repository's
+     existing write mutex is acquired and immediately before its transaction;
+   - conceal passive external content immediately on background when a hard
+     deadline cannot be guaranteed, while retaining the in-app overlay delay;
+   - move `distributionPath` and `zipStorePath` once to
+     `wrapper/dists-sha256-v1`, retaining the checksum, so pre-pin `.ok`
+     entries are stranded non-destructively.
+5. Run a fresh closing security diff scan over the resulting remediation
+   range. Do not treat the current incomplete scan as proof that later fixes
+   are clean.
+6. Write the original sealed scan's `artifacts/fix_report.md`, refresh
+   `docs/qualification/onboarding-dashboard-nfr-acceptance.md`,
+   `docs/threat-model.md`, `docs/architecture.md`, `RELEASING.md` only if its
+   facts change, and this handoff. Then obtain one independent whole-range
+   code review.
+7. Re-run focused tests, the full host gate, release assembly and all local
+   verifiers, SBOM, `git diff --check`, the no-caller proof, and the disposable
+   app connected suite before any completion claim.
+8. Keep Task 12 and the signer finding blocked until the owner securely
+   provisions `OPEN_TASKS_RELEASE_CERT_SHA256` from an independent trusted
+   record and returns only the generic PASS/FAIL result from:
+
+       read -s OPEN_TASKS_RELEASE_CERT_SHA256
+       export OPEN_TASKS_RELEASE_CERT_SHA256
+       bash scripts/verify-release-apk.sh \
+         app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+         app/build/outputs/apk/release/app-x86_64-release.apk \
+         app/build/outputs/apk/release/app-universal-release.apk
+       unset OPEN_TASKS_RELEASE_CERT_SHA256
+
+This is not a release decision. No disposable API 36 image or authorised
+physical threshold device was available; no owner credential was used; the
 two-browser/print/screen-reader exercise did not run; and pushed CodeQL and
-dependency-review jobs cannot exist before a push. Those gates are pending,
+dependency-review jobs cannot exist before a push. Those gates remain pending,
 with no p50/p95 values claimed. The hard stop before version bump, tag, push,
 or release remains in force.
 
-The approved plan/design stay untracked because Task 12's exact staging list
-does not include them. The pre-existing modified Stage 3 Drive plan, deleted
-Thai-dashboard spec, `.kotlin/`, and `artifacts/` remain owner-owned and
-untouched. The four proven-dead `core/sync` files and the durable documentation
-refresh are the only programme checkpoint changes after `4b3928f`.
+The approved onboarding plan/design stay untracked because Task 12's exact
+staging list does not include them. Preserve every current unrelated status
+entry exactly: the modified Stage 3 Drive plan, deleted Thai-dashboard spec,
+`.kotlin/`, `artifacts/`, and the two untracked onboarding plan/design files.
+No product fix for the five closing-scan candidates is partially applied at
+this pause.
 
 ### Release outcome
 
