@@ -2,6 +2,7 @@
 
 package app.opentasks.core.data.export
 
+import android.os.Trace
 import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.InsightsSnapshot
@@ -42,14 +43,16 @@ class ExecutiveDashboardHtmlWriter internal constructor(
         request: ExecutiveDashboardRequest,
         destination: OutputStream,
     ): Long {
-        val dashboard = buildDashboard(request)
-        val bounded = DashboardByteLimitOutputStream(destination, maximumBytes)
-        val csp = "default-src 'none'; connect-src 'none'; img-src 'none'; object-src 'none'; " +
-            "base-uri 'none'; form-action 'none'; style-src 'sha256-$DASHBOARD_CSS_HASH'; " +
-            "script-src 'sha256-$DASHBOARD_JAVASCRIPT_HASH'"
+        Trace.beginSection("OpenTasks.Dashboard")
+        try {
+            val dashboard = buildDashboard(request)
+            val bounded = DashboardByteLimitOutputStream(destination, maximumBytes)
+            val csp = "default-src 'none'; connect-src 'none'; img-src 'none'; object-src 'none'; " +
+                "base-uri 'none'; form-action 'none'; style-src 'sha256-$DASHBOARD_CSS_HASH'; " +
+                "script-src 'sha256-$DASHBOARD_JAVASCRIPT_HASH'"
 
-        bounded.appendUtf8(
-            "<!doctype html>\n" +
+            bounded.appendUtf8(
+                "<!doctype html>\n" +
                 "<html lang=\"en-GB\">\n" +
                 "<head>\n" +
                 "<meta charset=\"utf-8\">\n" +
@@ -65,21 +68,28 @@ class ExecutiveDashboardHtmlWriter internal constructor(
                 "<h1>Executive dashboard</h1>\n" +
                 "<p>Snapshot frozen at ${request.now} · ${request.zoneId.id}</p>\n" +
                 "</header>\n",
-        )
-        appendNoScriptSummary(bounded, dashboard)
-        bounded.appendUtf8(DASHBOARD_BODY)
-        bounded.appendUtf8("<script id=\"dashboard-data\" type=\"application/json\">")
-        val jsonDestination = ScriptSafeJsonOutputStream(bounded)
-        DASHBOARD_JSON.encodeToStream(ExecutiveDashboardDto.serializer(), dashboard, jsonDestination)
-        jsonDestination.finish()
-        bounded.appendUtf8(
-            "</script>\n" +
+            )
+            appendNoScriptSummary(bounded, dashboard)
+            bounded.appendUtf8(DASHBOARD_BODY)
+            bounded.appendUtf8("<script id=\"dashboard-data\" type=\"application/json\">")
+            val jsonDestination = ScriptSafeJsonOutputStream(bounded)
+            DASHBOARD_JSON.encodeToStream(
+                ExecutiveDashboardDto.serializer(),
+                dashboard,
+                jsonDestination,
+            )
+            jsonDestination.finish()
+            bounded.appendUtf8(
+                "</script>\n" +
                 "<script id=\"dashboard-app\">$DASHBOARD_JAVASCRIPT</script>\n" +
                 "</body>\n" +
                 "</html>\n",
-        )
-        bounded.flush()
-        return bounded.byteCount
+            )
+            bounded.flush()
+            return bounded.byteCount
+        } finally {
+            Trace.endSection()
+        }
     }
 
     private fun buildDashboard(request: ExecutiveDashboardRequest): ExecutiveDashboardDto {

@@ -55,6 +55,11 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+        }
     }
 
     splits {
@@ -69,6 +74,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     packaging {

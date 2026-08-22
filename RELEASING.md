@@ -53,26 +53,61 @@ arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
    `gradle/release-size-baseline.properties`; never update it just to make the
    gate pass.
 
-5. Verify the signed universal fallback:
+5. Run the physical-device performance qualification below. Emulator CI is a
+   functional wiring check only and never supplies release threshold results.
+
+6. Verify the signed universal fallback:
 
        bash scripts/verify-release-apk.sh \
          app/build/outputs/apk/release/app-universal-release.apk
 
-6. Run the smoke checklist below on a disposable AVD. Record the
+7. Run the smoke checklist below on a disposable AVD. Record the
    disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;
    the same qualification record must also contain the owner-present Drive
    gate results below.
-7. Run the owner-present Google Drive gate below on the physical device.
-8. Commit the version bump and qualification record, then tag:
+8. Run the owner-present Google Drive gate below on the physical device.
+9. Commit the version bump and qualification record, then tag:
 
        git add app/build.gradle.kts \
          docs/qualification/release-<versionName>-sideload.md
        git commit -m "docs: qualify release <versionName> for signed sideload"
        git tag -a v<versionName> -m "Release <versionName>" && git push origin main v<versionName>
 
-9. Install the matching APK on the real device (normally arm64-v8a):
+10. Install the matching APK on the real device (normally arm64-v8a):
 
        adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
+
+## Performance qualification (per release, disposable physical device only)
+
+This suite clears and replaces the installed Open Tasks benchmark package.
+Run it only with fresh owner approval and exactly one audited, disposable API
+36 arm64 physical device visible to ADB. Never run it on an owner workspace,
+the protected AVD, or any device containing data that must survive.
+
+Confirm the sole target, then run the release-like benchmark without dry-run
+arguments so every benchmark records its fixed ten iterations:
+
+    ~/Library/Android/sdk/platform-tools/adb devices -l
+    ./gradlew :benchmark:connectedBenchmarkAndroidTest \
+      -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.output.enable=true
+
+Pass the resulting unmodified `benchmarkData.json` and the accepted JSON from
+the same physical-device model to the gate:
+
+    scripts/check-benchmark-thresholds.sh \
+      benchmark/build/outputs/connected_android_test_additional_output/benchmark/connected/<device>/<current>-benchmarkData.json \
+      docs/qualification/<accepted>-benchmarkData.json
+
+The checker rejects emulator/generic evidence, non-API-36 results, a device
+model mismatch, fewer than ten iterations, missing metrics, hard-threshold
+failures, and startup regressions over 10%. For the first accepted baseline,
+run the candidate against itself to enforce every hard threshold, review the
+result, then archive that exact JSON; never accept a failing candidate merely
+to establish a baseline.
+
+Record the build SHA, device model, API/ABI, dataset, iteration count, p50,
+p95, checker result, and raw JSON path in the release qualification. Preserve
+the raw artifact with that record. Any failure blocks the release.
 
 ## Smoke checklist (per release, disposable AVD only)
 

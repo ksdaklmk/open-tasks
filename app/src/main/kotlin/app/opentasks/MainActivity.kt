@@ -10,6 +10,8 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.ReportDrawn
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -122,6 +124,10 @@ class MainActivity : ComponentActivity() {
                     } else if (activeRecovery) {
                         RecoverySurface(runtimeState, activeReplacement = true)
                     } else {
+                        val workspaceViewModel: WorkspaceViewModel = viewModel()
+                        val snapshot by
+                            workspaceViewModel.snapshot.collectAsStateWithLifecycle()
+                        ReportDrawnWhen { snapshot.workflowStatuses.isNotEmpty() }
                         val signal = quickAddSignal
                         OpenTasksApp(
                             activity = this,
@@ -175,6 +181,7 @@ class MainActivity : ComponentActivity() {
                                 }?.action = null
                             },
                             onOpenRecovery = { activeRecovery = true },
+                            viewModel = workspaceViewModel,
                         )
                     }
                 }
@@ -289,6 +296,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         OpenTasksTheme {
+            ReportDrawn()
             if (showWelcome) {
                 WelcomeScreen(
                     onContinueWithGoogle = recoveryViewModel::discoverDrive,

@@ -65,7 +65,9 @@ class VaultRuntimeManagerInstrumentedTest {
 
         val state = manager.state.value
         assertTrue(state is VaultRuntimeState.Active)
-        assertEquals(VaultSlot.LEGACY, (state as VaultRuntimeState.Active).runtime.slot)
+        val runtime = (state as VaultRuntimeState.Active).runtime
+        assertEquals(VaultSlot.LEGACY, runtime.slot)
+        assertTrue(runtime.backupStateStore.get(runtime.vaultId) != null)
         assertTrue(databaseFile("open_tasks.db").isFile)
         assertEquals(before.aliases, storageSnapshot().aliases)
         assertEquals(before.preferenceKeys, storageSnapshot().preferenceKeys)

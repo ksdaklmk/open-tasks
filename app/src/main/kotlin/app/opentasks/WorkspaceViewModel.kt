@@ -1,5 +1,6 @@
 package app.opentasks
 
+import android.os.Trace
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -60,7 +61,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
+
+private const val SEARCH_TRACE = "OpenTasks.Search"
+private const val INSIGHTS_TRACE = "OpenTasks.Insights"
+private val nextSearchTraceCookie = AtomicInteger()
 
 data class WorkspaceUiState(
     val snapshot: WorkspaceSnapshot,
@@ -777,9 +783,15 @@ internal class WorkspaceSearchState(
     fun search(query: SearchQuery) {
         searchJob?.cancel()
         searchJob = scope.launch {
-            val result = withContext(dispatcher) { repository.search(query) }
-            ensureActive()
-            mutableResults.value = result
+            val traceCookie = nextSearchTraceCookie.incrementAndGet()
+            Trace.beginAsyncSection(SEARCH_TRACE, traceCookie)
+            try {
+                val result = withContext(dispatcher) { repository.search(query) }
+                ensureActive()
+                mutableResults.value = result
+            } finally {
+                Trace.endAsyncSection(SEARCH_TRACE, traceCookie)
+            }
         }
     }
 
@@ -905,12 +917,17 @@ internal class WorkspaceInsightsState(
         projectionJob?.cancel()
         projectionJob = scope.launch {
             val projection = withContext(projectionDispatcher) {
-                project(
-                    workspace = projectionWorkspace,
-                    selection = projectionSelection,
-                    presentation = projectionPresentation,
-                    context = projectionContext,
-                )
+                Trace.beginSection(INSIGHTS_TRACE)
+                try {
+                    project(
+                        workspace = projectionWorkspace,
+                        selection = projectionSelection,
+                        presentation = projectionPresentation,
+                        context = projectionContext,
+                    )
+                } finally {
+                    Trace.endSection()
+                }
             }
             ensureActive()
             mutableSummary.value = projection.summary

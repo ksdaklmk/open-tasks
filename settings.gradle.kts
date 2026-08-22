@@ -18,6 +18,7 @@ rootProject.name = "OpenTasks"
 
 include(
     ":app",
+    ":benchmark",
     ":core:model",
     ":core:domain",
     ":core:data",

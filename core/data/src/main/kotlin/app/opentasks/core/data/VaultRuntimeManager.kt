@@ -307,6 +307,8 @@ class DefaultVaultRuntimeManager(
         withContext(Dispatchers.IO) {
             val runtime = runtimeFactory.createNew(VaultSlot.LEGACY)
             try {
+                // Active services read seeded backup state immediately.
+                runtime.repository.currentWorkspace()
                 slotRegistry.replace(VaultSlot.LEGACY)
             } catch (failure: Throwable) {
                 runtime.close()

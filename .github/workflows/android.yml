@@ -26,6 +26,8 @@ jobs:
         run: sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
       - name: Unit tests, lint, and debug assembly
         run: ./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace
+      - name: Verify benchmark threshold parser
+        run: bash scripts/verify-benchmark-threshold-script.sh
       - name: Upload lint reports
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -100,6 +102,83 @@ jobs:
           name: instrumented-test-reports-api-${{ matrix.api-level }}
           path: "**/build/outputs/androidTest-results/connected/**/*.xml"
           if-no-files-found: warn
+
+  benchmark:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Free disk space for the emulator
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk \
+            /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android 37 SDK
+        run: sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build benchmark APKs and merged manifests
+        run: >-
+          ./gradlew
+          :app:processDebugMainManifest
+          :app:processReleaseMainManifest
+          :app:processBenchmarkMainManifest
+          :benchmark:assembleBenchmark
+          --stacktrace
+      - name: Verify benchmark manifest isolation
+        run: |
+          set -eu
+          debug=app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
+          release=app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
+          benchmark=app/build/intermediates/merged_manifest/benchmark/processBenchmarkMainManifest/AndroidManifest.xml
+          if grep -Eq 'BENCHMARK_FIXTURE|BenchmarkFixtureReceiver|<profileable' "$debug" "$release"; then
+            echo "Benchmark-only components leaked into debug or release" >&2
+            exit 1
+          fi
+          grep -Fq 'android:name="app.opentasks.permission.BENCHMARK_FIXTURE"' "$benchmark"
+          grep -Fq 'android:protectionLevel="signature"' "$benchmark"
+          grep -Fq 'android:name="app.opentasks.benchmark.BenchmarkFixtureReceiver"' "$benchmark"
+          grep -Fq 'android:permission="app.opentasks.permission.BENCHMARK_FIXTURE"' "$benchmark"
+          grep -Fq 'android:name="app.opentasks.action.BENCHMARK_FIXTURE"' "$benchmark"
+          grep -Fq '<profileable android:shell="true"' "$benchmark"
+      - name: Stop the Gradle daemon before the emulator boots
+        run: ./gradlew --stop
+      - name: Run one functional benchmark iteration
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 36
+          channel: stable
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          disk-size: 8192M
+          script: >-
+            ./gradlew
+            :benchmark:connectedBenchmarkAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true
+            -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.output.enable=true
+            --stacktrace
+      - name: Upload raw benchmark output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-dry-run-raw
+          path: |
+            benchmark/build/outputs/connected_android_test_additional_output/**
+            benchmark/build/outputs/androidTest-results/connected/**
+          if-no-files-found: error
 
   release:
     needs: verify

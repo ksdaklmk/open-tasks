@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <permission
+        android:name="app.opentasks.permission.BENCHMARK_FIXTURE"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="app.opentasks.permission.BENCHMARK_FIXTURE" />
+
+    <application>
+        <profileable android:shell="true" />
+
+        <receiver
+            android:name=".benchmark.BenchmarkFixtureReceiver"
+            android:exported="true"
+            android:permission="app.opentasks.permission.BENCHMARK_FIXTURE">
+            <intent-filter>
+                <action android:name="app.opentasks.action.BENCHMARK_FIXTURE" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
