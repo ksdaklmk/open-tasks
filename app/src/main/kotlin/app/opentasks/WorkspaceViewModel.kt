@@ -34,12 +34,15 @@ import app.opentasks.feature.more.InsightsProjectOption
 import app.opentasks.feature.more.InsightsTagOption
 import app.opentasks.feature.more.InsightsUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +52,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.DateTimeException
 import java.time.DayOfWeek
 import java.time.Duration
@@ -120,7 +124,7 @@ class WorkspaceViewModel @Inject constructor(
     private val mutableDependencyFeedback = MutableStateFlow<DependencyFeedback?>(null)
     private val mutableSubtaskFeedback = MutableStateFlow<SubtaskFeedback?>(null)
     private val eventChannel = Channel<WorkspaceEvent>(Channel.BUFFERED)
-    private val mutableSearchResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    private val workspaceSearchState = WorkspaceSearchState(repository, viewModelScope)
 
     val snapshot: StateFlow<WorkspaceSnapshot> = repository.observeWorkspace()
     private val workspaceInsightsState = WorkspaceInsightsState(
@@ -133,7 +137,7 @@ class WorkspaceViewModel @Inject constructor(
     val insightsSummary: StateFlow<InsightsSnapshot> = workspaceInsightsState.summary
     val insightsUiState: StateFlow<InsightsUiState> = workspaceInsightsState.uiState
     val timeVersion: StateFlow<Long> = workspaceInsightsState.timeVersion
-    val searchResults: StateFlow<List<SearchResult>> = mutableSearchResults.asStateFlow()
+    val searchResults: StateFlow<List<SearchResult>> = workspaceSearchState.results
     val events = eventChannel.receiveAsFlow()
 
     val selectedTaskId: StateFlow<String?> = selectionState.selectedTaskId
@@ -737,11 +741,11 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     fun search(query: SearchQuery) {
-        viewModelScope.launch { mutableSearchResults.value = repository.search(query) }
+        workspaceSearchState.search(query)
     }
 
     fun clearSearch() {
-        mutableSearchResults.value = emptyList()
+        workspaceSearchState.clear()
     }
 
     private fun stopTimer(taskId: TaskId) {
@@ -758,6 +762,31 @@ class WorkspaceViewModel @Inject constructor(
         eventChannel.send(WorkspaceEvent.Message(result.message, result.undo))
     }
 
+}
+
+internal class WorkspaceSearchState(
+    private val repository: VaultRepository,
+    private val scope: CoroutineScope,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) {
+    private val mutableResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    private var searchJob: Job? = null
+
+    val results: StateFlow<List<SearchResult>> = mutableResults.asStateFlow()
+
+    fun search(query: SearchQuery) {
+        searchJob?.cancel()
+        searchJob = scope.launch {
+            val result = withContext(dispatcher) { repository.search(query) }
+            ensureActive()
+            mutableResults.value = result
+        }
+    }
+
+    fun clear() {
+        searchJob?.cancel()
+        mutableResults.value = emptyList()
+    }
 }
 
 data class InsightsTimeContext(
@@ -791,22 +820,21 @@ internal class WorkspaceInsightsState(
     private val insightsEngine: InsightsEngine,
     private val timeProvider: InsightsTimeProvider,
     private val scope: CoroutineScope,
+    private val projectionDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val selectionState = InsightsSelectionSavedState(savedStateHandle)
     private var timeContext = timeProvider.capture()
-    private val mutableSummary = MutableStateFlow(
-        calculate(workspace.value, InsightsSelection(), timeContext),
+    private val initialProjection = project(
+        workspace = workspace.value,
+        selection = selectionState.selection.value,
+        presentation = selectionState.presentation.value,
+        context = timeContext,
     )
-    private val mutableUiState = MutableStateFlow(
-        buildUiState(
-            workspace = workspace.value,
-            selection = selectionState.selection.value,
-            presentation = selectionState.presentation.value,
-            context = timeContext,
-        ),
-    )
+    private val mutableSummary = MutableStateFlow(initialProjection.summary)
+    private val mutableUiState = MutableStateFlow(initialProjection.uiState)
     private val mutableTimeVersion = MutableStateFlow(0L)
     private var scheduleJob: Job? = null
+    private var projectionJob: Job? = null
     private var foregrounded = false
 
     val summary: StateFlow<InsightsSnapshot> = mutableSummary.asStateFlow()
@@ -846,6 +874,7 @@ internal class WorkspaceInsightsState(
     fun setPresentation(presentation: InsightsPresentation) {
         selectionState.setPresentation(presentation)
         mutableUiState.value = mutableUiState.value.copy(presentation = presentation)
+        reproject()
     }
 
     fun setForegrounded(foregrounded: Boolean) {
@@ -856,6 +885,8 @@ internal class WorkspaceInsightsState(
         } else {
             scheduleJob?.cancel()
             scheduleJob = null
+            projectionJob?.cancel()
+            projectionJob = null
         }
     }
 
@@ -867,23 +898,28 @@ internal class WorkspaceInsightsState(
     }
 
     private fun reproject() {
-        val currentWorkspace = workspace.value
-        mutableSummary.value = calculate(currentWorkspace, InsightsSelection(), timeContext)
-        mutableUiState.value = buildUiState(
-            workspace = currentWorkspace,
-            selection = selectionState.selection.value,
-            presentation = selectionState.presentation.value,
-            context = timeContext,
-        )
+        val projectionWorkspace = workspace.value
+        val projectionSelection = selectionState.selection.value
+        val projectionPresentation = selectionState.presentation.value
+        val projectionContext = timeContext
+        projectionJob?.cancel()
+        projectionJob = scope.launch {
+            val projection = withContext(projectionDispatcher) {
+                project(
+                    workspace = projectionWorkspace,
+                    selection = projectionSelection,
+                    presentation = projectionPresentation,
+                    context = projectionContext,
+                )
+            }
+            ensureActive()
+            mutableSummary.value = projection.summary
+            mutableUiState.value = projection.uiState
+        }
     }
 
     private fun refreshSelection() {
-        mutableUiState.value = buildUiState(
-            workspace = workspace.value,
-            selection = selectionState.selection.value,
-            presentation = selectionState.presentation.value,
-            context = timeContext,
-        )
+        reproject()
     }
 
     private fun calculate(
@@ -897,36 +933,45 @@ internal class WorkspaceInsightsState(
         zoneId = context.zoneId,
     )
 
-    private fun buildUiState(
+    private fun project(
         workspace: WorkspaceSnapshot,
         selection: InsightsSelection,
         presentation: InsightsPresentation,
         context: InsightsTimeContext,
-    ): InsightsUiState {
+    ): InsightsProjection {
         val projectIds = workspace.projects.mapTo(hashSetOf(), Project::id)
         val tagIds = workspace.tags.mapTo(hashSetOf()) { it.id }
         val effectiveSelection = selection.copy(
             projectIds = selection.projectIds.intersect(projectIds),
             tagIds = selection.tagIds.intersect(tagIds),
         )
-        return InsightsUiState(
-            snapshot = calculate(workspace, effectiveSelection, context),
-            selection = effectiveSelection,
-            presentation = presentation,
-            projectOptions = workspace.projects
-                .map { InsightsProjectOption(it.id, it.name) }
-                .sortedWith(
-                    compareBy<InsightsProjectOption> {
-                        it.displayName.lowercase(Locale.ROOT)
-                    }.thenBy { it.id.value },
-                ),
-            tagOptions = workspace.tags
-                .map { InsightsTagOption(it.id, it.name) }
-                .sortedWith(
-                    compareBy<InsightsTagOption> {
-                        it.displayName.lowercase(Locale.ROOT)
-                    }.thenBy { it.id.value },
-                ),
+        val summary = calculate(workspace, InsightsSelection(), context)
+        val selected = if (effectiveSelection == InsightsSelection()) {
+            summary
+        } else {
+            calculate(workspace, effectiveSelection, context)
+        }
+        return InsightsProjection(
+            summary = summary,
+            uiState = InsightsUiState(
+                snapshot = selected,
+                selection = effectiveSelection,
+                presentation = presentation,
+                projectOptions = workspace.projects
+                    .map { InsightsProjectOption(it.id, it.name) }
+                    .sortedWith(
+                        compareBy<InsightsProjectOption> {
+                            it.displayName.lowercase(Locale.ROOT)
+                        }.thenBy { it.id.value },
+                    ),
+                tagOptions = workspace.tags
+                    .map { InsightsTagOption(it.id, it.name) }
+                    .sortedWith(
+                        compareBy<InsightsTagOption> {
+                            it.displayName.lowercase(Locale.ROOT)
+                        }.thenBy { it.id.value },
+                    ),
+            ),
         )
     }
 
@@ -945,6 +990,11 @@ internal class WorkspaceInsightsState(
         scheduleJob = nextJob
         nextJob.start()
     }
+
+    private data class InsightsProjection(
+        val summary: InsightsSnapshot,
+        val uiState: InsightsUiState,
+    )
 }
 
 private fun nextInsightsRefresh(

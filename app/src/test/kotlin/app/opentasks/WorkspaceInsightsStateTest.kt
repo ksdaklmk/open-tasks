@@ -14,21 +14,33 @@ import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.feature.more.InsightsPresentation
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class WorkspaceInsightsStateTest {
     @Test
@@ -158,9 +170,84 @@ class WorkspaceInsightsStateTest {
         )
 
         assertEquals(1, provider.captureCount)
-        assertEquals(2, engine.contexts.size)
-        assertEquals(engine.contexts[0], engine.contexts[1])
+        assertEquals(1, engine.contexts.size)
+        assertSame(state.summary.value, state.uiState.value.snapshot)
 
+        scope.cancel()
+    }
+
+    @Test
+    fun staleSelectionCannotPublishAfterANewerProjection() = runBlocking {
+        val now = Instant.parse("2026-07-27T10:00:00Z")
+        val provider = ManualInsightsTimeProvider(InsightsTimeContext(now, ZoneId.of("UTC")))
+        val engine = BlockingSelectionInsightsEngine()
+        val scope = testScope()
+        val state = WorkspaceInsightsState(
+            workspace = MutableStateFlow(OpenTasksFixtures.snapshot),
+            savedStateHandle = SavedStateHandle(),
+            insightsEngine = engine,
+            timeProvider = provider,
+            scope = scope,
+            projectionDispatcher = Dispatchers.Default,
+        )
+
+        state.setRange(InsightsRange.NINETY_DAYS)
+        assertTrue(engine.started.await(2, TimeUnit.SECONDS))
+        state.setRange(InsightsRange.THIRTY_DAYS)
+        withTimeout(2_000) {
+            state.uiState.first { it.selection.range == InsightsRange.THIRTY_DAYS }
+        }
+        val stalePublication = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(500) {
+                state.uiState.drop(1).first {
+                    it.selection.range == InsightsRange.NINETY_DAYS
+                }
+            }
+        }
+        engine.release.countDown()
+        assertTrue(engine.finished.await(2, TimeUnit.SECONDS))
+
+        assertNull(stalePublication.await())
+        assertEquals(InsightsRange.THIRTY_DAYS, state.uiState.value.selection.range)
+        scope.cancel()
+    }
+
+    @Test
+    fun refreshProjectionUsesDefaultDispatcherAndOneFrozenTimeContext() = runBlocking {
+        val captured = InsightsTimeContext(
+            Instant.parse("2026-07-27T10:00:00Z"),
+            ZoneId.of("Asia/Bangkok"),
+        )
+        val provider = ManualInsightsTimeProvider(
+            InsightsTimeContext(captured.now.minus(Duration.ofDays(1)), ZoneId.of("UTC")),
+        )
+        val engine = GatedRecordingInsightsEngine()
+        val scope = testScope()
+        val state = WorkspaceInsightsState(
+            workspace = MutableStateFlow(OpenTasksFixtures.snapshot),
+            savedStateHandle = SavedStateHandle(),
+            insightsEngine = engine,
+            timeProvider = provider,
+            scope = scope,
+            projectionDispatcher = Dispatchers.Default,
+        )
+        val initialInterval = state.summary.value.interval
+        provider.context = captured
+        engine.arm()
+
+        state.setForegrounded(true)
+        assertTrue(engine.started.await(2, TimeUnit.SECONDS))
+        provider.context = InsightsTimeContext(
+            captured.now.plusSeconds(30),
+            ZoneId.of("Pacific/Kiritimati"),
+        )
+        engine.release.countDown()
+        withTimeout(2_000) {
+            state.summary.first { it.interval != initialInterval }
+        }
+
+        assertEquals(listOf(captured), engine.contexts)
+        assertTrue(engine.threadNames.single().contains("DefaultDispatcher"))
         scope.cancel()
     }
 
@@ -385,6 +472,7 @@ class WorkspaceInsightsStateTest {
             insightsEngine = engine,
             timeProvider = provider,
             scope = scope,
+            projectionDispatcher = Dispatchers.Unconfined,
         )
         val initialSummary = state.summary.value
         val initialUiState = state.uiState.value
@@ -392,7 +480,7 @@ class WorkspaceInsightsStateTest {
         workspace.value = OpenTasksFixtures.snapshot.copy(tasks = listOf(intermediateTask))
         workspace.value = OpenTasksFixtures.snapshot.copy(tasks = listOf(latestTask))
 
-        assertEquals(2, engine.workspaceTaskIds.size)
+        assertEquals(1, engine.workspaceTaskIds.size)
         assertEquals(initialSummary, state.summary.value)
         assertEquals(initialUiState, state.uiState.value)
         assertEquals(1, provider.captureCount)
@@ -401,7 +489,7 @@ class WorkspaceInsightsStateTest {
         state.setForegrounded(true)
 
         assertEquals(
-            listOf(emptyList(), emptyList(), listOf(latestTask.id), listOf(latestTask.id)),
+            listOf(emptyList(), listOf(latestTask.id)),
             engine.workspaceTaskIds,
         )
         assertEquals(listOf(latestTask.id), state.summary.value.overdue.map { it.taskId })
@@ -461,6 +549,7 @@ class WorkspaceInsightsStateTest {
             insightsEngine = DefaultInsightsEngine(),
             timeProvider = provider,
             scope = scope,
+            projectionDispatcher = Dispatchers.Unconfined,
         )
 
         assertEquals(
@@ -479,12 +568,14 @@ class WorkspaceInsightsStateTest {
         provider: ManualInsightsTimeProvider,
         engine: InsightsEngine = DefaultInsightsEngine(),
         scope: CoroutineScope,
+        projectionDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): WorkspaceInsightsState = WorkspaceInsightsState(
         workspace = MutableStateFlow(workspace),
         savedStateHandle = SavedStateHandle(),
         insightsEngine = engine,
         timeProvider = provider,
         scope = scope,
+        projectionDispatcher = projectionDispatcher,
     )
 
     private fun testScope(): CoroutineScope =
@@ -503,6 +594,60 @@ class WorkspaceInsightsStateTest {
         ): InsightsSnapshot {
             contexts += InsightsTimeContext(now, zoneId)
             workspaceTaskIds += workspace.tasks.map { it.id }
+            return delegate.calculate(workspace, selection, now, zoneId)
+        }
+    }
+
+    private class BlockingSelectionInsightsEngine : InsightsEngine {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        private val delegate = DefaultInsightsEngine()
+
+        override fun calculate(
+            workspace: WorkspaceSnapshot,
+            selection: InsightsSelection,
+            now: Instant,
+            zoneId: ZoneId,
+        ): InsightsSnapshot {
+            val blocked = selection.range == InsightsRange.NINETY_DAYS
+            if (blocked) {
+                started.countDown()
+                release.await(2, TimeUnit.SECONDS)
+            }
+            return delegate.calculate(workspace, selection, now, zoneId).also {
+                if (blocked) finished.countDown()
+            }
+        }
+    }
+
+    private class GatedRecordingInsightsEngine : InsightsEngine {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val contexts = Collections.synchronizedList(mutableListOf<InsightsTimeContext>())
+        val threadNames = Collections.synchronizedList(mutableListOf<String>())
+        private val delegate = DefaultInsightsEngine()
+        @Volatile
+        private var armed = false
+
+        fun arm() {
+            contexts.clear()
+            threadNames.clear()
+            armed = true
+        }
+
+        override fun calculate(
+            workspace: WorkspaceSnapshot,
+            selection: InsightsSelection,
+            now: Instant,
+            zoneId: ZoneId,
+        ): InsightsSnapshot {
+            if (armed) {
+                started.countDown()
+                release.await(2, TimeUnit.SECONDS)
+            }
+            contexts += InsightsTimeContext(now, zoneId)
+            threadNames += Thread.currentThread().name
             return delegate.calculate(workspace, selection, now, zoneId)
         }
     }
