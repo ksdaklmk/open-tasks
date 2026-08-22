@@ -80,7 +80,7 @@ internal fun isReminderNotification(channelId: String?): Boolean =
 internal fun reminderContentConcealed(
     appLockSettings: AppLockSettings,
     appLockController: AppLockController,
-): Boolean = appLockSettings.titlePrivacy || !appLockController.isExternalActionAuthorized()
+): Boolean = appLockSettings.titlePrivacy || appLockController.externalContentConcealed.value
 
 @Singleton
 class ReminderScheduler @Inject constructor(
@@ -212,9 +212,8 @@ class ReminderNotifier @Inject constructor(
         if (!canPostNotifications()) return
         ReminderNotifications.createChannel(context)
 
-        // Title privacy and an active lock both conceal task text from the
-        // notification's main content, not only from its lock-screen-public
-        // version below.
+        // Title privacy and background concealment both remove task text from
+        // the main content, not only from the lock-screen-public version.
         val concealed = reminderContentConcealed(appLockSettings, appLockController)
 
         val publicNotification = NotificationCompat.Builder(

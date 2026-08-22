@@ -28,7 +28,7 @@ import org.junit.Test
 
 class WidgetActionGateTest {
     @Test
-    fun elapsedLockAuthorityBlocksWidgetTitlePublication() {
+    fun backgroundImmediatelyBlocksWidgetTitlePublication() {
         var elapsedRealtime = Duration.ofHours(12).toMillis()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
@@ -38,7 +38,7 @@ class WidgetActionGateTest {
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        assertTrue(widgetTitlesAuthorized(true, controller, settings))
+        assertFalse(widgetTitlesAuthorized(true, controller, settings))
 
         elapsedRealtime += Duration.ofMinutes(5).toMillis()
 

@@ -416,7 +416,8 @@ object AppModule {
         // finishes -- which is also why this needs no new member on
         // `ActiveVaultSession` and no change to its production caller
         // `ActiveVaultServices`.
-        fun titlesPermitted() = !(appLockSettings.titlePrivacy || appLockController.locked.value)
+        fun titlesPermitted() =
+            !(appLockSettings.titlePrivacy || appLockController.externalContentConcealed.value)
         val todayWidgetPublisher = TodayWidgetPublisher(
             context = context,
             repository = runtime.repository,

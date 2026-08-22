@@ -123,7 +123,7 @@ internal fun widgetTitlesAuthorized(
     appLockSettings: AppLockSettings,
 ): Boolean = requested &&
     !appLockSettings.titlePrivacy &&
-    appLockController.isExternalActionAuthorized()
+    !appLockController.externalContentConcealed.value
 
 // Glance (1.1.1) has no typography-role system of its own -- `glance-material3`
 // only converts a Compose Material3 `ColorScheme` to Glance `ColorProviders`,

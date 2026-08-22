@@ -151,7 +151,7 @@ class ReminderSystemTest {
     }
 
     @Test
-    fun elapsedLockAuthorityConcealsReminderPublication() {
+    fun backgroundImmediatelyConcealsReminderPublication() {
         var elapsedRealtime = 0L
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
@@ -161,7 +161,7 @@ class ReminderSystemTest {
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        assertFalse(reminderContentConcealed(settings, controller))
+        assertTrue(reminderContentConcealed(settings, controller))
 
         elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
