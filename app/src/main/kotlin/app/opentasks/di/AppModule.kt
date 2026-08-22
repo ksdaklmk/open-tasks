@@ -366,16 +366,16 @@ object AppModule {
         services.requireSession().remoteBackupLifecycleCoordinator
 
     internal suspend fun observeContentVisibility(
-        locked: Flow<Boolean>,
+        concealed: Flow<Boolean>,
         settingsChanges: Flow<Unit>,
         titlePrivacy: () -> Boolean,
         cancelActiveReminders: () -> Unit,
         publishTitlesPermitted: (Boolean) -> Unit,
     ) {
         combine(
-            locked,
+            concealed,
             settingsChanges.onStart { emit(Unit) },
-        ) { isLocked, _ -> !(isLocked || titlePrivacy()) }
+        ) { isConcealed, _ -> !(isConcealed || titlePrivacy()) }
             .distinctUntilChanged()
             .collect { titlesPermitted ->
                 if (!titlesPermitted) cancelActiveReminders()
@@ -416,7 +416,8 @@ object AppModule {
         // finishes -- which is also why this needs no new member on
         // `ActiveVaultSession` and no change to its production caller
         // `ActiveVaultServices`.
-        fun titlesPermitted() = !(appLockSettings.titlePrivacy || appLockController.locked.value)
+        fun titlesPermitted() =
+            !(appLockSettings.titlePrivacy || appLockController.externalContentConcealed.value)
         val todayWidgetPublisher = TodayWidgetPublisher(
             context = context,
             repository = runtime.repository,
@@ -426,7 +427,7 @@ object AppModule {
         todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
         scope.launch {
             observeContentVisibility(
-                locked = appLockController.locked,
+                concealed = appLockController.externalContentConcealed,
                 settingsChanges = appLockSettings.observe(),
                 titlePrivacy = { appLockSettings.titlePrivacy },
                 cancelActiveReminders = reminderNotifier::cancelActiveReminders,

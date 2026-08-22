@@ -237,6 +237,7 @@ class MainActivity : ComponentActivity() {
         biometricCancellationSignal?.cancel()
         val cancellationSignal = CancellationSignal()
         biometricCancellationSignal = cancellationSignal
+        val unlockAttempt = appLockController.beginUnlockAttempt()
 
         val prompt = BiometricPrompt.Builder(this)
             .setTitle(getString(R.string.app_lock_unlock_action))
@@ -249,7 +250,7 @@ class MainActivity : ComponentActivity() {
                 override fun onAuthenticationSucceeded(
                     result: BiometricPrompt.AuthenticationResult,
                 ) {
-                    appLockController.onUnlocked()
+                    appLockController.onUnlocked(unlockAttempt)
                 }
             },
         )

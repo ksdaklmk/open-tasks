@@ -16,6 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.coroutines.CoroutineContext
 
+internal fun AppLockController.onUnlocked() =
+    onUnlocked(beginUnlockAttempt())
+
 class AppLockControllerTest {
     private val baseElapsedRealtime = Duration.ofHours(12).toMillis()
 
@@ -229,6 +232,8 @@ class AppLockControllerTest {
         settings.lockEnabled = false
 
         assertTrue(controller.isExternalActionAuthorized())
+        assertFalse(controller.onAppForegrounded())
+        assertFalse(controller.externalContentConcealed.value)
     }
 
     @Test
@@ -259,7 +264,7 @@ class AppLockControllerTest {
     }
 
     @Test
-    fun unlockCancelsBackgroundExpiry() {
+    fun lateUnlockWhileBackgroundedKeepsExpiry() {
         val waits = ControlledWait()
         val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
@@ -272,10 +277,63 @@ class AppLockControllerTest {
         controller.onAppBackgrounded()
 
         controller.onUnlocked()
+
+        assertEquals(0, durableExpiry.cancellations)
+        assertFalse(controller.locked.value)
         waits.expire(0)
 
-        assertEquals(1, durableExpiry.cancellations)
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun lateUnlockFromPreviousForegroundCannotUnlockAfterResume() {
+        var elapsedRealtime = baseElapsedRealtime
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
+        val staleAttempt = controller.beginUnlockAttempt()
+        controller.onUnlocked(staleAttempt)
+        controller.onAppBackgrounded()
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
+        assertTrue(controller.onAppForegrounded())
+
+        controller.onUnlocked(staleAttempt)
+
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun replacementUnlockAttemptInvalidatesThePreviousAttempt() {
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
+        val staleAttempt = controller.beginUnlockAttempt()
+        val currentAttempt = controller.beginUnlockAttempt()
+
+        controller.onUnlocked(staleAttempt)
+        assertTrue(controller.locked.value)
+
+        controller.onUnlocked(currentAttempt)
         assertFalse(controller.locked.value)
+    }
+
+    @Test
+    fun backgroundImmediatelyConcealsPassiveContentDuringInAppGrace() {
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
+        controller.onUnlocked()
+        assertFalse(controller.externalContentConcealed.value)
+
+        controller.onAppBackgrounded()
+
+        assertTrue(controller.externalContentConcealed.value)
+        assertFalse(controller.locked.value)
+        assertFalse(controller.onAppForegrounded())
+        assertFalse(controller.externalContentConcealed.value)
     }
 
     @Test

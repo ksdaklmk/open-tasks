@@ -7,6 +7,7 @@ import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.FakeSharedPreferences
 import app.opentasks.lock.LockDelay
+import app.opentasks.lock.onUnlocked
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -27,7 +28,7 @@ import org.junit.Test
 
 class WidgetActionGateTest {
     @Test
-    fun elapsedLockAuthorityBlocksWidgetTitlePublication() {
+    fun backgroundImmediatelyBlocksWidgetTitlePublication() {
         var elapsedRealtime = Duration.ofHours(12).toMillis()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
@@ -37,7 +38,7 @@ class WidgetActionGateTest {
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        assertTrue(widgetTitlesAuthorized(true, controller, settings))
+        assertFalse(widgetTitlesAuthorized(true, controller, settings))
 
         elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
@@ -76,7 +77,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())
@@ -103,7 +106,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())
@@ -156,11 +161,41 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertEquals(1, commands.size)
             assertEquals(task.id, (commands.single() as DomainCommand.CompleteTask).taskId)
+        }
+    }
+
+    @Test
+    fun invalidatedGenerationIsRejectedAtCommit() = runBlocking {
+        withTimeout(5_000) {
+            val gate = WidgetActionGate()
+            val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+            val controller = AppLockController(settings, elapsedRealtime = { 0L })
+            controller.onUnlocked()
+            val commands = mutableListOf<DomainCommand>()
+
+            gate.dispatchCompletion(
+                gate.capture(),
+                snapshot,
+                task.id.value,
+                today,
+                zone,
+                now,
+                appLockController = controller,
+                appLockSettings = settings,
+                executeAuthorized = { command, isAuthorized ->
+                    gate.invalidate()
+                    if (isAuthorized()) commands += command
+                },
+            )
+
+            assertTrue(commands.isEmpty())
         }
     }
 
@@ -195,7 +230,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())

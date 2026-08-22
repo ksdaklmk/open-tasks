@@ -44,14 +44,14 @@ class ActiveVaultServicesTest {
     @Test
     fun lockedOrPrivateTitlesCancelRemindersAndConcealTheWidget() = runBlocking {
         withTimeout(TimeUnit.SECONDS.toMillis(5)) {
-            val locked = MutableStateFlow(false)
+            val concealed = MutableStateFlow(false)
             val settingsChanges = MutableSharedFlow<Unit>()
             val published = Channel<Boolean>(Channel.UNLIMITED)
             var titlePrivacy = false
             var reminderCancellations = 0
             val observer = launch(start = CoroutineStart.UNDISPATCHED) {
                 AppModule.observeContentVisibility(
-                    locked = locked,
+                    concealed = concealed,
                     settingsChanges = settingsChanges,
                     titlePrivacy = { titlePrivacy },
                     cancelActiveReminders = { reminderCancellations += 1 },
@@ -60,9 +60,9 @@ class ActiveVaultServicesTest {
             }
 
             assertTrue(published.receive())
-            locked.value = true
+            concealed.value = true
             assertFalse(published.receive())
-            locked.value = false
+            concealed.value = false
             assertTrue(published.receive())
             titlePrivacy = true
             settingsChanges.emit(Unit)

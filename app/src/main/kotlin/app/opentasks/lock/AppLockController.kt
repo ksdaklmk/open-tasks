@@ -35,12 +35,18 @@ class AppLockController(
 ) {
     private val stateGuard = Any()
     private val lockedState = MutableStateFlow(settings.lockEnabled)
+    private val externalContentConcealedState = MutableStateFlow(settings.lockEnabled)
     private var backgroundedAtElapsedRealtime: Long? = null
+    private var unlockAttemptGeneration: Long = 0
     private var expiryJob: Job? = null
     private var expiryGeneration: Long = 0
 
     /** `true` on cold start when [AppLockSettings.lockEnabled] is set. */
     val locked: StateFlow<Boolean> = lockedState.asStateFlow()
+
+    /** `true` while widgets and reminder notifications must omit private content. */
+    val externalContentConcealed: StateFlow<Boolean> =
+        externalContentConcealedState.asStateFlow()
 
     init {
         // Turning the feature off elsewhere (the More screen, while this
@@ -54,10 +60,14 @@ class AppLockController(
             settings.observe().collect {
                 synchronized(stateGuard) {
                     if (settings.lockEnabled) {
-                        if (backgroundedAtElapsedRealtime != null) scheduleExpiryLocked()
+                        if (backgroundedAtElapsedRealtime != null) {
+                            externalContentConcealedState.value = true
+                            scheduleExpiryLocked()
+                        }
                     } else {
                         cancelExpiryLocked()
                         lockedState.value = false
+                        externalContentConcealedState.value = false
                     }
                 }
             }
@@ -66,8 +76,14 @@ class AppLockController(
 
     fun onAppBackgrounded() {
         synchronized(stateGuard) {
+            unlockAttemptGeneration += 1
             backgroundedAtElapsedRealtime = elapsedRealtime()
-            if (settings.lockEnabled) scheduleExpiryLocked() else cancelExpiryLocked()
+            if (settings.lockEnabled) {
+                externalContentConcealedState.value = true
+                scheduleExpiryLocked()
+            } else {
+                cancelExpiryLocked()
+            }
         }
     }
 
@@ -84,18 +100,38 @@ class AppLockController(
             cancelExpiryLocked()
             val since = backgroundedAtElapsedRealtime
             backgroundedAtElapsedRealtime = null
-            if (!settings.lockEnabled) return@synchronized false
+            if (!settings.lockEnabled) {
+                externalContentConcealedState.value = false
+                return@synchronized false
+            }
             val mustLock = since == null ||
                 elapsedSince(since) >= settings.lockDelay.duration
-            if (mustLock) lockedState.value = true
+            if (mustLock) {
+                lockedState.value = true
+                externalContentConcealedState.value = true
+            } else {
+                externalContentConcealedState.value = false
+            }
             mustLock
         }
     }
 
-    fun onUnlocked() {
+    fun beginUnlockAttempt(): Long = synchronized(stateGuard) {
+        unlockAttemptGeneration += 1
+        unlockAttemptGeneration
+    }
+
+    fun onUnlocked(attemptGeneration: Long) {
         synchronized(stateGuard) {
+            if (
+                attemptGeneration != unlockAttemptGeneration ||
+                backgroundedAtElapsedRealtime != null
+            ) {
+                return@synchronized
+            }
             cancelExpiryLocked()
             lockedState.value = false
+            externalContentConcealedState.value = false
         }
     }
 
@@ -105,7 +141,10 @@ class AppLockController(
         val expired = backgroundedAtElapsedRealtime?.let { since ->
             elapsedSince(since) >= settings.lockDelay.duration
         } ?: false
-        if (expired) lockedState.value = true
+        if (expired) {
+            lockedState.value = true
+            externalContentConcealedState.value = true
+        }
         !lockedState.value
     }
 
@@ -125,6 +164,7 @@ class AppLockController(
                     settings.lockEnabled
                 ) {
                     lockedState.value = true
+                    externalContentConcealedState.value = true
                 }
             }
         }

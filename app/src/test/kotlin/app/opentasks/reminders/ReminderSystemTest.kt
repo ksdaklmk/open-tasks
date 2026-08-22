@@ -4,6 +4,7 @@ import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.FakeSharedPreferences
 import app.opentasks.lock.LockDelay
+import app.opentasks.lock.onUnlocked
 import java.time.Duration
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -150,7 +151,7 @@ class ReminderSystemTest {
     }
 
     @Test
-    fun elapsedLockAuthorityConcealsReminderPublication() {
+    fun backgroundImmediatelyConcealsReminderPublication() {
         var elapsedRealtime = 0L
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
@@ -160,7 +161,7 @@ class ReminderSystemTest {
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        assertFalse(reminderContentConcealed(settings, controller))
+        assertTrue(reminderContentConcealed(settings, controller))
 
         elapsedRealtime += Duration.ofMinutes(5).toMillis()
 

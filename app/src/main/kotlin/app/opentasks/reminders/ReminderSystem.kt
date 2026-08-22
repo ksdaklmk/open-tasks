@@ -66,8 +66,11 @@ internal fun reminderScheduleMode(
 
 internal suspend fun <T> performReminderMutation(
     appLockController: AppLockController,
-    mutation: suspend () -> T,
-): T? = if (appLockController.isExternalActionAuthorized()) mutation() else null
+    mutation: suspend (isAuthorized: () -> Boolean) -> T,
+): T? {
+    val isAuthorized = appLockController::isExternalActionAuthorized
+    return if (isAuthorized()) mutation(isAuthorized) else null
+}
 
 internal fun reminderMutationActionsEnabled(concealed: Boolean): Boolean = !concealed
 
@@ -77,7 +80,7 @@ internal fun isReminderNotification(channelId: String?): Boolean =
 internal fun reminderContentConcealed(
     appLockSettings: AppLockSettings,
     appLockController: AppLockController,
-): Boolean = appLockSettings.titlePrivacy || !appLockController.isExternalActionAuthorized()
+): Boolean = appLockSettings.titlePrivacy || appLockController.externalContentConcealed.value
 
 @Singleton
 class ReminderScheduler @Inject constructor(
@@ -209,9 +212,8 @@ class ReminderNotifier @Inject constructor(
         if (!canPostNotifications()) return
         ReminderNotifications.createChannel(context)
 
-        // Title privacy and an active lock both conceal task text from the
-        // notification's main content, not only from its lock-screen-public
-        // version below.
+        // Title privacy and background concealment both remove task text from
+        // the main content, not only from the lock-screen-public version.
         val concealed = reminderContentConcealed(appLockSettings, appLockController)
 
         val publicNotification = NotificationCompat.Builder(
@@ -438,8 +440,8 @@ class ReminderActionReceiver : BroadcastReceiver() {
         } ?: repository.currentWorkspace()
 
     private suspend fun executeMutation(command: DomainCommand): CommandResult? =
-        performReminderMutation(appLockController) {
-            repository.execute(command)
+        performReminderMutation(appLockController) { isAuthorized ->
+            repository.executeAuthorized(command, isAuthorized)
         }
 
     private companion object {

@@ -607,5 +607,9 @@ interface VaultRepository {
     fun observeTask(id: TaskId): Flow<Task?>
     suspend fun currentWorkspace(): WorkspaceSnapshot
     suspend fun execute(command: DomainCommand): CommandResult
+    suspend fun executeAuthorized(
+        command: DomainCommand,
+        isAuthorized: () -> Boolean,
+    ): CommandResult? = null
     suspend fun search(query: SearchQuery): List<SearchResult>
 }
