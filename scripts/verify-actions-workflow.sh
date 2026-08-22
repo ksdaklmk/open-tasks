@@ -3,6 +3,12 @@ set -euo pipefail
 
 workflow=".github/workflows/android.yml"
 security_workflow=".github/workflows/security.yml"
+wrapper_properties="gradle/wrapper/gradle-wrapper.properties"
+
+checksum_count="$(grep -Ec '^[[:space:]]*distributionSha256Sum[[:space:]]*=' "$wrapper_properties" || true)"
+test "$checksum_count" -eq 1
+grep -Eq '^distributionSha256Sum=[0-9A-Fa-f]{64}$' "$wrapper_properties"
+
 grep -q 'api-level: 36' "$workflow"
 grep -q 'api-level: "37.0"' "$workflow"
 grep -q 'profile: pixel_6' "$workflow"
