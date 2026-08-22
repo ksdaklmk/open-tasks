@@ -19,8 +19,7 @@ import kotlinx.coroutines.launch
  *
  * `MainActivity` is the only observer this needs: the single activity's own
  * `onStart`/`onStop` report foreground and background transitions, and its
- * overlay calls [onUnlocked] once biometric authentication succeeds --
- * there is no process-level lifecycle to track beyond that one activity.
+ * overlay calls [onUnlocked] once biometric authentication succeeds.
  * [now] is injected so delay-boundary behaviour can be tested without
  * sleeping, and [wait] lets tests expire the background timer directly.
  */
@@ -30,6 +29,8 @@ class AppLockController(
     private val scope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val wait: suspend (Duration) -> Unit = { delay(it.toMillis()) },
+    private val scheduleDurableExpiry: (Duration) -> Unit = {},
+    private val cancelDurableExpiry: () -> Unit = {},
 ) {
     private val stateGuard = Any()
     private val lockedState = MutableStateFlow(settings.lockEnabled)
@@ -108,11 +109,12 @@ class AppLockController(
     }
 
     private fun scheduleExpiryLocked() {
-        cancelExpiryLocked()
+        cancelProcessExpiryLocked()
         val since = backgroundedAt ?: return
         val generation = expiryGeneration
         val remaining = settings.lockDelay.duration.minus(Duration.between(since, now()))
             .let { if (it.isNegative) Duration.ZERO else it }
+        scheduleDurableExpiry(remaining)
         expiryJob = scope.launch {
             wait(remaining)
             synchronized(stateGuard) {
@@ -128,6 +130,11 @@ class AppLockController(
     }
 
     private fun cancelExpiryLocked() {
+        cancelProcessExpiryLocked()
+        cancelDurableExpiry()
+    }
+
+    private fun cancelProcessExpiryLocked() {
         expiryGeneration += 1
         expiryJob?.cancel()
         expiryJob = null

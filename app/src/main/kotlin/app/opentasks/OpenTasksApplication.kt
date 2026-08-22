@@ -7,6 +7,7 @@ import androidx.work.Configuration
 import app.opentasks.backup.RemoteBackupWorkerFactory
 import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.digest.DailyDigestNotifications
+import app.opentasks.lock.ExternalLockContentConcealer
 import app.opentasks.reminders.ReminderNotifications
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -25,6 +26,9 @@ class OpenTasksApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var remoteBackupWorkerFactory: RemoteBackupWorkerFactory
+
+    @Inject
+    lateinit var externalLockContentConcealer: ExternalLockContentConcealer
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -51,6 +55,9 @@ class OpenTasksApplication : Application(), Configuration.Provider {
         // reason: a channel must exist before anything can post to it, and
         // neither one needs a vault runtime to be declared.
         DailyDigestNotifications.createChannel(this)
+        applicationScope.launch {
+            externalLockContentConcealer.concealIfUnauthorized()
+        }
         // Android backup services exist only while a vault runtime is active,
         // and are closed again before the runtime's slot can be replaced.
         vaultRuntimeManager.setActiveServiceQuiescer(activeVaultServices::quiesce)

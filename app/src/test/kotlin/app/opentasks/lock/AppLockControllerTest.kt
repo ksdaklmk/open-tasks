@@ -128,15 +128,19 @@ class AppLockControllerTest {
     @Test
     fun backgroundExpiryLocksWithoutForegrounding() {
         val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits)
+        val controller = controlledController(settings, waits, durableExpiry = durableExpiry)
         controller.onUnlocked()
+        durableExpiry.reset()
 
         controller.onAppBackgrounded()
+
         assertEquals(listOf(Duration.ofMinutes(5)), waits.durations)
+        assertEquals(listOf(Duration.ofMinutes(5)), durableExpiry.scheduled)
         waits.expire(0)
 
         assertTrue(controller.locked.value)
@@ -150,7 +154,7 @@ class AppLockControllerTest {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits) { clock }
+        val controller = controlledController(settings, waits, now = { clock })
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
@@ -197,52 +201,66 @@ class AppLockControllerTest {
     fun foregroundCancelsBackgroundExpiry() {
         var clock = baseInstant
         val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits) { clock }
+        val controller = controlledController(
+            settings = settings,
+            waits = waits,
+            now = { clock },
+            durableExpiry = durableExpiry,
+        )
         controller.onUnlocked()
+        durableExpiry.reset()
         controller.onAppBackgrounded()
 
         clock = clock.plus(Duration.ofMinutes(4))
         assertFalse(controller.onAppForegrounded())
         waits.expire(0)
 
+        assertEquals(1, durableExpiry.cancellations)
         assertFalse(controller.locked.value)
     }
 
     @Test
     fun unlockCancelsBackgroundExpiry() {
         val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits)
+        val controller = controlledController(settings, waits, durableExpiry = durableExpiry)
         controller.onUnlocked()
+        durableExpiry.reset()
         controller.onAppBackgrounded()
 
         controller.onUnlocked()
         waits.expire(0)
 
+        assertEquals(1, durableExpiry.cancellations)
         assertFalse(controller.locked.value)
     }
 
     @Test
     fun disablingLockCancelsBackgroundExpiry() {
         val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits)
+        val controller = controlledController(settings, waits, durableExpiry = durableExpiry)
         controller.onUnlocked()
+        durableExpiry.reset()
         controller.onAppBackgrounded()
 
         settings.lockEnabled = false
         waits.expire(0)
 
+        assertEquals(1, durableExpiry.cancellations)
         assertFalse(controller.locked.value)
     }
 
@@ -250,12 +268,19 @@ class AppLockControllerTest {
     fun delayChangeReschedulesFromOriginalBackgroundTime() {
         var clock = baseInstant
         val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits) { clock }
+        val controller = controlledController(
+            settings = settings,
+            waits = waits,
+            now = { clock },
+            durableExpiry = durableExpiry,
+        )
         controller.onUnlocked()
+        durableExpiry.reset()
         controller.onAppBackgrounded()
 
         clock = clock.plus(Duration.ofMinutes(1))
@@ -264,6 +289,10 @@ class AppLockControllerTest {
         assertEquals(
             listOf(Duration.ofMinutes(5), Duration.ofMinutes(14)),
             waits.durations,
+        )
+        assertEquals(
+            listOf(Duration.ofMinutes(5), Duration.ofMinutes(14)),
+            durableExpiry.scheduled,
         )
         waits.expire(0)
         assertFalse(controller.locked.value)
@@ -300,12 +329,34 @@ class AppLockControllerTest {
         settings: AppLockSettings,
         waits: ControlledWait,
         now: () -> Instant = { baseInstant },
+        durableExpiry: DurableExpiryRecorder? = null,
     ) = AppLockController(
         settings = settings,
         now = now,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         wait = waits::await,
+        scheduleDurableExpiry = durableExpiry?.let { recorder -> recorder::schedule } ?: {},
+        cancelDurableExpiry = durableExpiry?.let { recorder -> recorder::cancel } ?: {},
     )
+
+    private class DurableExpiryRecorder {
+        val scheduled = mutableListOf<Duration>()
+        var cancellations = 0
+            private set
+
+        fun schedule(duration: Duration) {
+            scheduled += duration
+        }
+
+        fun cancel() {
+            cancellations += 1
+        }
+
+        fun reset() {
+            scheduled.clear()
+            cancellations = 0
+        }
+    }
 
     private class ControlledWait {
         private data class Invocation(

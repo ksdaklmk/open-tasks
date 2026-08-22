@@ -149,4 +149,22 @@ class ReminderSystemTest {
         assertFalse(isReminderNotification("daily_digest"))
         assertFalse(isReminderNotification(null))
     }
+
+    @Test
+    fun elapsedLockAuthorityConcealsReminderPublication() {
+        var clock = Instant.EPOCH
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, now = { clock })
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        assertFalse(reminderContentConcealed(settings, controller))
+
+        clock = clock.plus(Duration.ofMinutes(5))
+
+        assertTrue(reminderContentConcealed(settings, controller))
+    }
 }

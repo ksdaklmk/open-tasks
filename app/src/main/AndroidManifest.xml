@@ -86,6 +86,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".lock.AppLockExpiryReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".reminders.ReminderSystemEventReceiver"
             android:exported="false">
             <intent-filter>

@@ -117,6 +117,14 @@ internal fun todayWidgetUsesWideCounts(width: Dp): Boolean =
 internal fun todayWidgetUsesVerboseCounts(width: Dp, fontScale: Float): Boolean =
     todayWidgetUsesWideCounts(width) && fontScale <= 1.3f
 
+internal fun widgetTitlesAuthorized(
+    requested: Boolean,
+    appLockController: AppLockController,
+    appLockSettings: AppLockSettings,
+): Boolean = requested &&
+    !appLockSettings.titlePrivacy &&
+    appLockController.isExternalActionAuthorized()
+
 // Glance (1.1.1) has no typography-role system of its own -- `glance-material3`
 // only converts a Compose Material3 `ColorScheme` to Glance `ColorProviders`,
 // nothing about type. Real Material role *values* (size, weight) come from a
@@ -193,6 +201,21 @@ private fun Preferences.readFocusEntries(): List<FocusEntry> =
         val completable = this[FocusCompletableKeys[index]] ?: false
         FocusEntry(taskId = taskId, title = title, completable = completable)
     }
+
+private fun writeFocusTitles(state: MutablePreferences, entries: List<FocusEntry>) {
+    FocusTitleKeys.forEachIndexed { index, key ->
+        val entry = entries.getOrNull(index)
+        if (entry != null) state[key] = entry.title else state.remove(key)
+    }
+    FocusIdKeys.forEachIndexed { index, key ->
+        val entry = entries.getOrNull(index)
+        if (entry != null) state[key] = entry.taskId else state.remove(key)
+    }
+    FocusCompletableKeys.forEachIndexed { index, key ->
+        val entry = entries.getOrNull(index)
+        if (entry != null) state[key] = entry.completable else state.remove(key)
+    }
+}
 
 @Composable
 private fun TodayWidgetContent() {
@@ -462,6 +485,19 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
     }
 }
 
+/** Clears private widget rows while retaining the last aggregate counts. */
+internal suspend fun clearTodayWidgetTitles(context: Context) {
+    val ids = GlanceAppWidgetManager(context).getGlanceIds(TodayWidget::class.java)
+    if (ids.isEmpty()) return
+    for (id in ids) {
+        updateAppWidgetState(context, id) { state ->
+            state[TitlesPermittedKey] = false
+            writeFocusTitles(state, emptyList())
+        }
+    }
+    TodayWidget().updateAll(context)
+}
+
 /**
  * Publishes [TodayWidgetProjection] into Glance state for every placed
  * [TodayWidget].
@@ -524,7 +560,7 @@ class TodayWidgetPublisher(
         }
         collection?.cancel()
         collection = null
-        scope.launch { writer.stop { clearTitles() } }
+        scope.launch { writer.stop { clearTodayWidgetTitles(context) } }
     }
 
     /**
@@ -598,40 +634,21 @@ class TodayWidgetPublisher(
         if (ids.isEmpty()) return
         for (id in ids) {
             updateAppWidgetState(context, id) { state ->
+                val titlesAuthorized = widgetTitlesAuthorized(
+                    requested = titlesPermitted,
+                    appLockController = appLockController,
+                    appLockSettings = appLockSettings,
+                )
                 state[OpenTodayCountKey] = projection.openTodayCount
                 state[OverdueCountKey] = projection.overdueCount
-                state[TitlesPermittedKey] = titlesPermitted
-                writeFocusTitles(state, projection.focusEntries)
+                state[TitlesPermittedKey] = titlesAuthorized
+                writeFocusTitles(
+                    state,
+                    if (titlesAuthorized) projection.focusEntries else emptyList(),
+                )
             }
         }
         TodayWidget().updateAll(context)
-    }
-
-    private suspend fun clearTitles() {
-        val ids = GlanceAppWidgetManager(context).getGlanceIds(TodayWidget::class.java)
-        if (ids.isEmpty()) return
-        for (id in ids) {
-            updateAppWidgetState(context, id) { state ->
-                state[TitlesPermittedKey] = false
-                writeFocusTitles(state, emptyList())
-            }
-        }
-        TodayWidget().updateAll(context)
-    }
-
-    private fun writeFocusTitles(state: MutablePreferences, entries: List<FocusEntry>) {
-        FocusTitleKeys.forEachIndexed { index, key ->
-            val entry = entries.getOrNull(index)
-            if (entry != null) state[key] = entry.title else state.remove(key)
-        }
-        FocusIdKeys.forEachIndexed { index, key ->
-            val entry = entries.getOrNull(index)
-            if (entry != null) state[key] = entry.taskId else state.remove(key)
-        }
-        FocusCompletableKeys.forEachIndexed { index, key ->
-            val entry = entries.getOrNull(index)
-            if (entry != null) state[key] = entry.completable else state.remove(key)
-        }
     }
 
     companion object {

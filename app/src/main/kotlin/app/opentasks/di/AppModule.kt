@@ -83,6 +83,7 @@ import app.opentasks.ViewArrangementStore
 import app.opentasks.focus.FocusSessionController
 import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockExpiryScheduler
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.reminders.ReminderNotifier
 import app.opentasks.widget.TodayWidgetPublisher
@@ -136,8 +137,14 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAppLockController(settings: AppLockSettings): AppLockController =
-        AppLockController(settings)
+    fun provideAppLockController(
+        settings: AppLockSettings,
+        expiryScheduler: AppLockExpiryScheduler,
+    ): AppLockController = AppLockController(
+        settings = settings,
+        scheduleDurableExpiry = expiryScheduler::schedule,
+        cancelDurableExpiry = expiryScheduler::cancel,
+    )
 
     // Process-scoped for the same reason app lock is: a focus cycle is a
     // device-local timing aid over whichever vault slot happens to be open,

@@ -74,6 +74,11 @@ internal fun reminderMutationActionsEnabled(concealed: Boolean): Boolean = !conc
 internal fun isReminderNotification(channelId: String?): Boolean =
     channelId == ReminderNotifications.CHANNEL_ID
 
+internal fun reminderContentConcealed(
+    appLockSettings: AppLockSettings,
+    appLockController: AppLockController,
+): Boolean = appLockSettings.titlePrivacy || !appLockController.isExternalActionAuthorized()
+
 @Singleton
 class ReminderScheduler @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -194,6 +199,7 @@ class ReminderNotifier @Inject constructor(
 ) {
     fun canPostNotifications(): Boolean = ReminderNotifications.areEnabled(context)
 
+    @Synchronized
     @SuppressLint("MissingPermission")
     fun show(
         task: Task,
@@ -206,7 +212,7 @@ class ReminderNotifier @Inject constructor(
         // Title privacy and an active lock both conceal task text from the
         // notification's main content, not only from its lock-screen-public
         // version below.
-        val concealed = appLockSettings.titlePrivacy || appLockController.locked.value
+        val concealed = reminderContentConcealed(appLockSettings, appLockController)
 
         val publicNotification = NotificationCompat.Builder(
             context,
@@ -272,6 +278,7 @@ class ReminderNotifier @Inject constructor(
         NotificationManagerCompat.from(context).cancel(notificationId(reminderId))
     }
 
+    @Synchronized
     fun cancelActiveReminders() {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.activeNotifications

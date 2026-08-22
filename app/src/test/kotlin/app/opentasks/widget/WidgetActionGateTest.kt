@@ -26,6 +26,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WidgetActionGateTest {
+    @Test
+    fun elapsedLockAuthorityBlocksWidgetTitlePublication() {
+        var now = Instant.parse("2026-08-05T09:00:00Z")
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, now = { now })
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        assertTrue(widgetTitlesAuthorized(true, controller, settings))
+
+        now = now.plus(Duration.ofMinutes(5))
+
+        assertFalse(widgetTitlesAuthorized(true, controller, settings))
+    }
+
     private val zone = ZoneId.of("Asia/Bangkok")
     private val today = LocalDate.of(2026, 8, 9)
     private val now = today.atTime(12, 0).atZone(zone).toInstant()
