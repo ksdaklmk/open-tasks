@@ -198,8 +198,8 @@ jobs:
         run: sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
       - name: Verify release size gate
         run: bash scripts/verify-release-size-script.sh
-      - name: Release assembly
-        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Release assembly and SBOM
+        run: ./gradlew :app:assembleRelease cyclonedxBom --stacktrace
       - name: Check release APK sizes
         run: |
           set -o pipefail
@@ -207,12 +207,14 @@ jobs:
             app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk \
             app/build/outputs/apk/release/app-universal-release-unsigned.apk \
             | tee app/build/outputs/apk/release/release-size-report.txt
-      - name: Upload release APKs and size report
+      - name: Upload release APKs, size report, and SBOM
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-apks-and-size-report
+          name: release-apks-size-report-and-sbom
           path: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/release-size-report.txt
+            build/reports/cyclonedx/bom.json
+            build/reports/cyclonedx/bom.xml
           if-no-files-found: error

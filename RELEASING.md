@@ -36,12 +36,20 @@ arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
 
        ./gradlew testDebugUnitTest lintDebug :app:assembleDebug
 
-3. Verify the size-gate script, then build the signed release:
+3. Verify the workflow policy, dependency checksums, and aggregate SBOM:
+
+       scripts/verify-actions-workflow.sh
+       ./gradlew help cyclonedxBom
+
+   Review `build/reports/cyclonedx/bom.json` and `bom.xml` as described in the
+   supply-chain section below.
+
+4. Verify the size-gate script, then build the signed release:
 
        bash scripts/verify-release-size-script.sh
        ./gradlew :app:assembleRelease
 
-4. Gate the arm64 and universal byte counts against the accepted baseline and
+5. Gate the arm64 and universal byte counts against the accepted baseline and
    hard caps:
 
        scripts/check-release-size.sh \
@@ -53,29 +61,50 @@ arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
    `gradle/release-size-baseline.properties`; never update it just to make the
    gate pass.
 
-5. Run the physical-device performance qualification below. Emulator CI is a
+6. Run the physical-device performance qualification below. Emulator CI is a
    functional wiring check only and never supplies release threshold results.
 
-6. Verify the signed universal fallback:
+7. Verify the signed universal fallback:
 
        bash scripts/verify-release-apk.sh \
          app/build/outputs/apk/release/app-universal-release.apk
 
-7. Run the smoke checklist below on a disposable AVD. Record the
+8. Run the smoke checklist below on a disposable AVD. Record the
    disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;
    the same qualification record must also contain the owner-present Drive
    gate results below.
-8. Run the owner-present Google Drive gate below on the physical device.
-9. Commit the version bump and qualification record, then tag:
+9. Run the owner-present Google Drive gate below on the physical device.
+10. Commit the version bump and qualification record, then tag:
 
        git add app/build.gradle.kts \
          docs/qualification/release-<versionName>-sideload.md
        git commit -m "docs: qualify release <versionName> for signed sideload"
        git tag -a v<versionName> -m "Release <versionName>" && git push origin main v<versionName>
 
-10. Install the matching APK on the real device (normally arm64-v8a):
+11. Install the matching APK on the real device (normally arm64-v8a):
 
        adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
+
+## Supply-chain qualification
+
+`gradle/verification-metadata.xml` is the reviewed SHA-256 allow-list for
+resolved build inputs. Regenerate it only with the complete gate command,
+then review every change rather than accepting a checksum merely because the
+build requested it:
+
+    ./gradlew --write-verification-metadata sha256 \
+      testDebugUnitTest lintDebug :app:assembleRelease cyclonedxBom
+
+The aggregate CycloneDX JSON and XML files must contain the application
+modules plus Room, SQLCipher, Tink, and Bouncy Castle. They must not contain
+keystore properties, signing material, credentials, or other local
+configuration. Attach both exact files to the release qualification.
+
+The pushed Security workflow must finish successfully before release. CodeQL
+uses a manual Java/Kotlin build, and dependency review blocks newly introduced
+High or Critical advisories on pull requests. If the repository is private
+and lacks the required GitHub Code Security entitlement, that is an external
+release blocker; do not waive either job.
 
 ## Performance qualification (per release, disposable physical device only)
 
