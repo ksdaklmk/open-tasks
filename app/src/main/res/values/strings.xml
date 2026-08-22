@@ -60,6 +60,7 @@
     <string name="attachment_damaged">That attachment is damaged or incompatible.</string>
     <string name="attachment_download_failed">The attachment could not be downloaded. Try again.</string>
     <string name="attachment_no_viewer">No app on this device can open that attachment.</string>
+    <string name="dashboard_no_share_target">No app on this device can share that dashboard.</string>
     <string name="attachment_content_deleted">Attachment content deleted</string>
     <string name="attachment_content_delete_refused">Attachment content was not deleted.</string>
 

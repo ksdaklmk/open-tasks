@@ -1,8 +1,11 @@
 package app.opentasks
 
+import android.content.ClipData
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.opentasks.backup.OT_VAULT_EXPORT_FAILED_REASON
@@ -15,6 +18,8 @@ import app.opentasks.backup.OtVaultImporter
 import app.opentasks.core.data.export.CsvTable
 import app.opentasks.core.data.export.CsvImportPreviewResult
 import app.opentasks.core.data.export.CsvParseResult
+import app.opentasks.core.data.export.ExecutiveDashboardHtmlWriter
+import app.opentasks.core.data.export.ExecutiveDashboardRequest
 import app.opentasks.core.data.export.MAX_TASKS_CSV_BYTES
 import app.opentasks.core.data.export.ProjectMarkdownWriter
 import app.opentasks.core.data.export.WorkspaceCsvWriter
@@ -24,15 +29,21 @@ import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.ImportedTaskRow
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
 import app.opentasks.feature.more.CsvImportOutcome
+import app.opentasks.feature.more.DashboardExportOutcome
 import app.opentasks.feature.more.MarkdownExportOutcome
 import app.opentasks.feature.more.VaultExportOutcome
 import app.opentasks.feature.more.VaultImportOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.util.Locale
 import javax.inject.Inject
@@ -68,14 +79,39 @@ import kotlinx.coroutines.withContext
  * bytes and ends the whole batch there; tables already written stand.
  */
 @HiltViewModel
-class VaultTransferViewModel @Inject constructor(
-    @ApplicationContext context: Context,
+class VaultTransferViewModel internal constructor(
+    context: Context,
     private val exporter: OtVaultExporter,
     private val importer: OtVaultImporter,
     private val vaultRepository: VaultRepository,
     private val csvWriter: WorkspaceCsvWriter,
     private val markdownWriter: ProjectMarkdownWriter,
+    private val dashboardWriter: ExecutiveDashboardHtmlWriter,
+    private val insightsTimeProvider: InsightsTimeProvider,
+    private val dashboardRuntime: DashboardTransferRuntime,
 ) : ViewModel() {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        exporter: OtVaultExporter,
+        importer: OtVaultImporter,
+        vaultRepository: VaultRepository,
+        csvWriter: WorkspaceCsvWriter,
+        markdownWriter: ProjectMarkdownWriter,
+        dashboardWriter: ExecutiveDashboardHtmlWriter,
+        insightsTimeProvider: InsightsTimeProvider,
+    ) : this(
+        context = context,
+        exporter = exporter,
+        importer = importer,
+        vaultRepository = vaultRepository,
+        csvWriter = csvWriter,
+        markdownWriter = markdownWriter,
+        dashboardWriter = dashboardWriter,
+        insightsTimeProvider = insightsTimeProvider,
+        dashboardRuntime = AndroidDashboardTransferRuntime(context),
+    )
+
     private val context: Context = context
     private val operation = Mutex()
 
@@ -93,6 +129,8 @@ class VaultTransferViewModel @Inject constructor(
     private val mutableCsvImportOutcome = MutableStateFlow<CsvImportOutcome?>(null)
     private val mutableMarkdownExportInProgress = MutableStateFlow(false)
     private val mutableMarkdownExportOutcome = MutableStateFlow<MarkdownExportOutcome?>(null)
+    private val mutableDashboardInProgress = MutableStateFlow(false)
+    private val mutableDashboardOutcome = MutableStateFlow<DashboardExportOutcome?>(null)
 
     val exportInProgress: StateFlow<Boolean> = mutableExportInProgress.asStateFlow()
     val exportOutcome: StateFlow<VaultExportOutcome?> = mutableExportOutcome.asStateFlow()
@@ -105,6 +143,8 @@ class VaultTransferViewModel @Inject constructor(
     val markdownExportInProgress: StateFlow<Boolean> = mutableMarkdownExportInProgress.asStateFlow()
     val markdownExportOutcome: StateFlow<MarkdownExportOutcome?> =
         mutableMarkdownExportOutcome.asStateFlow()
+    val dashboardInProgress: StateFlow<Boolean> = mutableDashboardInProgress.asStateFlow()
+    val dashboardOutcome: StateFlow<DashboardExportOutcome?> = mutableDashboardOutcome.asStateFlow()
 
     /** A confirmed passphrase is ready; the caller launches the SAF create-document picker. */
     val createDocumentRequests = Channel<Unit>(Channel.BUFFERED)
@@ -124,6 +164,12 @@ class VaultTransferViewModel @Inject constructor(
     /** The suggested filename for the selected project's Markdown document. */
     val markdownCreateDocumentRequests = Channel<String>(Channel.BUFFERED)
 
+    /** The stable local-date filename for a dashboard SAF destination. */
+    val dashboardCreateDocumentRequests = Channel<String>(Channel.BUFFERED)
+
+    /** A completed FileProvider handoff ready for the Android share sheet. */
+    val dashboardShareRequests = Channel<Intent>(Channel.BUFFERED)
+
     /** Tables still to be asked for after the one currently in flight. */
     private val pendingCsvTables = ArrayDeque<CsvTable>()
     private var csvCompletedCount = 0
@@ -139,6 +185,9 @@ class VaultTransferViewModel @Inject constructor(
     private var csvImportOwnsOperation = false
     private var markdownSnapshot: WorkspaceSnapshot? = null
     private var markdownProjectId: ProjectId? = null
+    private var pendingDashboardRequest: ExecutiveDashboardRequest? = null
+    private var dashboardState = DashboardState.IDLE
+    private var dashboardOwnsOperation = false
 
     /** Holds a validated passphrase and asks the caller to pick a destination for it. */
     fun beginExport(passphrase: String) = beginTransfer(passphrase, createDocumentRequests)
@@ -567,6 +616,164 @@ class VaultTransferViewModel @Inject constructor(
         mutableMarkdownExportOutcome.value = null
     }
 
+    /** Freezes one dashboard request before asking SAF for its destination. */
+    fun beginDashboardDownload(
+        selection: InsightsSelection,
+        includeTaskDetails: Boolean,
+    ) {
+        if (!operation.tryLock()) return
+        dashboardOwnsOperation = true
+        val request = captureDashboardRequest(selection, includeTaskDetails)
+        pendingDashboardRequest = request
+        dashboardState = DashboardState.AWAITING_DOCUMENT
+        mutableDashboardOutcome.value = null
+        mutableDashboardInProgress.value = true
+        if (!dashboardCreateDocumentRequests.trySend(dashboardFileName(request)).isSuccess) {
+            mutableDashboardOutcome.value = dashboardFailure()
+            finishDashboard()
+        }
+    }
+
+    /** The dashboard create-document picker returned [uri], or null on cancellation. */
+    fun onDashboardDocumentSelected(uri: Uri?) {
+        if (dashboardState != DashboardState.AWAITING_DOCUMENT) return
+        if (uri == null) {
+            finishDashboard()
+            return
+        }
+        val destination = try {
+            dashboardRuntime.document(uri)
+        } catch (_: Exception) {
+            deletePartialDocument(uri)
+            mutableDashboardOutcome.value = dashboardFailure()
+            finishDashboard()
+            return
+        }
+        onDashboardDestinationSelected(destination)
+    }
+
+    /** Stream seam used by the SAF callback above and host-side state-machine tests. */
+    internal fun onDashboardDestinationSelected(destination: DashboardDocumentDestination?) {
+        if (dashboardState != DashboardState.AWAITING_DOCUMENT) return
+        if (destination == null) {
+            finishDashboard()
+            return
+        }
+        val request = pendingDashboardRequest ?: return
+        pendingDashboardRequest = null
+        dashboardState = DashboardState.WRITING
+        viewModelScope.launch(Dispatchers.IO) {
+            var outcome: DashboardExportOutcome = dashboardFailure()
+            var success = false
+            try {
+                val byteCount = destination.open()?.use { output ->
+                    dashboardWriter.write(request, output)
+                } ?: throw IOException("Dashboard destination is unavailable")
+                outcome = DashboardExportOutcome.Completed(byteCount)
+                success = true
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                outcome = dashboardFailure()
+            } finally {
+                withContext(NonCancellable) {
+                    if (!success) {
+                        try {
+                            destination.delete()
+                        } catch (_: Exception) {
+                            // The provider may already have removed the partial document.
+                        }
+                    }
+                    finishDashboard()
+                }
+            }
+            mutableDashboardOutcome.value = outcome
+        }
+    }
+
+    /** Generates a frozen dashboard in the one FileProvider-visible report directory. */
+    fun shareDashboard(
+        selection: InsightsSelection,
+        includeTaskDetails: Boolean,
+    ) {
+        if (!operation.tryLock()) return
+        dashboardOwnsOperation = true
+        val request = captureDashboardRequest(selection, includeTaskDetails)
+        dashboardState = DashboardState.WRITING
+        mutableDashboardOutcome.value = null
+        mutableDashboardInProgress.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            var staged: File? = null
+            var outcome: DashboardExportOutcome = dashboardFailure()
+            var success = false
+            try {
+                val directory = dashboardRuntime.reportsDirectory
+                sweepStagedPlaintext(directory)
+                check(directory.mkdirs() || directory.isDirectory) {
+                    "Dashboard report directory is unavailable"
+                }
+                staged = File(directory, dashboardFileName(request))
+                val byteCount = FileOutputStream(staged).use { output ->
+                    dashboardWriter.write(request, output)
+                }
+                val shareRequest = DashboardShareRequest(file = staged)
+                val intent = dashboardRuntime.shareIntent(shareRequest)
+                check(dashboardShareRequests.trySend(intent).isSuccess) {
+                    "Dashboard share delivery is unavailable"
+                }
+                outcome = DashboardExportOutcome.Completed(byteCount)
+                success = true
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                outcome = dashboardFailure()
+            } finally {
+                withContext(NonCancellable) {
+                    if (!success) staged?.delete()
+                    finishDashboard()
+                }
+            }
+            mutableDashboardOutcome.value = outcome
+        }
+    }
+
+    fun dismissDashboardOutcome() {
+        mutableDashboardOutcome.value = null
+    }
+
+    private fun captureDashboardRequest(
+        selection: InsightsSelection,
+        includeTaskDetails: Boolean,
+    ): ExecutiveDashboardRequest {
+        val time = insightsTimeProvider.capture()
+        return ExecutiveDashboardRequest(
+            workspace = vaultRepository.observeWorkspace().value,
+            selection = selection.copy(
+                projectIds = selection.projectIds.toSet(),
+                tagIds = selection.tagIds.toSet(),
+            ),
+            now = time.now,
+            zoneId = time.zoneId,
+            includeTaskDetails = includeTaskDetails,
+        )
+    }
+
+    private fun dashboardFileName(request: ExecutiveDashboardRequest): String =
+        "open_tasks_executive_${request.now.atZone(request.zoneId).toLocalDate()}.html"
+
+    private fun finishDashboard() {
+        pendingDashboardRequest = null
+        dashboardState = DashboardState.IDLE
+        mutableDashboardInProgress.value = false
+        if (dashboardOwnsOperation) {
+            dashboardOwnsOperation = false
+            operation.unlock()
+        }
+    }
+
+    private fun dashboardFailure(): DashboardExportOutcome =
+        DashboardExportOutcome.Failed(DASHBOARD_EXPORT_FAILED_REASON)
+
     /**
      * Asks the caller for the next pending table's document, or aborts the
      * batch if the request itself cannot be sent (a closed channel — never
@@ -615,6 +822,7 @@ class VaultTransferViewModel @Inject constructor(
      * key of a staged archive may outlive this ViewModel.
      */
     override fun onCleared() {
+        if (dashboardState == DashboardState.AWAITING_DOCUMENT) finishDashboard()
         finishCsvImport()
         releasePendingPassphrase()
         if (mutableImportOutcome.value is VaultImportOutcome.Ready) releaseStagedImport()
@@ -675,5 +883,63 @@ class VaultTransferViewModel @Inject constructor(
 private const val CSV_EXPORT_FAILED_REASON = "The CSV export could not be completed."
 private const val CSV_IMPORT_FAILED_REASON = "The CSV import could not be completed."
 private const val MARKDOWN_EXPORT_FAILED_REASON = "The Markdown export could not be completed."
+private const val DASHBOARD_EXPORT_FAILED_REASON = "The dashboard could not be generated."
+private const val DASHBOARD_MIME_TYPE = "text/html"
+private const val DASHBOARD_SHARE_DIRECTORY = "share/reports"
 
 private enum class CsvImportState { IDLE, AWAITING_DOCUMENT, PREVIEW, COMMITTING }
+private enum class DashboardState { IDLE, AWAITING_DOCUMENT, WRITING }
+
+internal class DashboardDocumentDestination(
+    val open: () -> OutputStream?,
+    val delete: () -> Unit,
+)
+
+internal data class DashboardShareRequest(
+    val file: File,
+    val action: String = Intent.ACTION_SEND,
+    val mimeType: String = DASHBOARD_MIME_TYPE,
+    val grantReadPermission: Boolean = true,
+    val includeClipData: Boolean = true,
+)
+
+internal interface DashboardTransferRuntime {
+    val reportsDirectory: File
+
+    fun document(uri: Uri): DashboardDocumentDestination
+
+    fun shareIntent(request: DashboardShareRequest): Intent
+}
+
+private class AndroidDashboardTransferRuntime(
+    private val context: Context,
+) : DashboardTransferRuntime {
+    override val reportsDirectory = File(context.cacheDir, DASHBOARD_SHARE_DIRECTORY)
+
+    override fun document(uri: Uri) = DashboardDocumentDestination(
+        open = { context.contentResolver.openOutputStream(uri) },
+        delete = {
+            try {
+                DocumentsContract.deleteDocument(context.contentResolver, uri)
+            } catch (_: Exception) {
+                // The provider may already have removed the partial document.
+            }
+        },
+    )
+
+    override fun shareIntent(request: DashboardShareRequest): Intent {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.files",
+            request.file,
+        )
+        val intent = Intent(request.action)
+            .setType(request.mimeType)
+            .putExtra(Intent.EXTRA_STREAM, uri)
+        if (request.includeClipData) intent.clipData = ClipData.newRawUri("", uri)
+        if (request.grantReadPermission) {
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return Intent.createChooser(intent, null)
+    }
+}

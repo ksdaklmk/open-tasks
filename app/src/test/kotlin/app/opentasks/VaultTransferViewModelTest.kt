@@ -1,6 +1,8 @@
 package app.opentasks
 
+import android.content.Intent
 import android.content.ContextWrapper
+import android.net.Uri
 import app.opentasks.backup.OtVaultExporter
 import app.opentasks.backup.OtVaultImporter
 import app.opentasks.core.crypto.TinkVaultCrypto
@@ -10,16 +12,21 @@ import app.opentasks.core.crypto.VaultKey
 import app.opentasks.core.data.DefaultAuthenticatedCloudObjectCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.OtVaultCodec
+import app.opentasks.core.data.export.ExecutiveDashboardHtmlWriter
 import app.opentasks.core.data.export.ProjectMarkdownWriter
 import app.opentasks.core.data.export.CsvParseResult
 import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.domain.BackupCaptureSource
 import app.opentasks.core.domain.CommandResult
+import app.opentasks.core.domain.DefaultInsightsEngine
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.ImportedTaskRow
+import app.opentasks.core.domain.InsightsEngine
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.HomeSnapshot
+import app.opentasks.core.model.InsightsSelection
+import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
@@ -33,8 +40,13 @@ import app.opentasks.core.model.WorkspaceId
 import app.opentasks.feature.more.CsvExportOutcome
 import app.opentasks.feature.more.CsvExportTable
 import app.opentasks.feature.more.CsvImportOutcome
+import app.opentasks.feature.more.DashboardExportOutcome
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.io.OutputStream
 import java.nio.file.Files
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
@@ -43,7 +55,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -276,6 +290,155 @@ class VaultTransferViewModelTest {
         assertTrue(viewModel.markdownExportInProgress.value)
     }
 
+    @Test
+    fun dashboardDownloadFreezesSnapshotSelectionAndTimeBeforeThePickerReturns() {
+        val repository = FakeVaultRepository()
+        val engine = RecordingInsightsEngine()
+        val timeProvider = FakeInsightsTimeProvider(
+            InsightsTimeContext(
+                now = Instant.parse("2026-08-21T09:30:00Z"),
+                zoneId = ZoneId.of("Asia/Bangkok"),
+            ),
+        )
+        val runtime = dashboardRuntime()
+        val viewModel = viewModel(repository, engine, timeProvider, runtime)
+        val frozen = repository.observeWorkspace().value
+        val selection = InsightsSelection(projectIds = setOf(ProjectId("project-1")))
+
+        viewModel.beginDashboardDownload(selection, includeTaskDetails = true)
+
+        assertEquals(
+            "open_tasks_executive_2026-08-21.html",
+            viewModel.dashboardCreateDocumentRequests.tryReceive().getOrNull(),
+        )
+        repository.replace(emptyWorkspace())
+        timeProvider.value = InsightsTimeContext(
+            now = Instant.parse("2030-01-01T00:00:00Z"),
+            zoneId = ZoneId.of("UTC"),
+        )
+        val output = ByteArrayOutputStream()
+        viewModel.onDashboardDestinationSelected(
+            DashboardDocumentDestination(open = { output }, delete = {}),
+        )
+
+        assertTrue(waitUntil { viewModel.dashboardOutcome.value is DashboardExportOutcome.Completed })
+        val captured = engine.requests.single()
+        assertSame(frozen, captured.workspace)
+        assertEquals(selection, captured.selection)
+        assertEquals(Instant.parse("2026-08-21T09:30:00Z"), captured.now)
+        assertEquals(ZoneId.of("Asia/Bangkok"), captured.zoneId)
+        assertEquals(1, timeProvider.captureCount)
+        assertTrue(output.toString(Charsets.UTF_8).startsWith("<!doctype html>"))
+    }
+
+    @Test
+    fun dashboardPickerCancellationClearsProgressAndReleasesTheSharedLock() {
+        val viewModel = viewModel()
+        viewModel.beginDashboardDownload(InsightsSelection(), includeTaskDetails = false)
+        assertTrue(viewModel.dashboardInProgress.value)
+
+        viewModel.onDashboardDocumentSelected(uri = null)
+
+        assertFalse(viewModel.dashboardInProgress.value)
+        assertNull(viewModel.dashboardOutcome.value)
+        viewModel.beginMarkdownExport(ProjectId("project-1"))
+        assertTrue(viewModel.markdownExportInProgress.value)
+    }
+
+    @Test
+    fun dashboardDownloadDeletesPartialDocumentWhenWritingFails() {
+        val viewModel = viewModel()
+        var deleted = 0
+        viewModel.beginDashboardDownload(InsightsSelection(), includeTaskDetails = false)
+        viewModel.dashboardCreateDocumentRequests.tryReceive()
+
+        viewModel.onDashboardDestinationSelected(
+            DashboardDocumentDestination(
+                open = {
+                    object : OutputStream() {
+                        override fun write(value: Int) = throw IOException("disk full")
+                    }
+                },
+                delete = { deleted++ },
+            ),
+        )
+
+        assertTrue(waitUntil { viewModel.dashboardOutcome.value is DashboardExportOutcome.Failed })
+        assertEquals(1, deleted)
+        assertFalse(viewModel.dashboardInProgress.value)
+    }
+
+    @Test
+    fun dashboardWriterFailureDeletesTheChosenDocumentAndSurfacesBoundedCopy() {
+        val engine = RecordingInsightsEngine(failure = IOException("private cause"))
+        val viewModel = viewModel(insightsEngine = engine)
+        var deleted = 0
+        viewModel.beginDashboardDownload(InsightsSelection(), includeTaskDetails = false)
+        viewModel.dashboardCreateDocumentRequests.tryReceive()
+
+        viewModel.onDashboardDestinationSelected(
+            DashboardDocumentDestination(
+                open = { ByteArrayOutputStream() },
+                delete = { deleted++ },
+            ),
+        )
+
+        assertTrue(waitUntil { viewModel.dashboardOutcome.value is DashboardExportOutcome.Failed })
+        assertEquals(
+            DashboardExportOutcome.Failed("The dashboard could not be generated."),
+            viewModel.dashboardOutcome.value,
+        )
+        assertEquals(1, deleted)
+    }
+
+    @Test
+    fun dashboardUsesTheExistingOperationMutex() {
+        val viewModel = viewModel()
+        viewModel.beginCsvExport(setOf(CsvExportTable.TASKS))
+
+        viewModel.beginDashboardDownload(InsightsSelection(), includeTaskDetails = false)
+        viewModel.shareDashboard(InsightsSelection(), includeTaskDetails = false)
+
+        assertFalse(viewModel.dashboardInProgress.value)
+        assertNull(viewModel.dashboardCreateDocumentRequests.tryReceive().getOrNull())
+        assertNull(viewModel.dashboardShareRequests.tryReceive().getOrNull())
+    }
+
+    @Test
+    fun dashboardShareSweepsStaleFilesAndRequestsAReadOnlyHtmlHandoff() {
+        val repository = FakeVaultRepository()
+        val frozen = repository.observeWorkspace().value
+        val engine = RecordingInsightsEngine()
+        val runtime = dashboardRuntime()
+        runtime.reportsDirectory.mkdirs()
+        val stale = File(runtime.reportsDirectory, "stale.html").apply { writeText("old") }
+        val expectedIntent = Intent()
+        runtime.intent = expectedIntent
+        val viewModel = viewModel(
+            repository = repository,
+            insightsEngine = engine,
+            dashboardRuntime = runtime,
+        )
+
+        viewModel.shareDashboard(
+            selection = InsightsSelection(projectIds = setOf(ProjectId("project-1"))),
+            includeTaskDetails = true,
+        )
+        repository.replace(emptyWorkspace())
+
+        assertTrue(waitUntil { viewModel.dashboardOutcome.value is DashboardExportOutcome.Completed })
+        assertFalse(stale.exists())
+        val request = runtime.shareRequests.single()
+        assertEquals(Intent.ACTION_SEND, request.action)
+        assertEquals("text/html", request.mimeType)
+        assertTrue(request.grantReadPermission)
+        assertTrue(request.includeClipData)
+        assertTrue(request.file.isFile)
+        assertTrue(request.file.readText().startsWith("<!doctype html>"))
+        assertSame(expectedIntent, viewModel.dashboardShareRequests.tryReceive().getOrNull())
+        assertSame(frozen, engine.requests.single().workspace)
+    }
+
     private fun waitUntil(timeoutMillis: Long = 5_000, predicate: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         while (System.nanoTime() < deadline) {
@@ -285,14 +448,18 @@ class VaultTransferViewModelTest {
         return predicate()
     }
 
-    private fun viewModel(): VaultTransferViewModel {
+    private fun viewModel(
+        repository: FakeVaultRepository = FakeVaultRepository(),
+        insightsEngine: RecordingInsightsEngine = RecordingInsightsEngine(),
+        insightsTimeProvider: FakeInsightsTimeProvider = FakeInsightsTimeProvider(),
+        dashboardRuntime: FakeDashboardTransferRuntime = dashboardRuntime(),
+    ): VaultTransferViewModel {
         val crypto: VaultCrypto = TinkVaultCrypto()
         val codec = OtVaultCodec(DefaultAuthenticatedCloudObjectCodec(crypto))
-        val vaultRepository = FakeVaultRepository()
         val exporter = OtVaultExporter(
             vaultId = VaultId("vault-transfer-test"),
             captureSource = BackupCaptureSource { error("Not used by the CSV batch/cancel path") },
-            vaultRepository = vaultRepository,
+            vaultRepository = repository,
             contentKeyStore = ErrorContentKeyStore,
             codec = codec,
             prepareEnvelope = { error("Not used by the CSV batch/cancel path") },
@@ -314,10 +481,19 @@ class VaultTransferViewModelTest {
             context = ContextWrapper(null),
             exporter = exporter,
             importer = importer,
-            vaultRepository = vaultRepository,
+            vaultRepository = repository,
             csvWriter = WorkspaceCsvWriter(ZoneId.of("UTC")),
             markdownWriter = ProjectMarkdownWriter(),
+            dashboardWriter = ExecutiveDashboardHtmlWriter(insightsEngine),
+            insightsTimeProvider = insightsTimeProvider,
+            dashboardRuntime = dashboardRuntime,
         )
+    }
+
+    private fun dashboardRuntime(): FakeDashboardTransferRuntime {
+        val reports = Files.createTempDirectory("dashboard-share-test").toFile()
+        stagingRoots += reports
+        return FakeDashboardTransferRuntime(reports)
     }
 
     private fun importRow() = ImportedTaskRow(
@@ -379,6 +555,82 @@ class VaultTransferViewModelTest {
 
         override suspend fun search(query: SearchQuery): List<SearchResult> =
             error("Not used by the CSV batch/cancel path")
+
+        fun replace(value: WorkspaceSnapshot) {
+            snapshot.value = value
+        }
+    }
+
+    private fun emptyWorkspace() = WorkspaceSnapshot(
+        home = HomeSnapshot(
+            today = LocalDate.of(2030, 1, 1),
+            focusTasks = emptyList(),
+            upcomingTasks = emptyList(),
+            projects = emptyList(),
+            activeTimer = null,
+            overdueCount = 0,
+        ),
+        tasks = emptyList(),
+        projects = emptyList(),
+        workflowStatuses = emptyList(),
+        milestones = emptyList(),
+        tags = emptyList(),
+    )
+
+    private data class CapturedInsightsRequest(
+        val workspace: WorkspaceSnapshot,
+        val selection: InsightsSelection,
+        val now: Instant,
+        val zoneId: ZoneId,
+    )
+
+    private class RecordingInsightsEngine(
+        private val failure: Exception? = null,
+    ) : InsightsEngine {
+        private val delegate = DefaultInsightsEngine()
+        val requests = mutableListOf<CapturedInsightsRequest>()
+
+        override fun calculate(
+            workspace: WorkspaceSnapshot,
+            selection: InsightsSelection,
+            now: Instant,
+            zoneId: ZoneId,
+        ): InsightsSnapshot {
+            requests += CapturedInsightsRequest(workspace, selection, now, zoneId)
+            failure?.let { throw it }
+            return delegate.calculate(workspace, selection, now, zoneId)
+        }
+    }
+
+    private class FakeInsightsTimeProvider(
+        var value: InsightsTimeContext = InsightsTimeContext(
+            now = Instant.parse("2026-08-21T09:30:00Z"),
+            zoneId = ZoneId.of("Asia/Bangkok"),
+        ),
+    ) : InsightsTimeProvider {
+        var captureCount = 0
+
+        override fun capture(): InsightsTimeContext {
+            captureCount++
+            return value
+        }
+
+        override suspend fun awaitUntil(instant: Instant) = Unit
+    }
+
+    private class FakeDashboardTransferRuntime(
+        override val reportsDirectory: File,
+    ) : DashboardTransferRuntime {
+        val shareRequests = mutableListOf<DashboardShareRequest>()
+        var intent: Intent = Intent()
+
+        override fun document(uri: Uri): DashboardDocumentDestination =
+            error("Unit tests use the stream destination seam")
+
+        override fun shareIntent(request: DashboardShareRequest): Intent {
+            shareRequests += request
+            return intent
+        }
     }
 
     private object ErrorContentKeyStore : VaultContentKeyStore {

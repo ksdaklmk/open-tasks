@@ -23,14 +23,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.TableRows
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -94,6 +102,12 @@ data class InsightsTagOption(
     val displayName: String,
 )
 
+sealed interface DashboardExportOutcome {
+    data class Completed(val byteCount: Long) : DashboardExportOutcome
+
+    data class Failed(val reason: String) : DashboardExportOutcome
+}
+
 @Composable
 fun InsightsScreen(
     state: InsightsUiState,
@@ -103,8 +117,15 @@ fun InsightsScreen(
     onIncludeConflictedTimeChange: (Boolean) -> Unit,
     onPresentationChange: (InsightsPresentation) -> Unit,
     onBack: () -> Unit,
+    dashboardInProgress: Boolean = false,
+    dashboardOutcome: DashboardExportOutcome? = null,
+    onDownloadDashboard: (InsightsSelection, Boolean) -> Unit = { _, _ -> },
+    onShareDashboard: (InsightsSelection, Boolean) -> Unit = { _, _ -> },
+    onDismissDashboardOutcome: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var dashboardExpanded by rememberSaveable { mutableStateOf(false) }
+    var includeTaskDetails by rememberSaveable { mutableStateOf(false) }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -149,6 +170,15 @@ fun InsightsScreen(
                     InsightsReport(
                         state = state,
                         onPresentationChange = onPresentationChange,
+                        dashboardExpanded = dashboardExpanded,
+                        includeTaskDetails = includeTaskDetails,
+                        dashboardInProgress = dashboardInProgress,
+                        dashboardOutcome = dashboardOutcome,
+                        onDashboardExpandedChange = { dashboardExpanded = it },
+                        onIncludeTaskDetailsChange = { includeTaskDetails = it },
+                        onDownloadDashboard = onDownloadDashboard,
+                        onShareDashboard = onShareDashboard,
+                        onDismissDashboardOutcome = onDismissDashboardOutcome,
                         modifier = Modifier.weight(0.64f),
                     )
                 }
@@ -165,6 +195,15 @@ fun InsightsScreen(
                     InsightsReport(
                         state = state,
                         onPresentationChange = onPresentationChange,
+                        dashboardExpanded = dashboardExpanded,
+                        includeTaskDetails = includeTaskDetails,
+                        dashboardInProgress = dashboardInProgress,
+                        dashboardOutcome = dashboardOutcome,
+                        onDashboardExpandedChange = { dashboardExpanded = it },
+                        onIncludeTaskDetailsChange = { includeTaskDetails = it },
+                        onDownloadDashboard = onDownloadDashboard,
+                        onShareDashboard = onShareDashboard,
+                        onDismissDashboardOutcome = onDismissDashboardOutcome,
                     )
                 }
             }
@@ -323,6 +362,15 @@ private fun InsightsFilters(
 private fun InsightsReport(
     state: InsightsUiState,
     onPresentationChange: (InsightsPresentation) -> Unit,
+    dashboardExpanded: Boolean,
+    includeTaskDetails: Boolean,
+    dashboardInProgress: Boolean,
+    dashboardOutcome: DashboardExportOutcome?,
+    onDashboardExpandedChange: (Boolean) -> Unit,
+    onIncludeTaskDetailsChange: (Boolean) -> Unit,
+    onDownloadDashboard: (InsightsSelection, Boolean) -> Unit,
+    onShareDashboard: (InsightsSelection, Boolean) -> Unit,
+    onDismissDashboardOutcome: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
@@ -378,6 +426,148 @@ private fun InsightsReport(
             HorizontalDivider(Modifier.padding(vertical = 24.dp))
             MilestoneRows(state.snapshot.milestoneHealth)
         }
+        HorizontalDivider(Modifier.padding(vertical = 24.dp))
+        DashboardExportSection(
+            selection = state.selection,
+            expanded = dashboardExpanded,
+            includeTaskDetails = includeTaskDetails,
+            inProgress = dashboardInProgress,
+            outcome = dashboardOutcome,
+            onExpandedChange = onDashboardExpandedChange,
+            onIncludeTaskDetailsChange = onIncludeTaskDetailsChange,
+            onDownload = onDownloadDashboard,
+            onShare = onShareDashboard,
+            onDismissOutcome = onDismissDashboardOutcome,
+        )
+    }
+}
+
+@Composable
+private fun DashboardExportSection(
+    selection: InsightsSelection,
+    expanded: Boolean,
+    includeTaskDetails: Boolean,
+    inProgress: Boolean,
+    outcome: DashboardExportOutcome?,
+    onExpandedChange: (Boolean) -> Unit,
+    onIncludeTaskDetailsChange: (Boolean) -> Unit,
+    onDownload: (InsightsSelection, Boolean) -> Unit,
+    onShare: (InsightsSelection, Boolean) -> Unit,
+    onDismissOutcome: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .toggleable(
+                value = expanded,
+                role = Role.Switch,
+                onValueChange = onExpandedChange,
+            )
+            .testTag("insights-dashboard-toggle"),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.insights_dashboard_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(checked = expanded, onCheckedChange = null)
+    }
+    if (!expanded) return
+
+    Spacer(Modifier.height(12.dp))
+    SupportingText(stringResource(R.string.insights_dashboard_plaintext_disclosure))
+    Spacer(Modifier.height(12.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .toggleable(
+                value = includeTaskDetails,
+                enabled = !inProgress,
+                role = Role.Switch,
+                onValueChange = onIncludeTaskDetailsChange,
+            )
+            .testTag("insights-dashboard-include-details"),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.insights_dashboard_include_details),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(Modifier.height(4.dp))
+            SupportingText(stringResource(R.string.insights_dashboard_include_details_supporting))
+        }
+        Switch(
+            checked = includeTaskDetails,
+            enabled = !inProgress,
+            onCheckedChange = null,
+        )
+    }
+    Spacer(Modifier.height(12.dp))
+    if (inProgress) {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        SupportingText(stringResource(R.string.insights_dashboard_progress))
+        Spacer(Modifier.height(12.dp))
+    }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = { onDownload(selection, includeTaskDetails) },
+            enabled = !inProgress,
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("insights-dashboard-download"),
+        ) {
+            Text(stringResource(R.string.insights_dashboard_download))
+        }
+        OutlinedButton(
+            onClick = { onShare(selection, includeTaskDetails) },
+            enabled = !inProgress,
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("insights-dashboard-share"),
+        ) {
+            Text(stringResource(R.string.insights_dashboard_share))
+        }
+    }
+    when (outcome) {
+        is DashboardExportOutcome.Completed -> {
+            Spacer(Modifier.height(12.dp))
+            SupportingText(
+                stringResource(R.string.insights_dashboard_completed, outcome.byteCount),
+            )
+            DashboardDismissButton(onDismissOutcome)
+        }
+        is DashboardExportOutcome.Failed -> {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = outcome.reason,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            DashboardDismissButton(onDismissOutcome)
+        }
+        null -> Unit
+    }
+}
+
+@Composable
+private fun DashboardDismissButton(onDismiss: () -> Unit) {
+    TextButton(
+        onClick = onDismiss,
+        modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .testTag("insights-dashboard-dismiss"),
+    ) {
+        Text(stringResource(R.string.insights_dashboard_dismiss))
     }
 }
 

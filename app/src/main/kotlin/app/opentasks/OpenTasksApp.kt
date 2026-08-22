@@ -402,6 +402,15 @@ fun OpenTasksApp(
         ) { uri ->
             vaultTransferViewModel.onMarkdownDocumentSelected(uri)
         }
+        val dashboardInProgress by
+            vaultTransferViewModel.dashboardInProgress.collectAsStateWithLifecycle()
+        val dashboardOutcome by
+            vaultTransferViewModel.dashboardOutcome.collectAsStateWithLifecycle()
+        val dashboardDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/html"),
+        ) { uri ->
+            vaultTransferViewModel.onDashboardDocumentSelected(uri)
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val coroutineScope = rememberCoroutineScope()
         val accessibilityManager = LocalAccessibilityManager.current
@@ -471,6 +480,22 @@ fun OpenTasksApp(
         LaunchedEffect(vaultTransferViewModel, markdownExportDocumentLauncher) {
             for (fileName in vaultTransferViewModel.markdownCreateDocumentRequests) {
                 markdownExportDocumentLauncher.launch(fileName)
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, dashboardDocumentLauncher) {
+            for (fileName in vaultTransferViewModel.dashboardCreateDocumentRequests) {
+                dashboardDocumentLauncher.launch(fileName)
+            }
+        }
+        LaunchedEffect(vaultTransferViewModel, activity) {
+            for (intent in vaultTransferViewModel.dashboardShareRequests) {
+                try {
+                    activity.startActivity(intent)
+                } catch (_: ActivityNotFoundException) {
+                    snackbarHostState.showSnackbar(
+                        activity.getString(R.string.dashboard_no_share_target),
+                    )
+                }
             }
         }
         var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -1748,6 +1773,13 @@ fun OpenTasksApp(
                                         viewModel::setInsightsIncludeConflictedTime,
                                     onInsightsPresentationChange =
                                         viewModel::setInsightsPresentation,
+                                    dashboardInProgress = dashboardInProgress,
+                                    dashboardOutcome = dashboardOutcome,
+                                    onDownloadDashboard =
+                                        vaultTransferViewModel::beginDashboardDownload,
+                                    onShareDashboard = vaultTransferViewModel::shareDashboard,
+                                    onDismissDashboardOutcome =
+                                        vaultTransferViewModel::dismissDashboardOutcome,
                                     onOpenReview = {
                                         viewModel.startReview()
                                         navigate(ReviewRoute)

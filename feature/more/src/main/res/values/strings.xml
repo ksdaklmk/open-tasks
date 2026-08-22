@@ -104,6 +104,16 @@
     <string name="insights_project_health_blocked">Blocked</string>
     <string name="insights_project_health_complete">Complete</string>
 
+    <string name="insights_dashboard_title">Generate executive dashboard</string>
+    <string name="insights_dashboard_plaintext_disclosure">This dashboard is a plaintext HTML file. Anyone who receives it can read its contents.</string>
+    <string name="insights_dashboard_include_details">Include task details</string>
+    <string name="insights_dashboard_include_details_supporting">Adds matching task titles. Descriptions, notes, and attachment names stay excluded.</string>
+    <string name="insights_dashboard_download">Download HTML</string>
+    <string name="insights_dashboard_share">Share HTML</string>
+    <string name="insights_dashboard_progress">Generating dashboard…</string>
+    <string name="insights_dashboard_completed">Dashboard generated (%1$d bytes).</string>
+    <string name="insights_dashboard_dismiss">Dismiss</string>
+
     <string name="insights_less_than_minute">&lt;1 min</string>
     <string name="insights_minutes">%1$d min</string>
     <string name="insights_hours">%1$d h</string>

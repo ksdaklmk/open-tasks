@@ -24,6 +24,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
@@ -333,6 +336,135 @@ class InsightsScreenInstrumentedTest {
         composeRule.onNodeWithText("Included total 1 h 30 min")
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun dashboardControlsStartCollapsedWithDetailsOffAndExactPlaintextDisclosure() {
+        composeRule.setContent {
+            OpenTasksTheme { TestInsightsScreen(populatedState()) }
+        }
+
+        composeRule.onNodeWithTag("insights-dashboard-toggle")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-download").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("insights-dashboard-toggle").performClick()
+
+        composeRule.onNodeWithText(
+            "This dashboard is a plaintext HTML file. Anyone who receives it can read its contents.",
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-include-details")
+            .performScrollTo()
+            .assertIsOff()
+        composeRule.onNodeWithTag("insights-dashboard-download")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-share")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        composeRule.onNodeWithTag("insights-dashboard-include-details")
+            .performScrollTo()
+            .performClick()
+            .assertIsOn()
+    }
+
+    @Test
+    fun dashboardActionsUseTheFrozenInsightsSelectionAndCurrentDetailChoice() {
+        val calls = mutableListOf<Pair<String, Boolean>>()
+        val state = populatedState().copy(
+            selection = InsightsSelection(
+                range = InsightsRange.THIRTY_DAYS,
+                projectIds = setOf(ProjectId("alpha")),
+            ),
+        )
+        composeRule.setContent {
+            OpenTasksTheme {
+                InsightsScreen(
+                    state = state,
+                    onRangeChange = {},
+                    onProjectFilter = { _, _ -> },
+                    onTagFilter = { _, _ -> },
+                    onIncludeConflictedTimeChange = {},
+                    onPresentationChange = {},
+                    dashboardInProgress = false,
+                    dashboardOutcome = null,
+                    onDownloadDashboard = { selection, details ->
+                        calls += "download:${selection.range}" to details
+                    },
+                    onShareDashboard = { selection, details ->
+                        calls += "share:${selection.range}" to details
+                    },
+                    onDismissDashboardOutcome = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("insights-dashboard-toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("insights-dashboard-include-details")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("insights-dashboard-download")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("insights-dashboard-share")
+            .performScrollTo()
+            .performClick()
+
+        assertEquals(
+            listOf(
+                "download:THIRTY_DAYS" to true,
+                "share:THIRTY_DAYS" to true,
+            ),
+            calls,
+        )
+    }
+
+    @Test
+    fun dashboardProgressDisablesMutatingControlsAndFailureCanBeDismissed() {
+        var dismissed = 0
+        var inProgress by mutableStateOf(true)
+        var outcome by mutableStateOf<DashboardExportOutcome?>(null)
+        composeRule.setContent {
+            OpenTasksTheme {
+                InsightsScreen(
+                    state = populatedState(),
+                    onRangeChange = {},
+                    onProjectFilter = { _, _ -> },
+                    onTagFilter = { _, _ -> },
+                    onIncludeConflictedTimeChange = {},
+                    onPresentationChange = {},
+                    dashboardInProgress = inProgress,
+                    dashboardOutcome = outcome,
+                    onDownloadDashboard = { _, _ -> },
+                    onShareDashboard = { _, _ -> },
+                    onDismissDashboardOutcome = { dismissed++ },
+                    onBack = {},
+                )
+            }
+        }
+        composeRule.onNodeWithTag("insights-dashboard-toggle").performScrollTo().performClick()
+
+        composeRule.onNodeWithText("Generating dashboard…")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-include-details").assertIsNotEnabled()
+        composeRule.onNodeWithTag("insights-dashboard-download").assertIsNotEnabled()
+        composeRule.onNodeWithTag("insights-dashboard-share").assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            inProgress = false
+            outcome = DashboardExportOutcome.Failed("Dashboard failed safely.")
+        }
+        composeRule.onNodeWithText("Dashboard failed safely.")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-dismiss")
+            .performScrollTo()
+            .performClick()
+        assertEquals(1, dismissed)
     }
 
     @Test
@@ -649,6 +781,15 @@ class InsightsScreenInstrumentedTest {
         composeRule.onNodeWithTag("insights-tag-row-urgent")
             .performScrollTo()
             .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-toggle")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("insights-dashboard-download")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("insights-dashboard-share")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -831,6 +972,7 @@ class InsightsScreenInstrumentedTest {
             "insights-include-conflicted",
             "insights-presentation-chart",
             "insights-presentation-table",
+            "insights-dashboard-toggle",
         )
         composeRule.onNodeWithTag(traversal.first())
             .performSemanticsAction(SemanticsActions.RequestFocus)
@@ -865,12 +1007,46 @@ class InsightsScreenInstrumentedTest {
             "insights-include-conflicted",
             "insights-presentation-chart",
             "insights-presentation-table",
+            "insights-dashboard-toggle",
         ).forEach { tag ->
             composeRule.onNodeWithTag(tag)
                 .performScrollTo()
                 .assertHeightIsAtLeast(48.dp)
                 .assertWidthIsAtLeast(48.dp)
         }
+    }
+
+    @Test
+    fun expandedDashboardActionsKeepFortyEightDpTargetsAndReportColumnAlignment() {
+        composeRule.setContent {
+            OpenTasksTheme {
+                Box(
+                    modifier = Modifier
+                        .requiredWidth(720.dp)
+                        .height(800.dp),
+                ) {
+                    TestInsightsScreen(populatedState())
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("insights-dashboard-toggle")
+            .performScrollTo()
+            .performClick()
+        listOf(
+            "insights-dashboard-include-details",
+            "insights-dashboard-download",
+            "insights-dashboard-share",
+        ).forEach { tag ->
+            composeRule.onNodeWithTag(tag)
+                .performScrollTo()
+                .assertHeightIsAtLeast(48.dp)
+                .assertWidthIsAtLeast(48.dp)
+        }
+        val projects = composeRule.onNodeWithText("Projects").getUnclippedBoundsInRoot()
+        val dashboard = composeRule.onNodeWithText("Generate executive dashboard")
+            .getUnclippedBoundsInRoot()
+        assertTrue("Dashboard export should stay in the report column", dashboard.left > projects.left)
     }
 
     @Test

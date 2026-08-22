@@ -78,6 +78,7 @@ import app.opentasks.core.model.AndroidBackupStatus
 import app.opentasks.core.model.AutomationRule
 import app.opentasks.core.model.AutomationRuleId
 import app.opentasks.core.model.InsightsRange
+import app.opentasks.core.model.InsightsSelection
 import app.opentasks.core.model.InsightsSnapshot
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectId
@@ -121,6 +122,11 @@ fun MoreScreen(
     onInsightsTagFilter: (TagId, Boolean) -> Unit = { _, _ -> },
     onInsightsIncludeConflictedTimeChange: (Boolean) -> Unit = {},
     onInsightsPresentationChange: (InsightsPresentation) -> Unit = {},
+    dashboardInProgress: Boolean = false,
+    dashboardOutcome: DashboardExportOutcome? = null,
+    onDownloadDashboard: (InsightsSelection, Boolean) -> Unit = { _, _ -> },
+    onShareDashboard: (InsightsSelection, Boolean) -> Unit = { _, _ -> },
+    onDismissDashboardOutcome: () -> Unit = {},
     onOpenReview: () -> Unit = {},
     onRestoreProject: (ProjectId) -> Unit,
     onRestoreTask: (TaskId) -> Unit,
@@ -231,6 +237,11 @@ fun MoreScreen(
                 onIncludeConflictedTimeChange = onInsightsIncludeConflictedTimeChange,
                 onPresentationChange = onInsightsPresentationChange,
                 onBack = closeInsights,
+                dashboardInProgress = dashboardInProgress,
+                dashboardOutcome = dashboardOutcome,
+                onDownloadDashboard = onDownloadDashboard,
+                onShareDashboard = onShareDashboard,
+                onDismissDashboardOutcome = onDismissDashboardOutcome,
                 modifier = modifier,
             )
             return
