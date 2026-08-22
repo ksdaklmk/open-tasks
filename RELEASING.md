@@ -74,10 +74,19 @@ signer verification across every output, and unique FileProvider share paths.
 6. Run the physical-device performance qualification below. Emulator CI is a
    functional wiring check only and never supplies release threshold results.
 
-7. Verify the signed universal fallback:
+7. Provision `OPEN_TASKS_RELEASE_CERT_SHA256` in the current shell from the
+   owner's independent trusted certificate record outside the repository.
+   Do not derive it from any APK, put it on the command line, or echo it into
+   release evidence. Then authenticate the signer and release invariants of
+   all three signed APKs in one gate:
 
        bash scripts/verify-release-apk.sh \
+         app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+         app/build/outputs/apk/release/app-x86_64-release.apk \
          app/build/outputs/apk/release/app-universal-release.apk
+
+   The verifier rejects an absent or malformed owner input and any missing,
+   duplicate, unexpected, invalid, or differently signed artifact.
 
 8. Run the smoke checklist below on a disposable AVD. Record the
    disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;
@@ -188,9 +197,10 @@ Before installation, the owner verifies in Google Cloud that:
 4. `https://www.googleapis.com/auth/drive.appdata` remains the app's only Drive
    scope.
 
-The owner may inspect the APK certificate locally with `apksigner`, but must
-not paste or record its fingerprint, account, project, client ID, or signing
-material.
+The owner may inspect the APK certificate locally with `apksigner`, but that
+inspection must never supply the verifier's expected value. Do not paste or
+record its fingerprint, account, project, client ID, or signing material in
+qualification prose.
 
 Install the arm64 APK over the existing app with the unchanged signing identity:
 
