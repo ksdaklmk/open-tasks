@@ -5,7 +5,9 @@ import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,15 +22,20 @@ import kotlinx.coroutines.launch
  * overlay calls [onUnlocked] once biometric authentication succeeds --
  * there is no process-level lifecycle to track beyond that one activity.
  * [now] is injected so delay-boundary behaviour can be tested without
- * sleeping.
+ * sleeping, and [wait] lets tests expire the background timer directly.
  */
 class AppLockController(
     private val settings: AppLockSettings,
     private val now: () -> Instant = Instant::now,
+    private val scope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val wait: suspend (Duration) -> Unit = { delay(it.toMillis()) },
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val stateGuard = Any()
     private val lockedState = MutableStateFlow(settings.lockEnabled)
     private var backgroundedAt: Instant? = null
+    private var expiryJob: Job? = null
+    private var expiryGeneration: Long = 0
 
     /** `true` on cold start when [AppLockSettings.lockEnabled] is set. */
     val locked: StateFlow<Boolean> = lockedState.asStateFlow()
@@ -43,13 +50,23 @@ class AppLockController(
         // never race past a not-yet-registered listener.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             settings.observe().collect {
-                if (!settings.lockEnabled) lockedState.value = false
+                synchronized(stateGuard) {
+                    if (settings.lockEnabled) {
+                        if (backgroundedAt != null) scheduleExpiryLocked()
+                    } else {
+                        cancelExpiryLocked()
+                        lockedState.value = false
+                    }
+                }
             }
         }
     }
 
     fun onAppBackgrounded() {
-        backgroundedAt = now()
+        synchronized(stateGuard) {
+            backgroundedAt = now()
+            if (settings.lockEnabled) scheduleExpiryLocked() else cancelExpiryLocked()
+        }
     }
 
     /**
@@ -61,16 +78,48 @@ class AppLockController(
      * locked, matching [locked]'s own cold-start value.
      */
     fun onAppForegrounded(): Boolean {
-        if (!settings.lockEnabled) return false
-        val since = backgroundedAt
-        backgroundedAt = null
-        val mustLock = since == null ||
-            Duration.between(since, now()) >= settings.lockDelay.duration
-        if (mustLock) lockedState.value = true
-        return mustLock
+        return synchronized(stateGuard) {
+            cancelExpiryLocked()
+            val since = backgroundedAt
+            backgroundedAt = null
+            if (!settings.lockEnabled) return@synchronized false
+            val mustLock = since == null ||
+                Duration.between(since, now()) >= settings.lockDelay.duration
+            if (mustLock) lockedState.value = true
+            mustLock
+        }
     }
 
     fun onUnlocked() {
-        lockedState.value = false
+        synchronized(stateGuard) {
+            cancelExpiryLocked()
+            lockedState.value = false
+        }
+    }
+
+    private fun scheduleExpiryLocked() {
+        cancelExpiryLocked()
+        val since = backgroundedAt ?: return
+        val generation = expiryGeneration
+        val remaining = settings.lockDelay.duration.minus(Duration.between(since, now()))
+            .let { if (it.isNegative) Duration.ZERO else it }
+        expiryJob = scope.launch {
+            wait(remaining)
+            synchronized(stateGuard) {
+                if (
+                    generation == expiryGeneration &&
+                    backgroundedAt == since &&
+                    settings.lockEnabled
+                ) {
+                    lockedState.value = true
+                }
+            }
+        }
+    }
+
+    private fun cancelExpiryLocked() {
+        expiryGeneration += 1
+        expiryJob?.cancel()
+        expiryJob = null
     }
 }

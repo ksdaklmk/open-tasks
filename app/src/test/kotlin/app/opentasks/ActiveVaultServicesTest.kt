@@ -23,10 +23,15 @@ import app.opentasks.core.model.RemoteBackupLifecycle
 import app.opentasks.core.model.RemoteBackupStateVersion
 import app.opentasks.core.model.VaultId
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +41,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActiveVaultServicesTest {
+    @Test
+    fun lockedOrPrivateTitlesCancelRemindersAndConcealTheWidget() = runBlocking {
+        withTimeout(TimeUnit.SECONDS.toMillis(5)) {
+            val locked = MutableStateFlow(false)
+            val settingsChanges = MutableSharedFlow<Unit>()
+            val published = Channel<Boolean>(Channel.UNLIMITED)
+            var titlePrivacy = false
+            var reminderCancellations = 0
+            val observer = launch(start = CoroutineStart.UNDISPATCHED) {
+                AppModule.observeContentVisibility(
+                    locked = locked,
+                    settingsChanges = settingsChanges,
+                    titlePrivacy = { titlePrivacy },
+                    cancelActiveReminders = { reminderCancellations += 1 },
+                    publishTitlesPermitted = { published.trySend(it) },
+                )
+            }
+
+            assertTrue(published.receive())
+            locked.value = true
+            assertFalse(published.receive())
+            locked.value = false
+            assertTrue(published.receive())
+            titlePrivacy = true
+            settingsChanges.emit(Unit)
+            assertFalse(published.receive())
+
+            assertEquals(2, reminderCancellations)
+            observer.cancel()
+        }
+    }
+
     @Test
     fun productionStatusObservationIncludesTheRunnerInFlightState() = runBlocking {
         val configuration = MutableStateFlow<RemoteBackupConfiguration?>(activeConfiguration())

@@ -64,6 +64,17 @@ internal fun reminderScheduleMode(
         ReminderScheduleMode.INEXACT
     }
 
+internal suspend fun <T> performReminderMutation(
+    lockEnabled: Boolean,
+    locked: Boolean,
+    mutation: suspend () -> T,
+): T? = if (lockEnabled && locked) null else mutation()
+
+internal fun reminderMutationActionsEnabled(concealed: Boolean): Boolean = !concealed
+
+internal fun isReminderNotification(channelId: String?): Boolean =
+    channelId == ReminderNotifications.CHANNEL_ID
+
 @Singleton
 class ReminderScheduler @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -225,7 +236,9 @@ class ReminderNotifier @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicNotification)
-            .addAction(
+
+        if (reminderMutationActionsEnabled(concealed)) {
+            builder.addAction(
                 R.drawable.ic_notification,
                 context.getString(R.string.reminder_action_snooze),
                 actionIntent(
@@ -236,17 +249,18 @@ class ReminderNotifier @Inject constructor(
                 ),
             )
 
-        if (!task.isBlocked) {
-            builder.addAction(
-                R.drawable.ic_notification,
-                context.getString(R.string.reminder_action_complete),
-                actionIntent(
-                    action = ReminderIntents.ACTION_COMPLETE,
-                    verb = "complete",
-                    task = task,
-                    reminder = reminder,
-                ),
-            )
+            if (!task.isBlocked) {
+                builder.addAction(
+                    R.drawable.ic_notification,
+                    context.getString(R.string.reminder_action_complete),
+                    actionIntent(
+                        action = ReminderIntents.ACTION_COMPLETE,
+                        verb = "complete",
+                        task = task,
+                        reminder = reminder,
+                    ),
+                )
+            }
         }
 
         NotificationManagerCompat.from(context).notify(
@@ -257,6 +271,13 @@ class ReminderNotifier @Inject constructor(
 
     fun cancel(reminderId: String) {
         NotificationManagerCompat.from(context).cancel(notificationId(reminderId))
+    }
+
+    fun cancelActiveReminders() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.activeNotifications
+            .filter { isReminderNotification(it.notification.channelId) }
+            .forEach { manager.cancel(it.tag, it.id) }
     }
 
     private fun reminderContext(task: Task, projectName: String?): String {
@@ -321,6 +342,12 @@ class ReminderActionReceiver : BroadcastReceiver() {
     @Inject
     lateinit var notifier: ReminderNotifier
 
+    @Inject
+    lateinit var appLockSettings: AppLockSettings
+
+    @Inject
+    lateinit var appLockController: AppLockController
+
     private val repository: VaultRepository
         get() = vaultRepository.get()
 
@@ -361,7 +388,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
         val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: return
         val zoneId = task.due?.zoneId ?: ZoneId.systemDefault().id
         val scheduledAt = Instant.now().plus(SNOOZE_DURATION)
-        val result = repository.execute(
+        val result = executeMutation(
             DomainCommand.SetTaskReminder(
                 taskId = taskId,
                 triggerAt = ZonedMoment(
@@ -370,7 +397,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
                 ),
                 precise = precise,
             ),
-        )
+        ) ?: return
         notifier.cancel(reminderId)
         val refreshed = if (result is CommandResult.Success) {
             awaitWorkspace { workspace ->
@@ -387,7 +414,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
     private suspend fun complete(intent: Intent) {
         val taskId = intent.getStringExtra(ReminderIntents.EXTRA_TASK_ID)?.let(::TaskId) ?: return
         val reminderId = intent.getStringExtra(ReminderIntents.EXTRA_REMINDER_ID) ?: return
-        val result = repository.execute(DomainCommand.CompleteTask(taskId))
+        val result = executeMutation(DomainCommand.CompleteTask(taskId)) ?: return
         val refreshed = when (result) {
             is CommandResult.Success -> {
                 notifier.cancel(reminderId)
@@ -406,6 +433,14 @@ class ReminderActionReceiver : BroadcastReceiver() {
         withTimeoutOrNull(WORKSPACE_REFRESH_TIMEOUT_MILLIS) {
             repository.observeWorkspace().first(predicate)
         } ?: repository.currentWorkspace()
+
+    private suspend fun executeMutation(command: DomainCommand): CommandResult? =
+        performReminderMutation(
+            lockEnabled = appLockSettings.lockEnabled,
+            locked = appLockController.locked.value,
+        ) {
+            repository.execute(command)
+        }
 
     private companion object {
         val SNOOZE_DURATION: Duration = Duration.ofMinutes(15)

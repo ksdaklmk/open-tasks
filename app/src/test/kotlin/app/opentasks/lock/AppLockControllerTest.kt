@@ -3,9 +3,14 @@ package app.opentasks.lock
 import android.content.SharedPreferences
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -103,6 +108,117 @@ class AppLockControllerTest {
     }
 
     @Test
+    fun immediateDelayExpiresWhileAppRemainsBackgrounded() = runBlocking {
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.IMMEDIATE
+        }
+        val controller = AppLockController(settings, now = { baseInstant })
+        controller.onUnlocked()
+
+        controller.onAppBackgrounded()
+
+        assertTrue(withTimeout(5_000) {
+            controller.locked.first { it }
+        })
+    }
+
+    @Test
+    fun backgroundExpiryLocksWithoutForegrounding() {
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits)
+        controller.onUnlocked()
+
+        controller.onAppBackgrounded()
+        assertEquals(listOf(Duration.ofMinutes(5)), waits.durations)
+        waits.expire(0)
+
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun foregroundCancelsBackgroundExpiry() {
+        var clock = baseInstant
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits) { clock }
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        clock = clock.plus(Duration.ofMinutes(4))
+        assertFalse(controller.onAppForegrounded())
+        waits.expire(0)
+
+        assertFalse(controller.locked.value)
+    }
+
+    @Test
+    fun unlockCancelsBackgroundExpiry() {
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits)
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        controller.onUnlocked()
+        waits.expire(0)
+
+        assertFalse(controller.locked.value)
+    }
+
+    @Test
+    fun disablingLockCancelsBackgroundExpiry() {
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits)
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        settings.lockEnabled = false
+        waits.expire(0)
+
+        assertFalse(controller.locked.value)
+    }
+
+    @Test
+    fun delayChangeReschedulesFromOriginalBackgroundTime() {
+        var clock = baseInstant
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits) { clock }
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        clock = clock.plus(Duration.ofMinutes(1))
+        settings.lockDelay = LockDelay.FIFTEEN_MINUTES
+
+        assertEquals(
+            listOf(Duration.ofMinutes(5), Duration.ofMinutes(14)),
+            waits.durations,
+        )
+        waits.expire(0)
+        assertFalse(controller.locked.value)
+        waits.expire(1)
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
     fun onUnlockedClearsLocked() {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
         val controller = AppLockController(settings, now = { baseInstant })
@@ -125,6 +241,39 @@ class AppLockControllerTest {
             controller.locked.first { locked -> !locked }
         }
         assertFalse(controller.locked.value)
+    }
+
+    private fun controlledController(
+        settings: AppLockSettings,
+        waits: ControlledWait,
+        now: () -> Instant = { baseInstant },
+    ) = AppLockController(
+        settings = settings,
+        now = now,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        wait = waits::await,
+    )
+
+    private class ControlledWait {
+        private data class Invocation(
+            val duration: Duration,
+            val completion: CompletableDeferred<Unit>,
+        )
+
+        private val invocations = mutableListOf<Invocation>()
+
+        val durations: List<Duration>
+            get() = invocations.map(Invocation::duration)
+
+        suspend fun await(duration: Duration) {
+            val completion = CompletableDeferred<Unit>()
+            invocations += Invocation(duration, completion)
+            completion.await()
+        }
+
+        fun expire(index: Int) {
+            invocations[index].completion.complete(Unit)
+        }
     }
 }
 

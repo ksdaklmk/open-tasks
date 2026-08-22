@@ -83,6 +83,7 @@ import app.opentasks.focus.FocusSessionController
 import app.opentasks.focus.FocusSessionStore
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
+import app.opentasks.reminders.ReminderNotifier
 import app.opentasks.widget.TodayWidgetPublisher
 import dagger.Module
 import dagger.Provides
@@ -96,10 +97,12 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -349,6 +352,24 @@ object AppModule {
     ): RemoteBackupLifecycleCoordinator =
         services.requireSession().remoteBackupLifecycleCoordinator
 
+    internal suspend fun observeContentVisibility(
+        locked: Flow<Boolean>,
+        settingsChanges: Flow<Unit>,
+        titlePrivacy: () -> Boolean,
+        cancelActiveReminders: () -> Unit,
+        publishTitlesPermitted: (Boolean) -> Unit,
+    ) {
+        combine(
+            locked,
+            settingsChanges.onStart { emit(Unit) },
+        ) { isLocked, _ -> !(isLocked || titlePrivacy()) }
+            .distinctUntilChanged()
+            .collect { titlesPermitted ->
+                if (!titlesPermitted) cancelActiveReminders()
+                publishTitlesPermitted(titlesPermitted)
+            }
+    }
+
     /**
      * Builds every vault-bound service for the active slot in one bundle.
      *
@@ -368,6 +389,7 @@ object AppModule {
         workScheduler: BackupWorkScheduler,
         appLockSettings: AppLockSettings,
         appLockController: AppLockController,
+        reminderNotifier: ReminderNotifier,
     ): ActiveVaultSession {
         // Named so the widget publisher's stop-on-close hook below can attach
         // to exactly this slot's own job. `DefaultActiveVaultSession.close()`
@@ -388,18 +410,14 @@ object AppModule {
             actionAuthorized = ::titlesPermitted,
         )
         todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
-        // Neither source alone is enough: a lock/unlock must republish even
-        // between title-privacy changes, and a title-privacy change must
-        // republish even while the lock state itself is unchanged.
         scope.launch {
-            appLockController.locked.collect {
-                todayWidgetPublisher.setTitlesPermitted(titlesPermitted())
-            }
-        }
-        scope.launch {
-            appLockSettings.observe().collect {
-                todayWidgetPublisher.setTitlesPermitted(titlesPermitted())
-            }
+            observeContentVisibility(
+                locked = appLockController.locked,
+                settingsChanges = appLockSettings.observe(),
+                titlePrivacy = { appLockSettings.titlePrivacy },
+                cancelActiveReminders = reminderNotifier::cancelActiveReminders,
+                publishTitlesPermitted = todayWidgetPublisher::setTitlesPermitted,
+            )
         }
         sessionJob.invokeOnCompletion { todayWidgetPublisher.stop() }
         val localObjectStore = DefaultLocalBackupObjectStore(files.localBackupRoot)
