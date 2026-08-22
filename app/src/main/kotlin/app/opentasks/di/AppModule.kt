@@ -39,8 +39,9 @@ import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.LocalVaultRepositoryFactory
 import app.opentasks.core.data.VaultRuntimeManager
-import app.opentasks.core.data.export.WorkspaceCsvWriter
+import app.opentasks.core.data.export.ExecutiveDashboardHtmlWriter
 import app.opentasks.core.data.export.ProjectMarkdownWriter
+import app.opentasks.core.data.export.WorkspaceCsvWriter
 import app.opentasks.core.data.backup.AttachmentBlobSetManifestCodec
 import app.opentasks.core.data.backup.AttachmentCacheStore
 import app.opentasks.core.data.backup.AttachmentProviderSession
@@ -117,6 +118,11 @@ object AppModule {
     @Provides
     @Singleton
     fun provideInsightsEngine(): InsightsEngine = DefaultInsightsEngine()
+
+    @Provides
+    fun provideExecutiveDashboardHtmlWriter(
+        insightsEngine: InsightsEngine,
+    ): ExecutiveDashboardHtmlWriter = ExecutiveDashboardHtmlWriter(insightsEngine)
 
     // Process-scoped, independent of any vault slot: app lock and title
     // privacy apply to the app itself, not to the data inside one vault.
