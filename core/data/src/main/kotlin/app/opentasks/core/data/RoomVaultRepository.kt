@@ -186,9 +186,16 @@ class RoomVaultRepository(
         }
     }
 
-    override suspend fun execute(command: DomainCommand): CommandResult {
+    override suspend fun execute(command: DomainCommand): CommandResult =
+        checkNotNull(executeAuthorized(command) { true })
+
+    override suspend fun executeAuthorized(
+        command: DomainCommand,
+        isAuthorized: () -> Boolean,
+    ): CommandResult? {
         ready.await()
         return writeMutex.withLock {
+            if (!isAuthorized()) return@withLock null
             database.withTransaction {
                 val mutationDao = database.backupMutationDao()
                 val before = mutationDao.snapshots()

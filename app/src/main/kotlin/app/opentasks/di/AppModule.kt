@@ -366,16 +366,16 @@ object AppModule {
         services.requireSession().remoteBackupLifecycleCoordinator
 
     internal suspend fun observeContentVisibility(
-        locked: Flow<Boolean>,
+        concealed: Flow<Boolean>,
         settingsChanges: Flow<Unit>,
         titlePrivacy: () -> Boolean,
         cancelActiveReminders: () -> Unit,
         publishTitlesPermitted: (Boolean) -> Unit,
     ) {
         combine(
-            locked,
+            concealed,
             settingsChanges.onStart { emit(Unit) },
-        ) { isLocked, _ -> !(isLocked || titlePrivacy()) }
+        ) { isConcealed, _ -> !(isConcealed || titlePrivacy()) }
             .distinctUntilChanged()
             .collect { titlesPermitted ->
                 if (!titlesPermitted) cancelActiveReminders()
@@ -426,7 +426,7 @@ object AppModule {
         todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
         scope.launch {
             observeContentVisibility(
-                locked = appLockController.locked,
+                concealed = appLockController.externalContentConcealed,
                 settingsChanges = appLockSettings.observe(),
                 titlePrivacy = { appLockSettings.titlePrivacy },
                 cancelActiveReminders = reminderNotifier::cancelActiveReminders,

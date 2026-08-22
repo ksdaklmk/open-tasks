@@ -467,7 +467,7 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
     now: Instant,
     appLockController: AppLockController,
     appLockSettings: AppLockSettings,
-    execute: suspend (DomainCommand) -> Unit,
+    executeAuthorized: suspend (DomainCommand, () -> Boolean) -> Unit,
 ) {
     val completable = computeTodayProjection(
         snapshot = snapshot,
@@ -477,10 +477,12 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
         titlesPermitted = true,
     ).focusEntries.any { it.taskId == taskId && it.completable }
     if (completable) {
-        dispatch(capturedGeneration, {
+        val isAuthorized = {
             appLockController.isExternalActionAuthorized() && !appLockSettings.titlePrivacy
-        }) {
-            execute(DomainCommand.CompleteTask(TaskId(taskId)))
+                && capturedGeneration == capture()
+        }
+        dispatch(capturedGeneration, isAuthorized) {
+            executeAuthorized(DomainCommand.CompleteTask(TaskId(taskId)), isAuthorized)
         }
     }
 }
@@ -615,7 +617,9 @@ class TodayWidgetPublisher(
                 now = Instant.now(),
                 appLockController = appLockController,
                 appLockSettings = appLockSettings,
-                execute = repository::execute,
+                executeAuthorized = { command, isAuthorized ->
+                    repository.executeAuthorized(command, isAuthorized)
+                },
             )
             val latest = repository.observeWorkspace().value
             writer.write { writeProjection(latest) }

@@ -1,6 +1,7 @@
 package app.opentasks.core.data
 
 import app.opentasks.core.data.backup.InMemoryBackupJournal
+import app.opentasks.core.data.backup.InMemoryJournalAppendBoundary
 import app.opentasks.core.domain.BackupMutationKind
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
@@ -42,6 +43,9 @@ import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.ZonedMoment
 import app.opentasks.core.model.WorkflowStatusId
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -60,6 +64,46 @@ class InMemoryVaultRepositoryTest {
         now = { Instant.parse("2026-07-26T10:00:00Z") },
         backupJournal = journal,
     )
+
+    @Test
+    fun revokedAuthorizationCannotCrossTheWriteMutex() = runBlocking {
+        withTimeout(5_000) {
+            val firstWriteEntered = CompletableDeferred<Unit>()
+            val releaseFirstWrite = CompletableDeferred<Unit>()
+            var firstAppend = true
+            val repository = InMemoryVaultRepository(
+                backupJournal = InMemoryBackupJournal(
+                    appendBoundary = InMemoryJournalAppendBoundary {
+                        if (firstAppend) {
+                            firstAppend = false
+                            firstWriteEntered.complete(Unit)
+                            releaseFirstWrite.await()
+                        }
+                    },
+                ),
+            )
+            val firstWrite = async(start = CoroutineStart.UNDISPATCHED) {
+                repository.execute(DomainCommand.CreateTask("first"))
+            }
+            firstWriteEntered.await()
+            var authorized = true
+            val guardedWrite = async(start = CoroutineStart.UNDISPATCHED) {
+                repository.executeAuthorized(
+                    DomainCommand.CreateTask("must-not-commit"),
+                    isAuthorized = { authorized },
+                )
+            }
+
+            authorized = false
+            releaseFirstWrite.complete(Unit)
+            firstWrite.await()
+
+            assertNull(guardedWrite.await())
+            assertTrue(
+                repository.currentWorkspace().tasks.none { it.title == "must-not-commit" },
+            )
+        }
+    }
 
     private fun invalidCreates(
         due: ZonedMoment,

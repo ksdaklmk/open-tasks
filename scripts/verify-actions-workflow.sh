@@ -8,6 +8,8 @@ wrapper_properties="gradle/wrapper/gradle-wrapper.properties"
 checksum_count="$(grep -Ec '^[[:space:]]*distributionSha256Sum[[:space:]]*=' "$wrapper_properties" || true)"
 test "$checksum_count" -eq 1
 grep -Eq '^distributionSha256Sum=[0-9A-Fa-f]{64}$' "$wrapper_properties"
+grep -q '^distributionPath=wrapper/dists-sha256-v1$' "$wrapper_properties"
+grep -q '^zipStorePath=wrapper/dists-sha256-v1$' "$wrapper_properties"
 
 grep -q 'api-level: 36' "$workflow"
 grep -q 'api-level: "37.0"' "$workflow"

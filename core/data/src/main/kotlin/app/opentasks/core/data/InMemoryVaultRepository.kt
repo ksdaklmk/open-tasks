@@ -146,11 +146,21 @@ class InMemoryVaultRepository internal constructor(
 
     override suspend fun currentWorkspace(): WorkspaceSnapshot = mutableWorkspace.value
 
-    override suspend fun execute(command: DomainCommand): CommandResult = writeMutex.withLock {
+    override suspend fun execute(command: DomainCommand): CommandResult =
+        writeMutex.withLock { executeLocked(command) }
+
+    override suspend fun executeAuthorized(
+        command: DomainCommand,
+        isAuthorized: () -> Boolean,
+    ): CommandResult? = writeMutex.withLock {
+        if (isAuthorized()) executeLocked(command) else null
+    }
+
+    private suspend fun executeLocked(command: DomainCommand): CommandResult {
         val before = mutableWorkspace.value
         val beforeTombstones = tombstones
         val beforeTaskTags = taskTags
-        try {
+        return try {
             val dispatched = dispatch(command)
             // Evaluation sits between the dispatch and the reconciliation so
             // the tag relations and the journal diff both observe the rule

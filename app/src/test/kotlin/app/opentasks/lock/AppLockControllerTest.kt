@@ -229,6 +229,8 @@ class AppLockControllerTest {
         settings.lockEnabled = false
 
         assertTrue(controller.isExternalActionAuthorized())
+        assertFalse(controller.onAppForegrounded())
+        assertFalse(controller.externalContentConcealed.value)
     }
 
     @Test
@@ -259,7 +261,7 @@ class AppLockControllerTest {
     }
 
     @Test
-    fun unlockCancelsBackgroundExpiry() {
+    fun lateUnlockWhileBackgroundedKeepsExpiry() {
         val waits = ControlledWait()
         val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
@@ -272,10 +274,30 @@ class AppLockControllerTest {
         controller.onAppBackgrounded()
 
         controller.onUnlocked()
+
+        assertEquals(0, durableExpiry.cancellations)
+        assertFalse(controller.locked.value)
         waits.expire(0)
 
-        assertEquals(1, durableExpiry.cancellations)
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun backgroundImmediatelyConcealsPassiveContentDuringInAppGrace() {
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
+        controller.onUnlocked()
+        assertFalse(controller.externalContentConcealed.value)
+
+        controller.onAppBackgrounded()
+
+        assertTrue(controller.externalContentConcealed.value)
         assertFalse(controller.locked.value)
+        assertFalse(controller.onAppForegrounded())
+        assertFalse(controller.externalContentConcealed.value)
     }
 
     @Test

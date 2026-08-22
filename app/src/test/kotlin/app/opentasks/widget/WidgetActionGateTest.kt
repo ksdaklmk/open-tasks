@@ -76,7 +76,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())
@@ -103,7 +105,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())
@@ -156,11 +160,41 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertEquals(1, commands.size)
             assertEquals(task.id, (commands.single() as DomainCommand.CompleteTask).taskId)
+        }
+    }
+
+    @Test
+    fun invalidatedGenerationIsRejectedAtCommit() = runBlocking {
+        withTimeout(5_000) {
+            val gate = WidgetActionGate()
+            val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+            val controller = AppLockController(settings, elapsedRealtime = { 0L })
+            controller.onUnlocked()
+            val commands = mutableListOf<DomainCommand>()
+
+            gate.dispatchCompletion(
+                gate.capture(),
+                snapshot,
+                task.id.value,
+                today,
+                zone,
+                now,
+                appLockController = controller,
+                appLockSettings = settings,
+                executeAuthorized = { command, isAuthorized ->
+                    gate.invalidate()
+                    if (isAuthorized()) commands += command
+                },
+            )
+
+            assertTrue(commands.isEmpty())
         }
     }
 
@@ -195,7 +229,9 @@ class WidgetActionGateTest {
                 now,
                 appLockController = controller,
                 appLockSettings = settings,
-                execute = commands::add,
+                executeAuthorized = { command, isAuthorized ->
+                    if (isAuthorized()) commands += command
+                },
             )
 
             assertTrue(commands.isEmpty())
