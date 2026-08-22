@@ -3,12 +3,20 @@ package app.opentasks.widget
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.ZonedMoment
+import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockSettings
+import app.opentasks.lock.FakeSharedPreferences
+import app.opentasks.lock.LockDelay
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -133,6 +141,44 @@ class WidgetActionGateTest {
 
             assertEquals(1, commands.size)
             assertEquals(task.id, (commands.single() as DomainCommand.CompleteTask).taskId)
+        }
+    }
+
+    @Test
+    fun staleBackgroundExpiryCannotDispatchWidgetCompletion() = runBlocking {
+        withTimeout(5_000) {
+            var clock = Instant.parse("2026-08-05T09:00:00Z")
+            val waitForever = CompletableDeferred<Unit>()
+            val settings = AppLockSettings(FakeSharedPreferences()).apply {
+                lockEnabled = true
+                lockDelay = LockDelay.FIVE_MINUTES
+            }
+            val controller = AppLockController(
+                settings = settings,
+                now = { clock },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                wait = { waitForever.await() },
+            )
+            controller.onUnlocked()
+            controller.onAppBackgrounded()
+            val gate = WidgetActionGate()
+            val captured = gate.capture()
+            val isAuthorized = controller::isExternalActionAuthorized
+            clock = clock.plus(Duration.ofMinutes(5))
+            val commands = mutableListOf<DomainCommand>()
+
+            gate.dispatchCompletion(
+                captured,
+                snapshot,
+                task.id.value,
+                today,
+                zone,
+                now,
+                isAuthorized = isAuthorized,
+                execute = commands::add,
+            )
+
+            assertTrue(commands.isEmpty())
         }
     }
 }

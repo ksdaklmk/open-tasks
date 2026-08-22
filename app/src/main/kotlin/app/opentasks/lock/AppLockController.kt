@@ -97,6 +97,16 @@ class AppLockController(
         }
     }
 
+    /** Refreshes elapsed lock state before authorizing an external action. */
+    fun isExternalActionAuthorized(): Boolean = synchronized(stateGuard) {
+        if (!settings.lockEnabled) return@synchronized true
+        val expired = backgroundedAt?.let { since ->
+            Duration.between(since, now()) >= settings.lockDelay.duration
+        } ?: false
+        if (expired) lockedState.value = true
+        !lockedState.value
+    }
+
     private fun scheduleExpiryLocked() {
         cancelExpiryLocked()
         val since = backgroundedAt ?: return

@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
 
 class AppLockControllerTest {
     private val baseInstant: Instant = Instant.parse("2026-08-05T09:00:00Z")
@@ -138,6 +140,57 @@ class AppLockControllerTest {
         waits.expire(0)
 
         assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun externalActionAtExactDeadlineRefreshesAuthorityBeforeWaitCompletes() {
+        var clock = baseInstant
+        val waits = ControlledWait()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = controlledController(settings, waits) { clock }
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        clock = clock.plus(Duration.ofMinutes(5))
+
+        assertFalse(controller.isExternalActionAuthorized())
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun externalActionBeforeDeadlineRemainsAuthorized() {
+        var clock = baseInstant
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, now = { clock })
+        controller.onUnlocked()
+        controller.onAppBackgrounded()
+
+        clock = clock.plus(Duration.ofMinutes(4))
+
+        assertTrue(controller.isExternalActionAuthorized())
+        assertFalse(controller.locked.value)
+    }
+
+    @Test
+    fun disabledLockAuthorizesDespiteDelayedCachedStateUpdate() {
+        val dispatcher = QueuedDispatcher()
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+        val controller = AppLockController(
+            settings = settings,
+            now = { baseInstant },
+            scope = CoroutineScope(SupervisorJob() + dispatcher),
+        )
+        assertTrue(controller.locked.value)
+
+        settings.lockEnabled = false
+
+        assertTrue(controller.isExternalActionAuthorized())
     }
 
     @Test
@@ -274,6 +327,10 @@ class AppLockControllerTest {
         fun expire(index: Int) {
             invocations[index].completion.complete(Unit)
         }
+    }
+
+    private class QueuedDispatcher : CoroutineDispatcher() {
+        override fun dispatch(context: CoroutineContext, block: Runnable) = Unit
     }
 }
 
