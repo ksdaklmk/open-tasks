@@ -1,7 +1,8 @@
 # Releasing Open Tasks (signed sideload)
 
 Distribution is signed sideload only. There is no Play Console, no AAB,
-and no CI signing; CI builds the release unsigned.
+and no CI signing; CI builds the release unsigned. Release assembly produces
+arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
 
 ## One-time setup
 
@@ -35,29 +36,43 @@ and no CI signing; CI builds the release unsigned.
 
        ./gradlew testDebugUnitTest lintDebug :app:assembleDebug
 
-3. Build the signed release:
+3. Verify the size-gate script, then build the signed release:
 
+       bash scripts/verify-release-size-script.sh
        ./gradlew :app:assembleRelease
 
-4. Verify the APK:
+4. Gate the arm64 and universal byte counts against the accepted baseline and
+   hard caps:
 
-       bash scripts/verify-release-apk.sh
+       scripts/check-release-size.sh \
+         app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+         app/build/outputs/apk/release/app-universal-release.apk
 
-5. Run the smoke checklist below on a disposable AVD. Record the
+   A drift over 2% or 250 KiB exits separately for review. Inspect the APK
+   entries and record the explanation before updating
+   `gradle/release-size-baseline.properties`; never update it just to make the
+   gate pass.
+
+5. Verify the signed universal fallback:
+
+       bash scripts/verify-release-apk.sh \
+         app/build/outputs/apk/release/app-universal-release.apk
+
+6. Run the smoke checklist below on a disposable AVD. Record the
    disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;
    the same qualification record must also contain the owner-present Drive
    gate results below.
-6. Run the owner-present Google Drive gate below on the physical device.
-7. Commit the version bump and qualification record, then tag:
+7. Run the owner-present Google Drive gate below on the physical device.
+8. Commit the version bump and qualification record, then tag:
 
        git add app/build.gradle.kts \
          docs/qualification/release-<versionName>-sideload.md
        git commit -m "docs: qualify release <versionName> for signed sideload"
        git tag -a v<versionName> -m "Release <versionName>" && git push origin main v<versionName>
 
-8. Install on the real device:
+9. Install the matching APK on the real device (normally arm64-v8a):
 
-       adb install -r app/build/outputs/apk/release/app-release.apk
+       adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
 
 ## Smoke checklist (per release, disposable AVD only)
 
@@ -68,7 +83,7 @@ discarded at shutdown, which is what makes this safe. Inside the
 session, uninstall the inherited debug build first (overlay-only):
 
     adb uninstall app.opentasks
-    adb install app/build/outputs/apk/release/app-release.apk
+    adb install app/build/outputs/apk/release/app-universal-release.apk
 
 Then, by hand:
 
@@ -103,9 +118,9 @@ The owner may inspect the APK certificate locally with `apksigner`, but must
 not paste or record its fingerprint, account, project, client ID, or signing
 material.
 
-Install over the existing app with the unchanged signing identity:
+Install the arm64 APK over the existing app with the unchanged signing identity:
 
-    adb install -r app/build/outputs/apk/release/app-release.apk
+    adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
 
 Never uninstall the package, clear its data, or run a connected test suite on
 the physical device. Then:
@@ -148,7 +163,7 @@ first so adb has exactly one target.
    `device`. `unauthorized` means the phone's dialog is still waiting.
 4. Install from the repository root:
 
-       adb install app/build/outputs/apk/release/app-release.apk
+       adb install app/build/outputs/apk/release/app-arm64-v8a-release.apk
 
    Expect `Success`. On first launch, choose `Start without restoring` to create the local workspace.
 
@@ -165,6 +180,8 @@ Troubleshooting:
   file copy), open it from the Files app, and allow "install unknown
   apps" for Files when prompted.
 
-Updates install straight over the top with `adb install -r` — no
+Use `app-x86_64-release.apk` for an x86_64 target, or
+`app-universal-release.apk` when the 64-bit ABI is unknown. Updates install
+straight over the top with `adb install -r` — no
 uninstall or data clearing, data preserved — because every release is signed
 with the same keystore. That is why the keystore must never be lost.
