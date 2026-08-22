@@ -1,25 +1,24 @@
 package app.opentasks.lock
 
 import java.time.Duration
-import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ExternalLockContentConcealerTest {
-    private val baseInstant = Instant.parse("2026-08-05T09:00:00Z")
+    private val baseElapsedRealtime = Duration.ofHours(12).toMillis()
 
     @Test
     fun staleEarlyDeliveryLeavesExternalContentAlone() = runBlocking {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
         controller.onAppBackgrounded()
-        clock = clock.plus(Duration.ofMinutes(4))
+        elapsedRealtime += Duration.ofMinutes(4).toMillis()
         val effects = mutableListOf<String>()
         val concealer = ExternalLockContentConcealer(
             appLockController = controller,
@@ -34,15 +33,15 @@ class ExternalLockContentConcealerTest {
 
     @Test
     fun expiredDeliveryConcealsRemindersAndWidgetTitles() = runBlocking {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
         controller.onAppBackgrounded()
-        clock = clock.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
         val effects = mutableListOf<String>()
         val concealer = ExternalLockContentConcealer(
             appLockController = controller,
@@ -59,7 +58,7 @@ class ExternalLockContentConcealerTest {
     @Test
     fun lockedColdStartConcealsWithoutVaultState() = runBlocking {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
         val effects = mutableListOf<String>()
         val concealer = ExternalLockContentConcealer(
             appLockController = controller,

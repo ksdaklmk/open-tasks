@@ -1,7 +1,7 @@
 package app.opentasks.lock
 
+import android.os.SystemClock
 import java.time.Duration
-import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -20,12 +20,13 @@ import kotlinx.coroutines.launch
  * `MainActivity` is the only observer this needs: the single activity's own
  * `onStart`/`onStop` report foreground and background transitions, and its
  * overlay calls [onUnlocked] once biometric authentication succeeds.
- * [now] is injected so delay-boundary behaviour can be tested without
- * sleeping, and [wait] lets tests expire the background timer directly.
+ * [elapsedRealtime] is injected so delay-boundary behaviour can be tested
+ * without sleeping, and [wait] lets tests expire the background timer
+ * directly.
  */
 class AppLockController(
     private val settings: AppLockSettings,
-    private val now: () -> Instant = Instant::now,
+    private val elapsedRealtime: () -> Long = { SystemClock.elapsedRealtime() },
     private val scope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val wait: suspend (Duration) -> Unit = { delay(it.toMillis()) },
@@ -34,7 +35,7 @@ class AppLockController(
 ) {
     private val stateGuard = Any()
     private val lockedState = MutableStateFlow(settings.lockEnabled)
-    private var backgroundedAt: Instant? = null
+    private var backgroundedAtElapsedRealtime: Long? = null
     private var expiryJob: Job? = null
     private var expiryGeneration: Long = 0
 
@@ -53,7 +54,7 @@ class AppLockController(
             settings.observe().collect {
                 synchronized(stateGuard) {
                     if (settings.lockEnabled) {
-                        if (backgroundedAt != null) scheduleExpiryLocked()
+                        if (backgroundedAtElapsedRealtime != null) scheduleExpiryLocked()
                     } else {
                         cancelExpiryLocked()
                         lockedState.value = false
@@ -65,7 +66,7 @@ class AppLockController(
 
     fun onAppBackgrounded() {
         synchronized(stateGuard) {
-            backgroundedAt = now()
+            backgroundedAtElapsedRealtime = elapsedRealtime()
             if (settings.lockEnabled) scheduleExpiryLocked() else cancelExpiryLocked()
         }
     }
@@ -81,11 +82,11 @@ class AppLockController(
     fun onAppForegrounded(): Boolean {
         return synchronized(stateGuard) {
             cancelExpiryLocked()
-            val since = backgroundedAt
-            backgroundedAt = null
+            val since = backgroundedAtElapsedRealtime
+            backgroundedAtElapsedRealtime = null
             if (!settings.lockEnabled) return@synchronized false
             val mustLock = since == null ||
-                Duration.between(since, now()) >= settings.lockDelay.duration
+                elapsedSince(since) >= settings.lockDelay.duration
             if (mustLock) lockedState.value = true
             mustLock
         }
@@ -101,8 +102,8 @@ class AppLockController(
     /** Refreshes elapsed lock state before authorizing an external action. */
     fun isExternalActionAuthorized(): Boolean = synchronized(stateGuard) {
         if (!settings.lockEnabled) return@synchronized true
-        val expired = backgroundedAt?.let { since ->
-            Duration.between(since, now()) >= settings.lockDelay.duration
+        val expired = backgroundedAtElapsedRealtime?.let { since ->
+            elapsedSince(since) >= settings.lockDelay.duration
         } ?: false
         if (expired) lockedState.value = true
         !lockedState.value
@@ -110,9 +111,9 @@ class AppLockController(
 
     private fun scheduleExpiryLocked() {
         cancelProcessExpiryLocked()
-        val since = backgroundedAt ?: return
+        val since = backgroundedAtElapsedRealtime ?: return
         val generation = expiryGeneration
-        val remaining = settings.lockDelay.duration.minus(Duration.between(since, now()))
+        val remaining = settings.lockDelay.duration.minus(elapsedSince(since))
             .let { if (it.isNegative) Duration.ZERO else it }
         scheduleDurableExpiry(remaining)
         expiryJob = scope.launch {
@@ -120,7 +121,7 @@ class AppLockController(
             synchronized(stateGuard) {
                 if (
                     generation == expiryGeneration &&
-                    backgroundedAt == since &&
+                    backgroundedAtElapsedRealtime == since &&
                     settings.lockEnabled
                 ) {
                     lockedState.value = true
@@ -128,6 +129,9 @@ class AppLockController(
             }
         }
     }
+
+    private fun elapsedSince(since: Long): Duration =
+        Duration.ofMillis(elapsedRealtime() - since)
 
     private fun cancelExpiryLocked() {
         cancelProcessExpiryLocked()

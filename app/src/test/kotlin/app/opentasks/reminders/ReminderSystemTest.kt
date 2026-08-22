@@ -5,7 +5,6 @@ import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.FakeSharedPreferences
 import app.opentasks.lock.LockDelay
 import java.time.Duration
-import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +57,7 @@ class ReminderSystemTest {
             lockEnabled = true
             lockDelay = LockDelay.IMMEDIATE
         }
-        val controller = AppLockController(settings, now = { Instant.EPOCH })
+        val controller = AppLockController(settings, elapsedRealtime = { 0L })
         controller.onUnlocked()
         val pendingSnooze: suspend () -> Unit? = {
             performReminderMutation(controller) { mutations += 1 }
@@ -80,7 +79,7 @@ class ReminderSystemTest {
     fun authorizedPendingMutationStillRuns() = runBlocking {
         var mutations = 0
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-        val controller = AppLockController(settings, now = { Instant.EPOCH })
+        val controller = AppLockController(settings, elapsedRealtime = { 0L })
         controller.onUnlocked()
 
         val result = performReminderMutation(controller) {
@@ -96,7 +95,7 @@ class ReminderSystemTest {
     fun disabledLockAllowsMutation() = runBlocking {
         var mutations = 0
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = false }
-        val controller = AppLockController(settings, now = { Instant.EPOCH })
+        val controller = AppLockController(settings, elapsedRealtime = { 0L })
 
         performReminderMutation(controller) {
             mutations += 1
@@ -107,7 +106,7 @@ class ReminderSystemTest {
 
     @Test
     fun reminderMutationRechecksControllerAuthorityAtExecution() = runBlocking {
-        var clock = Instant.parse("2026-08-05T09:00:00Z")
+        var elapsedRealtime = Duration.ofHours(12).toMillis()
         val waitForever = CompletableDeferred<Unit>()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
@@ -115,7 +114,7 @@ class ReminderSystemTest {
         }
         val controller = AppLockController(
             settings = settings,
-            now = { clock },
+            elapsedRealtime = { elapsedRealtime },
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             wait = { waitForever.await() },
         )
@@ -129,7 +128,7 @@ class ReminderSystemTest {
                 "updated"
             }
         }
-        clock = clock.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
         val result = pendingMutation()
 
@@ -152,18 +151,18 @@ class ReminderSystemTest {
 
     @Test
     fun elapsedLockAuthorityConcealsReminderPublication() {
-        var clock = Instant.EPOCH
+        var elapsedRealtime = 0L
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
         assertFalse(reminderContentConcealed(settings, controller))
 
-        clock = clock.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
         assertTrue(reminderContentConcealed(settings, controller))
     }

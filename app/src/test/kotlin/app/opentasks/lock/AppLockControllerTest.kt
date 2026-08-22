@@ -2,7 +2,6 @@ package app.opentasks.lock
 
 import android.content.SharedPreferences
 import java.time.Duration
-import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -18,13 +17,13 @@ import org.junit.Test
 import kotlin.coroutines.CoroutineContext
 
 class AppLockControllerTest {
-    private val baseInstant: Instant = Instant.parse("2026-08-05T09:00:00Z")
+    private val baseElapsedRealtime = Duration.ofHours(12).toMillis()
 
     @Test
     fun coldStartLocksWhenEnabled() {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
 
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
 
         assertTrue(controller.locked.value)
     }
@@ -33,23 +32,23 @@ class AppLockControllerTest {
     fun coldStartDoesNotLockWhenDisabled() {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = false }
 
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
 
         assertFalse(controller.locked.value)
     }
 
     @Test
     fun backgroundBelowDelayDoesNotLock() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
 
         controller.onAppBackgrounded()
-        clock = clock.plus(Duration.ofMinutes(4))
+        elapsedRealtime += Duration.ofMinutes(4).toMillis()
         val mustLock = controller.onAppForegrounded()
 
         assertFalse(mustLock)
@@ -58,16 +57,16 @@ class AppLockControllerTest {
 
     @Test
     fun backgroundExactlyAtDelayLocks() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
 
         controller.onAppBackgrounded()
-        clock = clock.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
         val mustLock = controller.onAppForegrounded()
 
         assertTrue(mustLock)
@@ -76,16 +75,16 @@ class AppLockControllerTest {
 
     @Test
     fun backgroundAtOrBeyondDelayLocks() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
 
         controller.onAppBackgrounded()
-        clock = clock.plus(Duration.ofMinutes(6))
+        elapsedRealtime += Duration.ofMinutes(6).toMillis()
         val mustLock = controller.onAppForegrounded()
 
         assertTrue(mustLock)
@@ -94,12 +93,12 @@ class AppLockControllerTest {
 
     @Test
     fun immediateDelayLocksOnAnyForeground() {
-        val clock = baseInstant
+        val elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.IMMEDIATE
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
 
         controller.onAppBackgrounded()
@@ -115,7 +114,7 @@ class AppLockControllerTest {
             lockEnabled = true
             lockDelay = LockDelay.IMMEDIATE
         }
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
         controller.onUnlocked()
 
         controller.onAppBackgrounded()
@@ -148,34 +147,69 @@ class AppLockControllerTest {
 
     @Test
     fun externalActionAtExactDeadlineRefreshesAuthorityBeforeWaitCompletes() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val waits = ControlledWait()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = controlledController(settings, waits, now = { clock })
+        val controller = controlledController(
+            settings,
+            waits,
+            elapsedRealtime = { elapsedRealtime },
+        )
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        clock = clock.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
         assertFalse(controller.isExternalActionAuthorized())
         assertTrue(controller.locked.value)
     }
 
     @Test
-    fun externalActionBeforeDeadlineRemainsAuthorized() {
-        var clock = baseInstant
+    fun externalActionAtMonotonicDeadlineCannotBeAuthorizedByWallClockRollback() {
+        var elapsedRealtime = baseElapsedRealtime
+        val waits = ControlledWait()
+        val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { clock })
+        val controller = controlledController(
+            settings = settings,
+            waits = waits,
+            elapsedRealtime = { elapsedRealtime },
+            durableExpiry = durableExpiry,
+        )
+        controller.onUnlocked()
+        durableExpiry.reset()
+
+        controller.onAppBackgrounded()
+        elapsedRealtime += Duration.ofMinutes(1).toMillis()
+        settings.lockDelay = LockDelay.FIFTEEN_MINUTES
+        elapsedRealtime += Duration.ofMinutes(14).toMillis()
+
+        assertEquals(
+            listOf(Duration.ofMinutes(5), Duration.ofMinutes(14)),
+            durableExpiry.scheduled,
+        )
+        assertFalse(controller.isExternalActionAuthorized())
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun externalActionBeforeDeadlineRemainsAuthorized() {
+        var elapsedRealtime = baseElapsedRealtime
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
-        clock = clock.plus(Duration.ofMinutes(4))
+        elapsedRealtime += Duration.ofMinutes(4).toMillis()
 
         assertTrue(controller.isExternalActionAuthorized())
         assertFalse(controller.locked.value)
@@ -187,7 +221,7 @@ class AppLockControllerTest {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
         val controller = AppLockController(
             settings = settings,
-            now = { baseInstant },
+            elapsedRealtime = { baseElapsedRealtime },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
         )
         assertTrue(controller.locked.value)
@@ -199,7 +233,7 @@ class AppLockControllerTest {
 
     @Test
     fun foregroundCancelsBackgroundExpiry() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val waits = ControlledWait()
         val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
@@ -209,14 +243,14 @@ class AppLockControllerTest {
         val controller = controlledController(
             settings = settings,
             waits = waits,
-            now = { clock },
+            elapsedRealtime = { elapsedRealtime },
             durableExpiry = durableExpiry,
         )
         controller.onUnlocked()
         durableExpiry.reset()
         controller.onAppBackgrounded()
 
-        clock = clock.plus(Duration.ofMinutes(4))
+        elapsedRealtime += Duration.ofMinutes(4).toMillis()
         assertFalse(controller.onAppForegrounded())
         waits.expire(0)
 
@@ -266,7 +300,7 @@ class AppLockControllerTest {
 
     @Test
     fun delayChangeReschedulesFromOriginalBackgroundTime() {
-        var clock = baseInstant
+        var elapsedRealtime = baseElapsedRealtime
         val waits = ControlledWait()
         val durableExpiry = DurableExpiryRecorder()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
@@ -276,14 +310,14 @@ class AppLockControllerTest {
         val controller = controlledController(
             settings = settings,
             waits = waits,
-            now = { clock },
+            elapsedRealtime = { elapsedRealtime },
             durableExpiry = durableExpiry,
         )
         controller.onUnlocked()
         durableExpiry.reset()
         controller.onAppBackgrounded()
 
-        clock = clock.plus(Duration.ofMinutes(1))
+        elapsedRealtime += Duration.ofMinutes(1).toMillis()
         settings.lockDelay = LockDelay.FIFTEEN_MINUTES
 
         assertEquals(
@@ -303,7 +337,7 @@ class AppLockControllerTest {
     @Test
     fun onUnlockedClearsLocked() {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
         assertTrue(controller.locked.value)
 
         controller.onUnlocked()
@@ -314,7 +348,7 @@ class AppLockControllerTest {
     @Test
     fun settingsChangeToDisabledUnlocks() = runBlocking {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-        val controller = AppLockController(settings, now = { baseInstant })
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
         assertTrue(controller.locked.value)
 
         settings.lockEnabled = false
@@ -328,11 +362,11 @@ class AppLockControllerTest {
     private fun controlledController(
         settings: AppLockSettings,
         waits: ControlledWait,
-        now: () -> Instant = { baseInstant },
+        elapsedRealtime: () -> Long = { baseElapsedRealtime },
         durableExpiry: DurableExpiryRecorder? = null,
     ) = AppLockController(
         settings = settings,
-        now = now,
+        elapsedRealtime = elapsedRealtime,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         wait = waits::await,
         scheduleDurableExpiry = durableExpiry?.let { recorder -> recorder::schedule } ?: {},

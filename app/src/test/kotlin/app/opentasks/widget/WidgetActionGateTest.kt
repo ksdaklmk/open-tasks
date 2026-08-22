@@ -28,18 +28,18 @@ import org.junit.Test
 class WidgetActionGateTest {
     @Test
     fun elapsedLockAuthorityBlocksWidgetTitlePublication() {
-        var now = Instant.parse("2026-08-05T09:00:00Z")
+        var elapsedRealtime = Duration.ofHours(12).toMillis()
         val settings = AppLockSettings(FakeSharedPreferences()).apply {
             lockEnabled = true
             lockDelay = LockDelay.FIVE_MINUTES
         }
-        val controller = AppLockController(settings, now = { now })
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
         controller.onUnlocked()
         controller.onAppBackgrounded()
 
         assertTrue(widgetTitlesAuthorized(true, controller, settings))
 
-        now = now.plus(Duration.ofMinutes(5))
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
 
         assertFalse(widgetTitlesAuthorized(true, controller, settings))
     }
@@ -62,7 +62,7 @@ class WidgetActionGateTest {
                 lockEnabled = true
                 lockDelay = LockDelay.IMMEDIATE
             }
-            val controller = AppLockController(settings, now = { now })
+            val controller = AppLockController(settings, elapsedRealtime = { 0L })
             controller.onUnlocked()
             val commands = mutableListOf<DomainCommand>()
             controller.onAppBackgrounded()
@@ -89,7 +89,7 @@ class WidgetActionGateTest {
             val gate = WidgetActionGate()
             val captured = gate.capture()
             val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-            val controller = AppLockController(settings, now = { now })
+            val controller = AppLockController(settings, elapsedRealtime = { 0L })
             controller.onUnlocked()
             val commands = mutableListOf<DomainCommand>()
             gate.invalidate()
@@ -143,7 +143,7 @@ class WidgetActionGateTest {
         withTimeout(5_000) {
             val gate = WidgetActionGate()
             val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
-            val controller = AppLockController(settings, now = { now })
+            val controller = AppLockController(settings, elapsedRealtime = { 0L })
             controller.onUnlocked()
             val commands = mutableListOf<DomainCommand>()
 
@@ -167,7 +167,7 @@ class WidgetActionGateTest {
     @Test
     fun staleBackgroundExpiryCannotDispatchWidgetCompletion() = runBlocking {
         withTimeout(5_000) {
-            var clock = Instant.parse("2026-08-05T09:00:00Z")
+            var elapsedRealtime = Duration.ofHours(12).toMillis()
             val waitForever = CompletableDeferred<Unit>()
             val settings = AppLockSettings(FakeSharedPreferences()).apply {
                 lockEnabled = true
@@ -175,7 +175,7 @@ class WidgetActionGateTest {
             }
             val controller = AppLockController(
                 settings = settings,
-                now = { clock },
+                elapsedRealtime = { elapsedRealtime },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
                 wait = { waitForever.await() },
             )
@@ -183,7 +183,7 @@ class WidgetActionGateTest {
             controller.onAppBackgrounded()
             val gate = WidgetActionGate()
             val captured = gate.capture()
-            clock = clock.plus(Duration.ofMinutes(5))
+            elapsedRealtime += Duration.ofMinutes(5).toMillis()
             val commands = mutableListOf<DomainCommand>()
 
             gate.dispatchCompletion(
