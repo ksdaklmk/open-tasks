@@ -37,6 +37,7 @@ class AppLockController(
     private val lockedState = MutableStateFlow(settings.lockEnabled)
     private val externalContentConcealedState = MutableStateFlow(settings.lockEnabled)
     private var backgroundedAtElapsedRealtime: Long? = null
+    private var unlockAttemptGeneration: Long = 0
     private var expiryJob: Job? = null
     private var expiryGeneration: Long = 0
 
@@ -75,6 +76,7 @@ class AppLockController(
 
     fun onAppBackgrounded() {
         synchronized(stateGuard) {
+            unlockAttemptGeneration += 1
             backgroundedAtElapsedRealtime = elapsedRealtime()
             if (settings.lockEnabled) {
                 externalContentConcealedState.value = true
@@ -114,9 +116,19 @@ class AppLockController(
         }
     }
 
-    fun onUnlocked() {
+    fun beginUnlockAttempt(): Long = synchronized(stateGuard) {
+        unlockAttemptGeneration += 1
+        unlockAttemptGeneration
+    }
+
+    fun onUnlocked(attemptGeneration: Long) {
         synchronized(stateGuard) {
-            if (backgroundedAtElapsedRealtime != null) return@synchronized
+            if (
+                attemptGeneration != unlockAttemptGeneration ||
+                backgroundedAtElapsedRealtime != null
+            ) {
+                return@synchronized
+            }
             cancelExpiryLocked()
             lockedState.value = false
             externalContentConcealedState.value = false

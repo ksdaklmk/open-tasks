@@ -16,6 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.coroutines.CoroutineContext
 
+internal fun AppLockController.onUnlocked() =
+    onUnlocked(beginUnlockAttempt())
+
 class AppLockControllerTest {
     private val baseElapsedRealtime = Duration.ofHours(12).toMillis()
 
@@ -280,6 +283,39 @@ class AppLockControllerTest {
         waits.expire(0)
 
         assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun lateUnlockFromPreviousForegroundCannotUnlockAfterResume() {
+        var elapsedRealtime = baseElapsedRealtime
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
+        val staleAttempt = controller.beginUnlockAttempt()
+        controller.onUnlocked(staleAttempt)
+        controller.onAppBackgrounded()
+        elapsedRealtime += Duration.ofMinutes(5).toMillis()
+        assertTrue(controller.onAppForegrounded())
+
+        controller.onUnlocked(staleAttempt)
+
+        assertTrue(controller.locked.value)
+    }
+
+    @Test
+    fun replacementUnlockAttemptInvalidatesThePreviousAttempt() {
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+        val controller = AppLockController(settings, elapsedRealtime = { baseElapsedRealtime })
+        val staleAttempt = controller.beginUnlockAttempt()
+        val currentAttempt = controller.beginUnlockAttempt()
+
+        controller.onUnlocked(staleAttempt)
+        assertTrue(controller.locked.value)
+
+        controller.onUnlocked(currentAttempt)
+        assertFalse(controller.locked.value)
     }
 
     @Test

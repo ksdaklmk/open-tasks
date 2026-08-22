@@ -7,6 +7,7 @@ import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockSettings
 import app.opentasks.lock.FakeSharedPreferences
 import app.opentasks.lock.LockDelay
+import app.opentasks.lock.onUnlocked
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
