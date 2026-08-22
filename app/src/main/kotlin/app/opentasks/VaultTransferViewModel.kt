@@ -712,7 +712,7 @@ class VaultTransferViewModel internal constructor(
                 check(directory.mkdirs() || directory.isDirectory) {
                     "Dashboard report directory is unavailable"
                 }
-                staged = File(directory, dashboardFileName(request))
+                staged = File.createTempFile("open_tasks_executive_", ".html", directory)
                 val byteCount = FileOutputStream(staged).use { output ->
                     dashboardWriter.write(request, output)
                 }

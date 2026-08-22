@@ -439,6 +439,22 @@ class VaultTransferViewModelTest {
         assertSame(frozen, engine.requests.single().workspace)
     }
 
+    @Test
+    fun dashboardSharesUseDifferentPathsOnTheSameDay() {
+        val runtime = dashboardRuntime()
+        val viewModel = viewModel(dashboardRuntime = runtime)
+
+        viewModel.shareDashboard(InsightsSelection(), includeTaskDetails = false)
+        assertTrue(waitUntil { viewModel.dashboardOutcome.value is DashboardExportOutcome.Completed })
+        val firstPath = runtime.shareRequests.single().file.path
+
+        viewModel.shareDashboard(InsightsSelection(), includeTaskDetails = false)
+        assertTrue(waitUntil { runtime.shareRequests.size == 2 })
+
+        assertTrue(firstPath != runtime.shareRequests[1].file.path)
+        assertTrue(runtime.shareRequests[1].file.readText().startsWith("<!doctype html>"))
+    }
+
     private fun waitUntil(timeoutMillis: Long = 5_000, predicate: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         while (System.nanoTime() < deadline) {
