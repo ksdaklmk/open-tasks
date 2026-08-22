@@ -40,26 +40,26 @@ class WidgetActionGateTest {
         withTimeout(5_000) {
             val gate = WidgetActionGate()
             val captured = gate.capture()
-            val validate = CompletableDeferred<Unit>()
-            var authorized = true
-            val commands = mutableListOf<DomainCommand>()
-
-            val action = launch {
-                validate.await()
-                gate.dispatchCompletion(
-                    captured,
-                    snapshot,
-                    task.id.value,
-                    today,
-                    zone,
-                    now,
-                    isAuthorized = { authorized },
-                    execute = commands::add,
-                )
+            val settings = AppLockSettings(FakeSharedPreferences()).apply {
+                lockEnabled = true
+                lockDelay = LockDelay.IMMEDIATE
             }
-            authorized = false
-            validate.complete(Unit)
-            action.join()
+            val controller = AppLockController(settings, now = { now })
+            controller.onUnlocked()
+            val commands = mutableListOf<DomainCommand>()
+            controller.onAppBackgrounded()
+
+            gate.dispatchCompletion(
+                captured,
+                snapshot,
+                task.id.value,
+                today,
+                zone,
+                now,
+                appLockController = controller,
+                appLockSettings = settings,
+                execute = commands::add,
+            )
 
             assertTrue(commands.isEmpty())
         }
@@ -70,25 +70,23 @@ class WidgetActionGateTest {
         withTimeout(5_000) {
             val gate = WidgetActionGate()
             val captured = gate.capture()
-            val validate = CompletableDeferred<Unit>()
+            val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+            val controller = AppLockController(settings, now = { now })
+            controller.onUnlocked()
             val commands = mutableListOf<DomainCommand>()
-
-            val action = launch {
-                validate.await()
-                gate.dispatchCompletion(
-                    captured,
-                    snapshot,
-                    task.id.value,
-                    today,
-                    zone,
-                    now,
-                    isAuthorized = { true },
-                    execute = commands::add,
-                )
-            }
             gate.invalidate()
-            validate.complete(Unit)
-            action.join()
+
+            gate.dispatchCompletion(
+                captured,
+                snapshot,
+                task.id.value,
+                today,
+                zone,
+                now,
+                appLockController = controller,
+                appLockSettings = settings,
+                execute = commands::add,
+            )
 
             assertTrue(commands.isEmpty())
         }
@@ -126,6 +124,9 @@ class WidgetActionGateTest {
     fun liveAuthorizedTapDispatchesExactlyOnce() = runBlocking {
         withTimeout(5_000) {
             val gate = WidgetActionGate()
+            val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+            val controller = AppLockController(settings, now = { now })
+            controller.onUnlocked()
             val commands = mutableListOf<DomainCommand>()
 
             gate.dispatchCompletion(
@@ -135,7 +136,8 @@ class WidgetActionGateTest {
                 today,
                 zone,
                 now,
-                isAuthorized = { true },
+                appLockController = controller,
+                appLockSettings = settings,
                 execute = commands::add,
             )
 
@@ -163,7 +165,6 @@ class WidgetActionGateTest {
             controller.onAppBackgrounded()
             val gate = WidgetActionGate()
             val captured = gate.capture()
-            val isAuthorized = controller::isExternalActionAuthorized
             clock = clock.plus(Duration.ofMinutes(5))
             val commands = mutableListOf<DomainCommand>()
 
@@ -174,7 +175,8 @@ class WidgetActionGateTest {
                 today,
                 zone,
                 now,
-                isAuthorized = isAuthorized,
+                appLockController = controller,
+                appLockSettings = settings,
                 execute = commands::add,
             )
 

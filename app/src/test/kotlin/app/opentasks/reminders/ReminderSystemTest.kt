@@ -54,20 +54,22 @@ class ReminderSystemTest {
     @Test
     fun pendingMutationCreatedBeforeLockCannotRunAfterLock() = runBlocking {
         var mutations = 0
-        var locked = false
-        val pendingSnooze: suspend () -> Unit = { mutations += 1 }
-        val pendingComplete: suspend () -> Unit = { mutations += 1 }
-        assertFalse(locked)
-        locked = true
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.IMMEDIATE
+        }
+        val controller = AppLockController(settings, now = { Instant.EPOCH })
+        controller.onUnlocked()
+        val pendingSnooze: suspend () -> Unit? = {
+            performReminderMutation(controller) { mutations += 1 }
+        }
+        val pendingComplete: suspend () -> Unit? = {
+            performReminderMutation(controller) { mutations += 1 }
+        }
+        controller.onAppBackgrounded()
 
-        val snoozeResult = performReminderMutation(
-            isAuthorized = { !locked },
-            mutation = pendingSnooze,
-        )
-        val completeResult = performReminderMutation(
-            isAuthorized = { !locked },
-            mutation = pendingComplete,
-        )
+        val snoozeResult = pendingSnooze()
+        val completeResult = pendingComplete()
 
         assertNull(snoozeResult)
         assertNull(completeResult)
@@ -77,10 +79,11 @@ class ReminderSystemTest {
     @Test
     fun authorizedPendingMutationStillRuns() = runBlocking {
         var mutations = 0
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+        val controller = AppLockController(settings, now = { Instant.EPOCH })
+        controller.onUnlocked()
 
-        val result = performReminderMutation(
-            isAuthorized = { true },
-        ) {
+        val result = performReminderMutation(controller) {
             mutations += 1
             "updated"
         }
@@ -90,10 +93,12 @@ class ReminderSystemTest {
     }
 
     @Test
-    fun disabledLockDoesNotRejectAStaleLockedState() = runBlocking {
+    fun disabledLockAllowsMutation() = runBlocking {
         var mutations = 0
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = false }
+        val controller = AppLockController(settings, now = { Instant.EPOCH })
 
-        performReminderMutation(isAuthorized = { true }) {
+        performReminderMutation(controller) {
             mutations += 1
         }
 
@@ -119,9 +124,7 @@ class ReminderSystemTest {
         assertTrue(controller.isExternalActionAuthorized())
         var mutations = 0
         val pendingMutation: suspend () -> String? = {
-            performReminderMutation(
-                isAuthorized = controller::isExternalActionAuthorized,
-            ) {
+            performReminderMutation(controller) {
                 mutations += 1
                 "updated"
             }

@@ -61,6 +61,8 @@ import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.VaultRepository
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkspaceSnapshot
+import app.opentasks.lock.AppLockController
+import app.opentasks.lock.AppLockSettings
 import app.opentasks.reminders.ReminderIntents
 import java.time.Instant
 import java.time.LocalDate
@@ -440,7 +442,8 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
     today: LocalDate,
     zone: ZoneId,
     now: Instant,
-    isAuthorized: () -> Boolean,
+    appLockController: AppLockController,
+    appLockSettings: AppLockSettings,
     execute: suspend (DomainCommand) -> Unit,
 ) {
     val completable = computeTodayProjection(
@@ -451,7 +454,9 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
         titlesPermitted = true,
     ).focusEntries.any { it.taskId == taskId && it.completable }
     if (completable) {
-        dispatch(capturedGeneration, isAuthorized) {
+        dispatch(capturedGeneration, {
+            appLockController.isExternalActionAuthorized() && !appLockSettings.titlePrivacy
+        }) {
             execute(DomainCommand.CompleteTask(TaskId(taskId)))
         }
     }
@@ -475,7 +480,8 @@ internal suspend fun WidgetActionGate.dispatchCompletion(
 class TodayWidgetPublisher(
     private val context: Context,
     private val repository: VaultRepository,
-    private val actionAuthorized: () -> Boolean,
+    private val appLockController: AppLockController,
+    private val appLockSettings: AppLockSettings,
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -490,6 +496,9 @@ class TodayWidgetPublisher(
     // does not give.
     @Volatile
     private var titlesPermitted: Boolean = true
+
+    private fun actionAuthorized(): Boolean =
+        appLockController.isExternalActionAuthorized() && !appLockSettings.titlePrivacy
 
     /**
      * Starts collecting the slot's workspace and republishing the
@@ -568,7 +577,8 @@ class TodayWidgetPublisher(
                 today = LocalDate.now(zone),
                 zone = zone,
                 now = Instant.now(),
-                isAuthorized = actionAuthorized,
+                appLockController = appLockController,
+                appLockSettings = appLockSettings,
                 execute = repository::execute,
             )
             val latest = repository.observeWorkspace().value

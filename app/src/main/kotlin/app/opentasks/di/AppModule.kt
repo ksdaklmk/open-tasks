@@ -413,10 +413,8 @@ object AppModule {
         val todayWidgetPublisher = TodayWidgetPublisher(
             context = context,
             repository = runtime.repository,
-            actionAuthorized = {
-                appLockController.isExternalActionAuthorized() &&
-                    !appLockSettings.titlePrivacy
-            },
+            appLockController = appLockController,
+            appLockSettings = appLockSettings,
         )
         todayWidgetPublisher.start(titlesPermitted = titlesPermitted())
         scope.launch {
