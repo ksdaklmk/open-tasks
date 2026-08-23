@@ -1,32 +1,111 @@
 # Open Tasks Handoff
 
-## Current state — remediation and focused corrections pushed; release qualification paused, 23 August 2026
+## Current state — final security remediation committed for `main`, 24 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
+Implementation commit `68be1b713a665258ba014562b2944af197cd9b18`
+(`security: close final lock privacy findings`) follows checkpoint
+`0846c1a913cd2ba7db86807161e33b6331320127` on `main`. This documentation
+checkpoint records that integration. No version bump, tag, or release was
+performed.
+
+Final corrected-range diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`
+completed and sealed with complete coverage over exact immutable range
+`4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`.
+It reported one Medium and three Low findings:
+
+| Occurrence | Finding | Disposition in `68be1b7` |
+|---|---|---|
+| `occ_d55f2df9303320bcc103cd25` | Short foreground bounce exposes widget titles while the app remains locked | Fixed by preserving passive concealment whenever the controller remains locked |
+| `occ_0714afb3d4db4d044a230956` | Same state divergence exposes reminder content | Fixed by the same shared lifecycle transition |
+| `occ_65ffc615ef23e8ad67d38253` | Stale Snooze ignores title-privacy revocation | Fixed by a live combined app-lock/title-privacy predicate carried to the final repository check |
+| `occ_7b4ef44ba9cd848967844ccc` | Stale Complete ignores title-privacy revocation | Fixed by the same shared reminder-mutation predicate |
+
+The owner authorized these two root-cause fixes and regression tests. Commit
+`68be1b7` is limited to:
+
+- `app/src/main/kotlin/app/opentasks/lock/AppLockController.kt`;
+- `app/src/main/kotlin/app/opentasks/reminders/ReminderSystem.kt`;
+- `app/src/test/kotlin/app/opentasks/lock/AppLockControllerTest.kt`; and
+- `app/src/test/kotlin/app/opentasks/reminders/ReminderSystemTest.kt`.
+
+The two regressions failed against the original production code. After the
+fixes, the lock/reminder focused tests and complete app JVM suite passed. The
+fresh host gate (`testDebugUnitTest`, `lintDebug`, debug assembly, and
+Android-test Kotlin compilation) passed in 1m51s with 563/563 tasks executed;
+fresh release assembly passed in 1m37s with 442/442 tasks executed. Independent
+patch review requested one stronger transaction-time title-privacy test and
+returned clean after it was amended and rerun.
+
+The final scan now has `artifacts/fix_report.md`, and the original Standard
+scan's existing remediation report has the final corrected-range receipt.
+The fixes are integrated in `68be1b7`. The real owner-signer gate, fixed API
+36 arm64 physical qualification, credentialled Google restore,
+two-browser/print/accessibility review, and API 37 emulator-system decision
+remain external blockers. No release is eligible yet.
+
+Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
+spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
+plan/design files. None belongs to this security remediation.
+
+### Next safe steps
+
+1. Inspect the remote workflows triggered by the implementation/documentation
+   push; do not dispatch duplicates merely because a lane is still running.
+2. Use `68be1b713a665258ba014562b2944af197cd9b18` as the immutable source
+   revision for any remediation follow-up; the documentation commit changes no
+   product source.
+3. Run the real three-APK signer gate only with the owner's independently
+   provisioned `OPEN_TASKS_RELEASE_CERT_SHA256`; never derive or print it.
+4. Complete the remaining physical-device, Google-provider, browser, print,
+   keyboard, screen-reader, and 200%-zoom evidence before a release decision.
+5. A version bump, tag, or release still requires explicit owner approval
+   under `RELEASING.md`.
+
+## Superseded checkpoint — owner-requested pause during final security discovery, 23 August 2026
+
+This checkpoint is historical and is superseded by the 24 August section
+above.
+
 ### Safe pause boundary
 
-The owner requested a safe stop after the focused corrections were pushed.
-Do not start another implementation, scan, release gate, or external
-qualification step from this checkpoint. Functional head `c649801` is on
-`origin/main`. Exact-head Security run `32617911327` completed successfully;
-Android run `32617911318` is still in progress. The preceding test-fix Android
-run `32617307931` is also still in progress, while its paired Security run
-`32617307907` completed successfully. Inspect those existing runs on resume;
-do not duplicate them merely because they were active at pause. Publishing
-this documentation checkpoint may start a later docs-head workflow pair;
-discover those by the then-current `origin/main` SHA and inspect rather than
-duplicating them.
+The owner requested an immediate pause while final security candidate discovery
+was in progress. All three read-only discovery workers were interrupted. Do not
+resume them, start another scan or review, change product code, commit, push,
+dispatch a workflow, run an external gate, or make a release until the owner
+asks to continue.
+
+`HEAD` and `origin/main` are both
+`0846c1a913cd2ba7db86807161e33b6331320127` (`docs: record security
+qualification pause`). Functional implementation head remains `c649801`.
+The existing CI runs have settled: Security `32618409567` passed at `0846c1a`,
+while Android `32618409559` failed only in the expanded API 37 emulator lane;
+its verify, release, benchmark, and compact API 36 jobs passed. The same job
+classification applies to Android runs `32617307931` at `316bd86` and
+`32617911318` at `c649801`. No replacement workflow was dispatched.
+
+Final diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d` is durable but
+**unsealed**, pinned to exact immutable range
+`4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`.
+Preflight, advisory access, security-guidance resolution, and threat-model
+capture completed; discovery was split across 22 review items. No discovery
+candidates or validations were recorded. The interrupted workers had only
+preliminary, unvalidated hypotheses involving reminder title privacy,
+resumed-backup generation accounting, and duplicate Gradle wrapper properties;
+none is a finding. Continue the same scan rather than opening a replacement.
+Its directory is
+`/private/var/folders/cc/zvtsfhf91m747w_86jlft22r0000gn/T/codex-security-scans-2m0lz4/open-tasks/0846c1a913cd2ba7db86807161e33b6331320127_20260823T061600Z_ake0159w/`.
+A fresh independent whole-range review has not started, and the original
+scan-local `artifacts/fix_report.md` has not received the final receipt.
 
 Focused independent reviews approved the timer-test correction, failed-CI-
 experiment rollback, and exact-ABI signer-gate correction. The earlier
 whole-range review over `4b3928f..6cd690e` was not approved because it found
 the ineffective serialization claim and the ABI-label gap; both findings are
-now corrected, but a final whole-range review and final Codex Security diff
-scan over the complete corrected range plus documentation have not run. The
-original scan-local `artifacts/fix_report.md` has been reconciled through
-`c649801` but still needs the final scan receipt.
+now corrected. The original scan-local `artifacts/fix_report.md` has been
+reconciled through `c649801` but still needs the final scan receipt.
 
 ### Source identity and delivered remediation
 
@@ -34,10 +113,10 @@ Tasks 1–11 of
 `docs/superpowers/plans/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan.md`
 landed as recorded below. Task 12's two security-remediation waves and the
 subsequent focused review corrections are implemented, independently reviewed,
-and pushed. `origin/main` contains
+and pushed. `origin/main` contains implementation commit
 `c649801d720293a0298d4324e02d21f0a42e25d2` (`security: verify release APK
-architectures`). This is a security/qualification checkpoint, not a release
-decision.
+architectures`) followed only by documentation commit `0846c1a`. This is a
+security/qualification checkpoint, not a release decision.
 
 The original sealed Standard review's five remediations remain:
 
@@ -98,6 +177,11 @@ Do not delete them while the programme remains incomplete.
 - Exact follow-up diff scan `2cb2540b-e277-43c5-a12f-564f386de9c8`, range
   `d670404062c958cfa0d2161d8d0c03139a4da7b7..ff98bd73851af73e89a46beebe04e0ff87e9394e`,
   completed with complete coverage and **zero findings**.
+- Final corrected-range diff scan
+  `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`, range
+  `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`,
+  is paused during discovery and is neither validated nor sealed. Its worker
+  notes are hypotheses, not security findings.
 
 The latest advisory Trusted Access for Cyber check returned `granted`, and
 the owner reports completed verification plus OpenAI Daybreak Blue approval.
@@ -122,9 +206,14 @@ Security workflow requires it.
   owner-only real three-APK signer proof.
 - `git diff --check`: PASS for the focused code commits and this documentation
   checkpoint.
-- Security workflow runs `32608967519`, `32615516366`, `32617307907`, and
-  exact-head `32617911327`: CodeQL PASS; dependency review was correctly
-  skipped for each direct-push event.
+- Security workflow runs `32608967519`, `32615516366`, `32617307907`,
+  `32617911327`, and exact-head `32618409567`: CodeQL PASS; dependency review
+  was correctly skipped for each direct-push event.
+- Android runs `32617307931`, `32617911318`, and exact-head `32618409559`:
+  verify, release, benchmark, and compact API 36 jobs PASS. The exact-head
+  compact job completed all seven modules with 515 reported test results. Each
+  overall workflow failure is confined to expanded API 37 emulator-system
+  breakage; no duplicate run was dispatched.
 - Earlier Android workflow run `32608967477`: `verify`, `release`, `benchmark`,
   and compact API 36 instrumented tests PASS. Its expanded API 37.0 lane lost
   its `package` and `activity` services before any app assertion.
@@ -170,26 +259,35 @@ proof, and no second speculative workaround is claimed.
 4. Owner-present credentialled Google restore, two-browser print/keyboard/
    screen-reader/200%-zoom review, and the remaining version-specific release
    evidence remain pending.
-5. The final independent whole-range Codex Security scan/review remains after
-   the two active Android runs settle. No version bump, tag, or release is
-   authorized.
+5. Final corrected-range scan discovery is paused and unsealed; its preliminary
+   hypotheses remain unvalidated. The independent whole-range review has not
+   started, and the original fix report still lacks the final receipt. No
+   version bump, tag, or release is authorized.
 
 ### Exact resume sequence
 
-1. Read this section first. Run `git status --short --branch`, confirm
-   `origin/main` contains `c649801d720293a0298d4324e02d21f0a42e25d2`, and
-   preserve the unrelated working-tree entries listed below.
+1. Read this section first. Run `git status --short --branch`, fetch without
+   overwriting local work, confirm `HEAD` and `origin/main`, and preserve the
+   unrelated working-tree entries listed below. At pause both refs were
+   `0846c1a913cd2ba7db86807161e33b6331320127`.
 2. Do **not** repeat the completed five-candidate validation, either sealed
    post-fix scan, or the already-passed local/device gates unless source or
    evidence changes.
-3. Inspect Android runs `32617307931` and `32617911318`. Record the compact API
-   36 result and the ordinary verify/release/benchmark results. Preserve any
-   API 37 zero-test system-crash classification; do not repeat the failed
-   configuration or add another workaround without new root-cause evidence.
-   Also inspect any workflow pair associated with this documentation checkpoint
-   at the then-current `origin/main`; do not dispatch a replacement solely
-   because that docs-only run was still active at pause.
-4. Run the real three-APK signer gate only when the owner has independently
+3. Do not repeat CI runs `32617307931`, `32617911318`, or `32618409559`; their
+   useful jobs passed and only expanded API 37 failed at the emulator-system
+   layer. Do not repeat the failed configuration or add another workaround
+   without new root-cause evidence.
+4. Resume final diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`; never start
+   a replacement for the same range. Resume the three interrupted read-only
+   partitions or finish their assigned files, record discovery exactly once,
+   validate every durable candidate, and treat the three preliminary
+   hypotheses above as untrusted until proven. Ask before applying any newly
+   validated remediation.
+5. Obtain a fresh independent whole-range review over
+   `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`,
+   explicitly including `316bd86`, `afb1d93`, `c649801`, and the working
+   handoff-only diff.
+6. Run the real three-APK signer gate only when the owner has independently
    provisioned the expected certificate fingerprint:
 
        read -s OPEN_TASKS_RELEASE_CERT_SHA256
@@ -200,24 +298,22 @@ proof, and no second speculative workaround is claimed.
          app/build/outputs/apk/release/app-universal-release.apk
        unset OPEN_TASKS_RELEASE_CERT_SHA256
 
-5. Complete the fixed API 36 arm64 physical benchmark and the remaining
+7. Complete the fixed API 36 arm64 physical benchmark and the remaining
    provider/browser/accessibility gates. Record exact artifacts without
    converting emulator evidence into physical-device claims.
-6. Refresh Trusted Access advisory state only when resuming the Codex Security
-   workflow. Run one final diff scan from
-   `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e` through the then-current head and
-   working documentation, append its receipt to the original scan's existing
-   `artifacts/fix_report.md`, and obtain a fresh independent whole-range review
-   that includes `316bd86`, `afb1d93`, `c649801`, and this documentation.
-7. Re-run the full release gate only after any source/workflow change. A
+8. After the same final scan is sealed and the review is clean, append its
+   receipt to the original scan's existing `artifacts/fix_report.md`, reconcile
+   the acceptance documentation, and verify the documentation-only diff.
+9. Re-run the full release gate only after any source/workflow change. A
    version bump, tag, or release still requires the owner's explicit decision
    under `RELEASING.md`.
 
 Preserve every current unrelated status entry exactly: the modified Stage 3
 Drive plan, deleted Thai-dashboard spec, `.kotlin/`, `artifacts/`, and the two
 untracked onboarding plan/design files. None belongs in a handoff-only commit.
-No product fix or second workflow workaround is partially applied at this
-pause.
+The intended new working-tree change is this `HANDOFF.md` update only. No
+product fix, candidate validation, fix-report edit, second workflow workaround,
+commit, or push is partially applied at this pause.
 
 ## Superseded checkpoint — closing security validation paused, 22 August 2026
 

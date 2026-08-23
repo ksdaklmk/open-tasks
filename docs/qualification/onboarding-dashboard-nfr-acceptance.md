@@ -2,30 +2,33 @@
 
 ## Status and source identity
 
-**Programme security remediation is implemented, sealed without a reportable
-post-fix finding, merged, and pushed; release qualification remains
-incomplete.** Every gate that ran safely is recorded below. Earlier compact
-API 36 emulator CI, replacement release/SBOM and benchmark jobs, CodeQL, and
-the owner-reported passive-content process-death device check are complete.
-Run `32615516358` exposed one test-only API 36 timer-observation race; the test
-was corrected at `316bd86`, locally verified, independently approved, and
-pushed. The fixed API 36 arm64 physical benchmark, owner-present credentialled
-Google restore, two-browser/print/screen-reader HTML review, and real
-owner-only three-APK signer proof remain release blockers and are not inferred
-from emulator, harness, or unit-test evidence.
+**Final corrected-range security review is complete, and its four findings are
+fixed, verified, and independently approved in implementation commit
+`68be1b713a665258ba014562b2944af197cd9b18`; release qualification remains
+incomplete.** The two root-cause fixes preserve passive concealment while the
+controller remains locked and carry live title-privacy
+revocation to the final serialized reminder-mutation check. The fixed API 36
+arm64 physical benchmark, owner-present credentialled Google restore,
+two-browser/print/screen-reader HTML review, and real owner-only three-APK
+signer proof remain release blockers and are not inferred from emulator,
+harness, or unit-test evidence.
 
-Safe-pause note: exact-head Security run `32617911327` is green. Android runs
-`32617307931` (timer-test correction) and `32617911318` (final pushed
-implementation head) were still in progress when the owner requested the
-pause. Their results must be inspected, not duplicated, on resume. The final
-whole-range Codex Security diff scan and independent review remain pending.
+Follow-up note: final diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`
+sealed with complete coverage over
+`4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`
+and reported one Medium plus three Low findings. The new regressions failed
+before the fixes. Afterward, focused security tests, the complete app JVM
+suite, a fresh 563-task host gate, and a fresh 442-task release assembly all
+passed. Independent review returned clean after strengthening the
+transaction-time title-privacy regression.
 
-- Qualification checkpoint date: 23 August 2026
+- Qualification checkpoint date: 24 August 2026
 - Programme base: `c28a76ecd89468cc4303dd7c7040fe51257ff1c2`
-- Current pushed implementation head:
-  `c649801d720293a0298d4324e02d21f0a42e25d2`
-- Task 12 state: implementation and security-remediation code complete;
-  external release qualification and documentation closure remain open
+- Final security-remediation implementation head:
+  `68be1b713a665258ba014562b2944af197cd9b18`
+- Documentation checkpoint: follows `68be1b7` without changing product source
+- Task 12 state: final security remediation integrated; remote CI and external
+  release qualification remain open
 - Release identity: unchanged from 1.3.1; the implementation was pushed to
   `main`, but no version bump, release tag, or release was attempted
 
@@ -154,18 +157,12 @@ version, changing module, non-checksum exception, signing material, credential,
 or local secret/configuration path was accepted into the SBOM review.
 
 The CodeQL and dependency-review actions remain pinned to reviewed full
-commits. Security runs `32608967519`, `32615516366`, `32617307907`, and
-exact-head `32617911327` completed with CodeQL green; dependency review was
-correctly skipped for each direct-push event. Earlier Android run `32608967477`
-completed with verify,
-release/SBOM, benchmark, and compact API 36 green. Replacement Android run
-`32615516358` has verify, release/SBOM, and benchmark green; its compact API 36
-job ran all seven modules but failed the timer-flow test race corrected in
-`316bd86`.
-
-At the safe pause, Android runs `32617307931` and `32617911318` remain active.
-Do not infer their lane conclusions before completion; record the existing run
-results on resume rather than dispatching replacements without new evidence.
+commits. Security runs through exact-head `32618409567` completed with CodeQL
+green; dependency review was correctly skipped for each direct-push event.
+Android runs `32617307931`, `32617911318`, and exact-head `32618409559` settled
+with verify, release/SBOM, benchmark, and compact API 36 green. Each overall
+workflow failure was confined to the expanded API 37 emulator-system lane; no
+replacement workflow was dispatched.
 
 Expanded API 37.0 failed in replacement run `32615516358` before any
 application test assertion and ran zero tests. Its exact Gradle command
@@ -291,7 +288,7 @@ zoom release acceptance remains **PENDING**.
 | Zero-user-record offline vault | Unit/Room connected proof plus signed fallback empty UI | PASS locally; physical profile confirmation pending |
 | Optional Google backup/recovery | No-auto-discovery tests and `drive.appdata` boundary checks | PARTIAL — owner-present credentialled discovery/cancel/verified restore unrun |
 | Portable recovery non-overwrite/corruption/cancel | Unit and Room connected recovery suites | PARTIAL — manual signed workflow unrun |
-| Locked reminder/widget privacy | Transaction-bound authorization tests, post-fix scan, and owner-reported process-death device PASS | PASS for security closure; repeat only if the boundary changes |
+| Locked reminder/widget privacy | Final-scan regressions, live transaction-bound authorization, earlier process-death device PASS, fresh host/release gates, and clean independent patch review | FIXED in `68be1b7`; remote CI/external gates remain before release |
 | Aggregate/detail offline HTML safety | Writer/DOM/hostile-content/limit tests; real aggregate download/share and static scan | PARTIAL — detail file plus two-browser/print/accessibility exercise unrun |
 | Archive/CSV bounds and durability | Unit and maximum-bound Room connected tests | PASS locally |
 | Timer/search/Insights hot paths | Unit tests, trace boundaries, latest-wins implementation, functional benchmark smoke | PARTIAL — physical threshold measurements unrun |
@@ -299,7 +296,7 @@ zoom release acceptance remains **PENDING**.
 | Dependency verification and SBOM | Pinned Gradle ZIP, versioned wrapper-cache namespace, strict dependency verification, 580-component JSON/XML review, pushed release/SBOM job | PASS for implementation; inspect version-specific artifacts again before release |
 | Release signer identity and ABI | Fail-closed harness requires one expected owner certificate, all three outputs, and exact arm64-only/x86_64-only/universal-both native-code sets | BLOCKED — real three-APK gate with independent owner input has not run |
 | CodeQL/dependency review | Workflow policy verifier plus pushed Security runs `32608967519` and `32615516366` | CodeQL PASS; dependency review correctly skipped on direct pushes and remains a PR-event gate |
-| Seven connected modules | Local API 37 fallback plus pushed compact API 36 lanes | Earlier API 36 PASS; timer-test correction awaiting final hosted confirmation; expanded API 37 remains infrastructure-red after a zero-test emulator system crash, and the failed serialization experiment was removed |
+| Seven connected modules | Local API 37 fallback plus pushed compact API 36 lanes | Compact API 36 passed after the timer-test correction; expanded API 37 remains infrastructure-red after a zero-test emulator system crash, and the failed serialization experiment was removed |
 
 The 14-case R8-backed Macrobenchmark suite has a one-iteration emulator
 functional mode. Task 12 reran all **14/14** cases successfully in **4m01s**
@@ -311,7 +308,7 @@ Dry-run mode intentionally emits no accepted benchmark-data JSON, and an
 emulator result never supplies the NFR percentiles. There are therefore **no
 release p50/p95 values and no accepted physical raw JSON** in this record.
 
-## Security review closure and safe pause
+## Security review closure
 
 Standard scan `df9a41d7-2458-4943-9c5d-957e98d484e9` reported zero Critical,
 zero High, three Medium, and two Low findings. All five implementation defects
@@ -335,22 +332,35 @@ reported that exact device sequence **PASS**. Exact follow-up scan
 `d670404062c958cfa0d2161d8d0c03139a4da7b7..ff98bd73851af73e89a46beebe04e0ff87e9394e`
 with complete coverage and **zero findings**.
 
-No product remediation or deliberately failing test is left at this pause.
-The bounded CI experiment at `6cd690e` was disproved by replacement evidence
-and removed at `afb1d93`; this is rollback, not serialization proof. The
-separate signer-gate ABI-label gap is closed at `c649801`. No second speculative
-workflow workaround is claimed.
+Final corrected-range scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d` reviewed
+`4b3928ff46e1d0cfb0ce72684f4276488bd97b7e..0846c1a913cd2ba7db86807161e33b6331320127`
+with complete coverage and reported four findings: one Medium and three Low.
+They reduced to two root causes and are fixed in four-file implementation
+commit `68be1b7`. The regressions failed before the fixes; focused tests, the
+complete app JVM suite, the fresh 563-task host gate, and the fresh 442-task
+release assembly passed afterward. Independent review returned clean after
+the transaction-time title-privacy regression was strengthened. Both the
+final scan-local fix report and the original Standard scan's final receipt are
+written.
+
+No known product remediation or deliberately failing test remains at the
+reviewed implementation commit. The bounded CI experiment at `6cd690e` was
+disproved by replacement evidence and removed at `afb1d93`; this is rollback,
+not serialization proof. The separate signer-gate ABI-label gap is closed at
+`c649801`. No second speculative workflow workaround is claimed.
 
 ## Review and release decision
 
-The five-candidate validation, attack-path analysis, remediation, post-fix
-review, exact backup follow-up review, local gates, owner-reported device
-check, and push are complete.
+The earlier five-candidate validation, attack-path analysis, remediation,
+post-fix review, exact backup follow-up review, local gates, owner-reported
+device check, and push are complete. The final corrected-range scan and its
+independent remediation review are also complete; the resulting four-file fix
+landed in `68be1b7`.
 
 Release decision: **STOP / NOT YET ELIGIBLE.** Before any version bump, tag,
 or release, complete the real owner-input three-APK signer gate, fixed API 36
 arm64 physical performance/fresh-install evidence, owner-present Google gate,
 browser/print/accessibility review, and remaining version-specific artifacts.
 Resolve or explicitly accept the API 37 preview-emulator workflow blocker,
-obtain the final independent whole-range review, then obtain the owner's
-explicit release decision under `RELEASING.md`.
+inspect the remote CI for `68be1b7` and this documentation checkpoint, then
+obtain the owner's explicit release decision under `RELEASING.md`.
