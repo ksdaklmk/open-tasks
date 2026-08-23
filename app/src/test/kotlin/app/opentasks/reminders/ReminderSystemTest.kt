@@ -61,10 +61,10 @@ class ReminderSystemTest {
         val controller = AppLockController(settings, elapsedRealtime = { 0L })
         controller.onUnlocked()
         val pendingSnooze: suspend () -> Unit? = {
-            performReminderMutation(controller) { mutations += 1 }
+            performReminderMutation(controller, settings) { mutations += 1 }
         }
         val pendingComplete: suspend () -> Unit? = {
-            performReminderMutation(controller) { mutations += 1 }
+            performReminderMutation(controller, settings) { mutations += 1 }
         }
         controller.onAppBackgrounded()
 
@@ -77,13 +77,34 @@ class ReminderSystemTest {
     }
 
     @Test
+    fun titlePrivacyEnabledDuringMutationRevokesFinalAuthorization() = runBlocking {
+        var mutations = 0
+        val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
+        val controller = AppLockController(settings, elapsedRealtime = { 0L })
+        controller.onUnlocked()
+
+        val result = performReminderMutation(controller, settings) { isAuthorized ->
+            settings.titlePrivacy = true
+            if (isAuthorized()) {
+                mutations += 1
+                "updated"
+            } else {
+                null
+            }
+        }
+
+        assertNull(result)
+        assertEquals(0, mutations)
+    }
+
+    @Test
     fun authorizedPendingMutationStillRuns() = runBlocking {
         var mutations = 0
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = true }
         val controller = AppLockController(settings, elapsedRealtime = { 0L })
         controller.onUnlocked()
 
-        val result = performReminderMutation(controller) {
+        val result = performReminderMutation(controller, settings) {
             mutations += 1
             "updated"
         }
@@ -98,7 +119,7 @@ class ReminderSystemTest {
         val settings = AppLockSettings(FakeSharedPreferences()).apply { lockEnabled = false }
         val controller = AppLockController(settings, elapsedRealtime = { 0L })
 
-        performReminderMutation(controller) {
+        performReminderMutation(controller, settings) {
             mutations += 1
         }
 
@@ -124,7 +145,7 @@ class ReminderSystemTest {
         assertTrue(controller.isExternalActionAuthorized())
         var mutations = 0
         val pendingMutation: suspend () -> String? = {
-            performReminderMutation(controller) {
+            performReminderMutation(controller, settings) {
                 mutations += 1
                 "updated"
             }

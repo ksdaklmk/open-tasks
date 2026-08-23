@@ -66,9 +66,12 @@ internal fun reminderScheduleMode(
 
 internal suspend fun <T> performReminderMutation(
     appLockController: AppLockController,
+    appLockSettings: AppLockSettings,
     mutation: suspend (isAuthorized: () -> Boolean) -> T,
 ): T? {
-    val isAuthorized = appLockController::isExternalActionAuthorized
+    val isAuthorized = {
+        appLockController.isExternalActionAuthorized() && !appLockSettings.titlePrivacy
+    }
     return if (isAuthorized()) mutation(isAuthorized) else null
 }
 
@@ -353,6 +356,9 @@ class ReminderActionReceiver : BroadcastReceiver() {
     @Inject
     lateinit var appLockController: AppLockController
 
+    @Inject
+    lateinit var appLockSettings: AppLockSettings
+
     private val repository: VaultRepository
         get() = vaultRepository.get()
 
@@ -440,7 +446,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
         } ?: repository.currentWorkspace()
 
     private suspend fun executeMutation(command: DomainCommand): CommandResult? =
-        performReminderMutation(appLockController) { isAuthorized ->
+        performReminderMutation(appLockController, appLockSettings) { isAuthorized ->
             repository.executeAuthorized(command, isAuthorized)
         }
 

@@ -41,6 +41,23 @@ class AppLockControllerTest {
     }
 
     @Test
+    fun shortForegroundBounceWhileAlreadyLockedKeepsPassiveContentConcealed() {
+        var elapsedRealtime = baseElapsedRealtime
+        val settings = AppLockSettings(FakeSharedPreferences()).apply {
+            lockEnabled = true
+            lockDelay = LockDelay.FIVE_MINUTES
+        }
+        val controller = AppLockController(settings, elapsedRealtime = { elapsedRealtime })
+
+        controller.onAppBackgrounded()
+        elapsedRealtime += Duration.ofMinutes(4).toMillis()
+
+        assertFalse(controller.onAppForegrounded())
+        assertTrue(controller.locked.value)
+        assertTrue(controller.externalContentConcealed.value)
+    }
+
+    @Test
     fun backgroundBelowDelayDoesNotLock() {
         var elapsedRealtime = baseElapsedRealtime
         val settings = AppLockSettings(FakeSharedPreferences()).apply {

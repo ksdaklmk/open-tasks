@@ -110,7 +110,7 @@ class AppLockController(
                 lockedState.value = true
                 externalContentConcealedState.value = true
             } else {
-                externalContentConcealedState.value = false
+                externalContentConcealedState.value = lockedState.value
             }
             mustLock
         }
