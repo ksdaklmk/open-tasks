@@ -80,7 +80,8 @@ The repository contains the production offline-first workspace:
 - A single-flight local backup coordinator that performs authenticated
   readback and source comparison before checkpointing, retains recovery bases,
   and leaves local editing/journal rows intact on failure. Application
-  lifecycle wiring now coalesces journal changes and resumes pending work.
+  lifecycle wiring coalesces journal changes, binds each run to its exact
+  start generation, and resumes newer pending work.
 - A verified recovery-passphrase envelope and atomically replaced portable
   package no larger than 24 MiB. More reports only local package facts and
   preserves Android-restored packages as inert Stage 3 recovery input.
@@ -106,11 +107,20 @@ surfaces, and executive reporting are implemented. Google remains optional
 and backup/recovery-scoped; release qualification still requires the explicit
 owner-present provider gate.
 
-The onboarding/dashboard/NFR implementation reached its local machine gates
-and is paused for five validated security remediations. Physical API 36
-performance and fresh-install evidence, credentialled Google restore, manual
-browser/accessibility review, and pushed security workflows also remain
-pending in
+The five validated security candidates are remediated and pushed, and both
+post-fix scans report zero findings. Security runs `32615516366`,
+`32617307907`, and exact-head `32617911327` are green. Android run
+`32615516358` passed verify, release/SBOM,
+and benchmark, then exposed a test-only API 36 timer-observation race; that test
+was corrected in `316bd86`. The expanded preview API 37 suite remains
+infrastructure-red after the emulator lost core Android services before any app
+assertion. Its `--no-parallel` experiment did not serialize UTP work and was
+removed in `afb1d93`; no serialization proof is claimed. The three-APK gate now
+also checks the exact packaged ABIs in `c649801`, but real owner-certificate
+proof, physical fixed-API-36 arm64 performance and fresh-install evidence,
+owner-present Google restore, and manual browser/accessibility checks remain
+pending. Resume from
+[HANDOFF.md](HANDOFF.md) and record release evidence in
 [docs/qualification/onboarding-dashboard-nfr-acceptance.md](docs/qualification/onboarding-dashboard-nfr-acceptance.md).
 
 ## Build

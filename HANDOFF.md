@@ -1,9 +1,228 @@
 # Open Tasks Handoff
 
-## Current state — onboarding/dashboard/NFR paused during closing security validation, 22 August 2026
+## Current state — remediation and focused corrections pushed; release qualification paused, 23 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
+
+### Safe pause boundary
+
+The owner requested a safe stop after the focused corrections were pushed.
+Do not start another implementation, scan, release gate, or external
+qualification step from this checkpoint. Functional head `c649801` is on
+`origin/main`. Exact-head Security run `32617911327` completed successfully;
+Android run `32617911318` is still in progress. The preceding test-fix Android
+run `32617307931` is also still in progress, while its paired Security run
+`32617307907` completed successfully. Inspect those existing runs on resume;
+do not duplicate them merely because they were active at pause. Publishing
+this documentation checkpoint may start a later docs-head workflow pair;
+discover those by the then-current `origin/main` SHA and inspect rather than
+duplicating them.
+
+Focused independent reviews approved the timer-test correction, failed-CI-
+experiment rollback, and exact-ABI signer-gate correction. The earlier
+whole-range review over `4b3928f..6cd690e` was not approved because it found
+the ineffective serialization claim and the ABI-label gap; both findings are
+now corrected, but a final whole-range review and final Codex Security diff
+scan over the complete corrected range plus documentation have not run. The
+original scan-local `artifacts/fix_report.md` has been reconciled through
+`c649801` but still needs the final scan receipt.
+
+### Source identity and delivered remediation
+
+Tasks 1–11 of
+`docs/superpowers/plans/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan.md`
+landed as recorded below. Task 12's two security-remediation waves and the
+subsequent focused review corrections are implemented, independently reviewed,
+and pushed. `origin/main` contains
+`c649801d720293a0298d4324e02d21f0a42e25d2` (`security: verify release APK
+architectures`). This is a security/qualification checkpoint, not a release
+decision.
+
+The original sealed Standard review's five remediations remain:
+
+1. `78ea33d` — unique FileProvider share staging paths;
+2. `3bb60a2` and `939c823` — synchronous reminder/widget lock authority;
+3. `bac386f` and `c9974b0` — private durable external-content concealment;
+4. `a043152` — the official Gradle 9.7.0 checksum plus policy enforcement;
+5. `a7ba7da` and `e4f9bfc` — fail-closed owner-controlled signer verification
+   for the arm64, x86_64, and universal release APKs.
+
+The closing scan then produced five distinct findings. Keep their identities
+separate in any later audit:
+
+| Candidate | Final severity / confidence | Root fix |
+|---|---|---|
+| `candidate-4a2ccb9c2d78c2c3` | Low / Medium | `ad6ebc1`, completed by prompt-generation binding in `49671a4` |
+| `candidate-d23431158a225406` | Low / High | transaction-bound reminder authorization in `ad6ebc1` |
+| `candidate-763115ddae2d9ff7` | Low / High | transaction-bound widget generation/authority checks in `ad6ebc1` |
+| `candidate-06c83a55b6738660` | Low / High | versioned Gradle wrapper distribution/ZIP cache namespace in `ad6ebc1` |
+| `candidate-da65747ac45e845a` | Medium / High | immediate passive-surface concealment in `3b52404` |
+
+Merge `b28c7d2` integrated those fixes into `main`. `0b44d0d` and `d670404`
+added the independently reviewed Linux AAPT2 and coroutines-BOM dependency
+metadata needed by clean hosted builds. `ff98bd7` fixes a separate CI-exposed
+backup scheduling race: the runner captures the exact local generation under
+the existing publication gate and carries it through completion, so a later
+edit is never mistaken for the generation already attempted. `6cd690e` tried
+`--no-parallel` on the seven-task connected-test Gradle invocation, but hosted
+evidence proved that UTP work still overlapped; `afb1d93` removes the
+ineffective flag and restores the pre-experiment workflow exactly. This is
+rollback, not serialization proof. `316bd86` separately removes a test-only
+timer-observation race exposed by compact API 36, and `c649801` requires exact
+packaged native-code ABI sets for all three labelled release APKs.
+
+The ignored SDD ledger and task reports remain under
+`.superpowers/sdd/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan/`.
+Do not delete them while the programme remains incomplete.
+
+### Sealed security evidence
+
+- Original Standard scan `df9a41d7-2458-4943-9c5d-957e98d484e9` reported
+  three Medium and two Low findings, zero Critical/High. Its scan-local
+  `artifacts/fix_report.md` now exists, maps all five occurrences to their
+  fixes and evidence, and has been reconciled through exact follow-up scan
+  `2cb2540b-e277-43c5-a12f-564f386de9c8`. The real signer proof remains an
+  external release gate, not missing implementation documentation.
+- Closing diff scan `31e83519-4242-4240-9b61-7cb357b440e8`, exact range
+  `8bb2a6675fbf26f9b265306823e86a759bb6dedf..e4f9bfcae4ce6f9f8341229b68dffebaff991b85`,
+  completed with complete coverage and the one-Medium/four-Low findings in the
+  table above.
+- Remediation diff scan `19aa7c94-d7a0-4b6d-9cef-0e6c347e0ce5`, exact range
+  `e4f9bfcae4ce6f9f8341229b68dffebaff991b85..3b524043cd8a78b99fee266f9f4187fcef38c72d`,
+  sealed with **zero reportable findings**. Its canonical coverage remains
+  partial only because asynchronous purge completion required a real-device
+  process-death check. The owner subsequently reported that exact on-device
+  check **PASS**; preserve that as external acceptance evidence rather than
+  rewriting the sealed scan.
+- Exact follow-up diff scan `2cb2540b-e277-43c5-a12f-564f386de9c8`, range
+  `d670404062c958cfa0d2161d8d0c03139a4da7b7..ff98bd73851af73e89a46beebe04e0ff87e9394e`,
+  completed with complete coverage and **zero findings**.
+
+The latest advisory Trusted Access for Cyber check returned `granted`, and
+the owner reports completed verification plus OpenAI Daybreak Blue approval.
+That account state is advisory context, not repository authorization and not
+a substitute for any release gate; refresh it only when the active Codex
+Security workflow requires it.
+
+### Verification and remote CI evidence
+
+- Owner-provided device acceptance: **PASS** for the deferred passive-content
+  process-death/purge sequence. No certificate value was disclosed.
+- Fresh exact-head host gate:
+  `./gradlew testDebugUnitTest lintDebug :app:assembleDebug
+  :app:compileDebugAndroidTestKotlin --rerun-tasks --max-workers=2` —
+  **BUILD SUCCESSFUL in 1m43s; 563/563 tasks executed** at the `c649801`
+  working state. Forced-fresh `:app:assembleRelease` also passed in 1m12s with
+  442/442 tasks executed.
+- `scripts/verify-actions-workflow.sh`,
+  `scripts/verify-benchmark-threshold-script.sh`, and
+  `scripts/verify-release-apk-script.sh`: PASS. The last command includes
+  exact ABI-label and certificate non-disclosure cases; it is not the
+  owner-only real three-APK signer proof.
+- `git diff --check`: PASS for the focused code commits and this documentation
+  checkpoint.
+- Security workflow runs `32608967519`, `32615516366`, `32617307907`, and
+  exact-head `32617911327`: CodeQL PASS; dependency review was correctly
+  skipped for each direct-push event.
+- Earlier Android workflow run `32608967477`: `verify`, `release`, `benchmark`,
+  and compact API 36 instrumented tests PASS. Its expanded API 37.0 lane lost
+  its `package` and `activity` services before any app assertion.
+- Replacement Android workflow run `32615516358` at `6cd690e`: `verify`,
+  release/SBOM, and benchmark PASS. Compact API 36 ran all seven modules but
+  failed only the test-observation race corrected in `316bd86`. Expanded API
+  37.0 failed before any application test assertion and ran zero tests.
+- The focused timer test passed 1/1 on the sole audited API 37 arm64
+  disposable; Android-test compilation, whitespace checks, and independent
+  review also passed for `316bd86`.
+- Hosted overlap evidence, the workflow verifier, whitespace checks, and
+  independent review approve `afb1d93` as removal of the failed experiment,
+  not as serialization proof.
+- The signer harness first failed when an x86 payload was renamed as arm64,
+  then passed after `c649801` added exact native-code checks for arm64-only,
+  x86_64-only, and universal-both. Independent focused review approved the
+  correction; no owner certificate was inspected or inferred.
+
+The API 37 signature seen in runs `32607469479` and `32608967477` repeated in
+replacement run `32615516358`. The exact Gradle command included
+`--no-parallel`, yet at least four connected-test tasks began within seven
+seconds. The canary emulator then lost Android's `activity` and `package`
+services; UTP reported `INSTRUMENTATION_ABORTED: System has crashed`. The
+experiment was therefore disproved and removed in `afb1d93`. This is zero-test
+emulator-system evidence, not an application assertion failure or serialization
+proof, and no second speculative workaround is claimed.
+
+### Remaining blockers
+
+1. The real signer gate is still pending. The implementation and harness are
+   complete, including exact native-code ABI checks, but the owner must supply
+   `OPEN_TASKS_RELEASE_CERT_SHA256` from an independent trusted record and
+   return only generic PASS/FAIL for the real arm64, x86_64, and universal
+   signed APKs. Never derive the expected value from a candidate APK or print
+   it in chat, documentation, arguments, or logs.
+2. The API 37 expanded CI lane remains red on an emulator-system crash. The
+   failed `--no-parallel` experiment was removed; do not claim serialization or
+   a second workaround without new root-cause evidence.
+3. Earlier compact API 36 emulator CI is green; `32615516358` exposed the
+   now-corrected timer-test race. The fixed API 36 arm64 physical performance/
+   fresh-install gate remains pending, and no release p50/p95 values are
+   claimed.
+4. Owner-present credentialled Google restore, two-browser print/keyboard/
+   screen-reader/200%-zoom review, and the remaining version-specific release
+   evidence remain pending.
+5. The final independent whole-range Codex Security scan/review remains after
+   the two active Android runs settle. No version bump, tag, or release is
+   authorized.
+
+### Exact resume sequence
+
+1. Read this section first. Run `git status --short --branch`, confirm
+   `origin/main` contains `c649801d720293a0298d4324e02d21f0a42e25d2`, and
+   preserve the unrelated working-tree entries listed below.
+2. Do **not** repeat the completed five-candidate validation, either sealed
+   post-fix scan, or the already-passed local/device gates unless source or
+   evidence changes.
+3. Inspect Android runs `32617307931` and `32617911318`. Record the compact API
+   36 result and the ordinary verify/release/benchmark results. Preserve any
+   API 37 zero-test system-crash classification; do not repeat the failed
+   configuration or add another workaround without new root-cause evidence.
+   Also inspect any workflow pair associated with this documentation checkpoint
+   at the then-current `origin/main`; do not dispatch a replacement solely
+   because that docs-only run was still active at pause.
+4. Run the real three-APK signer gate only when the owner has independently
+   provisioned the expected certificate fingerprint:
+
+       read -s OPEN_TASKS_RELEASE_CERT_SHA256
+       export OPEN_TASKS_RELEASE_CERT_SHA256
+       bash scripts/verify-release-apk.sh \
+         app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+         app/build/outputs/apk/release/app-x86_64-release.apk \
+         app/build/outputs/apk/release/app-universal-release.apk
+       unset OPEN_TASKS_RELEASE_CERT_SHA256
+
+5. Complete the fixed API 36 arm64 physical benchmark and the remaining
+   provider/browser/accessibility gates. Record exact artifacts without
+   converting emulator evidence into physical-device claims.
+6. Refresh Trusted Access advisory state only when resuming the Codex Security
+   workflow. Run one final diff scan from
+   `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e` through the then-current head and
+   working documentation, append its receipt to the original scan's existing
+   `artifacts/fix_report.md`, and obtain a fresh independent whole-range review
+   that includes `316bd86`, `afb1d93`, `c649801`, and this documentation.
+7. Re-run the full release gate only after any source/workflow change. A
+   version bump, tag, or release still requires the owner's explicit decision
+   under `RELEASING.md`.
+
+Preserve every current unrelated status entry exactly: the modified Stage 3
+Drive plan, deleted Thai-dashboard spec, `.kotlin/`, `artifacts/`, and the two
+untracked onboarding plan/design files. None belongs in a handoff-only commit.
+No product fix or second workflow workaround is partially applied at this
+pause.
+
+## Superseded checkpoint — closing security validation paused, 22 August 2026
+
+The following checkpoint is historical and is superseded by the 23 August
+2026 section above.
 
 ### Onboarding/dashboard/NFR programme — remediation implemented; closing scan not yet closed
 

@@ -2,23 +2,32 @@
 
 ## Status and source identity
 
-**Programme implementation reached local qualification, then paused with five
-validated security remediations open; release qualification is incomplete.**
-Every gate that ran safely on this host is recorded below.
-The fixed API 36 physical-device benchmark, API 36 connected matrix,
-owner-present credentialled Google restore, two-browser/print/screen-reader
-HTML review, and pushed GitHub security jobs have not run. They remain release
-blockers and are not inferred from emulator or unit-test evidence.
+**Programme security remediation is implemented, sealed without a reportable
+post-fix finding, merged, and pushed; release qualification remains
+incomplete.** Every gate that ran safely is recorded below. Earlier compact
+API 36 emulator CI, replacement release/SBOM and benchmark jobs, CodeQL, and
+the owner-reported passive-content process-death device check are complete.
+Run `32615516358` exposed one test-only API 36 timer-observation race; the test
+was corrected at `316bd86`, locally verified, independently approved, and
+pushed. The fixed API 36 arm64 physical benchmark, owner-present credentialled
+Google restore, two-browser/print/screen-reader HTML review, and real
+owner-only three-APK signer proof remain release blockers and are not inferred
+from emulator, harness, or unit-test evidence.
 
-- Qualification date: 22 August 2026
+Safe-pause note: exact-head Security run `32617911327` is green. Android runs
+`32617307931` (timer-test correction) and `32617911318` (final pushed
+implementation head) were still in progress when the owner requested the
+pause. Their results must be inspected, not duplicated, on resume. The final
+whole-range Codex Security diff scan and independent review remain pending.
+
+- Qualification checkpoint date: 23 August 2026
 - Programme base: `c28a76ecd89468cc4303dd7c7040fe51257ff1c2`
-- Last committed implementation head before this record:
-  `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e`
-- Task 12 evidence source: the working tree based on that head, containing
-  only the four proven-dead `core/sync` deletions and this durable-document
-  security checkpoint; Task 12 is not closed
-- Release identity: unchanged from 1.3.1; no version bump, tag, push, or
-  release was attempted
+- Current pushed implementation head:
+  `c649801d720293a0298d4324e02d21f0a42e25d2`
+- Task 12 state: implementation and security-remediation code complete;
+  external release qualification and documentation closure remain open
+- Release identity: unchanged from 1.3.1; the implementation was pushed to
+  `main`, but no version bump, release tag, or release was attempted
 
 The implementation sequence is:
 
@@ -35,6 +44,13 @@ The implementation sequence is:
 | `63ecd99` | Per-ABI release packaging and size gates |
 | `5f88a83` | Release-like Macrobenchmark and threshold gates |
 | `4b3928f` | Security policy, dependency verification, SBOM, and security workflows |
+| `78ea33d`..`e4f9bfc` | Original five-finding remediation wave, including the three-APK signer harness |
+| `ad6ebc1`, `49671a4`, `3b52404` | Closing-scan authorization, biometric, wrapper-cache, and passive-concealment fixes |
+| `b28c7d2`, `0b44d0d`, `d670404` | Main integration plus reviewed hosted-build dependency metadata |
+| `ff98bd7` | Backup completion bound to the exact generation captured at runner start |
+| `6cd690e`, `afb1d93` | Failed `--no-parallel` serialization experiment, then exact rollback after hosted evidence disproved the claim |
+| `316bd86` | Settled-database setup removes the API 36 timer-test observation race without changing production |
+| `c649801` | Release gate matches every APK label to its exact packaged native-code ABI set |
 
 The untracked approved plan and design remain execution inputs outside Task
 12's exact staging list. The pre-existing modified Stage 3 Drive plan, deleted
@@ -56,15 +72,25 @@ Thai-dashboard design, `.kotlin/`, and `artifacts/` were not changed.
   metadata, and credentials are excluded.
 - Download uses SAF and share uses the existing read-only FileProvider
   boundary. Partial plaintext is removed on non-success paths.
-- Reminder mutation and widget actions consult app-lock state, and the live
-  process expires that state in the background. The sealed review found that
-  the cached decision can be stale at an external action boundary and that
-  process death can prevent durable concealment; both remain open below.
+- Reminder mutation and widget actions carry revocable authorization into the
+  shared repository write boundary and recheck it under the existing write
+  mutex immediately before mutation. Biometric success is bound to the
+  current foreground prompt generation. Reminder/widget content is concealed
+  immediately on background, and the owner-reported process-death device gate
+  passed.
 - Archive and CSV intake are bounded; timer updates do not rebuild the whole
   workspace each second; search and Insights cancel stale projection work.
-- Release packaging, benchmark checks, dependency checksums, SBOM generation,
-  CodeQL, dependency review, and the public security policy are now explicit
-  release controls.
+- Release packaging, benchmark checks, dependency checksums, a pinned and
+  versioned Gradle wrapper cache, SBOM generation, CodeQL, dependency review,
+  and the public security policy are explicit release controls. The signer
+  gate authenticates all three APKs against owner-controlled input and checks
+  arm64-only, x86_64-only, and universal-both packaged ABI sets, but the real
+  owner-only proof has not run.
+- Every dashboard share receives a unique FileProvider staging path while SAF
+  downloads retain their stable display name.
+- Remote backup completion carries the generation captured under the
+  serialized publication gate; an edit arriving during the run remains
+  eligible for the next backup.
 
 ## Dead-code proof and focused gate
 
@@ -92,15 +118,17 @@ failures.
 
 | Gate | Result |
 |---|---|
-| `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --stacktrace` | PASS in 1m19s; 1,402 JVM tests across 135 suites, zero failures; lint and debug assembly green |
-| `./gradlew :app:assembleRelease --stacktrace` | PASS in 1m47s |
-| `scripts/verify-release-apk.sh app/build/outputs/apk/release/app-universal-release.apk` | PASS for signature self-consistency, version, non-debuggable state, sole `drive.appdata` scope, and absence of the debug Drive qualification activity. It did **not** authenticate an expected signer or inspect the two split APKs; finding 4 remains open. |
+| `./gradlew testDebugUnitTest lintDebug :app:assembleDebug :app:compileDebugAndroidTestKotlin --rerun-tasks --max-workers=2` at the `c649801` working state | PASS in 1m43s; 563/563 tasks executed; unit tests, lint, debug assembly, and Android-test compilation green |
+| `./gradlew :app:assembleRelease --stacktrace --rerun-tasks` at the `c649801` working state | PASS in 1m12s; 442/442 tasks executed |
+| `scripts/verify-release-apk-script.sh` | PASS for signer, no-leak, and exact-ABI harness cases after a renamed x86-as-arm64 case first failed against the old verifier. This is not the real signer gate and does not authenticate a release candidate without independent owner input. |
 | `scripts/check-release-size.sh ...app-arm64-v8a-release.apk ...app-universal-release.apk` | PASS; both artifacts equal the reviewed baseline and remain below hard caps |
 | `scripts/verify-actions-workflow.sh` | PASS; full SHA pins, minimal permissions, Java/Kotlin manual CodeQL build, High dependency-review threshold, seven connected modules, and no credential output enforced |
+| Hosted overlap evidence, workflow verifier, whitespace checks, and independent correction review | PASS for removing the ineffective flag in `afb1d93`; this is rollback, not serialization proof |
 | `./gradlew cyclonedxBom` | PASS; JSON/XML parse and contain 580 components, including application modules, Room, SQLCipher, Tink, and Bouncy Castle |
 | `./gradlew clean :app:assembleDebug` | PASS as the exact local manual CodeQL build |
 
-Release artifacts:
+Historical pre-closing-remediation release artifacts (not current-head signer
+evidence):
 
 | Artifact | Bytes | SHA-256 | Result |
 |---|---:|---|---|
@@ -125,10 +153,27 @@ were generated and reviewed, and the strict refresh then passed. No dynamic
 version, changing module, non-checksum exception, signing material, credential,
 or local secret/configuration path was accepted into the SBOM review.
 
-The current CodeQL and dependency-review actions are pinned to reviewed full
-commits. Their actual GitHub jobs and release SBOM upload cannot exist until a
-push; local workflow validation and a manual build are not substitutes for
-those remote results.
+The CodeQL and dependency-review actions remain pinned to reviewed full
+commits. Security runs `32608967519`, `32615516366`, `32617307907`, and
+exact-head `32617911327` completed with CodeQL green; dependency review was
+correctly skipped for each direct-push event. Earlier Android run `32608967477`
+completed with verify,
+release/SBOM, benchmark, and compact API 36 green. Replacement Android run
+`32615516358` has verify, release/SBOM, and benchmark green; its compact API 36
+job ran all seven modules but failed the timer-flow test race corrected in
+`316bd86`.
+
+At the safe pause, Android runs `32617307931` and `32617911318` remain active.
+Do not infer their lane conclusions before completion; record the existing run
+results on resume rather than dispatching replacements without new evidence.
+
+Expanded API 37.0 failed in replacement run `32615516358` before any
+application test assertion and ran zero tests. Its exact Gradle command
+included `--no-parallel`, yet at least four connected-test tasks began within
+seven seconds. The canary then lost Android's `activity` and `package`
+services, and UTP reported `INSTRUMENTATION_ABORTED: System has crashed`.
+This falsifies the serialization claim. `afb1d93` removes the ineffective flag;
+no serialization proof or second speculative workaround is claimed.
 
 ## Connected-device evidence
 
@@ -173,9 +218,28 @@ The skips were the credentialled Drive qualification argument and the
 posture-dependent fold-transition case. Exact XML lives under each module's
 `build/outputs/androidTest-results/connected/debug/` directory.
 
-No disposable API 36 image is installed. Every locally installed AVD is API
-37 and the SDK contains only the API 37 arm64 image, so the required API 36
-seven-module gate is **PENDING**, not failed and not waived.
+No disposable API 36 image was installed on the local host. The pushed compact
+API 36 emulator lane subsequently ran the seven-module matrix successfully in
+workflow `32608967477`. That closes hosted connected coverage, but it does not
+replace the required fixed API 36 arm64 physical performance and fresh-install
+evidence.
+
+The compact API 36 job in replacement workflow `32615516358` ran all seven
+modules and failed only
+`RoomVaultRepositoryInstrumentedTest.activeTimerDoesNotReemitWorkspaceWithoutADatabaseWrite`.
+The old test subscribed after advancing its fake clock, so a delayed Room
+invalidation from the preceding timer write could be mistaken for a clock-only
+tick. `316bd86` establishes the active fixture, reopens the settled database
+without another write, and retains the bounded no-emission assertion. A fresh
+focused API 37 arm64 run passed 1/1 and independent review approved the
+test-only correction; hosted compact API 36 confirmation is recorded with the
+replacement workflow results above.
+
+The owner later reported **PASS** for the remediation scan's deferred
+real-device process-death sequence: previously published reminder/widget
+content was checked after backgrounding and process termination. This external
+acceptance closes that evidence request without changing the sealed scan's
+canonical `partial` coverage record and without exposing certificate data.
 
 ## Signed fallback smoke and generated HTML
 
@@ -227,15 +291,15 @@ zoom release acceptance remains **PENDING**.
 | Zero-user-record offline vault | Unit/Room connected proof plus signed fallback empty UI | PASS locally; physical profile confirmation pending |
 | Optional Google backup/recovery | No-auto-discovery tests and `drive.appdata` boundary checks | PARTIAL — owner-present credentialled discovery/cancel/verified restore unrun |
 | Portable recovery non-overwrite/corruption/cancel | Unit and Room connected recovery suites | PARTIAL — manual signed workflow unrun |
-| Locked reminder/widget privacy | Unit and connected authority/concealment/cancellation suites | BLOCKED — stale-authority and process-death findings open; physical exercise also pending |
+| Locked reminder/widget privacy | Transaction-bound authorization tests, post-fix scan, and owner-reported process-death device PASS | PASS for security closure; repeat only if the boundary changes |
 | Aggregate/detail offline HTML safety | Writer/DOM/hostile-content/limit tests; real aggregate download/share and static scan | PARTIAL — detail file plus two-browser/print/accessibility exercise unrun |
 | Archive/CSV bounds and durability | Unit and maximum-bound Room connected tests | PASS locally |
 | Timer/search/Insights hot paths | Unit tests, trace boundaries, latest-wins implementation, functional benchmark smoke | PARTIAL — physical threshold measurements unrun |
 | APK size | Exact arm64/universal bytes and hashes above | PASS |
-| Dependency verification and SBOM | Fail-closed dependency checksum test, strict refresh, 580-component JSON/XML review | BLOCKED — Gradle bootstrap ZIP is not pinned; release upload also pending |
-| Release signer identity | Universal APK self-consistency check only | BLOCKED — trusted owner fingerprint and all three APK checks absent |
-| CodeQL/dependency review | Workflow policy verifier and exact manual build | PENDING actual pushed GitHub jobs |
-| Seven connected modules | 510-test API 37 fallback | PENDING required API 36 run |
+| Dependency verification and SBOM | Pinned Gradle ZIP, versioned wrapper-cache namespace, strict dependency verification, 580-component JSON/XML review, pushed release/SBOM job | PASS for implementation; inspect version-specific artifacts again before release |
+| Release signer identity and ABI | Fail-closed harness requires one expected owner certificate, all three outputs, and exact arm64-only/x86_64-only/universal-both native-code sets | BLOCKED — real three-APK gate with independent owner input has not run |
+| CodeQL/dependency review | Workflow policy verifier plus pushed Security runs `32608967519` and `32615516366` | CodeQL PASS; dependency review correctly skipped on direct pushes and remains a PR-event gate |
+| Seven connected modules | Local API 37 fallback plus pushed compact API 36 lanes | Earlier API 36 PASS; timer-test correction awaiting final hosted confirmation; expanded API 37 remains infrastructure-red after a zero-test emulator system crash, and the failed serialization experiment was removed |
 
 The 14-case R8-backed Macrobenchmark suite has a one-iteration emulator
 functional mode. Task 12 reran all **14/14** cases successfully in **4m01s**
@@ -247,37 +311,46 @@ Dry-run mode intentionally emits no accepted benchmark-data JSON, and an
 emulator result never supplies the NFR percentiles. There are therefore **no
 release p50/p95 values and no accepted physical raw JSON** in this record.
 
-## Sealed security review and safe pause
+## Security review closure and safe pause
 
-Standard scan `df9a41d7-2458-4943-9c5d-957e98d484e9` reviewed the programme
-working tree rooted at `4b3928ff46e1d0cfb0ce72684f4276488bd97b7e` and
-sealed successfully. Coverage was partial whole-repository coverage (11/12
-surfaces, 579 workbench files) with the programme's high-risk boundaries
-covered. It reported **zero Critical, zero High, three Medium, and two Low**
-findings. All five are retained as release blockers:
+Standard scan `df9a41d7-2458-4943-9c5d-957e98d484e9` reported zero Critical,
+zero High, three Medium, and two Low findings. All five implementation defects
+are remediated. The signer verifier is also implemented, but its real
+owner-input proof remains an external release gate. The original scan's local
+`artifacts/fix_report.md` now exists, maps all five occurrences to their fixes
+and evidence, and is reconciled through the exact follow-up scan below.
 
-| Severity | Finding | Required remediation |
-|---|---|---|
-| Medium | Gradle wrapper distribution is downloaded without a checksum | Add the independently reviewed official SHA-256 for `gradle-9.7.0-bin.zip`; require exactly one 64-hex `distributionSha256Sum` in the workflow verifier. |
-| Medium | Reminder and widget mutations can use stale unlocked authority | Recompute elapsed lock authority synchronously at the shared controller boundary and use it immediately before both mutation paths. |
-| Medium | External lock content can survive process death | Arm a durable private expiry callback that rechecks authority, clears widget titles, and cancels active reminder notifications; cancel it on timely foreground. |
-| Low | Release verification trusts any signer and checks one APK | Require an owner-controlled certificate SHA-256 and verify arm64, x86_64, and universal outputs. |
-| Low | Same-day dashboard shares reuse a granted FileProvider URI | Give every share operation a unique staging path while retaining the stable SAF download name. |
+Closing diff scan `31e83519-4242-4240-9b61-7cb357b440e8` completed over
+`8bb2a6675fbf26f9b265306823e86a759bb6dedf..e4f9bfcae4ce6f9f8341229b68dffebaff991b85`
+with complete coverage and five reportable findings: one Medium and four Low.
+They were fixed in `ad6ebc1`, `49671a4`, and `3b52404` without collapsing the
+reminder and widget instances.
 
-No remediation or deliberately failing test is left in this checkpoint. The
-canonical local scan directory is
-`/private/var/folders/cc/zvtsfhf91m747w_86jlft22r0000gn/T/codex-security-scans-Jj7CWg/open-tasks/4b3928ff46e1d0cfb0ce72684f4276488bd97b7e_20260822T072609Z__1usm149/`.
-On resume, the fix workflow must create its required
-`artifacts/fix_report.md` there after focused and regression verification.
+Post-fix scan `19aa7c94-d7a0-4b6d-9cef-0e6c347e0ce5` reviewed
+`e4f9bfcae4ce6f9f8341229b68dffebaff991b85..3b524043cd8a78b99fee266f9f4187fcef38c72d`
+and sealed with **zero reportable findings**. Its canonical coverage is
+partial only for the real-device asynchronous purge proof; the owner later
+reported that exact device sequence **PASS**. Exact follow-up scan
+`2cb2540b-e277-43c5-a12f-564f386de9c8` reviewed
+`d670404062c958cfa0d2161d8d0c03139a4da7b7..ff98bd73851af73e89a46beebe04e0ff87e9394e`
+with complete coverage and **zero findings**.
+
+No product remediation or deliberately failing test is left at this pause.
+The bounded CI experiment at `6cd690e` was disproved by replacement evidence
+and removed at `afb1d93`; this is rollback, not serialization proof. The
+separate signer-gate ABI-label gap is closed at `c649801`. No second speculative
+workflow workaround is claimed.
 
 ## Review and release decision
 
-The final diff review began with the sealed security scan above. Task 12 is
-paused before its remediation, follow-up review, and closing diff check.
+The five-candidate validation, attack-path analysis, remediation, post-fix
+review, exact backup follow-up review, local gates, owner-reported device
+check, and push are complete.
 
 Release decision: **STOP / NOT YET ELIGIBLE.** Before any version bump, tag,
-push, or release, complete every pending physical/API 36, Google, browser/
-accessibility, benchmark, and remote-security gate above, attach their exact
-artifacts, resolve all five validated findings (plus any later Critical/High
-finding), and obtain the owner's explicit release decision under
-`RELEASING.md`.
+or release, complete the real owner-input three-APK signer gate, fixed API 36
+arm64 physical performance/fresh-install evidence, owner-present Google gate,
+browser/print/accessibility review, and remaining version-specific artifacts.
+Resolve or explicitly accept the API 37 preview-emulator workflow blocker,
+obtain the final independent whole-range review, then obtain the owner's
+explicit release decision under `RELEASING.md`.

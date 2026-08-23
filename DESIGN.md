@@ -235,8 +235,9 @@ time, generation, current generation, and bytes.
 The Encrypted app backup card exposes explicit connection, Back up now,
 passphrase change, disconnect, permanent history deletion, and ownership-loss
 recovery only when the current lifecycle supports each action. Backing up uses
-the runner's in-flight state and local generation. No active backup service is
-created for NoVault, Unreadable, Activating, or Recovering.
+the runner's retained execution sequence and the exact local generation
+captured under the publication gate, so a newer edit remains pending. No active
+backup service is created for NoVault, Unreadable, Activating, or Recovering.
 
 The recovery shell keeps Drive and Android-package recovery independent.
 NoVault also offers Start without restoring; active replacement never does.

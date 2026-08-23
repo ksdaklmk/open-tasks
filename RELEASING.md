@@ -6,13 +6,21 @@ arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
 
 The programme-level record at
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md` is implementation
-evidence, not a release waiver. Its pending physical API 36, owner-present
-Google, browser/accessibility, benchmark, and pushed Security workflow gates
-must be completed in the version-specific release record before step 1 below.
-Release is additionally blocked on all five findings from sealed scan
-`df9a41d7-2458-4943-9c5d-957e98d484e9`: Gradle wrapper checksum, synchronous
-external lock authority, process-death-safe concealment, owner-controlled APK
-signer verification across every output, and unique FileProvider share paths.
+evidence, not a release waiver. The original and closing security findings are
+implemented and their post-fix scans reported zero findings; the owner also
+reported PASS for the deferred passive-content process-death device check.
+Release remains blocked on the fixed API 36 arm64 physical performance and
+fresh-install gates, owner-present Google, browser/accessibility evidence, and
+the real signer authentication of all three APKs using the independent owner
+certificate record. Pushed Security runs `32615516366`, `32617307907`, and
+exact-head `32617911327` are green; repeat all
+applicable workflow gates after any later source or workflow change. The
+expanded API 37 preview lane remains infrastructure-red. Run `32615516358`
+proved that the bounded `--no-parallel` experiment did not serialize UTP work,
+so the ineffective flag was removed in `afb1d93`. The canary still lost
+Android's activity/package services before any application assertion. It is
+not an app failure, serialization proof, or a release waiver, and no second
+speculative workaround is accepted as evidence.
 
 ## One-time setup
 
@@ -86,7 +94,9 @@ signer verification across every output, and unique FileProvider share paths.
          app/build/outputs/apk/release/app-universal-release.apk
 
    The verifier rejects an absent or malformed owner input and any missing,
-   duplicate, unexpected, invalid, or differently signed artifact.
+   duplicate, unexpected, invalid, differently signed, or incorrectly labelled
+   artifact. It requires arm64-only native code in the arm64 APK, x86_64-only
+   native code in the x86_64 APK, and both ABIs in the universal APK.
 
 8. Run the smoke checklist below on a disposable AVD. Record the
    disposable-AVD results in `docs/qualification/release-<versionName>-sideload.md`;

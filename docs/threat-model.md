@@ -420,9 +420,10 @@ Stage 8.
 
 ## Implemented onboarding/dashboard/NFR addendum
 
-The following repository controls are implemented. Their external physical,
-provider, browser/accessibility, benchmark, and pushed-CI acceptance remains
-required before a release decision.
+The following repository controls are implemented. Their remaining external
+physical, provider, browser/accessibility, benchmark, real-signer, applicable
+PR dependency-review, and API 37 canary acceptance remains required before a
+release decision.
 
 | ID | Threat | Implemented control | Residual |
 |---|---|---|---|
@@ -430,17 +431,17 @@ required before a release decision.
 | T40 | Production fixtures disclose or corrupt a new person’s understanding of their data | Runtime code uses a production primary-workspace identity and structural seed only; tests inject fixtures explicitly; fresh-vault content counts are release-gated | Default workflow statuses are structural records required to create the first Inbox task |
 | T41 | Exported dashboard content executes markup/script or loads remote resources | Typed bounded DTO, escaped embedded JSON, CSP, `textContent` rendering, no external URL/network API, hostile-content tests, 10 MiB cap | The file is intentionally plaintext and its recipient/custody is outside the vault after explicit disclosure |
 | T42 | A dashboard leaks excessive workspace detail | Aggregate is default; detail is opt-in and allow-listed; descriptions, notes, activity bodies, attachment names/paths, account/provider data, recovery metadata and keys are always omitted | Project/tag labels and allowed task detail can still be sensitive and are covered by the plaintext disclosure |
-| T43 | A stale notification action mutates a locked vault or an old title remains visible | Concealed notifications omit actions; active reminder notifications are cancelled when the live process observes lock/title concealment | The receiver and widget mutation gate currently read cached lock state; synchronous elapsed-authority remediation is required before release |
-| T44 | Background delay leaves widget actions/titles authorised until the next foreground | One process coroutine expires the current lock in background and drives the existing widget concealment publisher; foreground/unlock/disable/delay changes cancel or reschedule it | Process death cancels that coroutine and can leave external content visible; a durable expiry callback is required before release |
+| T43 | A stale notification or widget action mutates a locked vault | Concealed notifications omit actions; reminder and widget mutations carry revocable lock/title/generation predicates into the shared repository write boundary and recheck under the write mutex immediately before the transaction | Same-device access during a legitimately unlocked interval remains an intended capability; later mutation paths must use the same transaction-bound contract |
+| T44 | Background delay, queued biometric success, or process death leaves passive content authorised | Backgrounding invalidates the prompt token, biometric success requires the current foreground generation, and reminder/widget sinks conceal immediately on background while the overlay retains its configured delay | Asynchronous cancellation/Glance rewriting required device proof; the owner-reported process-death sequence passed, and must be repeated if these sinks change |
 | T45 | Hostile archive/CSV input exhausts memory/CPU or triggers spreadsheet formulas | 512 MiB archive aggregate cap before body allocation/write, per-frame cancellation, O(1) attachment map, indexed project/tag resolution, 500/1,000 creation caps, and CR/LF formula neutralisation | Legitimate input above a declared product ceiling is rejected rather than partially imported |
-| T46 | Dependency or build-pipeline compromise reaches the signed app | Reviewed full-SHA Actions, CodeQL Java/Kotlin, high/critical dependency review, SHA-256 dependency verification, SBOM, existing crypto/database compatibility gates | The Gradle wrapper distribution is not yet checksum-pinned and the APK verifier does not yet authenticate the expected signer or all split outputs; both are release blockers |
+| T46 | Dependency or build-pipeline compromise reaches the signed app | Reviewed full-SHA Actions, CodeQL Java/Kotlin, high/critical dependency review, SHA-256 dependency verification, SBOM, checksum-pinned Gradle distribution in a versioned cache namespace, and a fail-closed verifier for all three APKs | The real release gate still requires an independent owner certificate input; the expected signer may never be derived from a candidate APK |
+| T47 | A local edit made during an active remote backup is mistaken for the generation already attempted | The runner captures `currentGeneration` under the serialized publication gate and carries that immutable start generation plus execution sequence through completion; the runtime re-enqueues any newer generation | Future runner implementations must preserve the same capture boundary and retained completion state |
 
 The HTML share cache is limited to `cache/share/reports/` under FileProvider,
 granted read-only to the chosen recipient, and swept on the next report
-operation. Download and share delete partial output on cancellation/failure.
-The current date-only share filename recreates the same FileProvider URI on a
-later same-day share, so an earlier live grant can reach the later report;
-unique share-only staging paths are required before release.
+operation. Every share uses a unique staging path while SAF retains the stable
+download display name. Download and share delete partial output on
+cancellation/failure.
 No dashboard payload enters Android saved state, logs, CI artifacts, backup,
 or Google Drive automatically.
 
@@ -454,11 +455,26 @@ Observed local evidence and every unrun external gate are recorded in
 
 The sealed Standard review
 `df9a41d7-2458-4943-9c5d-957e98d484e9` found zero Critical/High, three
-Medium, and two Low issues. The open boundaries are the Gradle wrapper
-checksum, synchronous external lock authority, process-death-safe external
-concealment, expected release-signer identity across all APKs, and unique
-FileProvider share paths. All five remain release blockers despite their
-calibrated severities.
+Medium, and two Low issues; all five implementation defects are remediated.
+Closing scan `31e83519-4242-4240-9b61-7cb357b440e8` found one Medium and four
+Low follow-up issues; those are also remediated. Post-fix scan
+`19aa7c94-d7a0-4b6d-9cef-0e6c347e0ce5` reported zero findings with only the
+now owner-passed device purge proof deferred, and exact backup follow-up scan
+`2cb2540b-e277-43c5-a12f-564f386de9c8` reported zero findings with complete
+coverage. The independent real three-APK signer proof remains a release gate,
+not an open implementation defect.
+
+Security runs `32615516366`, `32617307907`, and exact-head `32617911327`
+passed CodeQL, with dependency review correctly skipped for each direct push.
+Replacement Android run
+`32615516358` proved that the bounded `--no-parallel` experiment did not
+serialize UTP work before the API 37 emulator lost its activity/package
+services and ran zero tests. `afb1d93` removes that ineffective flag; rollback
+is not a security control or serialization proof. `c649801` independently
+closes the APK-label boundary by requiring exact `aapt2 native-code` sets for
+arm64, x86_64, and universal artifacts. The API 37 result remains an unresolved
+canary availability boundary, not evidence of an application assertion
+failure; no second speculative workaround is treated as a control.
 
 ## Security acceptance gates
 
@@ -496,9 +512,12 @@ Before production release:
 12. Prove locked stale reminder actions are inert, background lock expiry
     conceals widget state, active private notifications are cancelled, and
     maximum archive/CSV inputs meet their aggregate and creation caps.
-13. Resolve all five findings from scan
-    `df9a41d7-2458-4943-9c5d-957e98d484e9`; then require green
-    CodeQL/high-severity dependency review, Gradle wrapper and dependency
-    checksum verification, expected-signer checks for every APK, SBOM
-    inspection, per-ABI size caps, and fixed physical-device NFR evidence
-    before the programme’s release decision.
+13. Retain the completed remediation and post-fix scan evidence for
+    `df9a41d7-2458-4943-9c5d-957e98d484e9`,
+    `31e83519-4242-4240-9b61-7cb357b440e8`,
+    `19aa7c94-d7a0-4b6d-9cef-0e6c347e0ce5`, and
+    `2cb2540b-e277-43c5-a12f-564f386de9c8`; then require green
+    CodeQL/applicable dependency review, Gradle wrapper and dependency
+    checksum verification, the real owner-input signer check for every APK,
+    SBOM inspection, per-ABI size caps, and fixed physical-device NFR evidence
+    before the programme's release decision.

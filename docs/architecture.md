@@ -762,8 +762,8 @@ overwrite a vault implicitly.
 typed DTO is serialized into one offline HTML document; no reporting store,
 second metric engine, server, WebView, or web framework exists.
 `VaultTransferViewModel` extends its existing transfer mutex to stream a
-download through SAF or stage one share file under the existing FileProvider.
-Partial plaintext output is deleted on every non-success path.
+download through SAF or stage one uniquely named share file under the existing
+FileProvider. Partial plaintext output is deleted on every non-success path.
 
 The repository no longer owns a one-second clock flow. Persisted time-entry
 changes update the snapshot, while Home locally derives running elapsed text.
@@ -780,18 +780,37 @@ smoke; fixed API 36 arm64 evidence owns percentile decisions.
 
 Trust-boundary limits are 512 MiB for `.otvault`, 500 new projects and 1,000
 new tags per bounded Tasks CSV import, and 10 MiB for HTML. Reminder and widget
-actions currently consult cached lock state, while background expiry and
-external concealment depend on the live process. Independent review requires
-one synchronous elapsed-authority check and one durable expiry callback before
-release. CodeQL, high-severity dependency review, SHA-256 Gradle dependency
-verification, release SBOM, and per-ABI size checks join the release evidence;
-the Gradle wrapper ZIP and expected APK signer remain unpinned at this pause.
-Room stays v9 and authenticated backup format stays v1.
+actions carry a revocable predicate to the repository write mutex and recheck
+it immediately before mutation. Biometric success is bound to the current
+foreground prompt generation, and passive reminder/widget content is
+concealed immediately on background. The owner-reported process-death device
+gate passed. CodeQL, high-severity dependency review, SHA-256 Gradle dependency
+verification, a checksum-pinned versioned wrapper cache, release SBOM, and
+per-ABI size checks join the release evidence. The three-APK verifier now
+requires one independent owner certificate input and matches each filename to
+its exact `aapt2 native-code` set: arm64 only, x86_64 only, or both for the
+universal APK. The real owner-only proof remains pending. Room stays v9 and
+authenticated backup format stays v1.
 
-Local implementation evidence and the still-pending physical/API 36,
-credentialled provider, browser/accessibility, benchmark, and remote-CI gates
-are separated explicitly in
-`docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
-That record also carries the five release-blocking findings from sealed scan
-`df9a41d7-2458-4943-9c5d-957e98d484e9`, including same-day FileProvider path
-reuse; Task 12 is paused before their remediation.
+`DefaultRemoteBackupRunner` captures the current local generation under the
+existing serialized publication gate and publishes an execution sequence with
+that immutable start generation. `RemoteBackupRuntime` consumes completion by
+sequence and schedules any later generation, so a flow-observation delay
+cannot mark an edit made during an active run as already attempted.
+
+Local implementation evidence and the still-pending physical API 36,
+credentialled provider, browser/accessibility, benchmark-threshold, signer,
+applicable PR dependency-review, and API 37 canary gates are separated
+explicitly in
+`docs/qualification/onboarding-dashboard-nfr-acceptance.md`. The original and
+closing findings are remediated; post-fix scans reported zero findings.
+Security runs `32615516366`, `32617307907`, and exact-head `32617911327`
+passed. Android run `32615516358` proved that the `6cd690e` `--no-parallel`
+experiment did not
+serialize UTP work: at least four connected tasks began within seven seconds
+before the API 37 canary lost its activity/package services and ran zero tests.
+`afb1d93` removes the ineffective flag; this is rollback, not serialization
+proof, and no second workflow workaround is claimed. `316bd86` separately
+removes the API 36 timer-test observation race, and `c649801` closes the
+release-verifier ABI-label gap. Task 12 is paused at external release
+qualification and documentation closure.
