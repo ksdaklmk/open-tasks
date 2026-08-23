@@ -736,20 +736,29 @@ class RoomVaultRepositoryInstrumentedTest {
 
     @Test
     fun activeTimerDoesNotReemitWorkspaceWithoutADatabaseWrite() = runBlocking {
-        val startedAt = Instant.parse("2026-07-27T03:00:00Z")
-        val currentTime = AtomicReference(startedAt)
+        val fixtureTimer = checkNotNull(OpenTasksFixtures.snapshot.home.activeTimer)
+        val currentTime = AtomicReference(fixtureTimer.startedAt)
         openRepository(now = currentTime::get)
-        repository!!.execute(DomainCommand.StopTimer)
-        val task = repository!!.currentWorkspace().tasks.first { it.deletedAt == null }
-        repository!!.execute(DomainCommand.StartTimer(task.id, startedAt))
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.home.activeTimer?.entryId == fixtureTimer.entryId
+            }
+        }
+
+        repository!!.close()
+        repository = RoomVaultRepository(
+            database = database!!,
+            deviceId = DeviceId("instrumented-test-device"),
+            now = currentTime::get,
+        )
         val running = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace()
                 .map { it.home.activeTimer }
                 .filterNotNull()
-                .first { it.taskId == task.id }
+                .first { it.entryId == fixtureTimer.entryId }
         }
 
-        currentTime.set(startedAt.plusSeconds(5))
+        currentTime.set(fixtureTimer.startedAt.plusSeconds(5))
         val unexpectedEmission = withTimeoutOrNull(1_500) {
             repository!!.observeWorkspace().drop(1).first()
         }
@@ -762,7 +771,7 @@ class RoomVaultRepositoryInstrumentedTest {
                     snapshot.timeEntries.any { it.id == running.entryId && it.stoppedAt != null }
             }
         }.timeEntries.single { it.id == running.entryId }
-        currentTime.set(startedAt.plusSeconds(30))
+        currentTime.set(fixtureTimer.startedAt.plusSeconds(30))
         assertEquals(Duration.ofSeconds(5), stopped.duration(currentTime.get()))
     }
 
