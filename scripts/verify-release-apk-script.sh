@@ -55,6 +55,11 @@ case "$2" in
         else
             printf "package: name='app.opentasks' versionCode='0' versionName='0.0.0'\n"
         fi
+        case "$(sed -n 's/^abis=//p' "$apk")" in
+            arm64-v8a) printf "native-code: 'arm64-v8a'\n" ;;
+            x86_64) printf "native-code: 'x86_64'\n" ;;
+            universal) printf "native-code: 'arm64-v8a' 'x86_64'\n" ;;
+        esac
         [ "$(sed -n 's/^debuggable=//p' "$apk")" = no ] \
             || printf 'application-debuggable\n'
         ;;
@@ -90,6 +95,14 @@ universal="$fixtures/app-universal-release.apk"
 unexpected="$fixtures/app-armeabi-v7a-release.apk"
 
 write_fixture() {
+    local abis="${9:-}"
+    if [ -z "$abis" ]; then
+        case "${1##*/}" in
+            app-arm64-v8a-release.apk) abis=arm64-v8a ;;
+            app-x86_64-release.apk) abis=x86_64 ;;
+            app-universal-release.apk) abis=universal ;;
+        esac
+    fi
     printf '%s\n' \
         "signature=$2" \
         "digest_mode=$3" \
@@ -97,7 +110,8 @@ write_fixture() {
         "metadata=$5" \
         "debug_activity=$6" \
         "scope=$7" \
-        "debuggable=$8" > "$1"
+        "debuggable=$8" \
+        "abis=$abis" > "$1"
 }
 
 reset_fixtures() {
@@ -192,6 +206,21 @@ expect_status_without_leak 1 "unexpected variant" \
     run_with_cert "$matching_input" "$arm64" "$x86" "$unexpected"
 
 expect_status_without_leak 0 "three authenticated variants" \
+    "$matching_input" "$matching_actual" -- \
+    run_with_cert "$matching_input" "$arm64" "$x86" "$universal"
+
+write_fixture "$arm64" valid valid "$matching_actual" valid absent valid no x86_64
+expect_status_without_leak 1 "x86 payload renamed as arm64" \
+    "$matching_input" "$matching_actual" -- \
+    run_with_cert "$matching_input" "$arm64" "$x86" "$universal"
+reset_fixtures
+write_fixture "$x86" valid valid "$matching_actual" valid absent valid no arm64-v8a
+expect_status_without_leak 1 "arm64 payload renamed as x86" \
+    "$matching_input" "$matching_actual" -- \
+    run_with_cert "$matching_input" "$arm64" "$x86" "$universal"
+reset_fixtures
+write_fixture "$universal" valid valid "$matching_actual" valid absent valid no arm64-v8a
+expect_status_without_leak 1 "single-ABI payload renamed as universal" \
     "$matching_input" "$matching_actual" -- \
     run_with_cert "$matching_input" "$arm64" "$x86" "$universal"
 

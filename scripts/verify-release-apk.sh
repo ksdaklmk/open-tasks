@@ -55,13 +55,23 @@ for apk in "$@"; do
   echo "$badging" | grep -q "versionCode='$want_code' versionName='$want_name'" \
     || fail "version mismatch (expected $want_name/$want_code)"
 
-  # 3. Debug qualification activity absent from the manifest.
+  # 3. Filename and packaged native-code ABIs agree exactly.
+  case "${apk##*/}" in
+    app-arm64-v8a-release.apk) want_native_code="native-code: 'arm64-v8a'" ;;
+    app-x86_64-release.apk) want_native_code="native-code: 'x86_64'" ;;
+    app-universal-release.apk) want_native_code="native-code: 'arm64-v8a' 'x86_64'" ;;
+  esac
+  native_code="$(printf '%s\n' "$badging" | sed -n '/^native-code:/p')"
+  [ "$native_code" = "$want_native_code" ] \
+    || fail "release APK native-code ABI mismatch"
+
+  # 4. Debug qualification activity absent from the manifest.
   manifest="$("$bt/aapt2" dump xmltree "$apk" --file AndroidManifest.xml)" \
     || fail "aapt2 manifest dump failed"
   echo "$manifest" | grep -q "DriveCreateOnlyQualificationActivity" \
     && fail "debug qualification activity present in release manifest"
 
-  # 4. drive.appdata is the sole Drive scope string in the dex.
+  # 5. drive.appdata is the sole Drive scope string in the dex.
   unzip -p "$apk" "classes*.dex" >/dev/null || fail "unzip dex extraction failed"
   # Second extraction feeds grep directly so no NUL bytes pass through a
   # shell variable; an empty result still fails closed on the check below.
@@ -73,7 +83,7 @@ for apk in "$@"; do
   echo "$drive_scopes" | grep -q "^auth/drive\.appdata$" \
     || fail "auth/drive.appdata scope not found in release dex"
 
-  # 5. Not debuggable.
+  # 6. Not debuggable.
   echo "$badging" | grep -q "application-debuggable" \
     && fail "release APK is debuggable"
 done
