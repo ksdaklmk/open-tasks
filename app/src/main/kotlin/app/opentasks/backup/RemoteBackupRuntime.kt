@@ -50,6 +50,12 @@ interface RemoteBackupRuntime {
     fun stop()
 }
 
+internal data class RemoteBackupExecution(
+    val sequence: Long,
+    val startedGeneration: Long?,
+    val running: Boolean,
+)
+
 /**
  * One routine remote-backup attempt: authorize silently, publish, record.
  *
@@ -87,19 +93,23 @@ class DefaultRemoteBackupRunner(
     private val authorize: suspend (ByteArray) -> DriveAuthorizationResult,
     private val clearToken: suspend (AuthorizedDriveSession) -> Unit,
     private val openObjectStore: (CreateOnlyDriveTransport) -> CreateOnlyBackupObjectStore,
+    private val readLocalGeneration: suspend () -> Long?,
     private val publicationGate: Mutex = Mutex(),
     private val collectAttachments: suspend () -> Unit = {},
 ) : RemoteBackupRunner {
     private val stopped = AtomicBoolean()
+    private var runSequence = 0L
     private val runInFlight = MutableStateFlow(false)
+    private val currentExecution = MutableStateFlow<RemoteBackupExecution?>(null)
 
     /**
      * Whether a run currently holds the single-run lock.
      *
-     * Scheduling reads this because enqueueing the debounced work *replaces*
-     * it, which cancels a run already in progress.
+     * Product status reads this directly; scheduling uses [execution] so it
+     * also retains the exact generation after a run completes.
      */
     internal val running: StateFlow<Boolean> = runInFlight.asStateFlow()
+    internal val execution: StateFlow<RemoteBackupExecution?> = currentExecution.asStateFlow()
 
     /** Refuses every later run; the slot this runner was built for is gone. */
     fun stop() {
@@ -114,11 +124,26 @@ class DefaultRemoteBackupRunner(
             if (stopped.get()) {
                 RemoteBackupRunResult.NoChanges
             } else {
+                val startedGeneration = try {
+                    readLocalGeneration()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    null
+                }
+                runSequence += 1
+                val execution = RemoteBackupExecution(
+                    sequence = runSequence,
+                    startedGeneration = startedGeneration,
+                    running = true,
+                )
+                currentExecution.value = execution
                 runInFlight.value = true
                 try {
                     runExclusively()
                 } finally {
                     runInFlight.value = false
+                    currentExecution.value = execution.copy(running = false)
                 }
             }
         }
@@ -334,15 +359,17 @@ class DefaultRemoteBackupRuntime(
     private val manualRequests = Channel<Unit>(Channel.CONFLATED)
     private var observation: Job? = null
 
-    // All three are only ever read and written by the single observing
+    // All four are only ever read and written by the single observing
     // coroutine, so they need no synchronisation.
     private var lastActive: Boolean? = null
 
     /** The generation the debounced work was last enqueued for. */
     private var requestedGeneration: Long? = null
 
-    /** The generation observed when the run currently in flight began. */
-    private var runStartGeneration: Long? = null
+    /** The newest run-start generation already handled at completion. */
+    private var lastAttemptedGeneration: Long? = null
+
+    private var completedExecution: Long? = null
 
     override fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -350,9 +377,9 @@ class DefaultRemoteBackupRuntime(
             combine(
                 observeConfiguration(),
                 observeLocalGeneration().distinctUntilChanged(),
-                runner.running,
-            ) { configuration, generation, running ->
-                Observation(configuration, generation, running)
+                runner.execution,
+            ) { configuration, generation, execution ->
+                Observation(configuration, generation, execution)
             }
                 .collect(::apply)
         }
@@ -412,24 +439,22 @@ class DefaultRemoteBackupRuntime(
                 // A lineage that stops being active abandons what it asked
                 // for, so a later activation arms the debounce again.
                 requestedGeneration = null
-                runStartGeneration = null
+                lastAttemptedGeneration = null
                 scheduler.cancelAll()
             }
         }
-        if (configuration == null || !active) return
-
-        if (observation.running) {
-            // Enqueueing replaces — and so cancels — a run already in
-            // progress. Remembering the generation this run started from is
-            // what lets its completion tell newer work apart from the work it
-            // already attempted.
-            if (runStartGeneration == null) runStartGeneration = observation.generation
+        if (configuration == null || !active) {
+            completedExecution = observation.execution?.sequence
             return
         }
 
-        val startedFrom = runStartGeneration
-        runStartGeneration = null
-        if (startedFrom != null) {
+        val execution = observation.execution
+        if (execution?.running == true) return
+        if (execution != null && execution.sequence != completedExecution) {
+            completedExecution = execution.sequence
+            execution.startedGeneration?.let { started ->
+                lastAttemptedGeneration = maxOf(lastAttemptedGeneration ?: started, started)
+            }
             // A publication run just finished; a session interrupted during
             // or before that run may now be resumable under whatever
             // ownership state the run settled. This does not depend on
@@ -455,7 +480,8 @@ class DefaultRemoteBackupRuntime(
         // action-required state waits for the person or the periodic pass.
         // Re-arming here would also replace the still-returning worker and
         // discard the `Result.retry()` it is in the middle of reporting.
-        if (startedFrom != null && observation.generation <= startedFrom) return
+        val attempted = lastAttemptedGeneration
+        if (attempted != null && observation.generation <= attempted) return
         // Work is already scheduled for this generation; a configuration
         // change alone is no reason to restart its debounce.
         val requested = requestedGeneration
@@ -468,7 +494,7 @@ class DefaultRemoteBackupRuntime(
     private data class Observation(
         val configuration: RemoteBackupConfiguration?,
         val generation: Long,
-        val running: Boolean,
+        val execution: RemoteBackupExecution?,
     )
 
     private companion object {

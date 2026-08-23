@@ -208,6 +208,9 @@ class RecoveryTakeoverInstrumentedTest {
                     },
                     clearToken = {},
                     openObjectStore = { provider },
+                    readLocalGeneration = {
+                        runtimeA.backupStateStore.get(runtimeA.vaultId)?.currentGeneration
+                    },
                 )
                 assertEquals(RemoteBackupRunResult.OwnershipLost, runner.run())
                 val raced = checkNotNull(raceResults)
@@ -573,6 +576,9 @@ class RecoveryTakeoverInstrumentedTest {
                         },
                         clearToken = {},
                         openObjectStore = { provider },
+                        readLocalGeneration = {
+                            runtimeA.backupStateStore.get(runtimeA.vaultId)?.currentGeneration
+                        },
                     )
                     assertEquals(RemoteBackupRunResult.OwnershipLost, runner.run())
                     val preserved = lifecycle(

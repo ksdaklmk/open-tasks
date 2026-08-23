@@ -554,6 +554,7 @@ class RemoteBackupRuntimeTest {
         assertTrue(fixture.scheduler.awaitEvents(1))
         fixture.runtime.requestNow()
         assertTrue(fixture.coordinator.awaitPasses(1))
+        assertEquals(4L, fixture.runner.execution.value?.startedGeneration)
 
         fixture.localGeneration.value = 5
         Thread.sleep(SETTLE_MILLIS)
@@ -817,6 +818,7 @@ class RemoteBackupRuntimeTest {
         storedCategory: RemoteBackupFailureCategory? = null,
         publicationGate: Mutex = Mutex(),
         collectAttachments: suspend () -> Unit = {},
+        readLocalGeneration: suspend () -> Long? = { null },
     ): RunnerFixture {
         val events = mutableListOf<String>()
         val transport = RecordingDriveTransport { events += "transport-close" }
@@ -859,6 +861,7 @@ class RemoteBackupRuntimeTest {
                 fixture.openedObjectStores.incrementAndGet()
                 UnusedObjectStore
             },
+            readLocalGeneration = readLocalGeneration,
             publicationGate = publicationGate,
             collectAttachments = collectAttachments,
         )
@@ -904,6 +907,7 @@ class RemoteBackupRuntimeTest {
         val runnerFixture = runnerFixture(
             outcome = outcome,
             configured = configured,
+            readLocalGeneration = { generationFlow.value },
         )
         val runner = runnerFixture.runner
         return RuntimeFixture(

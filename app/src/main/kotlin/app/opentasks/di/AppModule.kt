@@ -548,6 +548,9 @@ object AppModule {
             },
             clearToken = authorizationManager::clearToken,
             openObjectStore = openRemoteObjectStore,
+            readLocalGeneration = {
+                runtime.backupStateStore.get(runtime.vaultId)?.currentGeneration
+            },
             publicationGate = publicationGate,
             collectAttachments = { attachmentRuntime.collectRetiredBytes() },
         )
