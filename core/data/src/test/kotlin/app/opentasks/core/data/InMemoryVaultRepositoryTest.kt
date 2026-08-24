@@ -2411,6 +2411,112 @@ class InMemoryVaultRepositoryTest {
     }
 
     @Test
+    fun restoreUndoRepairsAnAlreadyBinnedChildWithoutDuplicateActivity() = runBlocking {
+        withTimeout(5_000) {
+            val historicalDeletedAt = Instant.parse("2026-08-24T11:00:00Z")
+            val independentDeletedAt = Instant.parse("2026-08-24T12:00:00Z")
+            val journal = InMemoryBackupJournal()
+            val repository = InMemoryVaultRepository(
+                now = { Instant.parse("2026-08-24T10:00:00Z") },
+                backupJournal = journal,
+            )
+            repository.execute(DomainCommand.CreateTask("Replay parent"))
+            repository.execute(DomainCommand.CreateTask("Replay child"))
+            val tasks = repository.currentWorkspace().tasks.associateBy(Task::title)
+            val parent = checkNotNull(tasks["Replay parent"])
+            val child = checkNotNull(tasks["Replay child"])
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+            repository.execute(DomainCommand.DeleteTask(parent.id, historicalDeletedAt))
+            val restored = repository.execute(DomainCommand.RestoreTask(child.id))
+                as CommandResult.Success
+            repository.execute(DomainCommand.DeleteTask(child.id, independentDeletedAt))
+            val before = repository.currentWorkspace()
+            val childBefore = before.tasks.single { it.id == child.id }
+            val generationBefore = journal.currentGeneration
+            val entriesBefore = journal.entries.size
+            val childActivityBefore = before.activityEntries.filter { it.taskId == child.id }
+
+            val replayed = repository.execute(checkNotNull(restored.undo))
+                as CommandResult.Success
+
+            val after = repository.currentWorkspace()
+            val repaired = after.tasks.single { it.id == child.id }
+            assertEquals("Task is already in the Bin", replayed.message)
+            assertNull(replayed.undo)
+            assertEquals(historicalDeletedAt, repaired.deletedAt)
+            assertEquals(parent.id, repaired.parentTaskId)
+            assertEquals(
+                childBefore.revision.logicalCounter + 1,
+                repaired.revision.logicalCounter,
+            )
+            assertEquals(
+                childActivityBefore,
+                after.activityEntries.filter { it.taskId == child.id },
+            )
+            assertEquals(
+                2,
+                after.activityEntries.count {
+                    it.taskId == child.id && it.kind == ActivityKind.BINNED
+                },
+            )
+            assertEquals(generationBefore + 1, journal.currentGeneration)
+            val replayEntries = journal.entries.drop(entriesBefore)
+            assertEquals(listOf(child.id.value), replayEntries.map { it.objectId })
+            assertEquals(listOf("TASK"), replayEntries.map { it.objectType })
+            assertEquals(
+                listOf(BackupMutationKind.UPSERT),
+                replayEntries.map { it.mutationKind },
+            )
+        }
+    }
+
+    @Test
+    fun alreadyBinnedRestoreUndoRejectsAfterFormerParentIsPurgedWithoutMutation() =
+        runBlocking {
+            withTimeout(5_000) {
+                val journal = InMemoryBackupJournal()
+                val repository = InMemoryVaultRepository(backupJournal = journal)
+                repository.execute(DomainCommand.CreateTask("Purged replay parent"))
+                repository.execute(DomainCommand.CreateTask("Purged replay child"))
+                val tasks = repository.currentWorkspace().tasks.associateBy(Task::title)
+                val parent = checkNotNull(tasks["Purged replay parent"])
+                val child = checkNotNull(tasks["Purged replay child"])
+                repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+                repository.execute(
+                    DomainCommand.DeleteTask(
+                        parent.id,
+                        Instant.parse("2026-08-24T11:00:00Z"),
+                    ),
+                )
+                val restored = repository.execute(DomainCommand.RestoreTask(child.id))
+                    as CommandResult.Success
+                repository.execute(
+                    DomainCommand.DeleteTask(
+                        child.id,
+                        Instant.parse("2026-08-24T12:00:00Z"),
+                    ),
+                )
+                repository.execute(
+                    DomainCommand.PermanentlyDeleteTask(
+                        parent.id,
+                        Instant.parse("2026-08-24T13:00:00Z"),
+                    ),
+                )
+                val before = repository.currentWorkspace()
+                val generationBefore = journal.currentGeneration
+                val journalBefore = journal.entries
+
+                val rejected = repository.execute(checkNotNull(restored.undo))
+                    as CommandResult.Rejected
+
+                assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+                assertEquals(before, repository.currentWorkspace())
+                assertEquals(generationBefore, journal.currentGeneration)
+                assertEquals(journalBefore, journal.entries)
+            }
+        }
+
+    @Test
     fun bulkDeleteRestoresParentBeforeChildRegardlessOfListedOrder() = runBlocking {
         withTimeout(5_000) {
             val repository = InMemoryVaultRepository()

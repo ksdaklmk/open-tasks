@@ -2307,7 +2307,13 @@ class InMemoryVaultRepository internal constructor(
         val current = mutableWorkspace.value
         val task = current.tasks.firstOrNull { it.id == command.taskId }
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
-        if (task.deletedAt != null) {
+        if (
+            task.deletedAt != null &&
+            (
+                command.restoreParentTaskId == null ||
+                    task.parentTaskId == command.restoreParentTaskId
+            )
+        ) {
             return CommandResult.Success("Task is already in the Bin")
         }
         command.restoreParentTaskId?.let { parentId ->
@@ -2321,6 +2327,19 @@ class InMemoryVaultRepository internal constructor(
                     subtaskViolationMessage(violation),
                 )
             }
+        }
+        if (task.deletedAt != null) {
+            publish(
+                current.tasks.replace(
+                    task.copy(
+                        deletedAt = command.deletedAt,
+                        parentTaskId = command.restoreParentTaskId,
+                        revision = nextRevision(task, command.deletedAt),
+                    ),
+                ),
+                at = command.deletedAt,
+            )
+            return CommandResult.Success("Task is already in the Bin")
         }
         // Sorted by id to match Room's `liveChildren` (`ORDER BY id`), so a
         // multi-child subtree's undo-batch and activity-entry order agree

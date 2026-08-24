@@ -122,6 +122,9 @@ interface TaskDao {
     )
     suspend fun openSubtaskCount(taskId: String): Int
 
+    @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :taskId")
+    suspend fun allChildCount(taskId: String): Int
+
     @Query(
         """
         SELECT * FROM tasks

@@ -2421,7 +2421,13 @@ class RoomVaultRepository(
     private suspend fun deleteTask(command: DomainCommand.DeleteTask): CommandResult {
         val task = currentTask(command.taskId)
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
-        if (task.deletedAt != null) {
+        if (
+            task.deletedAt != null &&
+            (
+                command.restoreParentTaskId == null ||
+                    task.parentTaskId == command.restoreParentTaskId
+            )
+        ) {
             return CommandResult.Success("Task is already in the Bin")
         }
         command.restoreParentTaskId?.let { parentId ->
@@ -2440,7 +2446,7 @@ class RoomVaultRepository(
             val liveViolation = when {
                 liveParent == null -> SubtaskViolation.PARENT_MISSING_OR_BINNED
                 liveParent.parentTaskId != null -> SubtaskViolation.PARENT_IS_A_SUBTASK
-                database.taskDao().liveChildren(task.id.value).isNotEmpty() ->
+                database.taskDao().allChildCount(task.id.value) != 0 ->
                     SubtaskViolation.TASK_HAS_SUBTASKS
                 else -> null
             }
@@ -2450,6 +2456,17 @@ class RoomVaultRepository(
                     subtaskViolationMessage(liveViolation),
                 )
             }
+        }
+        if (task.deletedAt != null) {
+            persistTask(
+                task.copy(
+                    deletedAt = command.deletedAt,
+                    parentTaskId = command.restoreParentTaskId,
+                    revision = nextRevision(task, command.deletedAt),
+                ),
+                "delete",
+            )
+            return CommandResult.Success("Task is already in the Bin")
         }
         val children = database.taskDao().liveChildren(task.id.value)
         val updated = task.copy(
@@ -2791,7 +2808,7 @@ class RoomVaultRepository(
                 liveParent.projectId != command.projectId?.value ->
                     SubtaskViolation.CROSS_PROJECT
                 liveParent.parentTaskId != null -> SubtaskViolation.PARENT_IS_A_SUBTASK
-                database.taskDao().liveChildren(task.id.value).isNotEmpty() ->
+                database.taskDao().allChildCount(task.id.value) != 0 ->
                     SubtaskViolation.TASK_HAS_SUBTASKS
                 else -> null
             }
