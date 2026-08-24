@@ -1,10 +1,41 @@
 # Open Tasks Handoff
 
-## Current planning checkpoint — enhancement execution paused, 24 August 2026
+## Current state — Task 9 Undo gaps closed, 24 August 2026
 
-This section is authoritative for the next enhancement programme. The release
-baseline immediately below remains authoritative for release identity and
-qualification evidence.
+This section is authoritative. Older checkpoints below are historical and
+superseded wherever they conflict with this one. The release baseline below
+remains authoritative for release identity and qualification evidence.
+
+Implementation commits `7a3063f` (`fix: restore subtask parent on move undo`)
+and `5f81498` (`fix: preserve subtask parent on restore undo`) close the two
+bounded subtask Undo asymmetries in both repository engines. Undoing a
+child-only project move restores its former project, workflow status, and
+parent. Undoing a restore that safely detached a child returns it to the Bin
+with its former parent link when that parent record is still representable;
+delayed invalid Undo rejects before any partial write.
+
+The change is command-only Undo metadata. It adds no UI, database migration,
+backup-format change, dependency, permission, or version bump. The focused
+domain test passed: `:core:domain:testDebugUnitTest --tests
+"*SubtaskRulesTest"` exited 0 (`BUILD SUCCESSFUL in 250ms`; 35/35 actionable
+tasks up-to-date). The focused in-memory repository test passed:
+`:core:data:testDebugUnitTest --tests "*InMemoryVaultRepositoryTest"` exited 0
+(`BUILD SUCCESSFUL in 1s`; 57 actionable tasks: 1 executed, 56 up-to-date).
+Room Android-test Kotlin compilation passed: `:core:data:compileDebugAndroidTestKotlin`
+exited 0 (`BUILD SUCCESSFUL in 250ms`; 48/48 actionable tasks up-to-date). The
+full host gate `testDebugUnitTest lintDebug :app:assembleDebug` exited 0
+(`BUILD SUCCESSFUL in 26s`; 553 actionable tasks: 14 executed, 539 up-to-date).
+
+Connected Room execution was not run: `/Users/kk/Library/Android/sdk/platform-tools/adb
+devices -l` exited 0 and reported only `List of devices attached`, with no
+selected disposable target. The protected `Pixel_10_Pro_Fold` was not touched.
+
+The next approved action is Task 1 of
+`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`, not another
+CSV brainstorm or design approval. Do not bundle the version/trust footer or
+Play internal beta work into that slice.
+
+## Previous planning checkpoint — enhancement execution paused, 24 August 2026
 
 The owner approved this delivery order:
 
@@ -768,9 +799,9 @@ None block 1.3.0. In priority order:
    215/215 on the disposable Fold8 AVD. Commit `4a8cb8c` is pushed; hosted run
    `32483325764` passed `verify`, `release`, and compact API 36, with only the
    established expanded API 37.0 observe-only infrastructure failure.
-5. Product polish: restore-detach not undoable / detaching move
-   one-way (Task 9); inert-rule visibility in the automations editor;
-   remove render-dead `HomeSnapshot.focusTasks`;
+5. Product polish: ~~restore-detach not undoable / detaching move one-way~~
+   **DONE in the current checkpoint**; inert-rule visibility in the
+   automations editor; remove render-dead `HomeSnapshot.focusTasks`;
    `parentViolation` defence-in-depth on the candidate's `deletedAt`.
 6. Small code/test hygiene: Task 16's 20 dp spacers + divider seam;
    duplicate testTags (MyDayRow/MyDaySuggestionRow) and the
@@ -780,12 +811,11 @@ None block 1.3.0. In priority order:
 
 Items 3–6 remain outside the security- and release-bounded 1.3.1 patch.
 
-Resume with a bounded design approval for the first sub-item in backlog 5:
-close both Task 9 undo asymmetries (restore-detach not undoable and a
-detaching move being one-way) in the existing dual-engine command flow. No
-implementation for that item has started. Keep backlog 3 deferred until v11
-rule work begins, and do not bundle the other backlog 5 polish items into this
-fix.
+The Task 9 Undo asymmetries are closed in the current checkpoint. Resume with
+Task 1 of `docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`;
+that plan is already approved. Do not bundle the remaining backlog polish,
+version/trust footer, or Play internal beta into that slice. Keep backlog 3
+deferred until v11 rule work begins.
 
 The four protected working-tree entries (modified Stage 3 plan doc,
 deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)
