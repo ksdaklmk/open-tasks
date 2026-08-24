@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — release 1.4.0 qualified and owner-approved for tag/push, 24 August 2026
+## Current state — release 1.4.0 tagged, pushed, and closed, 24 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
@@ -9,7 +9,9 @@ Implementation commit `68be1b713a665258ba014562b2944af197cd9b18`
 (`security: close final lock privacy findings`) follows checkpoint
 `0846c1a913cd2ba7db86807161e33b6331320127` on `main`. Documentation
 checkpoint `540526fdb22791b64c2d00c878ece6b89911d128` records that integration
-and remains the `origin/main` baseline for this update.
+and was the pre-release `origin/main` baseline. Release commit
+`a47accb45220bee8007da025116b96b878baec0e` is the target of annotated tag
+`v1.4.0`; both the commit on `main` and the tag were pushed.
 
 Final corrected-range diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`
 completed and sealed with complete coverage over exact immutable range
@@ -64,6 +66,14 @@ reports again show `INSTRUMENTATION_ABORTED: System has crashed`, preserving
 the existing emulator-system classification rather than exposing a new app
 assertion failure.
 
+The release-head workflows are settled too. Security run `32696640570`
+passed. Android run `32696640603` passed verify, compact API 36, release/SBOM,
+and benchmark; only expanded API 37 failed. Its uploaded reports contain the
+same `INSTRUMENTATION_ABORTED: System has crashed` and Android package-service
+loss class as the prior accepted run, plus pre-unlock credential-storage
+fallout, with no `AssertionError`. This is the owner-accepted emulator-system
+failure, not a new application failure.
+
 On 24 August the owner accepted the recorded physical API 36 testing/benchmark,
 credentialled Google restore, and browser/print/accessibility evidence
 boundaries. The owner also accepted the expanded API 37 emulator-system issue
@@ -71,8 +81,8 @@ and approved any required version bump, annotated tag, push, and release. No
 missing p50/p95, raw physical artifact, or manual provider/browser observation
 was invented by recording those decisions.
 
-The working tree now carries the semver feature bump to versionName 1.4.0 /
-versionCode 6 and a pre-tag qualification record. The required host gate,
+Release commit `a47accb` carries the semver feature bump to versionName 1.4.0 /
+versionCode 6 and the final qualification record. The required host gate,
 workflow verifier, dependency/SBOM gate, size harness, signed release assembly,
 size check, release-verifier harness, direct signature validation, version,
 non-debuggable, and exact-ABI checks all pass. The exact rebuilt APKs are:
@@ -94,7 +104,7 @@ scan's existing remediation report has the final corrected-range receipt.
 The fixes are integrated in `68be1b7`; the earlier owner-signer gate passed for
 the exact 1.3.1/5 artifacts above; all other external boundaries are now owner
 accepted for 1.4.0. The rebuilt candidate's fresh independent signer comparison
-also passed; the release is qualified for the approved tag and push.
+also passed; annotated tag `v1.4.0` and the release push are complete.
 
 Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
 spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
@@ -102,15 +112,10 @@ plan/design files. None belongs to this security remediation.
 
 ### Next safe steps
 
-1. Preserve the owner decisions above and both authenticated artifact sets; do
-   not rewrite accepted boundaries as observations or record the fingerprint.
-2. Verify the documentation/version diff, then commit only the scoped
-   release/programme files. Do not stage any preserved unrelated entry.
-3. Create annotated tag `v1.4.0`, push `main` plus that tag, and inspect the
-   resulting Security and Android workflows. Treat only the known expanded
-   API 37 emulator-system class as owner accepted; a new app failure still
-   blocks completion.
-4. Update this authoritative section with the final commit/tag/workflow outcome.
+No release task remains. Preserve the owner decisions and authenticated
+artifact identities above; do not rewrite accepted boundaries as observations
+or record the fingerprint. Any later release must use a new version and tag;
+do not move `v1.4.0`.
 
 ## Superseded checkpoint — owner-requested pause during final security discovery, 23 August 2026
 

@@ -2,16 +2,18 @@
 
 ## Status and candidate identity
 
-**Qualified for the approved annotated tag and push.** Automated host,
-supply-chain, release-build, size, structural APK, and real independent-owner
-signer gates pass. The owner approved the 1.4.0 version bump, tag, and release
-on 24 August 2026 and accepted the external evidence boundaries below.
+**Released as annotated tag `v1.4.0`.** Automated host, supply-chain,
+release-build, size, structural APK, and real independent-owner signer gates
+pass. The owner approved the 1.4.0 version bump, tag, and release on 24 August
+2026 and accepted the external evidence boundaries below.
 
 - Date: 24 August 2026
 - Product implementation head:
   `68be1b713a665258ba014562b2944af197cd9b18`
 - Pre-tag repository base:
   `540526fdb22791b64c2d00c878ece6b89911d128`
+- Release commit and annotated-tag target:
+  `a47accb45220bee8007da025116b96b878baec0e`
 - Version: versionName 1.4.0, versionCode 6
 - Distribution: signed sideload APKs; no AAB or Play-distributed release
 - Signing: unchanged external user-held release identity; no certificate value
@@ -88,15 +90,18 @@ record only and does not turn this sideload release into a Play distribution.
 
 All validated security findings are remediated. The final corrected-range scan
 reported one Medium and three Low occurrences, reduced to two root causes fixed
-in `68be1b7`; its regression tests and independent review are clean. Security
-run `32672691883` passed. Android run `32672691895` passed verify,
-release/SBOM, benchmark, and compact API 36; only expanded API 37 failed in the
-owner-accepted emulator-system class.
+in `68be1b7`; its regression tests and independent review are clean.
+
+Release-head Security run `32696640570` passed. Android run `32696640603`
+passed verify, compact API 36, release/SBOM, and benchmark. Only expanded API
+37 failed. Its uploaded reports contain `INSTRUMENTATION_ABORTED: System has
+crashed`, Android package-service loss, and pre-unlock credential-storage
+fallout, with no `AssertionError`; the prior accepted API 37 run contains the
+same system-crash/package-service class. The failure is therefore within the
+owner-accepted emulator-system boundary, not a new application assertion.
 
 ## Release decision
 
-Release 1.4.0 is qualified and owner-authorized. Commit the scoped version and
-qualification records, create annotated tag `v1.4.0`, and push `main` plus the
-tag. The pushed workflows remain post-push evidence. Only the accepted
-expanded API 37 emulator-system failure is nonblocking; every other workflow
-failure blocks closure.
+Release 1.4.0 is closed for signed sideload. Release commit `a47accb` and
+annotated tag `v1.4.0` were pushed. Security and every blocking Android job
+passed; only the accepted expanded API 37 emulator-system failure remains.
