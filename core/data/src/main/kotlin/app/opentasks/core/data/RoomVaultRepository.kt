@@ -1947,7 +1947,10 @@ class RoomVaultRepository(
             }
         }
         val inverses = plans.map<MovePlan, DomainCommand> { plan ->
-            plan.task.toUpdateCommand(plan.reminder)
+            plan.task.toUpdateCommand(
+                plan.reminder,
+                restoreParentTaskId = if (plan.detach) plan.task.parentTaskId else null,
+            )
         }
         return CommandResult.Success(
             message = "${bulkTasksLabel(plans.size)} moved",
@@ -2614,6 +2617,7 @@ class RoomVaultRepository(
             val requestedMilestone: MilestoneEntity?,
             val recurrenceMetadata: RecurrenceSeriesMetadata?,
             val targetStatus: WorkflowStatus,
+            val targetParentTaskId: TaskId?,
         ) : TaskUpdateValidation
     }
 
@@ -2728,6 +2732,44 @@ class RoomVaultRepository(
             RejectionReason.INVALID_STATE,
             "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
         )
+        val targetParentTaskId = command.restoreParentTaskId ?: task.parentTaskId
+        command.restoreParentTaskId?.let { parentId ->
+            val projectedTasks = mutableWorkspace.value.tasks.map { candidate ->
+                if (candidate.id == task.id) {
+                    candidate.copy(projectId = command.projectId)
+                } else {
+                    candidate
+                }
+            }
+            val snapshotViolation = SubtaskRules.parentViolation(
+                projectedTasks,
+                task.id,
+                parentId,
+            )
+            if (snapshotViolation != null) {
+                return invalidTaskUpdate(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(snapshotViolation),
+                )
+            }
+            val liveParent = database.taskDao().getById(parentId.value)
+            val liveViolation = when {
+                liveParent == null || liveParent.deletedAtEpochMillis != null ->
+                    SubtaskViolation.PARENT_MISSING_OR_BINNED
+                liveParent.projectId != command.projectId?.value ->
+                    SubtaskViolation.CROSS_PROJECT
+                liveParent.parentTaskId != null -> SubtaskViolation.PARENT_IS_A_SUBTASK
+                database.taskDao().liveChildren(task.id.value).isNotEmpty() ->
+                    SubtaskViolation.TASK_HAS_SUBTASKS
+                else -> null
+            }
+            if (liveViolation != null) {
+                return invalidTaskUpdate(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(liveViolation),
+                )
+            }
+        }
         return TaskUpdateValidation.Valid(
             task = task,
             existingReminder = existingReminder,
@@ -2736,6 +2778,7 @@ class RoomVaultRepository(
             requestedMilestone = requestedMilestone,
             recurrenceMetadata = recurrenceMetadata,
             targetStatus = targetStatus,
+            targetParentTaskId = targetParentTaskId,
         )
     }
 
@@ -2751,6 +2794,7 @@ class RoomVaultRepository(
         val requestedMilestone = plan.requestedMilestone
         val recurrenceMetadata = plan.recurrenceMetadata
         val targetStatus = plan.targetStatus
+        val targetParentTaskId = plan.targetParentTaskId
         val title = command.title.trim()
         if (
             task.title == title &&
@@ -2766,6 +2810,7 @@ class RoomVaultRepository(
             task.recurrenceOccurrenceIndex == recurrenceMetadata?.occurrenceIndex &&
             task.estimate == command.estimate &&
             task.milestoneId == command.milestoneId &&
+            task.parentTaskId == targetParentTaskId &&
             existingReminder == requestedReminder
         ) {
             return CommandResult.Success("Changes saved")
@@ -2785,6 +2830,7 @@ class RoomVaultRepository(
             recurrenceOccurrenceIndex = recurrenceMetadata?.occurrenceIndex,
             estimate = command.estimate,
             milestoneId = command.milestoneId,
+            parentTaskId = targetParentTaskId,
             revision = nextRevision(task),
         )
         if (existingReminder == requestedReminder) {
@@ -4410,6 +4456,7 @@ class RoomVaultRepository(
 
     private fun Task.toUpdateCommand(
         reminder: Reminder? = null,
+        restoreParentTaskId: TaskId? = null,
     ): DomainCommand.UpdateTask = DomainCommand.UpdateTask(
         taskId = id,
         title = title,
@@ -4422,6 +4469,7 @@ class RoomVaultRepository(
         estimate = estimate,
         milestoneId = milestoneId,
         restoreStatusId = statusId,
+        restoreParentTaskId = restoreParentTaskId,
         reminder = reminder,
         restorePastReminder = true,
         recurrenceMetadata = recurrence?.let {

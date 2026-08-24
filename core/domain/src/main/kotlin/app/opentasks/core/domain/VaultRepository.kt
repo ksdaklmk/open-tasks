@@ -232,6 +232,8 @@ sealed interface DomainCommand {
         val milestoneId: MilestoneId? = null,
         val recurrenceMetadata: RecurrenceSeriesMetadata? = null,
         val restoreStatusId: WorkflowStatusId? = null,
+        /** [restoreParentTaskId] is repository-produced Undo metadata. Normal UI code must leave it null. */
+        val restoreParentTaskId: TaskId? = null,
         val reminder: Reminder? = null,
         val restorePastReminder: Boolean = false,
     ) : DomainCommand

@@ -2290,13 +2290,49 @@ class InMemoryVaultRepositoryTest {
 
                 val moved = repository.execute(
                     DomainCommand.MoveTasksToProject(listOf(child.id), destination.id),
-                )
-                assertTrue(moved is CommandResult.Success)
+                ) as CommandResult.Success
                 val afterMove = repository.currentWorkspace().tasks
                 assertEquals(destination.id, afterMove.first { it.id == child.id }.projectId)
                 assertNull(afterMove.first { it.id == child.id }.parentTaskId)
                 assertEquals(project.id, afterMove.first { it.id == parent.id }.projectId)
+
+                repository.execute(requireNotNull(moved.undo))
+                val afterUndo = repository.currentWorkspace().tasks.first { it.id == child.id }
+                assertEquals(child.projectId, afterUndo.projectId)
+                assertEquals(child.statusId, afterUndo.statusId)
+                assertEquals(parent.id, afterUndo.parentTaskId)
             }
+        }
+    }
+
+    @Test
+    fun movingAChildUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val destination = OpenTasksFixtures.taxProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+            val moved = repository.execute(
+                DomainCommand.MoveTasksToProject(listOf(child.id), destination.id),
+            ) as CommandResult.Success
+            repository.execute(DomainCommand.DeleteTask(parent.id))
+            repository.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+            val beforeUndo = repository.currentWorkspace().tasks.first { it.id == child.id }
+
+            val rejected = repository.execute(requireNotNull(moved.undo))
+                as CommandResult.Rejected
+
+            assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+            assertEquals(
+                beforeUndo,
+                repository.currentWorkspace().tasks.first { it.id == child.id },
+            )
         }
     }
 

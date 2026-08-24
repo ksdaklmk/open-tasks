@@ -3056,8 +3056,7 @@ class RoomVaultRepositoryInstrumentedTest {
 
         val movedChildAlone = repository!!.execute(
             DomainCommand.MoveTasksToProject(listOf(aloneChild.id), destination.id),
-        )
-        assertTrue(movedChildAlone is CommandResult.Success)
+        ) as CommandResult.Success
         val afterChildMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.projectId == destination.id
@@ -3065,6 +3064,56 @@ class RoomVaultRepositoryInstrumentedTest {
         }
         assertNull(afterChildMove.tasks.first { it.id == aloneChild.id }.parentTaskId)
         assertNull(afterChildMove.tasks.first { it.id == aloneParent.id }.projectId)
+
+        repository!!.execute(requireNotNull(movedChildAlone.undo))
+        val afterChildUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.let { task ->
+                    task.projectId == aloneChild.projectId &&
+                        task.statusId == aloneChild.statusId &&
+                        task.parentTaskId == aloneParent.id
+                } == true
+            }
+        }.tasks.first { it.id == aloneChild.id }
+        assertEquals(aloneChild.projectId, afterChildUndo.projectId)
+        assertEquals(aloneChild.statusId, afterChildUndo.statusId)
+        assertEquals(aloneParent.id, afterChildUndo.parentTaskId)
+    }
+
+    @Test
+    fun movingAChildUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        openRepository(now = { Instant.parse("2026-08-24T05:00:00Z") })
+        val destination = OpenTasksFixtures.taxProject
+        repository!!.execute(DomainCommand.CreateTask("Purged move parent"))
+        repository!!.execute(DomainCommand.CreateTask("Purged move child"))
+        val pair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Purged move parent" } &&
+                    snapshot.tasks.any { it.title == "Purged move child" }
+            }
+        }.tasks.associateBy { it.title }
+        val parent = checkNotNull(pair["Purged move parent"])
+        val child = checkNotNull(pair["Purged move child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        val moved = repository!!.execute(
+            DomainCommand.MoveTasksToProject(listOf(child.id), destination.id),
+        ) as CommandResult.Success
+        repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        repository!!.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+        val beforeUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == parent.id }
+            }
+        }.tasks.first { it.id == child.id }
+
+        val rejected = repository!!.execute(requireNotNull(moved.undo))
+            as CommandResult.Rejected
+
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            beforeUndo,
+            repository!!.currentWorkspace().tasks.first { it.id == child.id },
+        )
     }
 
     @Test
