@@ -789,8 +789,9 @@ verification, a checksum-pinned versioned wrapper cache, release SBOM, and
 per-ABI size checks join the release evidence. The three-APK verifier now
 requires one independent owner certificate input and matches each filename to
 its exact `aapt2 native-code` set: arm64 only, x86_64 only, or both for the
-universal APK. The real owner-only proof remains pending. Room stays v9 and
-authenticated backup format stays v1.
+universal APK. The real owner-only proof passed for the exact current-head
+1.3.1/5 artifacts on 24 August; any rebuilt final release candidate must repeat
+it. Room stays v9 and authenticated backup format stays v1.
 
 `DefaultRemoteBackupRunner` captures the current local generation under the
 existing serialized publication gate and publishes an execution sequence with
@@ -798,10 +799,9 @@ that immutable start generation. `RemoteBackupRuntime` consumes completion by
 sequence and schedules any later generation, so a flow-observation delay
 cannot mark an edit made during an active run as already attempted.
 
-Local implementation evidence and the still-pending physical API 36,
-credentialled provider, browser/accessibility, benchmark-threshold, signer,
-applicable PR dependency-review, and API 37 canary gates are separated
-explicitly in
+Local implementation evidence, the completed 1.3.1 and 1.4.0 exact-artifact
+signer proofs, and the owner-accepted physical/provider/browser/API 37 evidence
+boundaries are separated explicitly in
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md`. The original and
 closing findings are remediated; post-fix scans reported zero findings.
 Security runs `32615516366`, `32617307907`, and exact-head `32617911327`
@@ -812,5 +812,5 @@ before the API 37 canary lost its activity/package services and ran zero tests.
 `afb1d93` removes the ineffective flag; this is rollback, not serialization
 proof, and no second workflow workaround is claimed. `316bd86` separately
 removes the API 36 timer-test observation race, and `c649801` closes the
-release-verifier ABI-label gap. Task 12 is paused at external release
-qualification and documentation closure.
+release-verifier ABI-label gap. Task 12 and the rebuilt candidate are qualified
+for the owner-approved 1.4.0 tag and push.

@@ -1,15 +1,15 @@
 # Open Tasks Handoff
 
-## Current state — final security remediation committed for `main`, 24 August 2026
+## Current state — release 1.4.0 qualified and owner-approved for tag/push, 24 August 2026
 
 This section is authoritative. Older checkpoints below are historical and are
 superseded wherever they conflict with this one.
 
 Implementation commit `68be1b713a665258ba014562b2944af197cd9b18`
 (`security: close final lock privacy findings`) follows checkpoint
-`0846c1a913cd2ba7db86807161e33b6331320127` on `main`. This documentation
-checkpoint records that integration. No version bump, tag, or release was
-performed.
+`0846c1a913cd2ba7db86807161e33b6331320127` on `main`. Documentation
+checkpoint `540526fdb22791b64c2d00c878ece6b89911d128` records that integration
+and remains the `origin/main` baseline for this update.
 
 Final corrected-range diff scan `48749dd0-0e8f-4ce7-849d-7eb96fd5527d`
 completed and sealed with complete coverage over exact immutable range
@@ -39,12 +39,62 @@ fresh release assembly passed in 1m37s with 442/442 tasks executed. Independent
 patch review requested one stronger transaction-time title-privacy test and
 returned clean after it was amended and rerun.
 
+On 24 August the owner provisioned the expected signing-certificate SHA-256
+from an independent trusted record and ran the real gate against all three
+current-head APKs. `scripts/verify-release-apk.sh` returned
+`verify-release-apk: all checks passed`; no certificate value or signing
+material was recorded. The exact authenticated artifacts are versionName
+1.3.1 / versionCode 5:
+
+| APK | Bytes | SHA-256 | Packaged native code |
+|---|---:|---|---|
+| `app-arm64-v8a-release.apk` | 9,852,846 | `bb812a54f646fe322aaf408f4b96746d2baa8acd0398466d44094d5f9a11f3bb` | `arm64-v8a` |
+| `app-x86_64-release.apk` | 9,984,216 | `3e92e10625e5a9ac70f01641b72afc06e738c04537436996f66ffdf55648cc7b` | `x86_64` |
+| `app-universal-release.apk` | 12,114,299 | `77bd183f9b7542ee375b8c18c764f92aa21d137bacbbdfc20488d4658b938765` | `arm64-v8a`, `x86_64` |
+
+This closes the previously unrun owner proof for these exact files. It does
+not create a new release candidate: tag `v1.3.1` already identifies the older
+released source at `e4d25a9`. Any next release must increment its version,
+rebuild the APKs, and repeat this gate against the rebuilt final artifacts.
+
+Remote workflows for documentation head `540526f` are also settled. Security
+run `32672691883` passed. Android run `32672691895` passed verify, release,
+benchmark, and compact API 36; only expanded API 37 failed. Its uploaded
+reports again show `INSTRUMENTATION_ABORTED: System has crashed`, preserving
+the existing emulator-system classification rather than exposing a new app
+assertion failure.
+
+On 24 August the owner accepted the recorded physical API 36 testing/benchmark,
+credentialled Google restore, and browser/print/accessibility evidence
+boundaries. The owner also accepted the expanded API 37 emulator-system issue
+and approved any required version bump, annotated tag, push, and release. No
+missing p50/p95, raw physical artifact, or manual provider/browser observation
+was invented by recording those decisions.
+
+The working tree now carries the semver feature bump to versionName 1.4.0 /
+versionCode 6 and a pre-tag qualification record. The required host gate,
+workflow verifier, dependency/SBOM gate, size harness, signed release assembly,
+size check, release-verifier harness, direct signature validation, version,
+non-debuggable, and exact-ABI checks all pass. The exact rebuilt APKs are:
+
+| APK | Bytes | SHA-256 | Packaged native code |
+|---|---:|---|---|
+| `app-arm64-v8a-release.apk` | 9,852,846 | `b77a9baecb88a52163c58f532301514ed85a75f38ac2837abcd469d2ea4f862e` | `arm64-v8a` |
+| `app-x86_64-release.apk` | 9,984,216 | `cb0b15191e48412baeb1ea6a3b0ea0833eab2ec54361532a8623e0ea9b41d231` | `x86_64` |
+| `app-universal-release.apk` | 12,114,299 | `88401d0e2d138ac2a92cb3191625add60e0d874707a95befa49e1e9f4b7dea45` | `arm64-v8a`, `x86_64` |
+
+The owner reports that the same independently held value used as
+`OPEN_TASKS_RELEASE_CERT_SHA256` is registered externally as a Play Console
+fingerprint. The owner provisioned that independent value outside Codex and
+returned only `verify-release-apk: all checks passed` for the exact rebuilt
+files above. No certificate value or signing material was recorded.
+
 The final scan now has `artifacts/fix_report.md`, and the original Standard
 scan's existing remediation report has the final corrected-range receipt.
-The fixes are integrated in `68be1b7`. The real owner-signer gate, fixed API
-36 arm64 physical qualification, credentialled Google restore,
-two-browser/print/accessibility review, and API 37 emulator-system decision
-remain external blockers. No release is eligible yet.
+The fixes are integrated in `68be1b7`; the earlier owner-signer gate passed for
+the exact 1.3.1/5 artifacts above; all other external boundaries are now owner
+accepted for 1.4.0. The rebuilt candidate's fresh independent signer comparison
+also passed; the release is qualified for the approved tag and push.
 
 Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
 spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
@@ -52,17 +102,15 @@ plan/design files. None belongs to this security remediation.
 
 ### Next safe steps
 
-1. Inspect the remote workflows triggered by the implementation/documentation
-   push; do not dispatch duplicates merely because a lane is still running.
-2. Use `68be1b713a665258ba014562b2944af197cd9b18` as the immutable source
-   revision for any remediation follow-up; the documentation commit changes no
-   product source.
-3. Run the real three-APK signer gate only with the owner's independently
-   provisioned `OPEN_TASKS_RELEASE_CERT_SHA256`; never derive or print it.
-4. Complete the remaining physical-device, Google-provider, browser, print,
-   keyboard, screen-reader, and 200%-zoom evidence before a release decision.
-5. A version bump, tag, or release still requires explicit owner approval
-   under `RELEASING.md`.
+1. Preserve the owner decisions above and both authenticated artifact sets; do
+   not rewrite accepted boundaries as observations or record the fingerprint.
+2. Verify the documentation/version diff, then commit only the scoped
+   release/programme files. Do not stage any preserved unrelated entry.
+3. Create annotated tag `v1.4.0`, push `main` plus that tag, and inspect the
+   resulting Security and Android workflows. Treat only the known expanded
+   API 37 emulator-system class as owner accepted; a new app failure still
+   blocks completion.
+4. Update this authoritative section with the final commit/tag/workflow outcome.
 
 ## Superseded checkpoint — owner-requested pause during final security discovery, 23 August 2026
 

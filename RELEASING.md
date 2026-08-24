@@ -1,26 +1,24 @@
 # Releasing Open Tasks (signed sideload)
 
-Distribution is signed sideload only. There is no Play Console, no AAB,
-and no CI signing; CI builds the release unsigned. Release assembly produces
-arm64-v8a and x86_64 APKs plus one 64-bit universal fallback.
+Distribution is signed sideload only. There is no AAB or Play-distributed
+release in this process, and no CI signing; CI builds the release unsigned.
+Release assembly produces arm64-v8a and x86_64 APKs plus one 64-bit universal
+fallback. An owner-reported certificate-fingerprint registration in Play
+Console is an external identity record, not a change to this distribution.
 
 The programme-level record at
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md` is implementation
 evidence, not a release waiver. The original and closing security findings are
 implemented and their post-fix scans reported zero findings; the owner also
 reported PASS for the deferred passive-content process-death device check.
-Release remains blocked on the fixed API 36 arm64 physical performance and
-fresh-install gates, owner-present Google, browser/accessibility evidence, and
-the real signer authentication of all three APKs using the independent owner
-certificate record. Pushed Security runs `32615516366`, `32617307907`, and
-exact-head `32617911327` are green; repeat all
-applicable workflow gates after any later source or workflow change. The
-expanded API 37 preview lane remains infrastructure-red. Run `32615516358`
-proved that the bounded `--no-parallel` experiment did not serialize UTP work,
-so the ineffective flag was removed in `afb1d93`. The canary still lost
-Android's activity/package services before any application assertion. It is
-not an app failure, serialization proof, or a release waiver, and no second
-speculative workaround is accepted as evidence.
+On 24 August the owner accepted the recorded API 36 physical, credentialled
+Google, browser/print/accessibility, and API 37 emulator-system evidence
+boundaries for release 1.4.0 and explicitly approved its version bump, tag,
+and release. That per-release decision does not invent missing measurements or
+observations and does not waive these gates for later releases. The rebuilt
+1.4.0 candidate passed the real signer authentication of all three APKs using
+the independent owner certificate record; the certificate value was not
+recorded.
 
 ## One-time setup
 
@@ -32,6 +30,18 @@ speculative workaround is accepted as evidence.
          -dname "CN=Open Tasks"
 
    keytool prompts for the store password; use a strong unique one.
+
+   At key creation, establish the independent owner certificate record from
+   this known-good keystore:
+
+       keytool -list -v \
+         -keystore ~/Keys/opentasks-release.jks \
+         -alias opentasks
+
+   Store only the `SHA256` digest in a password manager plus the offline
+   backup, outside this repository. Remove its colons so the stored value is
+   exactly 64 hexadecimal characters. Never establish or refresh this trusted
+   value from a candidate APK.
 
 2. Write `keystore.properties` at the repository root (gitignored):
 
@@ -84,14 +94,23 @@ speculative workaround is accepted as evidence.
 
 7. Provision `OPEN_TASKS_RELEASE_CERT_SHA256` in the current shell from the
    owner's independent trusted certificate record outside the repository.
-   Do not derive it from any APK, put it on the command line, or echo it into
-   release evidence. Then authenticate the signer and release invariants of
-   all three signed APKs in one gate:
+   The value must be exactly 64 hexadecimal characters without colons. Do not
+   derive it from any APK, put it on the command line, or echo it into release
+   evidence. `read -s` waits silently for the value and Enter:
+
+       read -s OPEN_TASKS_RELEASE_CERT_SHA256
+       printf '\n'
+       export OPEN_TASKS_RELEASE_CERT_SHA256
+
+   Then authenticate the signer and release invariants of all three signed
+   APKs in one gate:
 
        bash scripts/verify-release-apk.sh \
          app/build/outputs/apk/release/app-arm64-v8a-release.apk \
          app/build/outputs/apk/release/app-x86_64-release.apk \
          app/build/outputs/apk/release/app-universal-release.apk
+
+       unset OPEN_TASKS_RELEASE_CERT_SHA256
 
    The verifier rejects an absent or malformed owner input and any missing,
    duplicate, unexpected, invalid, differently signed, or incorrectly labelled

@@ -207,8 +207,10 @@ adds no telemetry, server, hosted report, reporting database, or parallel
 analytics path. The implemented boundary and remaining external release gates
 are recorded in
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
-That programme is paused before release while five validated security
-findings in the same record are remediated.
+All validated security findings in that record are remediated. The owner
+accepted the recorded external evidence boundaries and approved release 1.4.0;
+the rebuilt three-APK candidate also passed independent signer authentication
+and is qualified for the approved tag and push.
 
 ## Brand Personality
 

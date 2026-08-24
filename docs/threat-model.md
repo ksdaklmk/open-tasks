@@ -420,10 +420,11 @@ Stage 8.
 
 ## Implemented onboarding/dashboard/NFR addendum
 
-The following repository controls are implemented. Their remaining external
-physical, provider, browser/accessibility, benchmark, real-signer, applicable
-PR dependency-review, and API 37 canary acceptance remains required before a
-release decision.
+The following repository controls are implemented. For release 1.4.0 the owner
+accepted the recorded physical, provider, browser/accessibility, benchmark,
+and API 37 emulator-system evidence boundaries. The rebuilt 1.4.0 candidate
+passed its independent-owner signer check and is qualified for the approved
+tag and push.
 
 | ID | Threat | Implemented control | Residual |
 |---|---|---|---|
@@ -434,7 +435,7 @@ release decision.
 | T43 | A stale notification or widget action mutates a locked vault | Concealed notifications omit actions; reminder and widget mutations carry revocable lock/title/generation predicates into the shared repository write boundary and recheck under the write mutex immediately before the transaction | Same-device access during a legitimately unlocked interval remains an intended capability; later mutation paths must use the same transaction-bound contract |
 | T44 | Background delay, queued biometric success, or process death leaves passive content authorised | Backgrounding invalidates the prompt token, biometric success requires the current foreground generation, and reminder/widget sinks conceal immediately on background while the overlay retains its configured delay | Asynchronous cancellation/Glance rewriting required device proof; the owner-reported process-death sequence passed, and must be repeated if these sinks change |
 | T45 | Hostile archive/CSV input exhausts memory/CPU or triggers spreadsheet formulas | 512 MiB archive aggregate cap before body allocation/write, per-frame cancellation, O(1) attachment map, indexed project/tag resolution, 500/1,000 creation caps, and CR/LF formula neutralisation | Legitimate input above a declared product ceiling is rejected rather than partially imported |
-| T46 | Dependency or build-pipeline compromise reaches the signed app | Reviewed full-SHA Actions, CodeQL Java/Kotlin, high/critical dependency review, SHA-256 dependency verification, SBOM, checksum-pinned Gradle distribution in a versioned cache namespace, and a fail-closed verifier for all three APKs | The real release gate still requires an independent owner certificate input; the expected signer may never be derived from a candidate APK |
+| T46 | Dependency or build-pipeline compromise reaches the signed app | Reviewed full-SHA Actions, CodeQL Java/Kotlin, high/critical dependency review, SHA-256 dependency verification, SBOM, checksum-pinned Gradle distribution in a versioned cache namespace, and a fail-closed verifier for all three APKs | The independent owner-input gate passed for the three exact current-head artifacts; every changed or rebuilt final candidate must repeat it, and the expected signer may never be derived from a candidate APK |
 | T47 | A local edit made during an active remote backup is mistaken for the generation already attempted | The runner captures `currentGeneration` under the serialized publication gate and carries that immutable start generation plus execution sequence through completion; the runtime re-enqueues any newer generation | Future runner implementations must preserve the same capture boundary and retained completion state |
 
 The HTML share cache is limited to `cache/share/reports/` under FileProvider,
@@ -450,7 +451,7 @@ drive one-second full snapshot rebuilds; search/Insights must cancel stale
 work; archive/import/report memory is bounded; and physical-device benchmark
 evidence must cover the 5,000-record ceiling without OOM or ≥700 ms frames.
 
-Observed local evidence and every unrun external gate are recorded in
+Observed local evidence and each owner-accepted external boundary are recorded in
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
 
 The sealed Standard review
@@ -461,8 +462,10 @@ Low follow-up issues; those are also remediated. Post-fix scan
 `19aa7c94-d7a0-4b6d-9cef-0e6c347e0ce5` reported zero findings with only the
 now owner-passed device purge proof deferred, and exact backup follow-up scan
 `2cb2540b-e277-43c5-a12f-564f386de9c8` reported zero findings with complete
-coverage. The independent real three-APK signer proof remains a release gate,
-not an open implementation defect.
+coverage. Independent real three-APK signer proofs passed for both the exact
+current-head 1.3.1 evidence set and the rebuilt 1.4.0 release set on 24 August;
+repeating the gate for any later changed or rebuilt candidate remains a
+release gate, not an open implementation defect.
 
 Security runs `32615516366`, `32617307907`, and exact-head `32617911327`
 passed CodeQL, with dependency review correctly skipped for each direct push.
