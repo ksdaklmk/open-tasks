@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — Task 9 Undo gaps closed, 24 August 2026
+## Current state — Task 9 Undo gaps final review closed, 24 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
@@ -8,23 +8,24 @@ remains authoritative for release identity and qualification evidence.
 
 Implementation commits `7a3063f` (`fix: restore subtask parent on move undo`)
 and `5f81498` (`fix: preserve subtask parent on restore undo`) close the two
-bounded subtask Undo asymmetries in both repository engines. Undoing a
-child-only project move restores its former project, workflow status, and
-parent. Undoing a restore that safely detached a child returns it to the Bin
-with its former parent link when that parent record is still representable;
-delayed invalid Undo rejects before any partial write.
+bounded subtask Undo asymmetries in both repository engines. Final-review fix
+commit `d4dc481863cca2f59fab9deb414f23970f7e5a7d` (`Fix replayed delete
+undo validation`) closes the two Important follow-ups. A metadata-bearing
+`DeleteTask` now repairs an already-binned task's historical deletion instant
+and parent atomically when needed, without another Bin activity or fabricated
+Undo, and rejects invalid delayed replay before mutation. Room's authoritative
+`DeleteTask` and `UpdateTask` rechecks now count every direct child row,
+including binned children, while live-only subtree binning remains unchanged.
 
-The change is command-only Undo metadata. It adds no UI, database migration,
-backup-format change, dependency, permission, or version bump. The focused
-domain test passed: `:core:domain:testDebugUnitTest --tests
-"*SubtaskRulesTest"` exited 0 (`BUILD SUCCESSFUL in 250ms`; 35/35 actionable
-tasks up-to-date). The focused in-memory repository test passed:
-`:core:data:testDebugUnitTest --tests "*InMemoryVaultRepositoryTest"` exited 0
-(`BUILD SUCCESSFUL in 1s`; 57 actionable tasks: 1 executed, 56 up-to-date).
-Room Android-test Kotlin compilation passed: `:core:data:compileDebugAndroidTestKotlin`
-exited 0 (`BUILD SUCCESSFUL in 250ms`; 48/48 actionable tasks up-to-date). The
-full host gate `testDebugUnitTest lintDebug :app:assembleDebug` exited 0
-(`BUILD SUCCESSFUL in 26s`; 553 actionable tasks: 14 executed, 539 up-to-date).
+The final-review change adds no UI, schema or migration, backup-format or
+fixture change, dependency, permission, version, release identity, or Play
+state. At exact code head `d4dc481863cca2f59fab9deb414f23970f7e5a7d`,
+the two focused host regressions exited 0 (`BUILD SUCCESSFUL in 4s`; 57
+actionable tasks: 7 executed, 50 up-to-date). Room Android-test Kotlin
+compilation exited 0 (`BUILD SUCCESSFUL in 1s`; 48 actionable tasks: 2
+executed, 46 up-to-date). The full host gate `testDebugUnitTest lintDebug
+:app:assembleDebug` exited 0 (`BUILD SUCCESSFUL in 47s`; 553 actionable tasks:
+44 executed, 509 up-to-date; 1,427 tests, zero failures, errors, or skips).
 
 Connected Room execution was not run: `/Users/kk/Library/Android/sdk/platform-tools/adb
 devices -l` exited 0 and reported only `List of devices attached`, with no
