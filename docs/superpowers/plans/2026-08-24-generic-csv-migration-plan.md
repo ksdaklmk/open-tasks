@@ -1,9 +1,8 @@
 # Generic CSV Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> superpowers:subagent-driven-development to implement this plan task-by-task.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a discoverable, offline generic task-CSV mapper on Welcome and
 More while retaining the strict Open Tasks CSV round trip and exact import
@@ -22,6 +21,11 @@ Android Storage Access Framework, Hilt ViewModel, Room, JUnit 4, Gradle.
 **Spec:**
 `docs/superpowers/specs/2026-08-24-generic-csv-migration-design.md`
 (approved in commit `1dd8990`).
+
+**Execution status:** Subagent-driven execution was selected on 2026-08-24,
+but this plan has not started. It is queued behind the Undo-gap plan; do not
+initialize its SDD workspace or dispatch an agent until Undo is complete and
+the owner authorizes this slice, unless the owner changes the sequence.
 
 ## Global Constraints
 

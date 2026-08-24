@@ -1,9 +1,8 @@
 # Undo Gap Closure Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> superpowers:subagent-driven-development to implement this plan task-by-task.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make child-project moves and safe-detaching Bin restores fully
 undoable in both repository engines.
@@ -18,6 +17,11 @@ write; do not add a coordinator, persistence field, or UI path.
 **Spec:**
 `docs/superpowers/specs/2026-08-24-undo-gap-closure-design.md`
 (approved in commit `e125faa`).
+
+**Execution status:** Subagent-driven execution was selected on 2026-08-24,
+then explicitly paused before Task 1. This is the next plan in the approved
+sequence; do not initialize its SDD workspace or dispatch an agent until the
+owner resumes execution.
 
 ## Global Constraints
 

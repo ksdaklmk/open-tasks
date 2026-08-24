@@ -1,9 +1,49 @@
 # Open Tasks Handoff
 
-## Current state — release 1.4.0 tagged, pushed, and closed, 24 August 2026
+## Current planning checkpoint — enhancement execution paused, 24 August 2026
 
-This section is authoritative. Older checkpoints below are historical and are
-superseded wherever they conflict with this one.
+This section is authoritative for the next enhancement programme. The release
+baseline immediately below remains authoritative for release identity and
+qualification evidence.
+
+The owner approved this delivery order:
+
+1. close the known Undo gaps;
+2. reduce migration friction with the generic CSV mapper;
+3. add the version/trust footer; and
+4. publish a Play internal beta.
+
+The first two slices are designed and have implementation plans:
+
+- Undo design `e125faa`; Undo plan `f9d4a32`;
+- generic CSV migration design `1dd8990`; migration plan `ece0c81`.
+
+The owner selected `superpowers:subagent-driven-development` as the future
+execution mode. Each plan must use a fresh implementer for each task, a scoped
+task review, and a final whole-plan review, with progress recorded in that
+plan's ignored SDD workspace and ledger.
+
+**Execution has not started and is not currently authorized.** No SDD
+workspace or ledger has been initialized, no subagent has been dispatched, and
+no product code, tests, schema, backup format, version, release artifact, or
+Play Console state has changed for this programme. The version/trust-footer and
+Play-internal-beta slices still need their own approved designs and plans.
+
+When the owner explicitly resumes execution, start with Task 1 of
+`docs/superpowers/plans/2026-08-24-undo-gap-closure-plan.md`. Complete and
+review that plan before starting
+`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`, unless the
+owner changes the sequence. Do not infer execution permission from the chosen
+workflow alone.
+
+Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
+spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
+plan/design files.
+
+## Release baseline — release 1.4.0 tagged, pushed, and closed, 24 August 2026
+
+This section is authoritative for release facts. Older release checkpoints
+below are historical and are superseded wherever they conflict with this one.
 
 Implementation commit `68be1b713a665258ba014562b2944af197cd9b18`
 (`security: close final lock privacy findings`) follows checkpoint
