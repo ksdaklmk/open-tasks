@@ -1,21 +1,22 @@
 # Open Tasks Handoff
 
-## Current state — Task 9 Undo gaps final review closed, 24 August 2026
+## Current state — Undo final fix committed; scoped re-review paused, 25 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
 remains authoritative for release identity and qualification evidence.
 
 Implementation commits `7a3063f` (`fix: restore subtask parent on move undo`)
-and `5f81498` (`fix: preserve subtask parent on restore undo`) close the two
+and `5f81498` (`fix: preserve subtask parent on restore undo`) implement the two
 bounded subtask Undo asymmetries in both repository engines. Final-review fix
 commit `d4dc481863cca2f59fab9deb414f23970f7e5a7d` (`Fix replayed delete
-undo validation`) closes the two Important follow-ups. A metadata-bearing
-`DeleteTask` now repairs an already-binned task's historical deletion instant
-and parent atomically when needed, without another Bin activity or fabricated
-Undo, and rejects invalid delayed replay before mutation. Room's authoritative
-`DeleteTask` and `UpdateTask` rechecks now count every direct child row,
-including binned children, while live-only subtree binning remains unchanged.
+undo validation`) implements the requested corrections for the two Important
+follow-ups. A metadata-bearing `DeleteTask` now repairs an already-binned
+task's historical deletion instant and parent atomically when needed, without
+another Bin activity or fabricated Undo, and rejects invalid delayed replay
+before mutation. Room's authoritative `DeleteTask` and `UpdateTask` rechecks
+now count every direct child row, including binned children, while live-only
+subtree binning remains unchanged.
 
 The final-review change adds no UI, schema or migration, backup-format or
 fixture change, dependency, permission, version, release identity, or Play
@@ -31,10 +32,20 @@ Connected Room execution was not run: `/Users/kk/Library/Android/sdk/platform-to
 devices -l` exited 0 and reported only `List of devices attached`, with no
 selected disposable target. The protected `Pixel_10_Pro_Fold` was not touched.
 
-The next approved action is Task 1 of
-`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`, not another
-CSV brainstorm or design approval. Do not bundle the version/trust footer or
-Play internal beta work into that slice.
+The owner requested a safe stop before the required scoped re-review finished.
+The interrupted reviewer produced no report and made no code or documentation
+change. The ignored SDD workspace remains at
+`.superpowers/sdd/2026-08-24-undo-gap-closure-plan/`, including the final-fix
+brief, implementation report, and exact review package for
+`e8d135e4bf62bb1b379f6e1563845e59271de434..5ea1ed2ff2f5ac2ecce7ed10d97259e334b306a1`.
+
+On resume, run exactly one fresh scoped re-review of that range against the two
+recorded Important findings. If both are addressed and the fix range introduces
+no Critical, Important, or Minor regression, record the clean result and close
+the Undo plan. Only then start Task 1 of
+`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`; do not repeat
+CSV brainstorming or design approval, and do not bundle the version/trust footer
+or Play internal beta work into that slice.
 
 ## Previous planning checkpoint — enhancement execution paused, 24 August 2026
 
