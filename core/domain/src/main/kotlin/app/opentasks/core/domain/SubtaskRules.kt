@@ -38,6 +38,22 @@ object SubtaskRules {
         return null
     }
 
+    /** One-level guard for restoring a historical binned parent link. */
+    fun historicalParentViolation(
+        tasks: List<Task>,
+        taskId: TaskId,
+        parentTaskId: TaskId,
+    ): SubtaskViolation? {
+        if (taskId == parentTaskId) return SubtaskViolation.SELF
+        val parent = tasks.firstOrNull { it.id == parentTaskId }
+            ?: return SubtaskViolation.PARENT_MISSING_OR_BINNED
+        if (parent.parentTaskId != null) return SubtaskViolation.PARENT_IS_A_SUBTASK
+        if (tasks.any { it.parentTaskId == taskId }) {
+            return SubtaskViolation.TASK_HAS_SUBTASKS
+        }
+        return null
+    }
+
     /** done/total over live (non-binned) children per parent. */
     fun subtaskRollups(tasks: List<Task>): Map<TaskId, SubtaskRollup> =
         tasks.asSequence()

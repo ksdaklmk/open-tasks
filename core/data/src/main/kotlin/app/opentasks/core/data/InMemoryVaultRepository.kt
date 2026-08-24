@@ -2310,6 +2310,18 @@ class InMemoryVaultRepository internal constructor(
         if (task.deletedAt != null) {
             return CommandResult.Success("Task is already in the Bin")
         }
+        command.restoreParentTaskId?.let { parentId ->
+            SubtaskRules.historicalParentViolation(
+                current.tasks,
+                task.id,
+                parentId,
+            )?.let { violation ->
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(violation),
+                )
+            }
+        }
         // Sorted by id to match Room's `liveChildren` (`ORDER BY id`), so a
         // multi-child subtree's undo-batch and activity-entry order agree
         // between engines.
@@ -2318,6 +2330,7 @@ class InMemoryVaultRepository internal constructor(
             .sortedBy { it.id.value }
         val updated = task.copy(
             deletedAt = command.deletedAt,
+            parentTaskId = command.restoreParentTaskId ?: task.parentTaskId,
             revision = nextRevision(task, command.deletedAt),
         )
         val updatedChildren = children.map { child ->
@@ -2408,7 +2421,11 @@ class InMemoryVaultRepository internal constructor(
         )
         return CommandResult.Success(
             message = "Task restored",
-            undo = DomainCommand.DeleteTask(task.id, deletedAt),
+            undo = DomainCommand.DeleteTask(
+                taskId = task.id,
+                deletedAt = deletedAt,
+                restoreParentTaskId = if (detach && parent != null) parentId else null,
+            ),
         )
     }
 

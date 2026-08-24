@@ -2424,9 +2424,37 @@ class RoomVaultRepository(
         if (task.deletedAt != null) {
             return CommandResult.Success("Task is already in the Bin")
         }
+        command.restoreParentTaskId?.let { parentId ->
+            val snapshotViolation = SubtaskRules.historicalParentViolation(
+                mutableWorkspace.value.tasks,
+                task.id,
+                parentId,
+            )
+            if (snapshotViolation != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(snapshotViolation),
+                )
+            }
+            val liveParent = database.taskDao().getById(parentId.value)
+            val liveViolation = when {
+                liveParent == null -> SubtaskViolation.PARENT_MISSING_OR_BINNED
+                liveParent.parentTaskId != null -> SubtaskViolation.PARENT_IS_A_SUBTASK
+                database.taskDao().liveChildren(task.id.value).isNotEmpty() ->
+                    SubtaskViolation.TASK_HAS_SUBTASKS
+                else -> null
+            }
+            if (liveViolation != null) {
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(liveViolation),
+                )
+            }
+        }
         val children = database.taskDao().liveChildren(task.id.value)
         val updated = task.copy(
             deletedAt = command.deletedAt,
+            parentTaskId = command.restoreParentTaskId ?: task.parentTaskId,
             revision = nextRevision(task, command.deletedAt),
         )
         val updatedChildren = children.map { child ->
@@ -2522,7 +2550,11 @@ class RoomVaultRepository(
         )
         return CommandResult.Success(
             message = "Task restored",
-            undo = DomainCommand.DeleteTask(task.id, deletedAt),
+            undo = DomainCommand.DeleteTask(
+                taskId = task.id,
+                deletedAt = deletedAt,
+                restoreParentTaskId = if (detach && parent != null) parentId else null,
+            ),
         )
     }
 

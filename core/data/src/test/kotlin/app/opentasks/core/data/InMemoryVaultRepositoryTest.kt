@@ -2245,10 +2245,16 @@ class InMemoryVaultRepositoryTest {
 
             // Restoring a child alone from the Bin detaches it.
             repository.execute(DomainCommand.DeleteTask(parent.id))
-            repository.execute(DomainCommand.RestoreTask(child.id))
+            val restoreResult = repository.execute(DomainCommand.RestoreTask(child.id))
+                as CommandResult.Success
             val detached = repository.currentWorkspace().tasks.first { it.id == child.id }
             assertNull(detached.deletedAt)
             assertNull(detached.parentTaskId)
+
+            repository.execute(requireNotNull(restoreResult.undo))
+            val reBinned = repository.currentWorkspace().tasks.first { it.id == child.id }
+            assertNotNull(reBinned.deletedAt)
+            assertEquals(parent.id, reBinned.parentTaskId)
         }
     }
 
@@ -2361,11 +2367,46 @@ class InMemoryVaultRepositoryTest {
 
             // Restoring the child must detach it: its parent is live, but no
             // longer in the same project.
-            repository.execute(DomainCommand.RestoreTask(child.id))
+            val restoreResult = repository.execute(DomainCommand.RestoreTask(child.id))
+                as CommandResult.Success
             val restored = repository.currentWorkspace().tasks.first { it.id == child.id }
             assertNull(restored.deletedAt)
             assertNull(restored.parentTaskId)
             assertEquals(project.id, restored.projectId)
+
+            repository.execute(requireNotNull(restoreResult.undo))
+            val reBinned = repository.currentWorkspace().tasks.first { it.id == child.id }
+            assertNotNull(reBinned.deletedAt)
+            assertEquals(parent.id, reBinned.parentTaskId)
+        }
+    }
+
+    @Test
+    fun restoreUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        withTimeout(5_000) {
+            val repository = InMemoryVaultRepository()
+            val project = OpenTasksFixtures.studioProject
+            val candidates = repository.currentWorkspace().tasks.filter {
+                it.projectId == project.id && it.deletedAt == null &&
+                    !it.isCompleted && it.parentTaskId == null && !it.isBlocked
+            }
+            val parent = candidates[0]
+            val child = candidates[1]
+            repository.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+            repository.execute(DomainCommand.DeleteTask(parent.id))
+            val restored = repository.execute(DomainCommand.RestoreTask(child.id))
+                as CommandResult.Success
+            repository.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+            val beforeUndo = repository.currentWorkspace().tasks.first { it.id == child.id }
+
+            val rejected = repository.execute(requireNotNull(restored.undo))
+                as CommandResult.Rejected
+
+            assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+            assertEquals(
+                beforeUndo,
+                repository.currentWorkspace().tasks.first { it.id == child.id },
+            )
         }
     }
 

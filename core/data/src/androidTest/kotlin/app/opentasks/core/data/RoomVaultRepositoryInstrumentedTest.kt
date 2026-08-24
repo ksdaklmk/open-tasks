@@ -2992,14 +2992,28 @@ class RoomVaultRepositoryInstrumentedTest {
                 snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt != null
             }
         }
-        repository!!.execute(DomainCommand.RestoreTask(child.id))
+        val restoreResult = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
         val detached = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt == null && task.parentTaskId == null
+                } == true
             }
         }.tasks.first { it.id == child.id }
         assertNull(detached.deletedAt)
         assertNull(detached.parentTaskId)
+
+        repository!!.execute(requireNotNull(restoreResult.undo))
+        val reBinned = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt != null && task.parentTaskId == parent.id
+                } == true
+            }
+        }.tasks.first { it.id == child.id }
+        assertNotNull(reBinned.deletedAt)
+        assertEquals(parent.id, reBinned.parentTaskId)
     }
 
     @Test
@@ -3162,15 +3176,63 @@ class RoomVaultRepositoryInstrumentedTest {
 
         // Restoring the child must detach it: its parent is live, but no
         // longer in the same project.
-        repository!!.execute(DomainCommand.RestoreTask(child.id))
+        val restoreResult = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
         val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt == null && task.parentTaskId == null
+                } == true
             }
         }.tasks.first { it.id == child.id }
         assertNull(restored.deletedAt)
         assertNull(restored.parentTaskId)
         assertEquals(project.id, restored.projectId)
+
+        repository!!.execute(requireNotNull(restoreResult.undo))
+        val reBinned = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt != null && task.parentTaskId == parent.id
+                } == true
+            }
+        }.tasks.first { it.id == child.id }
+        assertNotNull(reBinned.deletedAt)
+        assertEquals(parent.id, reBinned.parentTaskId)
+    }
+
+    @Test
+    fun restoreUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        openRepository(now = { Instant.parse("2026-08-24T05:00:00Z") })
+        repository!!.execute(DomainCommand.CreateTask("Purged restore parent"))
+        repository!!.execute(DomainCommand.CreateTask("Purged restore child"))
+        val pair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Purged restore parent" } &&
+                    snapshot.tasks.any { it.title == "Purged restore child" }
+            }
+        }.tasks.associateBy { it.title }
+        val parent = checkNotNull(pair["Purged restore parent"])
+        val child = checkNotNull(pair["Purged restore child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        val restored = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
+        repository!!.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+        val beforeUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == parent.id }
+            }
+        }.tasks.first { it.id == child.id }
+
+        val rejected = repository!!.execute(requireNotNull(restored.undo))
+            as CommandResult.Rejected
+
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            beforeUndo,
+            repository!!.currentWorkspace().tasks.first { it.id == child.id },
+        )
     }
 
     @Test

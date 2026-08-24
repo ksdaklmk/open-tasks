@@ -364,9 +364,14 @@ sealed interface DomainCommand {
 
     data class RestoreTask(val taskId: TaskId) : DomainCommand
 
+    /**
+     * [restoreParentTaskId] is repository-produced Undo metadata used only when
+     * re-binning a task whose restore safely detached it.
+     */
     data class DeleteTask(
         val taskId: TaskId,
         val deletedAt: Instant = Instant.now(),
+        val restoreParentTaskId: TaskId? = null,
     ) : DomainCommand
 
     data class PermanentlyDeleteTask(
