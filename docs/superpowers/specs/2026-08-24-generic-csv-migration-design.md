@@ -1,8 +1,13 @@
 # Generic CSV Migration
 
-Date: 2026-08-24. Status: approved design, pre-implementation.
+Date: 2026-08-24. Status: approved design, implementation paused after Task 4.
 Authority: this is the second delivery slice in the agreed sequence:
 Undo gaps, migration friction, version/trust footer, then Play internal beta.
+
+Tasks 1–3 are implementation- and task-review complete. Task 4 is implemented
+with focused and full host gates passing, but its task-scoped review remains
+the first action on resume. The UI, picker, navigation, and Welcome handoff in
+Tasks 5–8 have not started.
 
 ## Outcome
 

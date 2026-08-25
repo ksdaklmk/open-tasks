@@ -1,46 +1,54 @@
 # Open Tasks Handoff
 
-## Current state — Undo plan closed; generic CSV next, 25 August 2026
+## Current state — generic CSV paused after Task 4 implementation, 25 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
 remains authoritative for release identity and qualification evidence.
 
-Implementation commits `7a3063f` (`fix: restore subtask parent on move undo`)
-and `5f81498` (`fix: preserve subtask parent on restore undo`) implement the two
-bounded subtask Undo asymmetries in both repository engines. Final-review fix
-commit `d4dc481863cca2f59fab9deb414f23970f7e5a7d` (`Fix replayed delete
-undo validation`) implements the requested corrections for the two Important
-follow-ups. A metadata-bearing `DeleteTask` now repairs an already-binned
-task's historical deletion instant and parent atomically when needed, without
-another Bin activity or fabricated Undo, and rejects invalid delayed replay
-before mutation. Room's authoritative `DeleteTask` and `UpdateTask` rechecks
-now count every direct child row, including binned children, while live-only
-subtree binning remains unchanged.
+The Undo plan is closed. Documentation commit `12ac37e` records its clean
+scoped re-review and names the approved generic CSV migration plan as the next
+slice.
 
-The final-review change adds no UI, schema or migration, backup-format or
-fixture change, dependency, permission, version, release identity, or Play
-state. At exact code head `d4dc481863cca2f59fab9deb414f23970f7e5a7d`,
-the two focused host regressions exited 0 (`BUILD SUCCESSFUL in 4s`; 57
-actionable tasks: 7 executed, 50 up-to-date). Room Android-test Kotlin
-compilation exited 0 (`BUILD SUCCESSFUL in 1s`; 48 actionable tasks: 2
-executed, 46 up-to-date). The full host gate `testDebugUnitTest lintDebug
-:app:assembleDebug` exited 0 (`BUILD SUCCESSFUL in 47s`; 553 actionable tasks:
-44 executed, 509 up-to-date; 1,427 tests, zero failures, errors, or skips).
+Generic CSV Tasks 1–3 are implemented and task-review clean on `main`:
 
-Connected Room execution was not run: `/Users/kk/Library/Android/sdk/platform-tools/adb
-devices -l` exited 0 and reported only `List of devices attached`, with no
-selected disposable target. The protected `Pixel_10_Pro_Fold` was not touched.
+- `b22d967` (`refactor: share bounded csv record parsing`) extracts one bounded
+  UTF-8/RFC 4180 reader while preserving the strict Open Tasks CSV parser;
+- `418dbcd` (`feat: resolve mapped csv status semantics`) adds the optional
+  transient semantic hint and keeps both repository engines on one atomic
+  import planner; and
+- `4db6864` (`feat: suggest generic task csv mappings`) adds the Android-free
+  mapping vocabulary and conservative deterministic suggestions.
 
-One fresh scoped re-review completed over exact range
-`e8d135e4bf62bb1b379f6e1563845e59271de434..5ea1ed2ff2f5ac2ecce7ed10d97259e334b306a1`.
-It marked both recorded Important findings addressed and found no new Critical,
-Important, or Minor regression in the fix range. The Undo plan is closed.
+Task 4 implementation commit `7e8ac2e` (`feat: map generic task csv rows`)
+adds the pure full-field conversion/review engine and its JVM tests in exactly
+`GenericTasksCsvMapper.kt` and `GenericTasksCsvMapperTest.kt`. The final
+focused command passed 53 tests: 17 mapper, 21 strict-parser, and 15 in-memory
+import tests, with zero failures or errors. The full host gate
+`testDebugUnitTest lintDebug :app:assembleDebug` also passed
+(`BUILD SUCCESSFUL in 2m 56s`; 553 actionable tasks: 164 executed, 389
+up-to-date).
 
-Continue with Task 1 of
-`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`. Its design and
-plan are already approved; do not repeat brainstorming or bundle the
-version/trust footer or Play internal beta work into this slice.
+The owner requested a safe pause immediately after the Task 4 commit and
+implementation report. Its required task-scoped review has **not started**, so
+Task 4 is not yet marked complete. No Task 5 brief, implementation, test, or
+review has started. Through this checkpoint the slice adds no product UI,
+picker, navigation, Room migration, backup/archive change, dependency,
+permission, network path, version, release artifact, or Play state.
+
+The ignored SDD workspace remains at
+`.superpowers/sdd/2026-08-24-generic-csv-migration-plan/` with the ledger,
+Task 1–4 briefs and reports, and Task 1–3 review packages. On resume, first run
+exactly one task-scoped review of `4db6864..7e8ac2e` using
+`task-4-brief.md` and `task-4-report.md`. If it is clean, record Task 4 complete
+and begin Task 5. If it reports findings, enter the recorded SDD fix loop. Do
+not repeat Tasks 1–4, rerun brainstorming, or start Task 5 before that review.
+
+Task 2's Room Android tests compiled, but connected execution was not run
+because ADB listed no disposable target. The protected `Pixel_10_Pro_Fold`
+was not touched. Preserve the unrelated modified Stage 3 Drive plan, deleted
+Thai-dashboard spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked
+onboarding plan/design files.
 
 ## Previous planning checkpoint — enhancement execution paused, 24 August 2026
 
