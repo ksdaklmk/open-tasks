@@ -19,8 +19,6 @@ import app.opentasks.core.model.WorkflowStatus
 import app.opentasks.core.model.WorkspaceId
 import app.opentasks.core.model.WorkspaceSnapshot
 import app.opentasks.core.model.ZonedMoment
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.DateTimeException
 import java.time.Instant
@@ -76,18 +74,27 @@ internal sealed interface TasksImportPlanResult {
 
 fun parseTasksCsv(bytes: ByteArray): CsvParseResult {
     if (bytes.size > MAX_TASKS_CSV_BYTES) return malformed(0, "CSV exceeds 5 MiB")
-    val text = try {
-        StandardCharsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(java.nio.ByteBuffer.wrap(bytes))
-            .toString()
-    } catch (_: java.nio.charset.CharacterCodingException) {
-        return malformed(0, "CSV is not valid UTF-8")
+    val text = when (val decoded = decodeCsvUtf8(bytes)) {
+        is CsvTextResult.Ready -> decoded.text
+        is CsvTextResult.Failed -> return malformed(0, "CSV is not valid UTF-8")
     }
-    val records = when (val parsed = parseRecords(text)) {
-        is RecordParseResult.Invalid -> return malformed(parsed.rowNumber, parsed.reason)
-        is RecordParseResult.Valid -> parsed.records
+    val records = when (
+        val parsed = readCsvRecords(
+            text,
+            maxDataRows = MAX_IMPORT_ROWS,
+            maxColumns = 14,
+        )
+    ) {
+        is CsvRecordResult.Ready -> parsed.records
+        is CsvRecordResult.Failed -> return malformed(
+            parsed.rowNumber,
+            when (parsed.kind) {
+                CsvRecordFailureKind.INVALID_UTF8 -> "CSV is not valid UTF-8"
+                CsvRecordFailureKind.MALFORMED -> parsed.message
+                CsvRecordFailureKind.TOO_MANY_ROWS -> "Import at most $MAX_IMPORT_ROWS tasks"
+                CsvRecordFailureKind.TOO_MANY_COLUMNS -> "Expected 14 fields"
+            },
+        )
     }
     if (records.firstOrNull() != WorkspaceCsvWriter.TASKS_HEADER) {
         return malformed(0, "CSV header does not match the Tasks export")
@@ -226,128 +233,6 @@ internal fun buildTasksImportPlan(
         TasksImportPlan(tasks, projects.values.toList(), tags.values.toList()),
     )
 }
-
-private sealed interface RecordParseResult {
-    data class Valid(val records: List<List<String>>) : RecordParseResult
-    data class Invalid(val rowNumber: Int, val reason: String) : RecordParseResult
-}
-
-private fun parseRecords(text: String): RecordParseResult {
-    val records = mutableListOf<List<String>>()
-    var fields = mutableListOf<String>()
-    val field = StringBuilder()
-    var state = FieldState.START
-    var index = 0
-    fun rowNumber() = records.size
-    fun tooManyRows() = RecordParseResult.Invalid(
-        MAX_IMPORT_ROWS + 1,
-        "Import at most $MAX_IMPORT_ROWS tasks",
-    )
-    fun finishField() {
-        fields += field.toString()
-        field.setLength(0)
-        state = FieldState.START
-    }
-    fun finishSeparatedField(): Boolean {
-        finishField()
-        return fields.size < WorkspaceCsvWriter.TASKS_HEADER.size
-    }
-    fun finishRecord(): Boolean {
-        finishField()
-        if (records.size > MAX_IMPORT_ROWS) return false
-        records += fields
-        fields = mutableListOf()
-        return true
-    }
-    while (index < text.length) {
-        val char = text[index]
-        when (state) {
-            FieldState.START -> when (char) {
-                '"' -> state = FieldState.QUOTED
-                ',' -> if (!finishSeparatedField()) {
-                    return RecordParseResult.Invalid(rowNumber(), "Expected 14 fields")
-                }
-                '\n' -> if (!finishRecord()) {
-                    return tooManyRows()
-                }
-                '\r' -> {
-                    if (index + 1 >= text.length || text[index + 1] != '\n') {
-                        return RecordParseResult.Invalid(rowNumber(), "Bare CR outside a quoted field")
-                    }
-                    if (!finishRecord()) {
-                        return tooManyRows()
-                    }
-                    index++
-                }
-                else -> {
-                    field.append(char)
-                    state = FieldState.UNQUOTED
-                }
-            }
-            FieldState.UNQUOTED -> when (char) {
-                '"' -> return RecordParseResult.Invalid(rowNumber(), "Quote in unquoted field")
-                ',' -> if (!finishSeparatedField()) {
-                    return RecordParseResult.Invalid(rowNumber(), "Expected 14 fields")
-                }
-                '\n' -> if (!finishRecord()) {
-                    return tooManyRows()
-                }
-                '\r' -> {
-                    if (index + 1 >= text.length || text[index + 1] != '\n') {
-                        return RecordParseResult.Invalid(rowNumber(), "Bare CR outside a quoted field")
-                    }
-                    if (!finishRecord()) {
-                        return tooManyRows()
-                    }
-                    index++
-                }
-                else -> field.append(char)
-            }
-            FieldState.QUOTED -> when {
-                char != '"' -> field.append(char)
-                index + 1 < text.length && text[index + 1] == '"' -> {
-                    field.append('"')
-                    index++
-                }
-                else -> state = FieldState.AFTER_QUOTE
-            }
-            FieldState.AFTER_QUOTE -> when (char) {
-                ',' -> if (!finishSeparatedField()) {
-                    return RecordParseResult.Invalid(rowNumber(), "Expected 14 fields")
-                }
-                '\n' -> if (!finishRecord()) {
-                    return tooManyRows()
-                }
-                '\r' -> {
-                    if (index + 1 >= text.length || text[index + 1] != '\n') {
-                        return RecordParseResult.Invalid(rowNumber(), "Bare CR after quoted field")
-                    }
-                    if (!finishRecord()) {
-                        return tooManyRows()
-                    }
-                    index++
-                }
-                else -> return RecordParseResult.Invalid(
-                    rowNumber(),
-                    "Text after closing quote",
-                )
-            }
-        }
-        index++
-    }
-    if (state == FieldState.QUOTED) {
-        return RecordParseResult.Invalid(rowNumber(), "Unclosed quoted field")
-    }
-    if (
-        (state != FieldState.START || field.isNotEmpty() || fields.isNotEmpty()) &&
-        !finishRecord()
-    ) {
-        return tooManyRows()
-    }
-    return RecordParseResult.Valid(records)
-}
-
-private enum class FieldState { START, UNQUOTED, QUOTED, AFTER_QUOTE }
 
 private sealed interface RowParseResult {
     data class Valid(val row: ImportedTaskRow) : RowParseResult
@@ -701,7 +586,6 @@ private fun invalid(row: Int?, reason: RejectionReason, message: String) =
 
 private fun malformed(rowNumber: Int, reason: String) = CsvParseResult.Malformed(rowNumber, reason)
 
-private const val MAX_IMPORT_ROWS = 5_000
 private const val MAX_IMPORTED_NEW_PROJECTS = 500
 private const val MAX_IMPORTED_NEW_TAGS = 1_000
 private const val MAX_DURATION_MINUTES = Long.MAX_VALUE / 60
