@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — Undo final fix committed; scoped re-review paused, 25 August 2026
+## Current state — Undo plan closed; generic CSV next, 25 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
@@ -32,20 +32,15 @@ Connected Room execution was not run: `/Users/kk/Library/Android/sdk/platform-to
 devices -l` exited 0 and reported only `List of devices attached`, with no
 selected disposable target. The protected `Pixel_10_Pro_Fold` was not touched.
 
-The owner requested a safe stop before the required scoped re-review finished.
-The interrupted reviewer produced no report and made no code or documentation
-change. The ignored SDD workspace remains at
-`.superpowers/sdd/2026-08-24-undo-gap-closure-plan/`, including the final-fix
-brief, implementation report, and exact review package for
+One fresh scoped re-review completed over exact range
 `e8d135e4bf62bb1b379f6e1563845e59271de434..5ea1ed2ff2f5ac2ecce7ed10d97259e334b306a1`.
+It marked both recorded Important findings addressed and found no new Critical,
+Important, or Minor regression in the fix range. The Undo plan is closed.
 
-On resume, run exactly one fresh scoped re-review of that range against the two
-recorded Important findings. If both are addressed and the fix range introduces
-no Critical, Important, or Minor regression, record the clean result and close
-the Undo plan. Only then start Task 1 of
-`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`; do not repeat
-CSV brainstorming or design approval, and do not bundle the version/trust footer
-or Play internal beta work into that slice.
+Continue with Task 1 of
+`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`. Its design and
+plan are already approved; do not repeat brainstorming or bundle the
+version/trust footer or Play internal beta work into this slice.
 
 ## Previous planning checkpoint — enhancement execution paused, 24 August 2026
 
