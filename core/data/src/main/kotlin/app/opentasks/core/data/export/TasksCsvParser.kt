@@ -190,9 +190,11 @@ internal fun buildTasksImportPlan(
                     projects[project.name]?.statuses
                         ?: snapshot.workflowStatuses.filter { it.projectId == project.id }
                 }
-                statuses.first {
-                    it.archivedAt == null && it.semanticStatus == selected.semanticStatus
-                }
+                statuses
+                    .filter {
+                        it.archivedAt == null && it.semanticStatus == selected.semanticStatus
+                    }
+                    .minBy(WorkflowStatus::rank)
             }
         }
         val tagIds = resolved.tags.mapTo(linkedSetOf()) { selected ->
@@ -440,25 +442,65 @@ private fun resolveTaskImport(
                 it.projectId == null && it.archivedAt == null
             }
         }
+        val semanticHint = row.statusSemantic
+        if (
+            semanticHint != null && semanticHint !in setOf(
+                SemanticStatus.BACKLOG,
+                SemanticStatus.STARTED,
+                SemanticStatus.COMPLETED,
+            )
+        ) {
+            return invalid(
+                row.sourceRowNumber,
+                RejectionReason.IMPORT_STATUS_CONFLICT,
+                "CSV row ${row.sourceRowNumber} uses an unsupported mapped status.",
+            )
+        }
         val statusName = row.statusName?.trim()?.ifBlank { null }
         val exact = statusName?.let { name -> availableStatuses.firstOrNull { it.name == name } }
         if (
-            exact == null && statusName != null &&
+            semanticHint == null && exact == null && statusName != null &&
             availableStatuses.any { it.name.equals(statusName, ignoreCase = true) }
         ) return collision(row, "status", statusName)
-        val status = if (row.completedAt != null) {
-            exact?.takeIf { it.semanticStatus == SemanticStatus.COMPLETED }
-                ?.let(StatusSelection::Existing)
-                ?: StatusSelection.Default(SemanticStatus.COMPLETED)
-        } else {
-            if (exact?.semanticStatus == SemanticStatus.COMPLETED) {
-                return invalid(
-                    row.sourceRowNumber,
-                    RejectionReason.IMPORT_STATUS_CONFLICT,
-                    "CSV row ${row.sourceRowNumber} uses a completed status without a completion instant.",
-                )
+        val semanticMatch = semanticHint?.let { requested ->
+            availableStatuses
+                .filter { it.semanticStatus == requested }
+                .minByOrNull(WorkflowStatus::rank)
+        }
+        val status = when {
+            row.completedAt != null -> {
+                val completed = exact?.takeIf { it.semanticStatus == SemanticStatus.COMPLETED }
+                    ?: availableStatuses
+                        .filter { it.semanticStatus == SemanticStatus.COMPLETED }
+                        .minByOrNull(WorkflowStatus::rank)
+                    ?: return invalid(
+                        row.sourceRowNumber,
+                        RejectionReason.IMPORT_STATUS_CONFLICT,
+                        "CSV row ${row.sourceRowNumber} has no active completed status.",
+                    )
+                StatusSelection.Existing(completed)
             }
-            exact?.let(StatusSelection::Existing) ?: StatusSelection.Default(SemanticStatus.BACKLOG)
+            semanticHint == SemanticStatus.COMPLETED -> return invalid(
+                row.sourceRowNumber,
+                RejectionReason.IMPORT_STATUS_CONFLICT,
+                "CSV row ${row.sourceRowNumber} uses a completed status without a completion instant.",
+            )
+            semanticHint != null -> StatusSelection.Existing(
+                exact?.takeIf { it.semanticStatus == semanticHint }
+                    ?: semanticMatch
+                    ?: return invalid(
+                        row.sourceRowNumber,
+                        RejectionReason.IMPORT_STATUS_CONFLICT,
+                        "CSV row ${row.sourceRowNumber} has no active mapped status.",
+                    ),
+            )
+            exact?.semanticStatus == SemanticStatus.COMPLETED -> return invalid(
+                row.sourceRowNumber,
+                RejectionReason.IMPORT_STATUS_CONFLICT,
+                "CSV row ${row.sourceRowNumber} uses a completed status without a completion instant.",
+            )
+            exact != null -> StatusSelection.Existing(exact)
+            else -> StatusSelection.Default(SemanticStatus.BACKLOG)
         }
         if (
             status is StatusSelection.Default &&

@@ -54,6 +54,7 @@ data class ImportedTaskRow(
     val estimateMinutes: Long?,
     val tagNames: List<String>,
     val description: String,
+    val statusSemantic: SemanticStatus? = null,
 )
 
 data class ImportedTaskReceipt(
