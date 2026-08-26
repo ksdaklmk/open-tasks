@@ -139,7 +139,6 @@ class WelcomeScreenInstrumentedTest {
         composeRule.onNodeWithTag("welcome-expanded").assertIsDisplayed()
         composeRule.onNodeWithTag("welcome-compact").assertDoesNotExist()
         composeRule.onNodeWithTag("welcome-import")
-            .performScrollTo()
             .assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp)
     }
