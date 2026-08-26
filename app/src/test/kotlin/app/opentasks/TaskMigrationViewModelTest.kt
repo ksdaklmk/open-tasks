@@ -13,6 +13,7 @@ import app.opentasks.feature.more.TaskMigrationLoadFailure
 import app.opentasks.feature.more.TaskMigrationUiState
 import java.time.Instant
 import java.time.ZoneId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -151,6 +152,31 @@ class TaskMigrationViewModelTest {
 
         assertNotNull(subject.confirm(emptyTaskCsvTarget()))
         assertNull(subject.confirm(emptyTaskCsvTarget()))
+    }
+
+    @Test
+    fun mappingEditDuringCommitDoesNotAllowASecondConfirm() {
+        val subject = viewModel()
+        load(subject, "Title\r\nOne\r\n")
+
+        assertNotNull(subject.confirm(emptyTaskCsvTarget()))
+        subject.mapField(TaskCsvField.TITLE, 0)
+
+        assertTrue(review(subject).isCommitting)
+        assertNull(subject.confirm(emptyTaskCsvTarget()))
+    }
+
+    @Test
+    fun queryCancellationIsRethrownDuringDocumentRead() {
+        try {
+            taskMigrationDisplayName {
+                throw CancellationException("test cancellation")
+            }
+        } catch (_: CancellationException) {
+            return
+        }
+
+        org.junit.Assert.fail("query cancellation was swallowed")
     }
 
     @Test

@@ -203,6 +203,7 @@ class TaskMigrationViewModel internal constructor(
     }
 
     fun chooseAnother() {
+        if (isCommitting()) return
         val current = draft ?: return
         targetAtSelection = current.target
         openDocumentRequests.trySend(Unit)
@@ -217,6 +218,7 @@ class TaskMigrationViewModel internal constructor(
     private fun updateMapping(
         transform: (TaskCsvMapping, GenericTasksCsvDocument) -> TaskCsvMapping,
     ) {
+        if (isCommitting()) return
         val current = draft ?: return
         val nextDraft = current.copy(mapping = transform(current.mapping, current.document))
         draft = nextDraft
@@ -234,6 +236,9 @@ class TaskMigrationViewModel internal constructor(
         zone = draft.zone,
         completionFallback = now(),
     )
+
+    private fun isCommitting() =
+        (mutableState.value as? TaskMigrationUiState.Review)?.isCommitting == true
 
     private fun app.opentasks.core.data.export.GenericTasksCsvReview.toUi(
         draft: Draft,
@@ -314,7 +319,7 @@ private fun remap(
 }
 
 private fun Context.readTaskMigrationDocument(uri: Uri): SelectedTaskMigrationDocument? {
-    val displayName = try {
+    val displayName = taskMigrationDisplayName {
         contentResolver.query(
             uri,
             arrayOf(OpenableColumns.DISPLAY_NAME),
@@ -331,11 +336,17 @@ private fun Context.readTaskMigrationDocument(uri: Uri): SelectedTaskMigrationDo
                 null
             }
         }
-    } catch (_: Exception) {
-        null
-    } ?: "tasks.csv"
+    }
     val bytes = contentResolver.openInputStream(uri)?.use { stream ->
         stream.readNBytes(MAX_TASKS_CSV_BYTES + 1)
     } ?: return null
     return SelectedTaskMigrationDocument(displayName, bytes)
 }
+
+internal fun taskMigrationDisplayName(query: () -> String?): String = try {
+    query()
+} catch (cancellation: CancellationException) {
+    throw cancellation
+} catch (_: Exception) {
+    null
+} ?: "tasks.csv"
