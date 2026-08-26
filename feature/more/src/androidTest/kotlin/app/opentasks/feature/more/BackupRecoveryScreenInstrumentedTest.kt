@@ -231,6 +231,32 @@ class BackupRecoveryScreenInstrumentedTest {
     }
 
     @Test
+    fun migrationEntryIsTopLevelAndDoesNotOpenBackupRecovery() {
+        val migrations = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = emptyList(),
+                    onImportFromAnotherApp = { migrations.incrementAndGet() },
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("open-task-migration")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(1, migrations.get())
+        composeRule.onNodeWithTag("backup-screen").assertDoesNotExist()
+        composeRule.onNodeWithTag("more-overview").assertIsDisplayed()
+    }
+
+    @Test
     fun moreForwardsTransientInitialFailureToSecureReprepareAction() {
         val runtimeRetries = AtomicInteger()
         composeRule.setContent {

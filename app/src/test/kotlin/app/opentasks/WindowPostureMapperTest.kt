@@ -6,6 +6,49 @@ import org.junit.Test
 
 class WindowPostureMapperTest {
     @Test
+    fun migrationPaneChoosesTheLargestUnoccludedPhysicalPane() {
+        assertEquals(
+            MigrationPane(0, 0, 1_000, 800),
+            largestMigrationPane(1_000, 800, emptyList()),
+        )
+        assertEquals(
+            MigrationPane(0, 0, 480, 800),
+            largestMigrationPane(
+                1_000,
+                800,
+                listOf(RawFold(480, 0, 40, 800, isSeparating = true)),
+            ),
+        )
+        assertEquals(
+            MigrationPane(0, 320, 480, 800),
+            largestMigrationPane(
+                1_000,
+                800,
+                listOf(
+                    RawFold(480, 0, 40, 800, isSeparating = true),
+                    RawFold(0, 300, 1_000, 20, isSeparating = true),
+                ),
+            ),
+        )
+        assertEquals(
+            MigrationPane(0, 0, 500, 800),
+            largestMigrationPane(
+                1_000,
+                800,
+                listOf(RawFold(500, 0, 0, 800, isSeparating = true)),
+            ),
+        )
+        assertEquals(
+            MigrationPane(0, 0, 1_000, 800),
+            largestMigrationPane(
+                1_000,
+                800,
+                listOf(RawFold(480, 0, 40, 800, isSeparating = false)),
+            ),
+        )
+    }
+
+    @Test
     fun tallFoldBecomesVerticalFoldLineInDp() {
         val posture = WindowPostureMapper.map(
             widthDp = 840,

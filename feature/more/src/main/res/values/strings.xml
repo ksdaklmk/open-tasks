@@ -369,6 +369,8 @@
     <string name="automation_threshold_days_label">Days without activity</string>
 
     <string name="migration_title">Import from another app</string>
+    <string name="task_migration_title">Import from another app</string>
+    <string name="task_migration_more_supporting">Bring tasks from a CSV file</string>
     <string name="migration_source_summary">%1$s • %2$d rows • %3$d columns</string>
     <string name="migration_create_only">This creates new tasks. Importing the same file again creates duplicates.</string>
     <string name="migration_zone_disclosure">Dates without an offset use %1$s.</string>

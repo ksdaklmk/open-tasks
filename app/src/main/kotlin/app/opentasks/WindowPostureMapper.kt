@@ -10,6 +10,57 @@ data class RawFold(
     val isSeparating: Boolean,
 )
 
+internal data class MigrationPane(
+    val leftPx: Int,
+    val topPx: Int,
+    val rightPx: Int,
+    val bottomPx: Int,
+)
+
+private data class PixelSpan(val start: Int, val endExclusive: Int) {
+    val length: Int get() = endExclusive - start
+}
+
+internal fun largestMigrationPane(
+    widthPx: Int,
+    heightPx: Int,
+    folds: List<RawFold>,
+): MigrationPane {
+    require(widthPx > 0 && heightPx > 0)
+    val separating = folds.filter(RawFold::isSeparating)
+    val horizontal = largestSpan(
+        widthPx,
+        separating.filter { it.heightPx >= it.widthPx }
+            .map { PixelSpan(it.leftPx, it.leftPx + it.widthPx) },
+    )
+    val vertical = largestSpan(
+        heightPx,
+        separating.filter { it.heightPx < it.widthPx }
+            .map { PixelSpan(it.topPx, it.topPx + it.heightPx) },
+    )
+    return MigrationPane(
+        leftPx = horizontal.start,
+        topPx = vertical.start,
+        rightPx = horizontal.endExclusive,
+        bottomPx = vertical.endExclusive,
+    )
+}
+
+private fun largestSpan(length: Int, blocked: List<PixelSpan>): PixelSpan {
+    var cursor = 0
+    val available = mutableListOf<PixelSpan>()
+    blocked.sortedBy(PixelSpan::start).forEach { raw ->
+        val start = raw.start.coerceIn(0, length)
+        val end = raw.endExclusive.coerceIn(start, length)
+        if (start > cursor) available += PixelSpan(cursor, start)
+        cursor = maxOf(cursor, end)
+    }
+    if (cursor < length) available += PixelSpan(cursor, length)
+    return available.maxWithOrNull(
+        compareBy<PixelSpan>(PixelSpan::length).thenBy { -it.start },
+    ) ?: PixelSpan(0, length)
+}
+
 object WindowPostureMapper {
     fun map(
         widthDp: Int,

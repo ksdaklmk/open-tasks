@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MoveToInbox
 import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AlertDialog
@@ -128,6 +129,7 @@ fun MoreScreen(
     onShareDashboard: (InsightsSelection, Boolean) -> Unit = { _, _ -> },
     onDismissDashboardOutcome: () -> Unit = {},
     onOpenReview: () -> Unit = {},
+    onImportFromAnotherApp: () -> Unit = {},
     onRestoreProject: (ProjectId) -> Unit,
     onRestoreTask: (TaskId) -> Unit,
     onPermanentlyDeleteTask: (TaskId) -> Unit,
@@ -403,6 +405,13 @@ fun MoreScreen(
                 supportingText = stringResource(R.string.review_open),
                 onClick = onOpenReview,
                 modifier = Modifier.testTag("open-review"),
+            )
+            DestinationRow(
+                icon = Icons.Rounded.MoveToInbox,
+                title = stringResource(R.string.task_migration_title),
+                supportingText = stringResource(R.string.task_migration_more_supporting),
+                onClick = onImportFromAnotherApp,
+                modifier = Modifier.testTag("open-task-migration"),
             )
             DestinationRow(
                 icon = Icons.Rounded.Description,

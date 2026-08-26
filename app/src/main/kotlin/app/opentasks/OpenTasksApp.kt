@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -109,8 +110,10 @@ import app.opentasks.calendar.CalendarEventDraft
 import app.opentasks.calendar.calendarEventDraft
 import app.opentasks.calendar.calendarInsertIntent
 import app.opentasks.core.data.export.CsvTable
+import app.opentasks.core.data.export.toTaskCsvTarget
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.domain.DomainCommand
+import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.RecoveryPassphrasePolicy
 import app.opentasks.core.domain.ScheduleMoveFailure
 import app.opentasks.core.domain.ScheduleMovePlan
@@ -153,6 +156,7 @@ import app.opentasks.feature.home.MyDayPlanSheet
 import app.opentasks.feature.more.LockDelayOption
 import app.opentasks.feature.more.MoreScreen
 import app.opentasks.feature.more.ReviewScreen
+import app.opentasks.feature.more.TaskMigrationScreen
 import app.opentasks.feature.projects.NewProjectSheet
 import app.opentasks.feature.projects.ProjectEdit
 import app.opentasks.feature.projects.ProjectsScreen
@@ -305,6 +309,7 @@ fun OpenTasksApp(
     onOpenHomeConsumed: () -> Unit = {},
     onOpenRecovery: () -> Unit = {},
     viewModel: WorkspaceViewModel = viewModel(),
+    taskMigrationViewModel: TaskMigrationViewModel = viewModel(),
     backupViewModel: BackupViewModel = viewModel(),
     encryptedBackupViewModel: EncryptedBackupViewModel = viewModel(),
     attachmentViewModel: AttachmentIntakeViewModel = viewModel(),
@@ -314,6 +319,7 @@ fun OpenTasksApp(
 ) {
     OpenTasksTheme {
         val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+        val taskMigrationState by taskMigrationViewModel.state.collectAsStateWithLifecycle()
         val backupPresentation by backupViewModel.presentation.collectAsStateWithLifecycle()
         val encryptedBackupPresentation by
             encryptedBackupViewModel.presentation.collectAsStateWithLifecycle()
@@ -374,6 +380,11 @@ fun OpenTasksApp(
             ActivityResultContracts.OpenDocument(),
         ) { uri ->
             vaultTransferViewModel.onImportDocumentSelected(uri)
+        }
+        val taskMigrationDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            taskMigrationViewModel.onDocumentSelected(uri)
         }
         val csvExportInProgress by
             vaultTransferViewModel.csvExportInProgress.collectAsStateWithLifecycle()
@@ -457,6 +468,13 @@ fun OpenTasksApp(
                 vaultImportDocumentLauncher.launch(arrayOf("application/octet-stream"))
             }
         }
+        LaunchedEffect(taskMigrationViewModel, taskMigrationDocumentLauncher) {
+            for (ignored in taskMigrationViewModel.openDocumentRequests) {
+                taskMigrationDocumentLauncher.launch(
+                    arrayOf("text/csv", "text/comma-separated-values", "text/plain"),
+                )
+            }
+        }
         LaunchedEffect(vaultTransferViewModel, csvExportDocumentLauncher) {
             for (table in vaultTransferViewModel.csvCreateDocumentRequests) {
                 csvExportDocumentLauncher.launch(csvExportFileName(table))
@@ -520,7 +538,7 @@ fun OpenTasksApp(
             ActivityResultContracts.OpenDocument(),
             acceptPickedAttachment,
         )
-        var rawFolds by remember { mutableStateOf(emptyList<RawFold>()) }
+        val rawFolds = rememberRawFolds(activity)
         var permissionStateVersion by remember { mutableIntStateOf(0) }
         var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
         val lifecycleOwner = LocalLifecycleOwner.current
@@ -912,24 +930,6 @@ fun OpenTasksApp(
             }
         }
 
-        LaunchedEffect(activity) {
-            WindowInfoTracker.getOrCreate(activity)
-                .windowLayoutInfo(activity)
-                .collect { layout ->
-                    rawFolds = layout.displayFeatures
-                        .filterIsInstance<FoldingFeature>()
-                        .map { feature ->
-                            RawFold(
-                                leftPx = feature.bounds.left,
-                                topPx = feature.bounds.top,
-                                widthPx = feature.bounds.width(),
-                                heightPx = feature.bounds.height(),
-                                isSeparating = feature.isSeparating,
-                            )
-                        }
-                }
-        }
-
         LaunchedEffect(quickAddSignal) {
             if (quickAddSignal > 0) {
                 // Captured ahead of `onQuickAddConsumed()` below: the sheet
@@ -1028,7 +1028,8 @@ fun OpenTasksApp(
             }
         }
 
-        BoxWithConstraints(
+        val migrationState = taskMigrationState
+        if (migrationState == null) BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .onFocusEvent { focusState -> editableFocused = focusState.hasFocus }
@@ -1784,6 +1785,9 @@ fun OpenTasksApp(
                                         viewModel.startReview()
                                         navigate(ReviewRoute)
                                     },
+                                    onImportFromAnotherApp = {
+                                        taskMigrationViewModel.begin(snapshot.toTaskCsvTarget())
+                                    },
                                     today = today,
                                     onRestoreProject = { projectId ->
                                         viewModel.execute(
@@ -1986,6 +1990,35 @@ fun OpenTasksApp(
                 when {
                     selectedTaskId != null -> viewModel.closeTask()
                     selectedProjectId != null -> viewModel.closeProject()
+                }
+            }
+        } else {
+            TaskMigrationPane(folds = rawFolds) {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = MaterialTheme.colorScheme.background,
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                ) { _ ->
+                    TaskMigrationScreen(
+                        state = migrationState,
+                        onMapField = taskMigrationViewModel::mapField,
+                        onStatusChoice = taskMigrationViewModel::chooseStatus,
+                        onPriorityChoice = taskMigrationViewModel::choosePriority,
+                        onDateOrder = taskMigrationViewModel::chooseDateOrder,
+                        onEstimateUnit = taskMigrationViewModel::chooseEstimateUnit,
+                        onTagMode = taskMigrationViewModel::chooseTagMode,
+                        onImport = {
+                            taskMigrationViewModel.confirm(snapshot.toTaskCsvTarget())?.let { rows ->
+                                viewModel.execute(DomainCommand.ImportTasks(rows)) { result ->
+                                    val success = result is CommandResult.Success
+                                    taskMigrationViewModel.onCommitFinished(success)
+                                    if (success) navigate(TasksRoute)
+                                }
+                            }
+                        },
+                        onChooseAnother = taskMigrationViewModel::chooseAnother,
+                        onCancel = taskMigrationViewModel::cancel,
+                    )
                 }
             }
         }
@@ -2232,6 +2265,57 @@ fun OpenTasksApp(
                     calendarPreview = null
                 },
             )
+        }
+    }
+}
+
+@Composable
+internal fun rememberRawFolds(activity: Activity): List<RawFold> {
+    var folds by remember(activity) { mutableStateOf(emptyList<RawFold>()) }
+    LaunchedEffect(activity) {
+        WindowInfoTracker.getOrCreate(activity)
+            .windowLayoutInfo(activity)
+            .collect { layout ->
+                folds = layout.displayFeatures
+                    .filterIsInstance<FoldingFeature>()
+                    .map { feature ->
+                        RawFold(
+                            leftPx = feature.bounds.left,
+                            topPx = feature.bounds.top,
+                            widthPx = feature.bounds.width(),
+                            heightPx = feature.bounds.height(),
+                            isSeparating = feature.isSeparating,
+                        )
+                    }
+            }
+    }
+    return folds
+}
+
+@Composable
+internal fun TaskMigrationPane(
+    folds: List<RawFold>,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val widthPx = constraints.maxWidth.coerceAtLeast(1)
+        val heightPx = constraints.maxHeight.coerceAtLeast(1)
+        val pane = remember(widthPx, heightPx, folds) {
+            largestMigrationPane(widthPx, heightPx, folds)
+        }
+        val density = LocalDensity.current
+        Box(
+            Modifier
+                .fillMaxSize()
+                .absolutePadding(
+                    left = with(density) { pane.leftPx.toDp() },
+                    top = with(density) { pane.topPx.toDp() },
+                    right = with(density) { (widthPx - pane.rightPx).toDp() },
+                    bottom = with(density) { (heightPx - pane.bottomPx).toDp() },
+                ),
+        ) {
+            content()
         }
     }
 }
