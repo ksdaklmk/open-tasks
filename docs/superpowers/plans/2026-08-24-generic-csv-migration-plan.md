@@ -22,14 +22,19 @@ Android Storage Access Framework, Hilt ViewModel, Room, JUnit 4, Gradle.
 `docs/superpowers/specs/2026-08-24-generic-csv-migration-design.md`
 (approved in commit `1dd8990`).
 
-**Execution status:** Paused at the owner's request on 2026-08-25. Tasks 1–3
-are implemented and task-review clean in commits `b22d967`, `418dbcd`, and
-`4db6864`. Task 4 implementation commit `7e8ac2e` and its report are complete;
-53 focused tests and the full host/lint/debug-assembly gate pass, but the
-required task-scoped review has not started. No Task 5 work has started. On
-resume, review exact range `4db6864..7e8ac2e` using the preserved Task 4 brief,
-report, and SDD ledger; only after a clean review should execution advance to
-Task 5.
+**Execution status:** **Completed.** Tasks 1–8, their scoped reviews, Task 9
+verification/documentation, and the final review fixes are complete through
+implementation endpoint `01dba43bd5978f976298321973d568f9d83bd977`.
+Connected/manual acceptance remains unavailable and unexecuted.
+
+**Historical pause checkpoint, preserved:** Paused at the owner's request on
+2026-08-25. Tasks 1–3 are implemented and task-review clean in commits
+`b22d967`, `418dbcd`, and `4db6864`. Task 4 implementation commit `7e8ac2e` and
+its report are complete; 53 focused tests and the full
+host/lint/debug-assembly gate pass, but the required task-scoped review has not
+started. No Task 5 work has started. On resume, review exact range
+`4db6864..7e8ac2e` using the preserved Task 4 brief, report, and SDD ledger;
+only after a clean review should execution advance to Task 5.
 
 ## Global Constraints
 

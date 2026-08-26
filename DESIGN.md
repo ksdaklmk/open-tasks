@@ -567,9 +567,10 @@ from Welcome creates no vault.
 
 One scrollable page combines the source summary, destination selectors,
 samples, ignored columns, conditional choices, preview counts, warnings, and
-confirmation. Status and priority value mappings appear only when unresolved;
-the day/month choice appears only for ambiguous numeric dates; estimate units
-and tag separators appear only for their mapped fields. Every supported field
+confirmation. Status and priority value mappings show every distinct non-empty
+source value and remain editable; unresolved values block confirmation. The
+day/month choice appears only for ambiguous numeric dates; estimate units and
+tag separators appear only for their mapped fields. Every supported field
 remains editable on this page.
 
 The page always discloses that import creates new tasks and that selecting the

@@ -4,13 +4,13 @@ Date: 2026-08-24. Status: **implemented**.
 Authority: this is the second delivery slice in the agreed sequence:
 Undo gaps, migration friction, version/trust footer, then Play internal beta.
 
-Tasks 1–8 are implementation- and task-review complete in
-[the `b22d967..c0b195e` commit range](https://github.com/ksdaklmk/open-tasks/compare/b22d967e7ab5b55f6e0c50a5c7228b6180302e35^...c0b195e71a252854bc0a8cfcf81af74841f7287f).
-The focused host suites pass and the Room and Compose Android tests compile.
-Connected and manual acceptance remains unexecuted because no explicitly
-disposable target is available; the protected `Pixel_10_Pro_Fold` was not
-touched. The implementation adds no Room or authenticated backup/archive
-format change.
+Tasks 1–8, their task reviews, and the final review fixes are complete in
+[the `b22d967..01dba43` implementation range](https://github.com/ksdaklmk/open-tasks/compare/b22d967e7ab5b55f6e0c50a5c7228b6180302e35^...01dba43bd5978f976298321973d568f9d83bd977).
+The focused host suites pass and the Room and Compose Android tests compile;
+the final mapper suite contains 18 passing tests. Connected and manual
+acceptance remains unexecuted because no explicitly disposable target is
+available; the protected `Pixel_10_Pro_Fold` was not touched. The
+implementation adds no Room or authenticated backup/archive format change.
 
 ## Outcome
 

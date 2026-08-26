@@ -1,15 +1,15 @@
 # Open Tasks Handoff
 
-## Current state — generic CSV migration implemented, 26 August 2026
+## Current state — generic CSV migration final review fixed, 27 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
 remains authoritative for release identity and qualification evidence.
 
-The Undo plan remains closed at `12ac37e`. Generic CSV Tasks 1–8 are
-implementation- and task-review clean on `main`; the implementation range is
+The Undo plan remains closed at `12ac37e`. Generic CSV Tasks 1–8 and the final
+review fixes are clean on `main`; the implementation range is
 `b22d967e7ab5b55f6e0c50a5c7228b6180302e35` through
-`c0b195e71a252854bc0a8cfcf81af74841f7287f`:
+`01dba43bd5978f976298321973d568f9d83bd977`:
 
 - `b22d967` shares the bounded CSV record reader while retaining the exact
   strict Open Tasks parser;
@@ -21,15 +21,35 @@ implementation- and task-review clean on `main`; the implementation range is
 - `c074efe` plus `1ab7652` add and correct the Welcome one-shot handoff.
 - `c0b195e` applies the migration overlay's zero Scaffold insets and consumes
   the resulting padding; its focused Task 7 review is clean.
+- `01dba43` distinguishes completion-date 17:00 from confirmation-time copy,
+  removes the fabricated status-override warning when no source Status exists,
+  and restores the explicit Ignore fallback labels.
 
-Fresh Task 9 focused verification passed. The core-data command ran 53/53
-tests: 17 `GenericTasksCsvMapperTest`, 21 `TasksCsvParserTest`, and 15
-`InMemoryImportTasksTest`, with zero skips, failures, or errors. The app
+Initial Task 9 focused verification at `c0b195e` passed. The core-data command
+ran 53/53 tests: 17 `GenericTasksCsvMapperTest`, 21 `TasksCsvParserTest`, and
+15 `InMemoryImportTasksTest`, with zero skips, failures, or errors. The app
 command ran 21/21 tests: 16 `TaskMigrationViewModelTest` and five
 `WindowPostureMapperTest`, with zero skips, failures, or errors. That same app
 command compiled `:core:data`, `:feature:more`, and `:app` Android-test Kotlin;
 Gradle reported `BUILD SUCCESSFUL in 1s`, 222 actionable tasks, three executed
 and 219 up-to-date.
+
+Final-review focused verification at `01dba43` ran the mapper regression RED,
+then GREEN, and the complete mapper suite passed 18/18 with zero skips,
+failures, or errors. `:feature:more:compileDebugAndroidTestKotlin` compiled the
+updated Compose assertions successfully: `BUILD SUCCESSFUL in 911ms`, 30
+actionable tasks, seven executed and 23 up-to-date. A three-assertion host
+resource/mapping check also passed after failing on all three corrected
+meanings before the fix.
+
+The final-review commands were:
+
+```text
+./gradlew :core:data:testDebugUnitTest \
+  --tests "*GenericTasksCsvMapperTest" \
+  --console=plain
+./gradlew :feature:more:compileDebugAndroidTestKotlin --console=plain
+```
 
 The exact focused commands were:
 
@@ -77,10 +97,11 @@ compact/expanded/folding layouts, RTL, TalkBack/keyboard order, and 200% font
 reachability are all **unexecuted**, not PASS. The protected
 `Pixel_10_Pro_Fold` was not touched.
 
-After the controller's mandatory final whole-slice review, the next agreed
-slice is version/trust footer. It still requires its own approved design and
-plan. Do not start it, bump a version, sign/copy an APK, tag, push, publish, or
-start Play Console work from this checkpoint.
+The controller owns re-review and the broad schema/full-host/release gates.
+After those gates, the next agreed slice is version/trust footer. It still
+requires its own approved design and plan. Do not start it, bump a version,
+sign/copy an APK, tag, push, publish, or start Play Console work from this
+checkpoint.
 
 Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
 spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
