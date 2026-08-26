@@ -13,6 +13,23 @@ Read `@docs/architecture.md` before changing data or command flow, `@DESIGN.md` 
 ./gradlew :core:domain:testDebugUnitTest --tests "*RecurrenceEngineTest.monthEndDoesNotDrift"
 ```
 
+Generic task CSV migration has two focused host/compile gates:
+
+```bash
+./gradlew :core:data:testDebugUnitTest \
+  --tests "*GenericTasksCsvMapperTest" \
+  --tests "*TasksCsvParserTest" \
+  --tests "*InMemoryImportTasksTest" \
+  --console=plain
+./gradlew :app:testDebugUnitTest \
+  --tests "*TaskMigrationViewModelTest" \
+  --tests "*WindowPostureMapperTest" \
+  :core:data:compileDebugAndroidTestKotlin \
+  :feature:more:compileDebugAndroidTestKotlin \
+  :app:compileDebugAndroidTestKotlin \
+  --console=plain
+```
+
 Instrumented tests need a device. CI runs them on API 36 and 37.0; use the same
 command locally for device-specific diagnosis:
 
@@ -122,8 +139,15 @@ race KSP while release Hilt sources are generated.
   and exported schema.
 - Keep Stage 6 bounds: at most 20 saved views, 200 distinct task IDs per bulk
   command, 5,000 rows and 5 MiB per Tasks CSV import, and 14 days for weekly
-  review staleness. CSV import accepts only the exact app-exported Tasks schema
-  and creates new records; it never matches or merges existing records.
+  review staleness. Backup & recovery's strict parser accepts only the exact
+  app-exported 14-column Tasks schema. The separate generic migration parser
+  accepts at most 100 columns and maps only title, project, status, priority,
+  start, due, completion, estimate, tags, and description. Both paths create
+  new records; neither matches, merges, or deduplicates existing records.
+- Generic CSV migration remains local and transient: no network or provider
+  account, no persisted URI permission or source copy, and no mapping draft in
+  `SavedStateHandle`, preferences, Room, or backup. Process death restarts the
+  flow and requires choosing the source again.
 - Focus cycles have exactly two presets, 25/5 and 50/10. Start, boundary,
   reconcile, banner Stop, and timer Stop stay serialized through the existing
   focus coordinator gate. Stopping the focus-owned task must clear the

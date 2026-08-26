@@ -555,3 +555,34 @@ focus, hostile content, CSP, print, and reduced-motion contracts. The manual
 two-browser, print-preview, keyboard, zoom, and screen-reader release exercise
 is still pending in
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+
+## Generic CSV migration (implemented)
+
+Welcome places the full-width **Import from another app** action between
+**Continue offline** and **Restore from this device**. More places the same
+destination at top level after Weekly review, separate from Backup &
+recovery's strict **Import Open Tasks CSV** action. Selecting either entry
+opens the system document picker and then the same mapping surface; cancelling
+from Welcome creates no vault.
+
+One scrollable page combines the source summary, destination selectors,
+samples, ignored columns, conditional choices, preview counts, warnings, and
+confirmation. Status and priority value mappings appear only when unresolved;
+the day/month choice appears only for ambiguous numeric dates; estimate units
+and tag separators appear only for their mapped fields. Every supported field
+remains editable on this page.
+
+The page always discloses that import creates new tasks and that selecting the
+same file again creates another set. With no warnings the action reads
+**Import N tasks**; with any accepted loss it reads **Import N tasks anyway**.
+Warnings identify the row, field, and reason in text with error semantics;
+colour is never the only signal. The screen never auto-commits or adds a
+second confirmation page.
+
+The page has one safe-drawing, IME-aware scroll owner, 48 dp controls, logical
+focus/TalkBack order, heading semantics, visible focus, scalable text, and RTL
+layout. Compact and expanded widths expose the same content and actions;
+folds constrain the surface to the largest physical pane. These properties
+have automated host or Android-test compile coverage, while connected
+TalkBack, RTL, keyboard, compact/expanded, folding, and 200% font acceptance
+still requires an explicitly disposable or owner-approved device.

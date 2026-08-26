@@ -1,54 +1,90 @@
 # Open Tasks Handoff
 
-## Current state — generic CSV paused after Task 4 implementation, 25 August 2026
+## Current state — generic CSV migration implemented, 26 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
 remains authoritative for release identity and qualification evidence.
 
-The Undo plan is closed. Documentation commit `12ac37e` records its clean
-scoped re-review and names the approved generic CSV migration plan as the next
-slice.
+The Undo plan remains closed at `12ac37e`. Generic CSV Tasks 1–8 are
+implementation- and task-review clean on `main`; the implementation range is
+`b22d967e7ab5b55f6e0c50a5c7228b6180302e35` through
+`c0b195e71a252854bc0a8cfcf81af74841f7287f`:
 
-Generic CSV Tasks 1–3 are implemented and task-review clean on `main`:
+- `b22d967` shares the bounded CSV record reader while retaining the exact
+  strict Open Tasks parser;
+- `418dbcd`, `4db6864`, and `7e8ac2e` add transient semantic resolution,
+  conservative suggestions, and pure full-field generic review;
+- `0231124`, `d1fc5ba`, `ca1144c`, `dacd81f`, and `8e5344d` add and harden the
+  Activity-scoped transient state and the combined review page;
+- `8d63453` adds the More entry and active-workspace command/Undo path; and
+- `c074efe` plus `1ab7652` add and correct the Welcome one-shot handoff.
+- `c0b195e` applies the migration overlay's zero Scaffold insets and consumes
+  the resulting padding; its focused Task 7 review is clean.
 
-- `b22d967` (`refactor: share bounded csv record parsing`) extracts one bounded
-  UTF-8/RFC 4180 reader while preserving the strict Open Tasks CSV parser;
-- `418dbcd` (`feat: resolve mapped csv status semantics`) adds the optional
-  transient semantic hint and keeps both repository engines on one atomic
-  import planner; and
-- `4db6864` (`feat: suggest generic task csv mappings`) adds the Android-free
-  mapping vocabulary and conservative deterministic suggestions.
+Fresh Task 9 focused verification passed. The core-data command ran 53/53
+tests: 17 `GenericTasksCsvMapperTest`, 21 `TasksCsvParserTest`, and 15
+`InMemoryImportTasksTest`, with zero skips, failures, or errors. The app
+command ran 21/21 tests: 16 `TaskMigrationViewModelTest` and five
+`WindowPostureMapperTest`, with zero skips, failures, or errors. That same app
+command compiled `:core:data`, `:feature:more`, and `:app` Android-test Kotlin;
+Gradle reported `BUILD SUCCESSFUL in 1s`, 222 actionable tasks, three executed
+and 219 up-to-date.
 
-Task 4 implementation commit `7e8ac2e` (`feat: map generic task csv rows`)
-adds the pure full-field conversion/review engine and its JVM tests in exactly
-`GenericTasksCsvMapper.kt` and `GenericTasksCsvMapperTest.kt`. The final
-focused command passed 53 tests: 17 mapper, 21 strict-parser, and 15 in-memory
-import tests, with zero failures or errors. The full host gate
-`testDebugUnitTest lintDebug :app:assembleDebug` also passed
-(`BUILD SUCCESSFUL in 2m 56s`; 553 actionable tasks: 164 executed, 389
-up-to-date).
+The exact focused commands were:
 
-The owner requested a safe pause immediately after the Task 4 commit and
-implementation report. Its required task-scoped review has **not started**, so
-Task 4 is not yet marked complete. No Task 5 brief, implementation, test, or
-review has started. Through this checkpoint the slice adds no product UI,
-picker, navigation, Room migration, backup/archive change, dependency,
-permission, network path, version, release artifact, or Play state.
+```text
+./gradlew :core:data:testDebugUnitTest \
+  --tests "*GenericTasksCsvMapperTest" \
+  --tests "*TasksCsvParserTest" \
+  --tests "*InMemoryImportTasksTest" \
+  --console=plain
+./gradlew :app:testDebugUnitTest \
+  --tests "*TaskMigrationViewModelTest" \
+  --tests "*WindowPostureMapperTest" \
+  :core:data:compileDebugAndroidTestKotlin \
+  :feature:more:compileDebugAndroidTestKotlin \
+  :app:compileDebugAndroidTestKotlin \
+  --console=plain
+```
 
-The ignored SDD workspace remains at
-`.superpowers/sdd/2026-08-24-generic-csv-migration-plan/` with the ledger,
-Task 1–4 briefs and reports, and Task 1–3 review packages. On resume, first run
-exactly one task-scoped review of `4db6864..7e8ac2e` using
-`task-4-brief.md` and `task-4-report.md`. If it is clean, record Task 4 complete
-and begin Task 5. If it reports findings, enter the recorded SDD fix loop. Do
-not repeat Tasks 1–4, rerun brainstorming, or start Task 5 before that review.
+Task 9 final gates are recorded in the implementation report at
+`.superpowers/sdd/2026-08-24-generic-csv-migration-plan/task-9-report.md`.
+The first host gate exposed Task 7's ignored Scaffold-padding lint error; the
+scoped `c0b195e` fix and review closed it. Fresh post-fix verification then
+reported:
 
-Task 2's Room Android tests compiled, but connected execution was not run
-because ADB listed no disposable target. The protected `Pixel_10_Pro_Fold`
-was not touched. Preserve the unrelated modified Stage 3 Drive plan, deleted
-Thai-dashboard spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked
-onboarding plan/design files.
+- `./scripts/check-schema-drift.sh`: PASS; no schema drift; 38/38 Gradle tasks
+  executed;
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain`:
+  PASS; 1,463/1,463 host tests across 138 suites, zero skips, failures, or
+  errors; final ordered rerun `BUILD SUCCESSFUL in 447ms`; 553 actionable
+  tasks, 12 executed and 541 up-to-date;
+- `./gradlew :app:assembleRelease --console=plain`: PASS; `BUILD SUCCESSFUL in
+  355ms`; 442 actionable tasks, two executed and 440 up-to-date; and
+- `git diff --check`: PASS; `git status --short` contained only the five
+  intended docs plus the preserved unrelated entries listed below.
+
+Room remains v9 and the authenticated backup and `.otvault` archive formats
+remain v1. No version, signing, artifact copy, tag, push, publication, or Play
+state changed.
+
+No disposable device or owner-approved physical target exists. The Room
+instrumented tests and Welcome/More/migration Compose tests compiled but did
+not run. Welcome cancellation/import, exact Undo, repeated import, Done-time
+inference, repository-race rejection, strict-parser round trip/rejection,
+compact/expanded/folding layouts, RTL, TalkBack/keyboard order, and 200% font
+reachability are all **unexecuted**, not PASS. The protected
+`Pixel_10_Pro_Fold` was not touched.
+
+After the controller's mandatory final whole-slice review, the next agreed
+slice is version/trust footer. It still requires its own approved design and
+plan. Do not start it, bump a version, sign/copy an APK, tag, push, publish, or
+start Play Console work from this checkpoint.
+
+Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
+spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
+plan/design files.
 
 ## Previous planning checkpoint — enhancement execution paused, 24 August 2026
 

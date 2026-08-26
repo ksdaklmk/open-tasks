@@ -1,13 +1,16 @@
 # Generic CSV Migration
 
-Date: 2026-08-24. Status: approved design, implementation paused after Task 4.
+Date: 2026-08-24. Status: **implemented**.
 Authority: this is the second delivery slice in the agreed sequence:
 Undo gaps, migration friction, version/trust footer, then Play internal beta.
 
-Tasks 1–3 are implementation- and task-review complete. Task 4 is implemented
-with focused and full host gates passing, but its task-scoped review remains
-the first action on resume. The UI, picker, navigation, and Welcome handoff in
-Tasks 5–8 have not started.
+Tasks 1–8 are implementation- and task-review complete in
+[the `b22d967..c0b195e` commit range](https://github.com/ksdaklmk/open-tasks/compare/b22d967e7ab5b55f6e0c50a5c7228b6180302e35^...c0b195e71a252854bc0a8cfcf81af74841f7287f).
+The focused host suites pass and the Room and Compose Android tests compile.
+Connected and manual acceptance remains unexecuted because no explicitly
+disposable target is available; the protected `Pixel_10_Pro_Fold` was not
+touched. The implementation adds no Room or authenticated backup/archive
+format change.
 
 ## Outcome
 
