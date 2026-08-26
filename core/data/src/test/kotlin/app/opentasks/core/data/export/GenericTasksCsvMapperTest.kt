@@ -267,6 +267,29 @@ class GenericTasksCsvMapperTest {
     }
 
     @Test
+    fun explicitCompletionWithoutSourceStatusDoesNotFabricateAnOverrideWarning() {
+        val review = reviewGenericTasksCsv(
+            parsedGeneric(
+                "Title,Completed\r\n" +
+                    "Finished,2026-08-24T12:34:56Z\r\n",
+            ),
+            TaskCsvMapping(
+                columns = mapOf(
+                    TaskCsvField.TITLE to 0,
+                    TaskCsvField.COMPLETION to 1,
+                ),
+            ),
+            emptyTaskCsvTarget(),
+            ZoneId.of("UTC"),
+            Instant.EPOCH,
+        )
+
+        assertEquals(1, review.rows.size)
+        assertEquals(SemanticStatus.COMPLETED, review.rows.single().statusSemantic)
+        assertTrue(review.warnings.isEmpty())
+    }
+
+    @Test
     fun doneFallbackCountsAnInvalidCompletionCellOnlyOnce() {
         val target = emptyTaskCsvTarget().copy(
             workflowStatuses = WorkflowStatus.defaults(null).filter {

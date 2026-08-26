@@ -195,6 +195,8 @@ class TaskMigrationScreenInstrumentedTest {
             onPriorityChoice = { value, choice -> priority.set(value to choice) },
         )
 
+        composeRule.onNodeWithText("Ignore (use Backlog)").assertIsDisplayed()
+        composeRule.onNodeWithText("Ignore (use None)").assertIsDisplayed()
         composeRule.onNodeWithTag("migration-status-0-done").performClick()
         composeRule.onNodeWithTag("migration-priority-0-urgent").performClick()
         assertEquals("3" to TaskCsvStatusChoice.DONE, status.get())
@@ -263,6 +265,32 @@ class TaskMigrationScreenInstrumentedTest {
             .performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Import 2 tasks anyway")
             .performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun completionWarningsDistinguishDateOnlyTimeFromConfirmationTime() {
+        setScreen(
+            reviewState(
+                warnings = listOf(
+                    TaskCsvWarning(
+                        rowNumber = 2,
+                        field = TaskCsvField.COMPLETION,
+                        reason = TaskCsvWarningReason.COMPLETION_TIME_INFERRED,
+                    ),
+                    TaskCsvWarning(
+                        rowNumber = 3,
+                        field = TaskCsvField.COMPLETION,
+                        reason = TaskCsvWarningReason.COMPLETION_INFERRED,
+                    ),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Row 2 • Completion • No time supplied; 17:00 will be used")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Row 3 • Completion • No completion time supplied; confirmation time will be used",
+        ).performScrollTo().assertIsDisplayed()
     }
 
     @Test

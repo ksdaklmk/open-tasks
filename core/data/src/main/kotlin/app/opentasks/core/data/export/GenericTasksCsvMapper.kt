@@ -507,12 +507,12 @@ fun reviewGenericTasksCsv(
             }
             statusSemantic = SemanticStatus.BACKLOG
         } else if (completedAt != null) {
-            if (statusSemantic != SemanticStatus.COMPLETED) {
+            if (statusSemantic != SemanticStatus.COMPLETED && rawStatus.isNotEmpty()) {
                 warn(
                     TaskCsvField.COMPLETION,
                     TaskCsvWarningReason.COMPLETION_OVERRIDES_STATUS,
                 )
-                if (!statusLossCounted && rawStatus.isNotEmpty()) {
+                if (!statusLossCounted) {
                     omittedValueCount++
                     statusLossCounted = true
                 }

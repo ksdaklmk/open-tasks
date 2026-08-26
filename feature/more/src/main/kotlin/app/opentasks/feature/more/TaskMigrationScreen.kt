@@ -721,9 +721,10 @@ private fun warningReason(reason: TaskCsvWarningReason, zoneId: String): String 
         TaskCsvWarningReason.DUE_ZONE_INFERRED,
         TaskCsvWarningReason.COMPLETION_ZONE_INFERRED,
         -> R.string.migration_warning_zone_inferred
-        TaskCsvWarningReason.COMPLETION_TIME_INFERRED,
-        TaskCsvWarningReason.COMPLETION_INFERRED,
-        -> R.string.migration_warning_completion_omitted
+        TaskCsvWarningReason.COMPLETION_TIME_INFERRED ->
+            R.string.migration_warning_due_time_inferred
+        TaskCsvWarningReason.COMPLETION_INFERRED ->
+            R.string.migration_warning_completion_omitted
         TaskCsvWarningReason.COMPLETION_OVERRIDES_STATUS ->
             R.string.migration_warning_completion_overrides_status
         TaskCsvWarningReason.ESTIMATE_OMITTED -> R.string.migration_warning_estimate_omitted

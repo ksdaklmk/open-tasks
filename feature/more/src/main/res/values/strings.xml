@@ -396,13 +396,13 @@
     <string name="migration_status_backlog">Backlog</string>
     <string name="migration_status_in_progress">In progress</string>
     <string name="migration_status_done">Done</string>
-    <string name="migration_status_ignore">Ignore</string>
+    <string name="migration_status_ignore">Ignore (use Backlog)</string>
     <string name="migration_priority_none">None</string>
     <string name="migration_priority_low">Low</string>
     <string name="migration_priority_medium">Medium</string>
     <string name="migration_priority_high">High</string>
     <string name="migration_priority_urgent">Urgent</string>
-    <string name="migration_priority_ignore">Ignore</string>
+    <string name="migration_priority_ignore">Ignore (use None)</string>
     <string name="migration_date_order_heading">Date order</string>
     <string name="migration_date_order_dmy">Day/month/year</string>
     <string name="migration_date_order_mdy">Month/day/year</string>
