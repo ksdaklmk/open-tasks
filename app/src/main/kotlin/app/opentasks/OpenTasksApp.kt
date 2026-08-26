@@ -2007,7 +2007,7 @@ fun OpenTasksApp(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = MaterialTheme.colorScheme.background,
                     snackbarHost = { SnackbarHost(snackbarHostState) },
-                ) { _ ->
+                ) { contentPadding ->
                     TaskMigrationScreen(
                         state = migrationState,
                         onMapField = taskMigrationViewModel::mapField,
@@ -2027,6 +2027,9 @@ fun OpenTasksApp(
                         },
                         onChooseAnother = taskMigrationViewModel::chooseAnother,
                         onCancel = taskMigrationViewModel::cancel,
+                        modifier = Modifier
+                            .padding(contentPadding)
+                            .consumeWindowInsets(contentPadding),
                     )
                 }
             }
