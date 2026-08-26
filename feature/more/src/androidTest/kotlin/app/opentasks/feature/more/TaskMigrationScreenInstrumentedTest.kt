@@ -155,7 +155,7 @@ class TaskMigrationScreenInstrumentedTest {
     }
 
     @Test
-    fun rowWiderFailureUsesSpecificOrGenericCopyWithoutCrashing() {
+    fun rowWiderFailureWithRowNumberUsesSpecificCopy() {
         setScreen(
             TaskMigrationUiState.LoadFailure(
                 fileName = "wide.csv",
@@ -164,7 +164,10 @@ class TaskMigrationScreenInstrumentedTest {
             ),
         )
         composeRule.onNodeWithText("Row 7 has more values than the header.").assertIsDisplayed()
+    }
 
+    @Test
+    fun rowWiderFailureWithoutRowNumberUsesGenericCopy() {
         setScreen(
             TaskMigrationUiState.LoadFailure(
                 fileName = "wide.csv",
