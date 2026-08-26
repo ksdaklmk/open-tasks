@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — generic CSV migration final review fixed, 27 August 2026
+## Current state — generic CSV migration paused at final release gate, 27 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
@@ -85,6 +85,31 @@ reported:
 - `git diff --check`: PASS; `git status --short` contained only the five
   intended docs plus the preserved unrelated entries listed below.
 
+The mandatory whole-slice review of `12ac37e..762c35e` found zero Critical,
+two Important, and two Minor issues. `01dba43` fixed all four, `24c5093`
+reconciled the durable docs, and the one allowed scoped re-review of
+`762c35e..24c5093` was clean with no new breakage.
+
+Fresh controller verification after those fixes reached this safe pause:
+
+- `./scripts/check-schema-drift.sh`: PASS; no schema drift; `BUILD SUCCESSFUL
+  in 3s`; 38/38 tasks executed; and
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain`:
+  PASS; `BUILD SUCCESSFUL in 55s`; 553 actionable tasks, 58 executed and 495
+  up-to-date.
+
+The post-fix release assembly has **not** run. Resume with only:
+
+```text
+./gradlew :app:assembleRelease --console=plain
+git diff --check
+git status --short
+```
+
+If those pass without a tree change, record Task 9 complete and close its SDD
+workspace. Do not repeat implementation or either review unless the code
+changes.
+
 Room remains v9 and the authenticated backup and `.otvault` archive formats
 remain v1. No version, signing, artifact copy, tag, push, publication, or Play
 state changed.
@@ -97,11 +122,10 @@ compact/expanded/folding layouts, RTL, TalkBack/keyboard order, and 200% font
 reachability are all **unexecuted**, not PASS. The protected
 `Pixel_10_Pro_Fold` was not touched.
 
-The controller owns re-review and the broad schema/full-host/release gates.
-After those gates, the next agreed slice is version/trust footer. It still
-requires its own approved design and plan. Do not start it, bump a version,
-sign/copy an APK, tag, push, publish, or start Play Console work from this
-checkpoint.
+Work is intentionally paused at the release-gate checkpoint above. After it
+passes, the next agreed slice is version/trust footer. It still requires its
+own approved design and plan. Do not start it, bump a version, sign/copy an
+APK, tag, push, publish, or start Play Console work from this checkpoint.
 
 Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
 spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
