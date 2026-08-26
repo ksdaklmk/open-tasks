@@ -445,14 +445,18 @@ private fun MappingSelector(
                 }
             }
         }
-        selected?.samples?.take(3)?.takeIf(List<String>::isNotEmpty)?.let { samples ->
-            Text(
-                stringResource(R.string.migration_samples, samples.joinToString()),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        selected?.samples
+            ?.filter(String::isNotBlank)
+            ?.take(3)
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let { samples ->
+                Text(
+                    stringResource(R.string.migration_samples, samples.joinToString()),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
     }
 }
 
@@ -667,10 +671,9 @@ private fun loadFailureMessage(state: TaskMigrationUiState.LoadFailure): String 
     TaskMigrationLoadFailure.TOO_MANY_ROWS -> stringResource(R.string.migration_failure_too_many_rows)
     TaskMigrationLoadFailure.TOO_MANY_COLUMNS -> stringResource(R.string.migration_failure_too_many_columns)
     TaskMigrationLoadFailure.MISSING_HEADER -> stringResource(R.string.migration_failure_missing_header)
-    TaskMigrationLoadFailure.ROW_WIDER_THAN_HEADER -> stringResource(
-        R.string.migration_failure_row_wider,
-        checkNotNull(state.rowNumber),
-    )
+    TaskMigrationLoadFailure.ROW_WIDER_THAN_HEADER -> state.rowNumber?.let {
+        stringResource(R.string.migration_failure_row_wider, it)
+    } ?: stringResource(R.string.migration_failure_malformed)
 }
 
 @Composable

@@ -9,12 +9,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -23,8 +25,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import app.opentasks.core.designsystem.OpenTasksTheme
 import app.opentasks.core.model.TaskCsvBlockingIssue
 import app.opentasks.core.model.TaskCsvDateOrder
@@ -137,6 +141,41 @@ class TaskMigrationScreenInstrumentedTest {
     }
 
     @Test
+    fun sourceSamplesSkipBlankValuesBeforeTakingThree() {
+        setScreen(
+            reviewState(
+                columns = listOf(
+                    TaskMigrationColumnUi(0, "Title", listOf("", "One", "", "Two", "Three", "Four")),
+                    TaskMigrationColumnUi(1, "Project", listOf("Launch")),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Samples: One, Two, Three").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowWiderFailureUsesSpecificOrGenericCopyWithoutCrashing() {
+        setScreen(
+            TaskMigrationUiState.LoadFailure(
+                fileName = "wide.csv",
+                reason = TaskMigrationLoadFailure.ROW_WIDER_THAN_HEADER,
+                rowNumber = 7,
+            ),
+        )
+        composeRule.onNodeWithText("Row 7 has more values than the header.").assertIsDisplayed()
+
+        setScreen(
+            TaskMigrationUiState.LoadFailure(
+                fileName = "wide.csv",
+                reason = TaskMigrationLoadFailure.ROW_WIDER_THAN_HEADER,
+                rowNumber = null,
+            ),
+        )
+        composeRule.onNodeWithText("The CSV structure is invalid.").assertIsDisplayed()
+    }
+
+    @Test
     fun unresolvedStatusAndPriorityValuesExposeExplicitChoices() {
         val status = AtomicReference<Pair<String, TaskCsvStatusChoice>?>()
         val priority = AtomicReference<Pair<String, TaskCsvPriorityChoice>?>()
@@ -230,16 +269,109 @@ class TaskMigrationScreenInstrumentedTest {
                 blockers = setOf(TaskCsvBlockingIssue.DATE_ORDER_REQUIRED),
             ),
         )
+        val mapped = AtomicInteger()
+        val status = AtomicInteger()
+        val priority = AtomicInteger()
         composeRule.setContent {
-            OpenTasksTheme { MigrationTestScreen(state) }
+            OpenTasksTheme {
+                MigrationTestScreen(
+                    state,
+                    onMapField = { _, _ -> mapped.incrementAndGet() },
+                    onStatusChoice = { _, _ -> status.incrementAndGet() },
+                    onPriorityChoice = { _, _ -> priority.incrementAndGet() },
+                )
+            }
         }
         composeRule.onNodeWithTag("migration-import").performScrollTo().assertIsNotEnabled()
 
-        composeRule.runOnIdle { state = reviewState(isCommitting = true) }
+        composeRule.runOnIdle {
+            state = reviewState(
+                statusValues = listOf("3"),
+                priorityValues = listOf("2"),
+                isCommitting = true,
+            )
+        }
         composeRule.onNodeWithTag("migration-import").performScrollTo().assertIsNotEnabled()
+        listOf(
+            "migration-field-title",
+            "migration-status-0-done",
+            "migration-priority-0-urgent",
+        ).forEach { tag ->
+            scrollScreenTo(tag)
+            composeRule.onNodeWithTag(tag).assertIsNotEnabled()
+        }
         composeRule.onNodeWithTag("migration-choose-another")
             .performScrollTo().assertIsNotEnabled()
         composeRule.onNodeWithTag("migration-cancel").performScrollTo().assertIsNotEnabled()
+        assertEquals(0, mapped.get())
+        assertEquals(0, status.get())
+        assertEquals(0, priority.get())
+    }
+
+    @Test
+    fun systemBackCancelsUnlessReviewIsCommitting() {
+        lateinit var dispatcher: androidx.activity.OnBackPressedDispatcher
+        var state by mutableStateOf(reviewState())
+        val cancel = AtomicInteger()
+        composeRule.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            OpenTasksTheme {
+                MigrationTestScreen(state = state, onCancel = { cancel.incrementAndGet() })
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.runOnUiThread(dispatcher::onBackPressed)
+        assertEquals(1, cancel.get())
+
+        composeRule.runOnIdle { state = reviewState(isCommitting = true) }
+        composeRule.runOnUiThread(dispatcher::onBackPressed)
+        assertEquals(1, cancel.get())
+        composeRule.onNodeWithTag("task-migration-screen").assertIsDisplayed()
+    }
+
+    @Test
+    fun dropdownAndRadioOptionsMeetTheMinimumTargetSize() {
+        setScreen(
+            reviewState(
+                statusValues = listOf("3"),
+                priorityValues = listOf("2"),
+                ambiguousDatesPresent = true,
+                estimateValuesPresent = true,
+                tagValuesPresent = true,
+            ),
+        )
+
+        composeRule.onNodeWithTag("migration-field-title").performClick()
+        composeRule.onNodeWithTag("migration-field-title-option-0")
+            .assertHeightIsAtLeast(48.dp)
+        listOf(
+            "migration-status-0-done",
+            "migration-priority-0-urgent",
+            "migration-date-order-dmy",
+            "migration-estimate-hours",
+            "migration-tag-pipe",
+        ).forEach { tag ->
+            composeRule.onNodeWithTag(tag).performScrollTo().assertHeightIsAtLeast(48.dp)
+        }
+    }
+
+    @Test
+    fun rtlLayoutKeepsFinalActionsReachable() {
+        composeRule.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                OpenTasksTheme {
+                    Box(Modifier.width(320.dp).height(520.dp)) {
+                        MigrationTestScreen(reviewState())
+                    }
+                }
+            }
+        }
+
+        listOf("migration-field-title", "migration-import", "migration-choose-another", "migration-cancel")
+            .forEach { tag ->
+                composeRule.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
+            }
     }
 
     @Test
@@ -309,6 +441,10 @@ class TaskMigrationScreenInstrumentedTest {
         estimateValuesPresent: Boolean = false,
         tagValuesPresent: Boolean = false,
         tagSamples: List<String> = emptyList(),
+        columns: List<TaskMigrationColumnUi> = listOf(
+            TaskMigrationColumnUi(0, "Title", listOf("One")),
+            TaskMigrationColumnUi(1, "Project", listOf("Launch")),
+        ),
         warnings: List<TaskCsvWarning> = emptyList(),
         blockers: Set<TaskCsvBlockingIssue> = emptySet(),
         isCommitting: Boolean = false,
@@ -316,10 +452,7 @@ class TaskMigrationScreenInstrumentedTest {
         fileName = "tasks.csv",
         sourceRowCount = 2,
         sourceColumnCount = 2,
-        columns = listOf(
-            TaskMigrationColumnUi(0, "Title", listOf("One")),
-            TaskMigrationColumnUi(1, "Project", listOf("Launch")),
-        ),
+        columns = columns,
         mapping = TaskCsvMapping(columns = mapOf(TaskCsvField.TITLE to 0)),
         statusValues = statusValues,
         priorityValues = priorityValues,
@@ -362,6 +495,11 @@ class TaskMigrationScreenInstrumentedTest {
                 )
             }
         }
+    }
+
+    private fun scrollScreenTo(tag: String) {
+        composeRule.onNodeWithTag("task-migration-screen")
+            .performScrollToNode(hasTestTag(tag))
     }
 
     @androidx.compose.runtime.Composable
