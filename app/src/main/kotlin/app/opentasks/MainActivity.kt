@@ -34,13 +34,17 @@ import app.opentasks.backup.RecoveryViewModel
 import app.opentasks.core.data.DefaultVaultRuntimeManager
 import app.opentasks.core.data.LocalVaultRuntime
 import app.opentasks.core.data.VaultRuntimeState
+import app.opentasks.core.data.export.emptyTaskCsvTarget
 import app.opentasks.core.designsystem.OpenTasksTheme
+import app.opentasks.core.domain.CommandResult
+import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.RecoverySource
 import app.opentasks.digest.DailyDigestCoordinator
 import app.opentasks.digest.DailyDigestIntents
 import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
+import app.opentasks.feature.more.TaskMigrationScreen
 import app.opentasks.feature.more.WelcomeScreen
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockScreen
@@ -76,6 +80,7 @@ class MainActivity : ComponentActivity() {
     private var openTaskSignal by mutableIntStateOf(0)
     private var openTaskId by mutableStateOf<String?>(null)
     private var openHomeSignal by mutableIntStateOf(0)
+    private var openTasksAfterMigrationSignal by mutableIntStateOf(0)
     private var activeRuntime by mutableStateOf<LocalVaultRuntime?>(null)
     private var runtimeState by mutableStateOf<VaultRuntimeState>(VaultRuntimeState.Initializing)
     private var activeRecovery by mutableStateOf(false)
@@ -125,9 +130,19 @@ class MainActivity : ComponentActivity() {
                         RecoverySurface(runtimeState, activeReplacement = true)
                     } else {
                         val workspaceViewModel: WorkspaceViewModel = viewModel()
+                        val taskMigrationViewModel: TaskMigrationViewModel = viewModel()
                         val snapshot by
                             workspaceViewModel.snapshot.collectAsStateWithLifecycle()
                         ReportDrawnWhen { snapshot.workflowStatuses.isNotEmpty() }
+                        LaunchedEffect(workspaceViewModel, taskMigrationViewModel) {
+                            taskMigrationViewModel.takeWelcomeRows()?.let { rows ->
+                                workspaceViewModel.execute(DomainCommand.ImportTasks(rows)) { result ->
+                                    val success = result is CommandResult.Success
+                                    taskMigrationViewModel.onCommitFinished(success)
+                                    if (success) openTasksAfterMigrationSignal++
+                                }
+                            }
+                        }
                         val signal = quickAddSignal
                         OpenTasksApp(
                             activity = this,
@@ -180,8 +195,13 @@ class MainActivity : ComponentActivity() {
                                     it.action == DailyDigestIntents.ACTION_OPEN_HOME
                                 }?.action = null
                             },
+                            openTasksAfterMigrationSignal = openTasksAfterMigrationSignal,
+                            onOpenTasksAfterMigrationConsumed = {
+                                openTasksAfterMigrationSignal = 0
+                            },
                             onOpenRecovery = { activeRecovery = true },
                             viewModel = workspaceViewModel,
+                            taskMigrationViewModel = taskMigrationViewModel,
                         )
                     }
                 }
@@ -262,7 +282,10 @@ class MainActivity : ComponentActivity() {
         activeReplacement: Boolean = false,
     ) {
         val recoveryViewModel: RecoveryViewModel = viewModel()
+        val taskMigrationViewModel: TaskMigrationViewModel = viewModel()
         val presentation by recoveryViewModel.presentation.collectAsStateWithLifecycle()
+        val taskMigrationState by
+            taskMigrationViewModel.state.collectAsStateWithLifecycle()
         val resolutionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult(),
         ) { result ->
@@ -277,6 +300,24 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        val taskMigrationDocumentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            taskMigrationViewModel.onDocumentSelected(uri)
+        }
+        LaunchedEffect(taskMigrationViewModel, taskMigrationDocumentLauncher) {
+            for (ignored in taskMigrationViewModel.openDocumentRequests) {
+                taskMigrationDocumentLauncher.launch(
+                    arrayOf("text/csv", "text/comma-separated-values", "text/plain"),
+                )
+            }
+        }
+        LaunchedEffect(presentation) {
+            if (presentation is RecoveryPresentation.Failed) {
+                taskMigrationViewModel.abandonWelcomeHandoff()
+            }
+        }
+        val rawFolds = rememberRawFolds(this@MainActivity)
         val candidates = (presentation as? RecoveryPresentation.Candidates)
             ?.values
             ?.map { RecoveryShellCandidate(it.handle, it.source == RecoverySource.GOOGLE_DRIVE) }
@@ -298,11 +339,34 @@ class MainActivity : ComponentActivity() {
         }
         OpenTasksTheme {
             ReportDrawn()
-            if (showWelcome) {
+            val migrationState = taskMigrationState
+            if (migrationState != null) {
+                TaskMigrationPane(folds = rawFolds) {
+                    TaskMigrationScreen(
+                        state = migrationState,
+                        onMapField = taskMigrationViewModel::mapField,
+                        onStatusChoice = taskMigrationViewModel::chooseStatus,
+                        onPriorityChoice = taskMigrationViewModel::choosePriority,
+                        onDateOrder = taskMigrationViewModel::chooseDateOrder,
+                        onEstimateUnit = taskMigrationViewModel::chooseEstimateUnit,
+                        onTagMode = taskMigrationViewModel::chooseTagMode,
+                        onImport = {
+                            if (taskMigrationViewModel.confirmForWelcome(emptyTaskCsvTarget())) {
+                                recoveryViewModel.startWithoutRestoring()
+                            }
+                        },
+                        onChooseAnother = taskMigrationViewModel::chooseAnother,
+                        onCancel = taskMigrationViewModel::cancel,
+                    )
+                }
+            } else if (showWelcome) {
                 WelcomeScreen(
                     onContinueWithGoogle = recoveryViewModel::discoverDrive,
                     onContinueOffline = recoveryViewModel::startWithoutRestoring,
                     onRestoreFromDevice = recoveryViewModel::discoverPortable,
+                    onImportFromAnotherApp = {
+                        taskMigrationViewModel.begin(emptyTaskCsvTarget())
+                    },
                 )
             } else {
                 RecoveryShellScreen(

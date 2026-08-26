@@ -307,6 +307,8 @@ fun OpenTasksApp(
     onOpenTaskConsumed: () -> Unit = {},
     openHomeSignal: Int = 0,
     onOpenHomeConsumed: () -> Unit = {},
+    openTasksAfterMigrationSignal: Int = 0,
+    onOpenTasksAfterMigrationConsumed: () -> Unit = {},
     onOpenRecovery: () -> Unit = {},
     viewModel: WorkspaceViewModel = viewModel(),
     taskMigrationViewModel: TaskMigrationViewModel = viewModel(),
@@ -969,6 +971,13 @@ fun OpenTasksApp(
                 // including one where a reminder tap had just selected a task
                 // -- landing the user on Home instead.
                 onOpenHomeConsumed()
+            }
+        }
+
+        LaunchedEffect(openTasksAfterMigrationSignal) {
+            if (openTasksAfterMigrationSignal > 0) {
+                navigate(TasksRoute)
+                onOpenTasksAfterMigrationConsumed()
             }
         }
 

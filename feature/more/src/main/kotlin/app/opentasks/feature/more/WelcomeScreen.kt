@@ -40,6 +40,7 @@ fun WelcomeScreen(
     onContinueWithGoogle: () -> Unit,
     onContinueOffline: () -> Unit,
     onRestoreFromDevice: () -> Unit,
+    onImportFromAnotherApp: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -62,6 +63,7 @@ fun WelcomeScreen(
                         WelcomeActions(
                             onContinueWithGoogle = onContinueWithGoogle,
                             onContinueOffline = onContinueOffline,
+                            onImportFromAnotherApp = onImportFromAnotherApp,
                             onRestoreFromDevice = onRestoreFromDevice,
                         )
                     }
@@ -80,6 +82,7 @@ fun WelcomeScreen(
                     WelcomeActions(
                         onContinueWithGoogle = onContinueWithGoogle,
                         onContinueOffline = onContinueOffline,
+                        onImportFromAnotherApp = onImportFromAnotherApp,
                         onRestoreFromDevice = onRestoreFromDevice,
                     )
                 }
@@ -116,6 +119,7 @@ private fun WelcomeIdentity() {
 private fun WelcomeActions(
     onContinueWithGoogle: () -> Unit,
     onContinueOffline: () -> Unit,
+    onImportFromAnotherApp: () -> Unit,
     onRestoreFromDevice: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp)) {
@@ -151,6 +155,16 @@ private fun WelcomeActions(
                 .testTag("welcome-offline"),
         ) {
             Text(stringResource(R.string.welcome_offline))
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onImportFromAnotherApp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("welcome-import"),
+        ) {
+            Text(stringResource(R.string.task_migration_title))
         }
         Spacer(Modifier.height(8.dp))
         TextButton(

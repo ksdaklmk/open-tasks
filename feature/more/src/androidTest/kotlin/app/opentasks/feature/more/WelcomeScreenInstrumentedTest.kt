@@ -22,6 +22,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.designsystem.OpenTasksTheme
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -38,6 +39,7 @@ class WelcomeScreenInstrumentedTest {
     fun approvedCopyAndActionsRemainIndependent() {
         val google = AtomicInteger()
         val offline = AtomicInteger()
+        val migration = AtomicInteger()
         val portable = AtomicInteger()
         composeRule.setContent {
             OpenTasksTheme {
@@ -45,6 +47,7 @@ class WelcomeScreenInstrumentedTest {
                     onContinueWithGoogle = { google.incrementAndGet() },
                     onContinueOffline = { offline.incrementAndGet() },
                     onRestoreFromDevice = { portable.incrementAndGet() },
+                    onImportFromAnotherApp = { migration.incrementAndGet() },
                 )
             }
         }
@@ -72,13 +75,31 @@ class WelcomeScreenInstrumentedTest {
             .performClick()
         assertEquals(1, google.get())
         assertEquals(1, offline.get())
+        assertEquals(0, migration.get())
         assertEquals(0, portable.get())
 
+        composeRule.onNodeWithTag("welcome-offline")
+            .assertHeightIsAtLeast(48.dp)
+        composeRule.onNodeWithTag("welcome-import")
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(1, migration.get())
+        assertEquals(0, portable.get())
         composeRule.onNodeWithTag("welcome-portable")
             .assertHeightIsAtLeast(48.dp)
+        val offlineTop = composeRule.onNodeWithTag("welcome-offline")
+            .fetchSemanticsNode().boundsInRoot.top
+        val migrationTop = composeRule.onNodeWithTag("welcome-import")
+            .fetchSemanticsNode().boundsInRoot.top
+        val portableTop = composeRule.onNodeWithTag("welcome-portable")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(offlineTop < migrationTop)
+        assertTrue(migrationTop < portableTop)
+        composeRule.onNodeWithTag("welcome-portable")
             .performClick()
         assertEquals(1, google.get())
         assertEquals(1, offline.get())
+        assertEquals(1, migration.get())
         assertEquals(1, portable.get())
     }
 
@@ -94,6 +115,10 @@ class WelcomeScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("welcome-compact").assertIsDisplayed()
         composeRule.onNodeWithTag("welcome-expanded").assertDoesNotExist()
+        composeRule.onNodeWithTag("welcome-import")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
     }
 
     @Test
@@ -113,6 +138,10 @@ class WelcomeScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("welcome-expanded").assertIsDisplayed()
         composeRule.onNodeWithTag("welcome-compact").assertDoesNotExist()
+        composeRule.onNodeWithTag("welcome-import")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
     }
 
     @Test
@@ -128,7 +157,12 @@ class WelcomeScreenInstrumentedTest {
             }
         }
 
-        listOf("welcome-google", "welcome-offline", "welcome-portable").forEach { tag ->
+        listOf(
+            "welcome-google",
+            "welcome-offline",
+            "welcome-import",
+            "welcome-portable",
+        ).forEach { tag ->
             composeRule.onNodeWithTag(tag)
                 .performScrollTo()
                 .assertIsDisplayed()

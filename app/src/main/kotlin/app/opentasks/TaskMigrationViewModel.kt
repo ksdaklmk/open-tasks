@@ -72,6 +72,7 @@ class TaskMigrationViewModel internal constructor(
     private val mutableState = MutableStateFlow<TaskMigrationUiState?>(null)
     private var draft: Draft? = null
     private var targetAtSelection: TaskCsvTarget? = null
+    private var pendingWelcomeRows: List<ImportedTaskRow>? = null
 
     val openDocumentRequests = Channel<Unit>(Channel.BUFFERED)
     val state: StateFlow<TaskMigrationUiState?> = mutableState.asStateFlow()
@@ -192,6 +193,22 @@ class TaskMigrationViewModel internal constructor(
         return review.rows
     }
 
+    fun confirmForWelcome(latestTarget: TaskCsvTarget): Boolean {
+        val rows = confirm(latestTarget) ?: return false
+        pendingWelcomeRows = rows
+        return true
+    }
+
+    fun takeWelcomeRows(): List<ImportedTaskRow>? =
+        pendingWelcomeRows.also { pendingWelcomeRows = null }
+
+    fun abandonWelcomeHandoff(): Boolean {
+        if (pendingWelcomeRows == null) return false
+        pendingWelcomeRows = null
+        cancel()
+        return true
+    }
+
     fun onCommitFinished(success: Boolean) {
         if (success) {
             cancel()
@@ -210,6 +227,7 @@ class TaskMigrationViewModel internal constructor(
     }
 
     fun cancel() {
+        pendingWelcomeRows = null
         draft = null
         targetAtSelection = null
         mutableState.value = null
