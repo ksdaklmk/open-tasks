@@ -45,8 +45,7 @@ class OpenTasksMacrobenchmark {
     private val context = instrumentation.context
     private val device = UiDevice.getInstance(instrumentation)
 
-    @Test fun welcomeColdFullyDrawn() = startup(null, StartupMode.COLD)
-    @Test fun welcomeWarmFullyDrawn() = startup(null, StartupMode.WARM)
+    @Test fun firstRunColdFullyDrawn() = firstRunStartup()
     @Test fun emptyColdFullyDrawn() = startup(0, StartupMode.COLD)
     @Test fun emptyWarmFullyDrawn() = startup(0, StartupMode.WARM)
     @Test fun tasks500ColdFullyDrawn() = startup(500, StartupMode.COLD)
@@ -144,8 +143,21 @@ class OpenTasksMacrobenchmark {
         assertEquals(RESULT_REJECTED, sendFixture(FIXTURE_ACTION, 5_001))
     }
 
-    private fun startup(datasetSize: Int?, startupMode: StartupMode) {
-        if (datasetSize == null) clearTarget() else prepareDataset(datasetSize)
+    private fun firstRunStartup() {
+        benchmarkRule.measureRepeated(
+            packageName = PACKAGE_NAME,
+            metrics = listOf(StartupTimingMetric()),
+            compilationMode = CompilationMode.Partial(),
+            startupMode = StartupMode.COLD,
+            iterations = ITERATIONS,
+            setupBlock = { clearTarget() },
+        ) {
+            startActivityAndWait()
+        }
+    }
+
+    private fun startup(datasetSize: Int, startupMode: StartupMode) {
+        prepareDataset(datasetSize)
         benchmarkRule.measureRepeated(
             packageName = PACKAGE_NAME,
             metrics = listOf(StartupTimingMetric()),
@@ -184,8 +196,6 @@ class OpenTasksMacrobenchmark {
     private fun prepareDataset(size: Int) {
         clearTarget()
         launchTarget()
-        waitForText("Welcome to Open Tasks")
-        tapText("Continue offline")
         waitForDescription("Search workspace")
         if (size != 0) assertEquals(RESULT_SEEDED, sendFixture(FIXTURE_ACTION, size))
         device.executeShellCommand("am force-stop $PACKAGE_NAME")

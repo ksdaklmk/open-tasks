@@ -118,11 +118,10 @@ try:
     hard_failures = []
     regressions = []
     startup_limits = {
-        "welcomeColdFullyDrawn": 1500.0,
+        "firstRunColdFullyDrawn": 1500.0,
         "emptyColdFullyDrawn": 1500.0,
         "tasks500ColdFullyDrawn": 1500.0,
         "tasks5000ColdFullyDrawn": 1500.0,
-        "welcomeWarmFullyDrawn": 500.0,
         "emptyWarmFullyDrawn": 500.0,
         "tasks500WarmFullyDrawn": 500.0,
         "tasks5000WarmFullyDrawn": 500.0,
