@@ -176,3 +176,24 @@ publication evidence.
 | Off-device behavior separation | PASS — corrected repository evidence | Separates Drive/`.otvault` encrypted attachment file bytes from Android portable encrypted attachment record/metadata, and records attachment-content/history-deletion residuals. The Android package has reprepare/clear-app-data and platform controls; `withdraw` is not a user deletion path. PENDING — final AAB audit. |
 | Final-binary status wording | PASS — corrected repository evidence | Current Task 5 final-AAB/merged-manifest/transitive-binary uncertainties use the exact separate status `PENDING — final AAB audit`; owner, runtime and Console gates remain separately pending. Historical wording above is retained as append-only evidence. |
 | Fixed-fact and safety checks | PASS — corrected repository evidence | Focused RED→GREEN declaration check, literal listing limits, fixed-fact/prohibited-claim scans, `git diff --check`, exact two-file scope and sensitive-value scan ran without final AAB, Console or runtime claims. |
+
+## Entry — 2026-08-27T16:01:54Z — worker — Task 6 Pages deployment
+
+This entry supersedes the earlier privacy/support deployment PENDING states
+only. It creates no Play Console, Cloud Console, signing, final-AAB, device,
+testing, or publication evidence.
+
+The first Pages attempt started before the repository had a Pages site and
+failed at `configure-pages` with HTTP 404. Under explicit owner approval, the
+repository Pages source was then enabled as GitHub Actions and the same pinned
+run was retried. Attempt 2 is the result promoted below.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Integration and push | PASS — exact repository commit | Local `main` and `origin/main` advanced to `f0c85cc04b3c68dc6c60849aa450ca74f065e2b0`. The post-integration `testDebugUnitTest lintDebug :app:assembleDebug` gate reported `BUILD SUCCESSFUL in 27s`, 553 actionable tasks, 35 executed, 37 from cache, and 481 up-to-date. |
+| GitHub Pages source | PASS — owner-approved repository configuration | GitHub's Pages API reports `build_type: workflow`, `public: true`, and `https_enforced: true` for `https://ksdaklmk.github.io/open-tasks/`. |
+| Pinned Pages deployment | PASS — deployed exact commit | [Pages run 33090904000](https://github.com/ksdaklmk/open-tasks/actions/runs/33090904000), attempt 2, deployed commit `f0c85cc04b3c68dc6c60849aa450ca74f065e2b0` successfully through deployment `6126316671`; the successful status was recorded at `2026-08-27T16:01:54Z`. |
+| Privacy page public HTTP/content | PASS — anonymous public evidence | `https://ksdaklmk.github.io/open-tasks/privacy/` returned HTTP 200 and `text/html; charset=utf-8`. The fetched bytes equal `site/privacy/index.html` and contain `Open Tasks privacy policy`, `app.opentasks`, and the exact public developer display name `Kritsada K.`. |
+| Support page public HTTP/content | PASS — anonymous public evidence | `https://ksdaklmk.github.io/open-tasks/support/` returned HTTP 200 and `text/html; charset=utf-8`. The fetched bytes equal `site/support/index.html` and contain the fixed GitHub Issues route plus the public-data warning. |
+| Deployed static-safety scan | PASS — fetched-content evidence | Both fetched pages contain no script, form, tracker, third-party font, insecure `http:` reference, or mixed-content path. Anonymous retrieval required no authentication. |
+| Normal/private browser, narrow/wide layout, and keyboard focus | PENDING — browser evidence not produced | No controllable browser was connected. No rendered layout, private-window, or keyboard-tab result is claimed from the HTTP/content checks. |
