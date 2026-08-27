@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — generic CSV migration paused at final release gate, 27 August 2026
+## Current state — generic CSV migration complete, 27 August 2026
 
 This section is authoritative. Older checkpoints below are historical and
 superseded wherever they conflict with this one. The release baseline below
@@ -68,11 +68,10 @@ The exact focused commands were:
   --console=plain
 ```
 
-Task 9 final gates are recorded in the implementation report at
-`.superpowers/sdd/2026-08-24-generic-csv-migration-plan/task-9-report.md`.
-The first host gate exposed Task 7's ignored Scaffold-padding lint error; the
-scoped `c0b195e` fix and review closed it. Fresh post-fix verification then
-reported:
+Task 9's final gates were consolidated here before its ignored SDD workspace
+was closed. The first host gate exposed Task 7's ignored Scaffold-padding lint
+error; the scoped `c0b195e` fix and review closed it. Fresh post-fix
+verification then reported:
 
 - `./scripts/check-schema-drift.sh`: PASS; no schema drift; 38/38 Gradle tasks
   executed;
@@ -90,25 +89,22 @@ two Important, and two Minor issues. `01dba43` fixed all four, `24c5093`
 reconciled the durable docs, and the one allowed scoped re-review of
 `762c35e..24c5093` was clean with no new breakage.
 
-Fresh controller verification after those fixes reached this safe pause:
+Fresh controller verification after those fixes completed the gate:
 
 - `./scripts/check-schema-drift.sh`: PASS; no schema drift; `BUILD SUCCESSFUL
-  in 3s`; 38/38 tasks executed; and
+  in 3s`; 38/38 tasks executed;
 - `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain`:
   PASS; `BUILD SUCCESSFUL in 55s`; 553 actionable tasks, 58 executed and 495
-  up-to-date.
+  up-to-date;
+- `./gradlew :app:assembleRelease --console=plain`: PASS; `BUILD SUCCESSFUL in
+  43s`; 442 actionable tasks, 50 executed, five from cache, and 387
+  up-to-date; and
+- `git diff --check`: PASS; `git status --short` contained only the preserved
+  unrelated entries listed below.
 
-The post-fix release assembly has **not** run. Resume with only:
-
-```text
-./gradlew :app:assembleRelease --console=plain
-git diff --check
-git status --short
-```
-
-If those pass without a tree change, record Task 9 complete and close its SDD
-workspace. Do not repeat implementation or either review unless the code
-changes.
+Task 9 and the generic CSV migration slice are complete. The plan's ignored
+SDD workspace is closed; implementation and review should not be repeated
+unless the code changes.
 
 Room remains v9 and the authenticated backup and `.otvault` archive formats
 remain v1. No version, signing, artifact copy, tag, push, publication, or Play
@@ -122,10 +118,9 @@ compact/expanded/folding layouts, RTL, TalkBack/keyboard order, and 200% font
 reachability are all **unexecuted**, not PASS. The protected
 `Pixel_10_Pro_Fold` was not touched.
 
-Work is intentionally paused at the release-gate checkpoint above. After it
-passes, the next agreed slice is version/trust footer. It still requires its
-own approved design and plan. Do not start it, bump a version, sign/copy an
-APK, tag, push, publish, or start Play Console work from this checkpoint.
+The next agreed slice is version/trust footer. It still requires its own
+approved design and plan. Do not start it, bump a version, sign/copy an APK,
+tag, push, publish, or start Play Console work from this checkpoint.
 
 Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
 spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
