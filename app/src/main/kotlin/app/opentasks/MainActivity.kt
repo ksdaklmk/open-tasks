@@ -45,7 +45,6 @@ import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
 import app.opentasks.feature.more.TaskMigrationScreen
-import app.opentasks.feature.more.WelcomeScreen
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockScreen
 import app.opentasks.lock.AppLockSettings
@@ -322,9 +321,11 @@ class MainActivity : ComponentActivity() {
             ?.values
             ?.map { RecoveryShellCandidate(it.handle, it.source == RecoverySource.GOOGLE_DRIVE) }
             .orEmpty()
-        val showWelcome = runtimeState == VaultRuntimeState.NoVault &&
-            presentation == RecoveryPresentation.NoVault &&
-            !activeReplacement
+        val createInitialVault = shouldCreateInitialVault(
+            runtimeState = runtimeState,
+            presentation = presentation,
+            activeReplacement = activeReplacement,
+        )
         BackHandler(
             enabled = runtimeState == VaultRuntimeState.NoVault &&
                 presentation != RecoveryPresentation.NoVault,
@@ -338,9 +339,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         OpenTasksTheme {
-            ReportDrawn()
             val migrationState = taskMigrationState
-            if (migrationState != null) {
+            if (createInitialVault) {
+                LaunchedEffect(recoveryViewModel) {
+                    recoveryViewModel.startWithoutRestoring()
+                }
+                Surface(modifier = Modifier.fillMaxSize()) {}
+            } else if (migrationState != null) {
+                ReportDrawn()
                 TaskMigrationPane(folds = rawFolds) {
                     TaskMigrationScreen(
                         state = migrationState,
@@ -359,16 +365,8 @@ class MainActivity : ComponentActivity() {
                         onCancel = taskMigrationViewModel::cancel,
                     )
                 }
-            } else if (showWelcome) {
-                WelcomeScreen(
-                    onContinueWithGoogle = recoveryViewModel::discoverDrive,
-                    onContinueOffline = recoveryViewModel::startWithoutRestoring,
-                    onRestoreFromDevice = recoveryViewModel::discoverPortable,
-                    onImportFromAnotherApp = {
-                        taskMigrationViewModel.begin(emptyTaskCsvTarget())
-                    },
-                )
             } else {
+                ReportDrawn()
                 RecoveryShellScreen(
                     mode = recoveryShellMode(
                         runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
@@ -512,6 +510,15 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_QUICK_ADD = "open_quick_add"
     }
 }
+
+internal fun shouldCreateInitialVault(
+    runtimeState: VaultRuntimeState,
+    presentation: RecoveryPresentation,
+    activeReplacement: Boolean,
+): Boolean =
+    runtimeState == VaultRuntimeState.NoVault &&
+        presentation == RecoveryPresentation.NoVault &&
+        !activeReplacement
 
 internal fun recoveryShellMode(
     runtimeRecovering: Boolean,
