@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Tasks privacy policy</title>
+  <style>
+    :root { color-scheme: light; --ink: #322e2e; --muted: #756d6b; --line: #bbb4b1; --paper: #fff; --ground: #f9f7f6; --ember: #c64e2b; --pale: #f8e4dc; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--ground); color: var(--ink); font: 1rem/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header, main, footer { width: min(100% - 2rem, 48rem); margin: auto; }
+    header { padding: 3rem 0 2rem; border-bottom: .25rem solid var(--ember); }
+    main { padding: 2rem 0 3rem; }
+    footer { padding: 1.5rem 0 3rem; color: var(--muted); border-top: 1px solid var(--line); }
+    h1, h2 { line-height: 1.2; }
+    h1 { margin: 0; font-size: clamp(2rem, 7vw, 3.25rem); }
+    h2 { margin-top: 2.5rem; font-size: 1.35rem; }
+    p, li { max-width: 70ch; }
+    .eyebrow { margin: 0 0 .5rem; color: var(--ember); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .notice { padding: 1rem 1.25rem; background: var(--pale); border-radius: 1rem; }
+    a { color: #963717; text-underline-offset: .16em; }
+    a:focus-visible { outline: .2rem solid var(--ember); outline-offset: .2rem; border-radius: .2rem; }
+    @media (min-width: 48rem) { header, main, footer { width: min(100% - 4rem, 48rem); } }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">Open Tasks</p>
+    <h1>Open Tasks privacy policy</h1>
+    <p>Effective 27 August 2026</p>
+  </header>
+  <main>
+    <p class="notice">This policy covers Open Tasks (package <strong>app.opentasks</strong>), published by <strong>Kritsada K.</strong>.</p>
+
+    <h2>Local workspace</h2>
+    <p>Open Tasks is local-first. Core use needs no account, and the developer operates no application backend. Your encrypted local vault can contain tasks and descriptions, notes, projects, tags, schedules, timers, reminders, attachments and settings. The developer cannot access your vault contents.</p>
+
+    <h2>Optional backup, recovery and export</h2>
+    <p>If you choose Google Drive backup or recovery, Google authorisation is optional. The app keeps a local account binding, backup configuration and per-install account digest; disconnecting stops new requests and marks that configuration dormant, but keeps it for same-account reconnection. It may leave existing Drive backups until you delete them.</p>
+    <p>After you enable it, eligible changes can be backed up automatically. Google Drive receives encrypted objects in your private <code>appDataFolder</code>, plus necessary Drive file metadata such as names, roles, IDs and bounded properties. Access tokens and raw account details are not retained by the app.</p>
+    <p>Android backup and device transfer may include only the explicitly allowed encrypted portable package. That package contains encrypted vault snapshots and attachment records/metadata, not attachment file bytes. Encrypted <code>.otvault</code> exports can include encrypted attachment bytes. CSV, Markdown and report exports are plaintext by design; protect the destination you choose.</p>
+    <p>When you confirm a calendar handoff, the selected calendar provider receives a task title, project name, and start or due times. It does not receive the task body.</p>
+
+    <h2>Permissions and providers</h2>
+    <ul>
+      <li><strong>Internet</strong> is used only for optional Google Drive authorisation, backup and recovery, and for opening this policy in your browser.</li>
+      <li><strong>Notifications</strong>, <strong>boot events</strong> and <strong>exact alarms</strong> support reminders, focus timing and restoring local schedules after relevant system changes.</li>
+      <li><strong>Biometric unlock</strong> can unlock the optional local app lock. Open Tasks does not read biometric templates.</li>
+    </ul>
+    <p>Google Play distributes the app and may provide platform diagnostics. Google Drive provides your optional private backup storage. Android backup provides the optional encrypted portable-package backup or transfer path. Those providers process data under their own terms and controls.</p>
+
+    <h2>Retention and deletion</h2>
+    <p>Local data remains until you delete it in the app, clear app data, or uninstall. Deleted items can remain in the in-app Bin for 30 days. Deleting an attachment's content can leave its attachment record and other backup history. Use Backup &amp; recovery to delete Drive history; deleting history can leave a non-secret terminal safety marker and does not delete the separate Android package. Disconnecting Drive is not remote deletion.</p>
+    <p>You control deletion of Drive copies through the app and Google Drive, exported files through their destination, and calendar entries through the calendar provider. Android backup copies follow Android and Google controls.</p>
+
+    <h2>What we do not do</h2>
+    <p>Open Tasks has no ads, does not sell data, contains no embedded analytics, has no in-app purchases, and uses no cookies on this static policy site.</p>
+
+    <h2>Children, security and changes</h2>
+    <p>Open Tasks is not directed to children under 13. We use reasonable safeguards, but no system can guarantee absolute security. Keep recovery phrases, passphrases and exported files private; losing recovery material can prevent recovery.</p>
+    <p>If this policy changes, we will publish the changed policy here with a new effective date.</p>
+
+    <h2>Privacy and support requests</h2>
+    <p>For help or a privacy request, visit <a href="https://ksdaklmk.github.io/open-tasks/support/">Open Tasks support</a>.</p>
+  </main>
+  <footer>Open Tasks · Privacy policy</footer>
+</body>
+</html>
