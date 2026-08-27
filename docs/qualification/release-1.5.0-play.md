@@ -116,3 +116,25 @@ only to the exact candidate hash recorded with it.
 |---:|---|---|---|
 | 6 | 1.4.0 | Historical signed-sideload release; not a Play upload | See `docs/qualification/release-1.4.0-sideload.md`; no certificate value copied here. |
 | 7 | 1.5.0 | PENDING — evidence not yet produced | No AAB, APK set, APK, mapping, symbols, SBOM, or Play upload hash has been produced. |
+
+## Entry — 2026-08-27T10:24:56Z — worker — candidate 1.5.0/7
+
+### Task 5 listing and declaration repository evidence
+
+This entry appends repository evidence only. It does not change any earlier
+owner, account, public-deployment, final-binary, Console, asset, testing or
+publication gate.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Exact en-GB listing copy | PASS — repository evidence produced | `docs/google-play/store-listing.md` versions the fixed app name, short/full descriptions and release notes without unsupported compatibility, sync, collaboration, affiliation or absolute-security claims. |
+| Listing character limits | PASS — repository evidence produced | Literal `printf %s | wc -m` measurements: short description 70/80, full description 588/4,000, release notes 150/500; all three contracted `test` commands exited 0. |
+| Fixed listing identity | PASS — repository evidence produced | Store listing records Open Tasks, `app.opentasks`, Productivity, English (United Kingdom), Free, No ads, 13+, every Play-supported country/region, and the fixed privacy/support URLs. Developer identity and public URL deployment remain PENDING. |
+| Data Safety source matrix | PASS — draft repository evidence produced; PENDING — final AAB audit and Console answer | One row per implicated data type records on-device processing, every known off-device path/recipient, preliminary Play classification position, optionality, purpose, transit, deletion and final-evidence state. It does not collapse behavior to “no data collected.” |
+| Off-device behavior separation | PASS — repository evidence produced | Listing evidence separately records automatic encrypted Drive backup/metadata/account binding, Android's allowed portable backup package, user-directed plaintext CSV/Markdown/report exports, encrypted `.otvault` import/export, FileProvider sharing, Play Services authorization and Google Play platform diagnostics. |
+| Release dependency audit | PASS — repository evidence produced; PENDING — final AAB audit | `:app:dependencies --configuration releaseRuntimeClasspath` succeeded with the contracted SDK environment. Temporary report `/private/tmp/open-tasks-release-runtime-dependencies.txt` contains `play-services-auth:21.6.0`; no Firebase, analytics, telemetry, advertising, billing or crash-reporting SDK match was found. The report is not committed. |
+| Source network/scope audit | PASS — repository evidence produced; PENDING — final AAB and owner Cloud configuration | Production app source contains the Google Drive origin, one active `drive.appdata` scope and the privacy link opened in a browser; no developer-operated application backend or advertising-ID API/permission was found. Broad `Authorization`, `GoogleSignInAccount`, `crash`, XML namespace and test/example URL matches were reconciled. |
+| Manifest/backup audit | PASS — repository evidence produced; PENDING — final merged manifest and device qualification | Manifest permissions/components and both backup-rule formats are recorded with their purposes. Android 12+ extraction includes only `open_tasks_portable_v1.otb` and requires cloud encryption capability; legacy backup rules exclude all domains. |
+| App Content draft | PASS — draft repository evidence produced; PENDING — current Console wording/owner submission | Evidence matrix covers ads, app access, audience, content rating, excluded app categories, account deletion, optional Drive authorization, permissions/components/backup and reviewer navigation. Console-only questions remain explicitly PENDING. |
+| Store assets | PENDING — captured from final release UI | Manifest contracts exact names, dimensions, content and alt text for the icon, feature graphic, four phone screenshots and four large-screen screenshots; no asset was produced or approved in Task 5. |
+| Exact candidate artifacts and declarations | PENDING — evidence not yet produced | Task 5 did not build, inspect, sign or upload an AAB/APK, access Play/Cloud Console, verify public deployment, submit declarations or create tester/account evidence. |
