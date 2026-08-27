@@ -1,5 +1,77 @@
 # Open Tasks Handoff
 
+## Current state — local-first launch and compact Home complete, 27 August 2026
+
+This section is authoritative. Older checkpoints below remain historical
+evidence and are superseded wherever they conflict with this current contract.
+The release baseline below remains authoritative for release identity and
+qualification evidence.
+
+The implemented local-first launch is now the current product behavior:
+
+- Home uses the UK-English date plus search, with no greeting;
+- an idle ordinary `NoVault` first launch creates the normal empty encrypted
+  local vault automatically and proceeds to Home;
+- More > Backup & recovery exposes Restore existing workspace and opens the
+  existing Google Drive/Android replacement shell;
+- the Welcome UI, Welcome resources, and Welcome-only CSV handoff were deleted;
+- first-run fully drawn now measures usable Home rather than the neutral
+  initialization surface; and
+- verified staging, explicit takeover, and nondestructive Back behavior remain
+  in the existing recovery implementation.
+
+Room remains v9. The authenticated backup, `.otvault`, and Android portable
+package formats, SDK values, permissions, version, signing, publication, and
+release state did not change. No dependency, migration, sample content,
+provider scope, or application-network path was added.
+
+Fresh focused non-device verification in this worktree reported:
+
+```text
+./gradlew :app:testDebugUnitTest :feature:home:compileDebugAndroidTestKotlin :feature:more:compileDebugAndroidTestKotlin :app:compileDebugAndroidTestKotlin :benchmark:assembleBenchmark --console=plain
+bash scripts/verify-benchmark-threshold-script.sh
+```
+
+The Gradle command passed 499/499 app host tests with zero skips, failures, or
+errors; compiled Home, More, and app Android-test Kotlin; and assembled the
+benchmark APK. It reported `BUILD SUCCESSFUL in 27s`, 254 actionable tasks,
+one executed and 253 up-to-date. The script reported
+`verify-benchmark-threshold-script: all checks passed`.
+
+Fresh repository-wide non-device verification reported:
+
+```text
+./scripts/check-schema-drift.sh
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain
+git diff --check
+rg -n "WelcomeScreen|welcome[-_]|confirmForWelcome|takeWelcomeRows|abandonWelcomeHandoff|returnToWelcome|openTasksAfterMigrationSignal|Good afternoon" app/src feature/home/src feature/more/src benchmark/src scripts
+rg -n "fresh installation starts at Welcome|Welcome now offers|### Welcome|Welcome places" README.md PRODUCT.md DESIGN.md
+```
+
+The schema script found no drift and reported `BUILD SUCCESSFUL in 3s` with
+38/38 tasks executed. The repository Gradle command passed 1,462/1,462 host
+tests across 138 suites with zero skips, failures, or errors; lint and debug
+assembly passed; it reported `BUILD SUCCESSFUL in 46s`, 553 actionable tasks,
+254 executed, 60 from cache, and 239 up-to-date. `git diff --check` passed with
+no output. The living-document scan passed with no matches. The source scan had
+one test-only match at
+  `feature/home/src/androidTest/kotlin/app/opentasks/feature/home/HomeScreenInstrumentedTest.kt:110`,
+  where a negative assertion proves `Good afternoon` is absent. Production
+  code has no match, but the exact prescribed no-match scan is not promoted to
+  PASS.
+
+No disposable device or owner-approved physical target was authorized.
+Connected Home/More Compose, app process-restoration/fold, and benchmark
+execution are explicitly **UNEXECUTED**, not PASS. The Android-test source
+sets and benchmark APK compiled only; no physical launch or performance result
+is claimed.
+
+The unrelated original-checkout entries named in the plan's Global Constraints
+remain preserved exactly: the modified Stage 3 Google Drive plan, deleted Thai
+dashboard spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked 21
+August onboarding plan/design files. This feature worktree contains only the
+four intended living-document changes.
+
 ## Current state — generic CSV migration complete, 27 August 2026
 
 This section is authoritative. Older checkpoints below are historical and

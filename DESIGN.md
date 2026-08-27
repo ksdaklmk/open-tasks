@@ -507,24 +507,19 @@ document; see `docs/qualification/stage8-planning-surfaces.md`.
 This design is implemented. The visual and behavioural contract remains
 `docs/superpowers/specs/2026-08-21-offline-onboarding-executive-dashboard-nfr-design.md`.
 
-### Welcome
+### Local-first launch
 
-A missing vault renders Welcome, not recovery discovery. Compact is one calm,
-vertically balanced column; expanded may use a restrained identity/action
-split. Both reuse the light-only charcoal/ember system, system typography,
-dot motif, existing spacing, and 48 dp controls. No new illustration or design
-dependency is required.
+A genuinely missing vault creates the normal empty encrypted local workspace
+automatically and proceeds to Home. The neutral initialization surface makes
+no provider discovery, Google authorization, picker request, or application
+network call and does not report fully drawn before the active workspace is
+ready. Unreadable, recovering, and active-replacement states retain their
+existing recovery surfaces.
 
-The screen contains `Welcome to Open Tasks`, one concise private-local
-workspace sentence, `Continue with Google` with the Google mark, the immediate
-disclosure `Optional — Google Drive is used only for encrypted backup and
-recovery.`, `Continue offline`, and `Restore from this device`. The rejected
-`Works offline` and `Encrypted locally` bubbles do not appear. Google and
-portable discovery begin only from their respective actions.
-
-The layout must preserve complete labels, logical TalkBack/focus order,
-visible keyboard focus, 48 dp targets, and action reachability at 200% font
-across compact, folding, and expanded windows.
+More keeps Import from another app at top level. Backup & recovery adds one
+Restore existing workspace action that opens the existing Google Drive and
+Android package recovery-source screen; verified staging, explicit takeover,
+and nondestructive Back behavior remain unchanged.
 
 ### Executive HTML
 
@@ -558,12 +553,10 @@ is still pending in
 
 ## Generic CSV migration (implemented)
 
-Welcome places the full-width **Import from another app** action between
-**Continue offline** and **Restore from this device**. More places the same
-destination at top level after Weekly review, separate from Backup &
-recovery's strict **Import Open Tasks CSV** action. Selecting either entry
-opens the system document picker and then the same mapping surface; cancelling
-from Welcome creates no vault.
+More places **Import from another app** at top level after Weekly review,
+separate from Backup & recovery's strict **Import Open Tasks CSV** action.
+Selecting it opens the existing combined mapping surface; cancellation returns
+to the active workspace without changing local data.
 
 One scrollable page combines the source summary, destination selectors,
 samples, ignored columns, conditional choices, preview counts, warnings, and
