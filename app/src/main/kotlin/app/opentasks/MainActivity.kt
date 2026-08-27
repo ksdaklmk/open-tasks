@@ -83,6 +83,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        @Suppress("DEPRECATION")
+        activeRuntime = lastCustomNonConfigurationInstance as? LocalVaultRuntime
+        activeRecovery = savedInstanceState?.getBoolean(STATE_ACTIVE_RECOVERY) == true
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
@@ -306,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Surface(modifier = Modifier.fillMaxSize()) {}
             } else {
-                ReportDrawn()
+                if (shouldReportRecoveryFullyDrawn(runtimeState)) ReportDrawn()
                 RecoveryShellScreen(
                     mode = recoveryShellMode(
                         runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
@@ -356,6 +359,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_ACTIVE_RECOVERY, activeRecovery)
+        super.onSaveInstanceState(outState)
+    }
+
+    /** Retains the manager-owned identity alongside the retained ViewModel store. */
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onRetainCustomNonConfigurationInstance(): Any? = activeRuntime
 
     /**
      * Re-drives initialisation whenever the user returns to the app.
@@ -443,6 +455,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val STATE_ACTIVE_RECOVERY = "active_recovery"
         internal const val QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"
 
         /** Legacy compatibility for previously generated widget actions. */
@@ -458,6 +471,9 @@ internal fun shouldCreateInitialVault(
     runtimeState == VaultRuntimeState.NoVault &&
         presentation == RecoveryPresentation.NoVault &&
         !activeReplacement
+
+internal fun shouldReportRecoveryFullyDrawn(runtimeState: VaultRuntimeState): Boolean =
+    runtimeState != VaultRuntimeState.NoVault
 
 internal fun recoveryShellMode(
     runtimeRecovering: Boolean,

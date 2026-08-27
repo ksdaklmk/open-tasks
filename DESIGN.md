@@ -502,19 +502,22 @@ zero Critical findings. Device confirmation of the drag, time-picker and
 digest legs belongs to the stage qualification record rather than to this
 document; see `docs/qualification/stage8-planning-surfaces.md`.
 
-## First-run and executive dashboard design (implemented)
+## Local-first launch and executive dashboard design (implemented)
 
-This design is implemented. The visual and behavioural contract remains
-`docs/superpowers/specs/2026-08-21-offline-onboarding-executive-dashboard-nfr-design.md`.
+The local-first launch contract is
+`docs/superpowers/specs/2026-08-27-local-first-launch-compact-home-design.md`.
+The 21 August design remains historical background only for the executive
+dashboard and still-applicable NFR material; it does not govern local launch.
 
 ### Local-first launch
 
 A genuinely missing vault creates the normal empty encrypted local workspace
 automatically and proceeds to Home. The neutral initialization surface makes
 no provider discovery, Google authorization, picker request, or application
-network call and does not report fully drawn before the active workspace is
-ready. Unreadable, recovering, and active-replacement states retain their
-existing recovery surfaces.
+network call. No ordinary `NoVault` surface reports fully drawn, including a
+failed creation or user-selected recovery in progress; usable Home remains the
+first-run completion boundary. Unreadable, recovering, and active-replacement
+states retain their existing recovery surfaces and reporting.
 
 More keeps Import from another app at top level. Backup & recovery adds one
 Restore existing workspace action that opens the existing Google Drive and

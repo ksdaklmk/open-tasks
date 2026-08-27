@@ -315,6 +315,32 @@ class RecoveryViewModelTest {
         assertTrue(waitUntil { driveCalls.get() == 1 })
     }
 
+    @Test
+    fun localStartDropsAConcurrentRequestInsteadOfQueueingIt() {
+        val firstEntered = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+        val secondEntered = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val viewModel = viewModel(
+            createNewVault = {
+                if (calls.incrementAndGet() == 1) {
+                    firstEntered.countDown()
+                    releaseFirst.await(5, TimeUnit.SECONDS)
+                } else {
+                    secondEntered.countDown()
+                }
+            },
+        )
+
+        viewModel.startWithoutRestoring()
+        assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
+        viewModel.startWithoutRestoring()
+        releaseFirst.countDown()
+
+        assertFalse(secondEntered.await(1, TimeUnit.SECONDS))
+        assertEquals(1, calls.get())
+    }
+
     private fun viewModel(
         initialPresentation: RecoveryPresentation = RecoveryPresentation.NoVault,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),

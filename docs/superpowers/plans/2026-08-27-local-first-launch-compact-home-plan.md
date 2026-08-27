@@ -401,7 +401,9 @@ git commit -m "feat: expose workspace recovery from More"
 **Files:**
 
 - Modify: `app/src/main/kotlin/app/opentasks/MainActivity.kt:90-220,280-405,519-535`
+- Modify: `app/src/main/kotlin/app/opentasks/backup/RecoveryViewModel.kt`
 - Test: `app/src/test/kotlin/app/opentasks/NavigationPresentationTest.kt`
+- Test: `app/src/test/kotlin/app/opentasks/backup/RecoveryViewModelTest.kt`
 - Test:
   `app/src/androidTest/kotlin/app/opentasks/MainActivityQuickAddInstrumentedTest.kt`
 
@@ -411,7 +413,8 @@ git commit -m "feat: expose workspace recovery from More"
   `RecoveryViewModel.startWithoutRestoring()`, and the active-workspace
   `ReportDrawnWhen`.
 - Produces:
-  `shouldCreateInitialVault(VaultRuntimeState, RecoveryPresentation, Boolean): Boolean`.
+  `shouldCreateInitialVault(VaultRuntimeState, RecoveryPresentation, Boolean): Boolean`
+  and `shouldReportRecoveryFullyDrawn(VaultRuntimeState): Boolean`.
 
 - [ ] **Step 1: Add the host state-boundary test**
 
@@ -456,6 +459,17 @@ fun onlyAnIdleOrdinaryNoVaultSurfaceCreatesTheInitialVault() {
         ),
     )
 }
+
+@Test
+fun onlyOrdinaryNoVaultRecoveryWithholdsFullyDrawn() {
+    assertFalse(shouldReportRecoveryFullyDrawn(VaultRuntimeState.NoVault))
+    assertTrue(
+        shouldReportRecoveryFullyDrawn(VaultRuntimeState.Unreadable(VaultSlot.LEGACY)),
+    )
+    assertTrue(
+        shouldReportRecoveryFullyDrawn(VaultRuntimeState.Recovering("operation")),
+    )
+}
 ```
 
 - [ ] **Step 2: Run the host test to verify RED**
@@ -466,7 +480,8 @@ Run:
 ./gradlew :app:testDebugUnitTest --tests "*NavigationPresentationTest" --console=plain
 ```
 
-Expected: FAIL to compile because `shouldCreateInitialVault` does not exist.
+Expected: FAIL to compile because `shouldCreateInitialVault` and
+`shouldReportRecoveryFullyDrawn` do not exist.
 
 - [ ] **Step 3: Extract the existing three-part safety condition**
 
@@ -481,6 +496,9 @@ internal fun shouldCreateInitialVault(
     runtimeState == VaultRuntimeState.NoVault &&
         presentation == RecoveryPresentation.NoVault &&
         !activeReplacement
+
+internal fun shouldReportRecoveryFullyDrawn(runtimeState: VaultRuntimeState): Boolean =
+    runtimeState != VaultRuntimeState.NoVault
 ```
 
 In `RecoverySurface`, replace `showWelcome` with:
@@ -525,7 +543,7 @@ if (createInitialVault) {
         )
     }
 } else {
-    ReportDrawn()
+    if (shouldReportRecoveryFullyDrawn(runtimeState)) ReportDrawn()
     RecoveryShellScreen(
         mode = recoveryShellMode(
             runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
@@ -555,7 +573,82 @@ if (createInitialVault) {
 Delete the old `else if (showWelcome)` branch rather than retaining a second
 entry surface. The bootstrap branch must not call `ReportDrawn()`. The active
 workspace continues to call `ReportDrawnWhen` after its workflow statuses
-load.
+load. Every ordinary `NoVault` recovery presentation, including a failed
+creation or user-selected recovery in progress, also withholds recovery-shell
+fully-drawn reporting. `Unreadable`, `Recovering`, and active replacement keep
+their existing recovery-shell reporting.
+
+Before relying on the keyed effect, add this host regression:
+
+```kotlin
+@Test
+fun localStartDropsAConcurrentRequestInsteadOfQueueingIt() {
+    val firstEntered = CountDownLatch(1)
+    val releaseFirst = CountDownLatch(1)
+    val secondEntered = CountDownLatch(1)
+    val calls = AtomicInteger()
+    val viewModel = viewModel(
+        createNewVault = {
+            if (calls.incrementAndGet() == 1) {
+                firstEntered.countDown()
+                releaseFirst.await(5, TimeUnit.SECONDS)
+            } else {
+                secondEntered.countDown()
+            }
+        },
+    )
+
+    viewModel.startWithoutRestoring()
+    assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
+    viewModel.startWithoutRestoring()
+    releaseFirst.countDown()
+
+    assertFalse(secondEntered.await(1, TimeUnit.SECONDS))
+    assertEquals(1, calls.get())
+}
+```
+
+Run it alone:
+
+```bash
+./gradlew :app:testDebugUnitTest --tests "*RecoveryViewModelTest.localStartDropsAConcurrentRequestInsteadOfQueueingIt" --console=plain
+```
+
+Expected: FAIL because the queued second creation runs after the first
+unlocks. Then make only local start non-queueing:
+
+```kotlin
+fun startWithoutRestoring() = launchOperation(waitForTurn = false) {
+    createNewVault()
+    presented.value = RecoveryPresentation.Activating
+}
+
+private fun launchOperation(
+    waitForTurn: Boolean = true,
+    block: suspend () -> Unit,
+) {
+    if (!waitForTurn && !operation.tryLock()) return
+    viewModelScope.launch(Dispatchers.Default) {
+        if (waitForTurn) {
+            operation.lock()
+        }
+        try {
+            block()
+        } catch (failure: Throwable) {
+            if (failure is CancellationException) throw failure
+            presented.value = RecoveryPresentation.Failed(
+                RecoveryFailureCategory.CORRUPT_OR_INCOMPATIBLE,
+            )
+        } finally {
+            operation.unlock()
+        }
+    }
+}
+```
+
+The default waiting lock preserves every unrelated recovery action. Re-run
+`*RecoveryViewModelTest` GREEN before continuing; a later explicit local-start
+request may retry after the first attempt completes or fails.
 
 - [ ] **Step 5: Make the warm quick-add test expect the now-active local workspace**
 
@@ -596,10 +689,10 @@ The retained lifecycle assertions must still prove that exactly one
 Run:
 
 ```bash
-./gradlew :app:testDebugUnitTest --tests "*NavigationPresentationTest" :app:compileDebugAndroidTestKotlin --console=plain
+./gradlew :app:testDebugUnitTest --tests "*RecoveryViewModelTest" --tests "*NavigationPresentationTest" :app:compileDebugAndroidTestKotlin --console=plain
 ```
 
-Expected: host test PASS and `BUILD SUCCESSFUL`.
+Expected: both host suites PASS and `BUILD SUCCESSFUL`.
 
 On a disposable target only, run:
 
@@ -707,17 +800,32 @@ From `MainActivity` remove:
   `emptyTaskCsvTarget`, `CommandResult`, `DomainCommand`,
   `TaskMigrationScreen`, and `WelcomeScreen`.
 
-In `observeVaultRuntime()`, replace:
+Restore the manager-owned runtime identity and the non-secret recovery-route
+flag immediately after `super.onCreate(savedInstanceState)`:
 
 ```kotlin
-if (next !== activeRuntime) {
-    if (activeRuntime != null) viewModelStore.clear()
-    activeRuntime = next
-    activeRecovery = false
-}
+@Suppress("DEPRECATION")
+activeRuntime = lastCustomNonConfigurationInstance as? LocalVaultRuntime
+activeRecovery = savedInstanceState?.getBoolean(STATE_ACTIVE_RECOVERY) == true
 ```
 
-with:
+Retain that exact process-owned identity only across configuration changes and
+save only the route flag:
+
+```kotlin
+override fun onSaveInstanceState(outState: Bundle) {
+    outState.putBoolean(STATE_ACTIVE_RECOVERY, activeRecovery)
+    super.onSaveInstanceState(outState)
+}
+
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+override fun onRetainCustomNonConfigurationInstance(): Any? = activeRuntime
+```
+
+Add `private const val STATE_ACTIVE_RECOVERY = "active_recovery"` to the
+existing companion object.
+
+Keep the runtime-transition block:
 
 ```kotlin
 if (next !== activeRuntime) {
@@ -727,10 +835,14 @@ if (next !== activeRuntime) {
 }
 ```
 
-Update the method comment to say that every runtime identity change clears
-ViewModels before the next composition. The removed null guard existed to
-carry Welcome CSV rows across first activation; without that handoff it would
-retain `RecoveryPresentation.Activating` and strand a later More recovery.
+An Activity attaching to the manager's already-active runtime now starts with
+the same retained identity, so the manager's initial hot emission does not
+clear the retained ViewModel store. A genuine first `NoVault` to `Active`
+activation, transition away from an active runtime, or later active-runtime
+identity replacement still differs and clears ViewModels before the next
+composition. Saving `activeRecovery` preserves the active-replacement route;
+do not save passphrases, candidate handles, recovery results, transient CSV
+rows, or any other recovery data.
 
 After removal, the themed part of `RecoverySurface` has only:
 
@@ -742,7 +854,7 @@ OpenTasksTheme {
         }
         Surface(modifier = Modifier.fillMaxSize()) {}
     } else {
-        ReportDrawn()
+        if (shouldReportRecoveryFullyDrawn(runtimeState)) ReportDrawn()
         RecoveryShellScreen(
             mode = recoveryShellMode(
                 runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
@@ -928,11 +1040,13 @@ composeRule.onNodeWithTag("restore-existing-workspace")
 composeRule.onNodeWithTag("recovery-portable").performClick()
 ```
 
-Keep the existing passphrase entry, activity recreation, and cleared-input
-assertions unchanged. This test also proves that first activation cleared the
-bootstrap `RecoveryViewModel`: otherwise the More action would show an
-`Activating` spinner instead of `recovery-portable`. Retain the file's existing
-`performScrollTo` import.
+Keep the existing passphrase entry, activity recreation, and post-recreation
+`recovery-passphrase` assertion unchanged. The node's continued presence proves
+that the non-secret active-recovery route survived recreation; its empty input
+proves that the passphrase did not. The test also proves that first activation
+cleared the bootstrap `RecoveryViewModel`: otherwise the More action would show
+an `Activating` spinner instead of `recovery-portable`. Retain the file's
+existing `performScrollTo` import.
 
 - [ ] **Step 8: Run host tests, Android-test compilation, and the dead-name scan**
 

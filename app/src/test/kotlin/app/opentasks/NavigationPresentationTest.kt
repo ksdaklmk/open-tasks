@@ -50,6 +50,17 @@ class NavigationPresentationTest {
     }
 
     @Test
+    fun onlyOrdinaryNoVaultRecoveryWithholdsFullyDrawn() {
+        assertFalse(shouldReportRecoveryFullyDrawn(VaultRuntimeState.NoVault))
+        assertTrue(
+            shouldReportRecoveryFullyDrawn(VaultRuntimeState.Unreadable(VaultSlot.LEGACY)),
+        )
+        assertTrue(
+            shouldReportRecoveryFullyDrawn(VaultRuntimeState.Recovering("operation")),
+        )
+    }
+
+    @Test
     fun recoveringRuntimeDoesNotHideTakeoverConfirmation() {
         assertEquals(
             RecoveryShellMode.TakeoverConfirmation,
