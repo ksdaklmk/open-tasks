@@ -124,7 +124,7 @@ fun RecoveryShellScreen(
                         Button(
                             onClick = onStartWithoutRestoring,
                             modifier = Modifier.heightIn(min = 48.dp),
-                        ) { Text(stringResource(R.string.welcome_offline)) }
+                        ) { Text(stringResource(R.string.recovery_start_local)) }
                     }
                 }
             }

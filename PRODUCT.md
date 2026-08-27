@@ -176,22 +176,25 @@ release evidence live in the Stage 8 qualification record.
   workspaces.
 - Backup failure never blocks local editing, and attachment failure affects
   only the file operation.
-- A fresh installation starts at Welcome and makes no provider discovery or
-  application network call until the person explicitly chooses Google.
-- Account-free local use remains complete. Google authorization is optional
-  and serves encrypted backup/recovery only.
+- A fresh installation creates the normal empty encrypted local vault and
+  proceeds to Home without provider discovery, Google authorization, a picker,
+  or an application network call.
+- Account-free local use is the default and remains complete. Google
+  authorization is optional and serves encrypted backup/recovery only from
+  More.
 - A new offline vault contains structural workspace/default workflow records
   only and no demonstration or user content.
 - Insights may export one self-contained plaintext executive HTML dashboard
   through person-directed download or share. Aggregate output is the default;
   task detail requires an explicit opt-in.
 
-### Delivered onboarding, dashboard, and NFR programme
+### Delivered local-first launch, dashboard, and NFR programme
 
-Welcome now offers `Continue with Google`, `Continue offline`, and
-`Restore from this device` without automatic restore discovery. Offline is a
-complete primary path, not a degraded guest mode; Google never becomes
-identity or authority for local records.
+A missing vault now creates the normal empty local workspace automatically.
+Import from another app remains top-level in More, while Backup & recovery
+offers an explicit Restore existing workspace action for verified Google Drive
+or Android package recovery. Google never becomes identity or authority for
+local records.
 
 Insights generates one polished offline HTML page from its existing selection
 and metric engine. The report presents executive summary, portfolio health,

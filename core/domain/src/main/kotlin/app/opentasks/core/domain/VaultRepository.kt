@@ -54,6 +54,7 @@ data class ImportedTaskRow(
     val estimateMinutes: Long?,
     val tagNames: List<String>,
     val description: String,
+    val statusSemantic: SemanticStatus? = null,
 )
 
 data class ImportedTaskReceipt(
@@ -232,6 +233,8 @@ sealed interface DomainCommand {
         val milestoneId: MilestoneId? = null,
         val recurrenceMetadata: RecurrenceSeriesMetadata? = null,
         val restoreStatusId: WorkflowStatusId? = null,
+        /** [restoreParentTaskId] is repository-produced Undo metadata. Normal UI code must leave it null. */
+        val restoreParentTaskId: TaskId? = null,
         val reminder: Reminder? = null,
         val restorePastReminder: Boolean = false,
     ) : DomainCommand
@@ -362,9 +365,14 @@ sealed interface DomainCommand {
 
     data class RestoreTask(val taskId: TaskId) : DomainCommand
 
+    /**
+     * [restoreParentTaskId] is repository-produced Undo metadata used only when
+     * re-binning a task whose restore safely detached it.
+     */
     data class DeleteTask(
         val taskId: TaskId,
         val deletedAt: Instant = Instant.now(),
+        val restoreParentTaskId: TaskId? = null,
     ) : DomainCommand
 
     data class PermanentlyDeleteTask(

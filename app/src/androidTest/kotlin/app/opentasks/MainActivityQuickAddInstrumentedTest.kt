@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.core.app.ActivityScenario
@@ -62,10 +63,9 @@ class MainActivityQuickAddInstrumentedTest {
             scenario = ActivityScenario.launch(scenarioIntent)
             scenario.onActivity(first::set)
             composeRule.waitUntil(timeoutMillis = 10_000) {
-                composeRule.onAllNodesWithTag("welcome-screen")
+                composeRule.onAllNodesWithContentDescription("Search workspace")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
             composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
 
             scenario.onActivity { activity ->
@@ -77,7 +77,9 @@ class MainActivityQuickAddInstrumentedTest {
 
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 resumed.get() === first.get() &&
-                    resumedAction.get() == MainActivity.QUICK_ADD_ACTION
+                    resumedAction.get() == MainActivity.QUICK_ADD_ACTION &&
+                    composeRule.onAllNodesWithTag("quick-add-title")
+                        .fetchSemanticsNodes().isNotEmpty()
             }
             scenario.onActivity { activity ->
                 assertSame(first.get(), activity)
@@ -85,8 +87,7 @@ class MainActivityQuickAddInstrumentedTest {
             }
             assertEquals(1, created.get())
             assertSame(first.get(), resumed.get())
-            composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
-            composeRule.onNodeWithTag("quick-add-title").assertDoesNotExist()
+            composeRule.onNodeWithTag("quick-add-title").assertIsDisplayed()
         } finally {
             try {
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {

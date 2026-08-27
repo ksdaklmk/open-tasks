@@ -41,7 +41,6 @@ import app.opentasks.digest.DailyDigestIntents
 import app.opentasks.feature.more.RecoveryShellMode
 import app.opentasks.feature.more.RecoveryShellCandidate
 import app.opentasks.feature.more.RecoveryShellScreen
-import app.opentasks.feature.more.WelcomeScreen
 import app.opentasks.lock.AppLockController
 import app.opentasks.lock.AppLockScreen
 import app.opentasks.lock.AppLockSettings
@@ -84,6 +83,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        @Suppress("DEPRECATION")
+        activeRuntime = lastCustomNonConfigurationInstance as? LocalVaultRuntime
+        activeRecovery = savedInstanceState?.getBoolean(STATE_ACTIVE_RECOVERY) == true
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
@@ -125,6 +127,7 @@ class MainActivity : ComponentActivity() {
                         RecoverySurface(runtimeState, activeReplacement = true)
                     } else {
                         val workspaceViewModel: WorkspaceViewModel = viewModel()
+                        val taskMigrationViewModel: TaskMigrationViewModel = viewModel()
                         val snapshot by
                             workspaceViewModel.snapshot.collectAsStateWithLifecycle()
                         ReportDrawnWhen { snapshot.workflowStatuses.isNotEmpty() }
@@ -182,6 +185,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenRecovery = { activeRecovery = true },
                             viewModel = workspaceViewModel,
+                            taskMigrationViewModel = taskMigrationViewModel,
                         )
                     }
                 }
@@ -268,7 +272,7 @@ class MainActivity : ComponentActivity() {
         ) { result ->
             result.data?.takeIf { result.resultCode == RESULT_OK }?.let(
                 recoveryViewModel::acceptResolution,
-            ) ?: recoveryViewModel.returnToWelcome()
+            ) ?: recoveryViewModel.returnToSources()
         }
         LaunchedEffect(recoveryViewModel) {
             for (pendingIntent in recoveryViewModel.resolutionEffects) {
@@ -281,30 +285,31 @@ class MainActivity : ComponentActivity() {
             ?.values
             ?.map { RecoveryShellCandidate(it.handle, it.source == RecoverySource.GOOGLE_DRIVE) }
             .orEmpty()
-        val showWelcome = runtimeState == VaultRuntimeState.NoVault &&
-            presentation == RecoveryPresentation.NoVault &&
-            !activeReplacement
+        val createInitialVault = shouldCreateInitialVault(
+            runtimeState = runtimeState,
+            presentation = presentation,
+            activeReplacement = activeReplacement,
+        )
         BackHandler(
             enabled = runtimeState == VaultRuntimeState.NoVault &&
                 presentation != RecoveryPresentation.NoVault,
-            onBack = recoveryViewModel::returnToWelcome,
+            onBack = recoveryViewModel::returnToSources,
         )
         BackHandler(enabled = activeReplacement) {
             if (presentation == RecoveryPresentation.NoVault) {
                 activeRecovery = false
             } else {
-                recoveryViewModel.returnToWelcome()
+                recoveryViewModel.returnToSources()
             }
         }
         OpenTasksTheme {
-            ReportDrawn()
-            if (showWelcome) {
-                WelcomeScreen(
-                    onContinueWithGoogle = recoveryViewModel::discoverDrive,
-                    onContinueOffline = recoveryViewModel::startWithoutRestoring,
-                    onRestoreFromDevice = recoveryViewModel::discoverPortable,
-                )
+            if (createInitialVault) {
+                LaunchedEffect(recoveryViewModel) {
+                    recoveryViewModel.startWithoutRestoring()
+                }
+                Surface(modifier = Modifier.fillMaxSize()) {}
             } else {
+                if (shouldReportRecoveryFullyDrawn(runtimeState)) ReportDrawn()
                 RecoveryShellScreen(
                     mode = recoveryShellMode(
                         runtimeRecovering = runtimeState is VaultRuntimeState.Recovering,
@@ -320,7 +325,7 @@ class MainActivity : ComponentActivity() {
                     onRestore = recoveryViewModel::restore,
                     onConfirmTakeover = recoveryViewModel::confirmTakeover,
                     onStartWithoutRestoring = recoveryViewModel::startWithoutRestoring,
-                    onBack = recoveryViewModel::returnToWelcome,
+                    onBack = recoveryViewModel::returnToSources,
                     canStartWithoutRestoring = !activeReplacement,
                     onRetryUnreadable = {
                         lifecycleScope.launch {
@@ -335,9 +340,8 @@ class MainActivity : ComponentActivity() {
     /**
      * Tracks the runtime the composition is allowed to build against.
      *
-     * A replaced slot publishes a different runtime, so the view models bound
-     * to the previous one are cleared before the new composition can inject a
-     * repository from the new slot.
+     * Every runtime identity change clears view models before the next
+     * composition can inject services from the new runtime.
      */
     private fun observeVaultRuntime() {
         lifecycleScope.launch {
@@ -347,7 +351,7 @@ class MainActivity : ComponentActivity() {
                 activeVaultServices.onVaultRuntimeState(state)
                 val next = (state as? VaultRuntimeState.Active)?.runtime
                 if (next !== activeRuntime) {
-                    if (activeRuntime != null) viewModelStore.clear()
+                    viewModelStore.clear()
                     activeRuntime = next
                     activeRecovery = false
                 }
@@ -355,6 +359,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_ACTIVE_RECOVERY, activeRecovery)
+        super.onSaveInstanceState(outState)
+    }
+
+    /** Retains the manager-owned identity alongside the retained ViewModel store. */
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onRetainCustomNonConfigurationInstance(): Any? = activeRuntime
 
     /**
      * Re-drives initialisation whenever the user returns to the app.
@@ -442,12 +455,25 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val STATE_ACTIVE_RECOVERY = "active_recovery"
         internal const val QUICK_ADD_ACTION = "app.opentasks.action.QUICK_ADD"
 
         /** Legacy compatibility for previously generated widget actions. */
         const val EXTRA_OPEN_QUICK_ADD = "open_quick_add"
     }
 }
+
+internal fun shouldCreateInitialVault(
+    runtimeState: VaultRuntimeState,
+    presentation: RecoveryPresentation,
+    activeReplacement: Boolean,
+): Boolean =
+    runtimeState == VaultRuntimeState.NoVault &&
+        presentation == RecoveryPresentation.NoVault &&
+        !activeReplacement
+
+internal fun shouldReportRecoveryFullyDrawn(runtimeState: VaultRuntimeState): Boolean =
+    runtimeState != VaultRuntimeState.NoVault
 
 internal fun recoveryShellMode(
     runtimeRecovering: Boolean,

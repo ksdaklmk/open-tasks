@@ -502,29 +502,27 @@ zero Critical findings. Device confirmation of the drag, time-picker and
 digest legs belongs to the stage qualification record rather than to this
 document; see `docs/qualification/stage8-planning-surfaces.md`.
 
-## First-run and executive dashboard design (implemented)
+## Local-first launch and executive dashboard design (implemented)
 
-This design is implemented. The visual and behavioural contract remains
-`docs/superpowers/specs/2026-08-21-offline-onboarding-executive-dashboard-nfr-design.md`.
+The local-first launch contract is
+`docs/superpowers/specs/2026-08-27-local-first-launch-compact-home-design.md`.
+The 21 August design remains historical background only for the executive
+dashboard and still-applicable NFR material; it does not govern local launch.
 
-### Welcome
+### Local-first launch
 
-A missing vault renders Welcome, not recovery discovery. Compact is one calm,
-vertically balanced column; expanded may use a restrained identity/action
-split. Both reuse the light-only charcoal/ember system, system typography,
-dot motif, existing spacing, and 48 dp controls. No new illustration or design
-dependency is required.
+A genuinely missing vault creates the normal empty encrypted local workspace
+automatically and proceeds to Home. The neutral initialization surface makes
+no provider discovery, Google authorization, picker request, or application
+network call. No ordinary `NoVault` surface reports fully drawn, including a
+failed creation or user-selected recovery in progress; usable Home remains the
+first-run completion boundary. Unreadable, recovering, and active-replacement
+states retain their existing recovery surfaces and reporting.
 
-The screen contains `Welcome to Open Tasks`, one concise private-local
-workspace sentence, `Continue with Google` with the Google mark, the immediate
-disclosure `Optional — Google Drive is used only for encrypted backup and
-recovery.`, `Continue offline`, and `Restore from this device`. The rejected
-`Works offline` and `Encrypted locally` bubbles do not appear. Google and
-portable discovery begin only from their respective actions.
-
-The layout must preserve complete labels, logical TalkBack/focus order,
-visible keyboard focus, 48 dp targets, and action reachability at 200% font
-across compact, folding, and expanded windows.
+More keeps Import from another app at top level. Backup & recovery adds one
+Restore existing workspace action that opens the existing Google Drive and
+Android package recovery-source screen; verified staging, explicit takeover,
+and nondestructive Back behavior remain unchanged.
 
 ### Executive HTML
 
@@ -555,3 +553,33 @@ focus, hostile content, CSP, print, and reduced-motion contracts. The manual
 two-browser, print-preview, keyboard, zoom, and screen-reader release exercise
 is still pending in
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md`.
+
+## Generic CSV migration (implemented)
+
+More places **Import from another app** at top level after Weekly review,
+separate from Backup & recovery's strict **Import Open Tasks CSV** action.
+Selecting it opens the existing combined mapping surface; cancellation returns
+to the active workspace without changing local data.
+
+One scrollable page combines the source summary, destination selectors,
+samples, ignored columns, conditional choices, preview counts, warnings, and
+confirmation. Status and priority value mappings show every distinct non-empty
+source value and remain editable; unresolved values block confirmation. The
+day/month choice appears only for ambiguous numeric dates; estimate units and
+tag separators appear only for their mapped fields. Every supported field
+remains editable on this page.
+
+The page always discloses that import creates new tasks and that selecting the
+same file again creates another set. With no warnings the action reads
+**Import N tasks**; with any accepted loss it reads **Import N tasks anyway**.
+Warnings identify the row, field, and reason in text with error semantics;
+colour is never the only signal. The screen never auto-commits or adds a
+second confirmation page.
+
+The page has one safe-drawing, IME-aware scroll owner, 48 dp controls, logical
+focus/TalkBack order, heading semantics, visible focus, scalable text, and RTL
+layout. Compact and expanded widths expose the same content and actions;
+folds constrain the surface to the largest physical pane. These properties
+have automated host or Android-test compile coverage, while connected
+TalkBack, RTL, keyboard, compact/expanded, folding, and 200% font acceptance
+still requires an explicitly disposable or owner-approved device.

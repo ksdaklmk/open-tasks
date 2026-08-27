@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.opentasks.core.data.db.VaultDatabase
+import app.opentasks.core.data.db.toEntity
 import app.opentasks.core.domain.CommandResult
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.ImportedTaskRow
@@ -11,7 +12,10 @@ import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.model.DeviceId
 import app.opentasks.core.model.OpenTasksFixtures
 import app.opentasks.core.model.Priority
+import app.opentasks.core.model.Revision
+import app.opentasks.core.model.SemanticStatus
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -130,6 +134,46 @@ class RoomImportTasksInstrumentedTest {
             assertEquals(RejectionReason.IMPORT_UNDO_CONFLICT, rejected.reason)
             assertEquals(beforeState, database!!.backupStateDao().require(VAULT_ID))
             assertEquals(beforeCounts, allTableCounts())
+        }
+    }
+
+    @Test
+    fun semanticHintUsesTheActiveRoomStatusAndUndoRemainsExact() = runBlocking {
+        withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.currentWorkspace()
+            val project = OpenTasksFixtures.studioProject
+            val started = repository!!.currentWorkspace().workflowStatuses.single {
+                it.projectId == project.id && it.semanticStatus == SemanticStatus.STARTED
+            }
+            database!!.workspaceDao().upsertWorkflowStatus(
+                started.copy(name = "Doing")
+                    .toEntity(Revision(DeviceId("import-test"), 1L, 0)),
+            )
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.workflowStatuses.any { it.id == started.id && it.name == "Doing" }
+            }
+            val before = recordTableCounts()
+
+            val imported = repository!!.execute(
+                DomainCommand.ImportTasks(
+                    listOf(
+                        importRow().copy(
+                            projectName = project.name,
+                            statusName = "In progress",
+                            statusSemantic = SemanticStatus.STARTED,
+                        ),
+                    ),
+                ),
+            ) as CommandResult.Success
+
+            val task = repository!!.currentWorkspace().tasks.single {
+                it.title == "Imported task"
+            }
+            assertEquals("Doing", repository!!.currentWorkspace().workflowStatuses.single {
+                it.id == task.statusId
+            }.name)
+            repository!!.execute(requireNotNull(imported.undo))
+            assertEquals(before, recordTableCounts())
         }
     }
 

@@ -23,6 +23,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -262,8 +263,10 @@ class TasksCsvParserTest {
         assertEquals(first.completedAt, rows[0].completedAt)
         assertEquals(first.estimate?.toMinutes(), rows[0].estimateMinutes)
         assertEquals(tags.map { it.name }, rows[0].tagNames)
+        assertNull(rows[0].statusSemantic)
         assertEquals(second.completedAt, rows[1].completedAt)
         assertEquals(statuses.last().name, rows[1].statusName)
+        assertNull(rows[1].statusSemantic)
     }
 
     @Test

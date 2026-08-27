@@ -62,3 +62,6 @@ id_ed25519
 
 # Local Superpowers brainstorming companion sessions
 .superpowers/brainstorm/
+
+# Local git worktrees
+.worktrees/

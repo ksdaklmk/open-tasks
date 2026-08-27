@@ -526,6 +526,31 @@ repository dispatch, and parse buffers are cleared when the preview is no
 longer needed. These interop paths do not change the encrypted Room, create-only
 Drive, or snapshot-only `.otvault` authority boundaries.
 
+## Generic CSV migration boundary (implemented)
+
+```text
+CSV bytes -> shared record reader -> mapping draft -> reviewed rows/warnings
+-> existing import preview -> DomainCommand.ImportTasks -> exact Undo
+```
+
+The pure `core:data` mapper owns conservative header suggestions, field
+conversion, date parsing, case canonicalisation, and complete warning
+production. The Activity-scoped `TaskMigrationViewModel` owns only transient
+source and review state; it persists no URI permission, file, mapping draft,
+or source cells and performs no network access. `app` owns picker effects,
+current-snapshot revalidation, and dispatch through the existing
+`WorkspaceViewModel.execute` command and snackbar/Undo path. `MainActivity`
+holds confirmed Welcome rows in memory only across the NoVault-to-Active
+transition and clears the one-shot handoff on every terminal path.
+
+Backup & recovery's strict **Import Open Tasks CSV** remains an exact,
+all-or-nothing 14-column parser. The separate Welcome/More **Import from
+another app** path accepts a bounded generic table, translates only reviewed
+supported fields, and creates new records without matching, merging, or
+deduplication. Both converge only after translation on the existing atomic
+import planner and repository-produced `RemoveImportedRecords` Undo. Room
+stays v9 and authenticated backup and `.otvault` archive formats stay v1.
+
 Google authorisation is explicit and the Drive backup transport requests only
 `drive.appdata`; it lists/reads encrypted lineage objects and creates immutable
 objects without a PATCH/update path. Backup and attachment namespaces remain

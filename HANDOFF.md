@@ -1,9 +1,245 @@
 # Open Tasks Handoff
 
-## Current state — release 1.4.0 tagged, pushed, and closed, 24 August 2026
+## Current state — local-first launch and compact Home complete, 27 August 2026
 
-This section is authoritative. Older checkpoints below are historical and are
-superseded wherever they conflict with this one.
+This section is authoritative. Older checkpoints below remain historical
+evidence and are superseded wherever they conflict with this current contract.
+The release baseline below remains authoritative for release identity and
+qualification evidence.
+
+The implemented local-first launch is now the current product behavior:
+
+- Home uses the UK-English date plus search, with no greeting;
+- an idle ordinary `NoVault` first launch creates the normal empty encrypted
+  local vault automatically and proceeds to Home;
+- More > Backup & recovery exposes Restore existing workspace and opens the
+  existing Google Drive/Android replacement shell;
+- the Welcome UI, Welcome resources, and Welcome-only CSV handoff were deleted;
+- first-run fully drawn now measures usable Home rather than the neutral
+  initialization surface; and
+- verified staging, explicit takeover, and nondestructive Back behavior remain
+  in the existing recovery implementation.
+
+Room remains v9. The authenticated backup, `.otvault`, and Android portable
+package formats, SDK values, permissions, version, signing, publication, and
+release state did not change. No dependency, migration, sample content,
+provider scope, or application-network path was added.
+
+Fresh focused non-device verification in this worktree reported:
+
+```text
+./gradlew :app:testDebugUnitTest :feature:home:compileDebugAndroidTestKotlin :feature:more:compileDebugAndroidTestKotlin :app:compileDebugAndroidTestKotlin :benchmark:assembleBenchmark --console=plain
+bash scripts/verify-benchmark-threshold-script.sh
+```
+
+The Gradle command passed 499/499 app host tests with zero skips, failures, or
+errors; compiled Home, More, and app Android-test Kotlin; and assembled the
+benchmark APK. It reported `BUILD SUCCESSFUL in 27s`, 254 actionable tasks,
+one executed and 253 up-to-date. The script reported
+`verify-benchmark-threshold-script: all checks passed`.
+
+Fresh repository-wide non-device verification reported:
+
+```text
+./scripts/check-schema-drift.sh
+./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain
+git diff --check
+rg -n "WelcomeScreen|welcome[-_]|confirmForWelcome|takeWelcomeRows|abandonWelcomeHandoff|returnToWelcome|openTasksAfterMigrationSignal|Good afternoon" app/src feature/home/src feature/more/src benchmark/src scripts
+rg -n "fresh installation starts at Welcome|Welcome now offers|### Welcome|Welcome places" README.md PRODUCT.md DESIGN.md
+```
+
+The schema script found no drift and reported `BUILD SUCCESSFUL in 3s` with
+38/38 tasks executed. The repository Gradle command passed 1,462/1,462 host
+tests across 138 suites with zero skips, failures, or errors; lint and debug
+assembly passed; it reported `BUILD SUCCESSFUL in 46s`, 553 actionable tasks,
+254 executed, 60 from cache, and 239 up-to-date. `git diff --check` passed with
+no output. The living-document scan passed with no matches. The source scan had
+one test-only match at
+  `feature/home/src/androidTest/kotlin/app/opentasks/feature/home/HomeScreenInstrumentedTest.kt:110`,
+  where a negative assertion proves `Good afternoon` is absent. Production
+  code has no match, but the exact prescribed no-match scan is not promoted to
+  PASS.
+
+No disposable device or owner-approved physical target was authorized.
+Connected Home/More Compose, app process-restoration/fold, and benchmark
+execution are explicitly **UNEXECUTED**, not PASS. The Android-test source
+sets and benchmark APK compiled only; no physical launch or performance result
+is claimed.
+
+The unrelated original-checkout entries named in the plan's Global Constraints
+remain preserved exactly: the modified Stage 3 Google Drive plan, deleted Thai
+dashboard spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked 21
+August onboarding plan/design files. This feature worktree contains only the
+four intended living-document changes.
+
+## Current state — generic CSV migration complete, 27 August 2026
+
+This section is authoritative. Older checkpoints below are historical and
+superseded wherever they conflict with this one. The release baseline below
+remains authoritative for release identity and qualification evidence.
+
+The Undo plan remains closed at `12ac37e`. Generic CSV Tasks 1–8 and the final
+review fixes are clean on `main`; the implementation range is
+`b22d967e7ab5b55f6e0c50a5c7228b6180302e35` through
+`01dba43bd5978f976298321973d568f9d83bd977`:
+
+- `b22d967` shares the bounded CSV record reader while retaining the exact
+  strict Open Tasks parser;
+- `418dbcd`, `4db6864`, and `7e8ac2e` add transient semantic resolution,
+  conservative suggestions, and pure full-field generic review;
+- `0231124`, `d1fc5ba`, `ca1144c`, `dacd81f`, and `8e5344d` add and harden the
+  Activity-scoped transient state and the combined review page;
+- `8d63453` adds the More entry and active-workspace command/Undo path; and
+- `c074efe` plus `1ab7652` add and correct the Welcome one-shot handoff.
+- `c0b195e` applies the migration overlay's zero Scaffold insets and consumes
+  the resulting padding; its focused Task 7 review is clean.
+- `01dba43` distinguishes completion-date 17:00 from confirmation-time copy,
+  removes the fabricated status-override warning when no source Status exists,
+  and restores the explicit Ignore fallback labels.
+
+Initial Task 9 focused verification at `c0b195e` passed. The core-data command
+ran 53/53 tests: 17 `GenericTasksCsvMapperTest`, 21 `TasksCsvParserTest`, and
+15 `InMemoryImportTasksTest`, with zero skips, failures, or errors. The app
+command ran 21/21 tests: 16 `TaskMigrationViewModelTest` and five
+`WindowPostureMapperTest`, with zero skips, failures, or errors. That same app
+command compiled `:core:data`, `:feature:more`, and `:app` Android-test Kotlin;
+Gradle reported `BUILD SUCCESSFUL in 1s`, 222 actionable tasks, three executed
+and 219 up-to-date.
+
+Final-review focused verification at `01dba43` ran the mapper regression RED,
+then GREEN, and the complete mapper suite passed 18/18 with zero skips,
+failures, or errors. `:feature:more:compileDebugAndroidTestKotlin` compiled the
+updated Compose assertions successfully: `BUILD SUCCESSFUL in 911ms`, 30
+actionable tasks, seven executed and 23 up-to-date. A three-assertion host
+resource/mapping check also passed after failing on all three corrected
+meanings before the fix.
+
+The final-review commands were:
+
+```text
+./gradlew :core:data:testDebugUnitTest \
+  --tests "*GenericTasksCsvMapperTest" \
+  --console=plain
+./gradlew :feature:more:compileDebugAndroidTestKotlin --console=plain
+```
+
+The exact focused commands were:
+
+```text
+./gradlew :core:data:testDebugUnitTest \
+  --tests "*GenericTasksCsvMapperTest" \
+  --tests "*TasksCsvParserTest" \
+  --tests "*InMemoryImportTasksTest" \
+  --console=plain
+./gradlew :app:testDebugUnitTest \
+  --tests "*TaskMigrationViewModelTest" \
+  --tests "*WindowPostureMapperTest" \
+  :core:data:compileDebugAndroidTestKotlin \
+  :feature:more:compileDebugAndroidTestKotlin \
+  :app:compileDebugAndroidTestKotlin \
+  --console=plain
+```
+
+Task 9's final gates were consolidated here before its ignored SDD workspace
+was closed. The first host gate exposed Task 7's ignored Scaffold-padding lint
+error; the scoped `c0b195e` fix and review closed it. Fresh post-fix
+verification then reported:
+
+- `./scripts/check-schema-drift.sh`: PASS; no schema drift; 38/38 Gradle tasks
+  executed;
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain`:
+  PASS; 1,463/1,463 host tests across 138 suites, zero skips, failures, or
+  errors; final ordered rerun `BUILD SUCCESSFUL in 447ms`; 553 actionable
+  tasks, 12 executed and 541 up-to-date;
+- `./gradlew :app:assembleRelease --console=plain`: PASS; `BUILD SUCCESSFUL in
+  355ms`; 442 actionable tasks, two executed and 440 up-to-date; and
+- `git diff --check`: PASS; `git status --short` contained only the five
+  intended docs plus the preserved unrelated entries listed below.
+
+The mandatory whole-slice review of `12ac37e..762c35e` found zero Critical,
+two Important, and two Minor issues. `01dba43` fixed all four, `24c5093`
+reconciled the durable docs, and the one allowed scoped re-review of
+`762c35e..24c5093` was clean with no new breakage.
+
+Fresh controller verification after those fixes completed the gate:
+
+- `./scripts/check-schema-drift.sh`: PASS; no schema drift; `BUILD SUCCESSFUL
+  in 3s`; 38/38 tasks executed;
+- `./gradlew testDebugUnitTest lintDebug :app:assembleDebug --console=plain`:
+  PASS; `BUILD SUCCESSFUL in 55s`; 553 actionable tasks, 58 executed and 495
+  up-to-date;
+- `./gradlew :app:assembleRelease --console=plain`: PASS; `BUILD SUCCESSFUL in
+  43s`; 442 actionable tasks, 50 executed, five from cache, and 387
+  up-to-date; and
+- `git diff --check`: PASS; `git status --short` contained only the preserved
+  unrelated entries listed below.
+
+Task 9 and the generic CSV migration slice are complete. With explicit owner
+approval, the plan's 804 KiB ignored SDD workspace and its task reports and
+review diffs were permanently deleted after their rulings and evidence were
+surfaced; only committed history and this durable handoff remain.
+Implementation and review should not be repeated unless the code changes.
+
+Room remains v9 and the authenticated backup and `.otvault` archive formats
+remain v1. No version, signing, artifact copy, tag, push, publication, or Play
+state changed.
+
+No disposable device or owner-approved physical target exists. The Room
+instrumented tests and Welcome/More/migration Compose tests compiled but did
+not run. Welcome cancellation/import, exact Undo, repeated import, Done-time
+inference, repository-race rejection, strict-parser round trip/rejection,
+compact/expanded/folding layouts, RTL, TalkBack/keyboard order, and 200% font
+reachability are all **unexecuted**, not PASS. The protected
+`Pixel_10_Pro_Fold` was not touched.
+
+The next agreed slice is version/trust footer. It still requires its own
+approved design and plan. Do not start it, bump a version, sign/copy an APK,
+tag, push, publish, or start Play Console work from this checkpoint.
+
+Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
+spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
+plan/design files.
+
+## Previous planning checkpoint — enhancement execution paused, 24 August 2026
+
+The owner approved this delivery order:
+
+1. close the known Undo gaps;
+2. reduce migration friction with the generic CSV mapper;
+3. add the version/trust footer; and
+4. publish a Play internal beta.
+
+The first two slices are designed and have implementation plans:
+
+- Undo design `e125faa`; Undo plan `f9d4a32`;
+- generic CSV migration design `1dd8990`; migration plan `ece0c81`.
+
+The owner selected `superpowers:subagent-driven-development` as the future
+execution mode. Each plan must use a fresh implementer for each task, a scoped
+task review, and a final whole-plan review, with progress recorded in that
+plan's ignored SDD workspace and ledger.
+
+**Execution has not started and is not currently authorized.** No SDD
+workspace or ledger has been initialized, no subagent has been dispatched, and
+no product code, tests, schema, backup format, version, release artifact, or
+Play Console state has changed for this programme. The version/trust-footer and
+Play-internal-beta slices still need their own approved designs and plans.
+
+When the owner explicitly resumes execution, start with Task 1 of
+`docs/superpowers/plans/2026-08-24-undo-gap-closure-plan.md`. Complete and
+review that plan before starting
+`docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`, unless the
+owner changes the sequence. Do not infer execution permission from the chosen
+workflow alone.
+
+Preserve the unrelated modified Stage 3 Drive plan, deleted Thai-dashboard
+spec, `.kotlin/`, `.ua/`, `artifacts/`, and the two untracked onboarding
+plan/design files.
+
+## Release baseline — release 1.4.0 tagged, pushed, and closed, 24 August 2026
+
+This section is authoritative for release facts. Older release checkpoints
+below are historical and are superseded wherever they conflict with this one.
 
 Implementation commit `68be1b713a665258ba014562b2944af197cd9b18`
 (`security: close final lock privacy findings`) follows checkpoint
@@ -728,9 +964,9 @@ None block 1.3.0. In priority order:
    215/215 on the disposable Fold8 AVD. Commit `4a8cb8c` is pushed; hosted run
    `32483325764` passed `verify`, `release`, and compact API 36, with only the
    established expanded API 37.0 observe-only infrastructure failure.
-5. Product polish: restore-detach not undoable / detaching move
-   one-way (Task 9); inert-rule visibility in the automations editor;
-   remove render-dead `HomeSnapshot.focusTasks`;
+5. Product polish: ~~restore-detach not undoable / detaching move one-way~~
+   **DONE in the current checkpoint**; inert-rule visibility in the
+   automations editor; remove render-dead `HomeSnapshot.focusTasks`;
    `parentViolation` defence-in-depth on the candidate's `deletedAt`.
 6. Small code/test hygiene: Task 16's 20 dp spacers + divider seam;
    duplicate testTags (MyDayRow/MyDaySuggestionRow) and the
@@ -740,12 +976,11 @@ None block 1.3.0. In priority order:
 
 Items 3–6 remain outside the security- and release-bounded 1.3.1 patch.
 
-Resume with a bounded design approval for the first sub-item in backlog 5:
-close both Task 9 undo asymmetries (restore-detach not undoable and a
-detaching move being one-way) in the existing dual-engine command flow. No
-implementation for that item has started. Keep backlog 3 deferred until v11
-rule work begins, and do not bundle the other backlog 5 polish items into this
-fix.
+The Task 9 Undo asymmetries are closed in the current checkpoint. Resume with
+Task 1 of `docs/superpowers/plans/2026-08-24-generic-csv-migration-plan.md`;
+that plan is already approved. Do not bundle the remaining backlog polish,
+version/trust footer, or Play internal beta into that slice. Keep backlog 3
+deferred until v11 rule work begins.
 
 The four protected working-tree entries (modified Stage 3 plan doc,
 deleted Thai-dashboard spec, untracked `.kotlin/` and `artifacts/`)

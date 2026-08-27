@@ -15,6 +15,7 @@ import app.opentasks.core.model.Priority
 import app.opentasks.core.model.Project
 import app.opentasks.core.model.ProjectHealth
 import app.opentasks.core.model.ProjectId
+import app.opentasks.core.model.SemanticStatus
 import app.opentasks.core.model.TaskId
 import app.opentasks.core.model.WorkflowStatus
 import java.time.Instant
@@ -373,6 +374,74 @@ class InMemoryImportTasksTest {
             assertEquals(before, repository.currentWorkspace())
             assertTrue(journal.entries.isEmpty())
         }
+    }
+
+    @Test
+    fun semanticHintSelectsTheFirstActiveStatusWithThatMeaning() = runBlocking {
+        val base = OpenTasksFixtures.snapshot
+        val project = OpenTasksFixtures.studioProject
+        val customStarted = base.workflowStatuses.map { status ->
+            if (status.projectId == project.id && status.semanticStatus == SemanticStatus.STARTED) {
+                status.copy(name = "Doing")
+            } else {
+                status
+            }
+        }
+        val repository = InMemoryVaultRepository(initial = base.copy(workflowStatuses = customStarted))
+
+        val result = repository.execute(
+            DomainCommand.ImportTasks(
+                listOf(
+                    row(1, "Mapped work", project = project.name).copy(
+                        statusName = "In progress",
+                        statusSemantic = SemanticStatus.STARTED,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(result is CommandResult.Success)
+        val imported = repository.currentWorkspace().tasks.single { it.title == "Mapped work" }
+        assertEquals("Doing", repository.currentWorkspace().workflowStatuses.single {
+            it.id == imported.statusId
+        }.name)
+    }
+
+    @Test
+    fun semanticHintRejectsAtomicallyWhenTheCategoryIsUnavailable() = runBlocking {
+        val base = OpenTasksFixtures.snapshot
+        val project = OpenTasksFixtures.studioProject.copy(
+            id = ProjectId("project-without-started"),
+            name = "Project without started",
+        )
+        val withoutStarted = base.workflowStatuses +
+            WorkflowStatus.defaults(project.id).filterNot {
+                it.semanticStatus == SemanticStatus.STARTED
+            }
+        val journal = InMemoryBackupJournal()
+        val repository = InMemoryVaultRepository(
+            initial = base.copy(
+                projects = base.projects + project,
+                workflowStatuses = withoutStarted,
+            ),
+            backupJournal = journal,
+        )
+        val before = repository.currentWorkspace()
+
+        val result = repository.execute(
+            DomainCommand.ImportTasks(
+                listOf(
+                    row(4, "Unavailable state", project = project.name).copy(
+                        statusName = "Doing",
+                        statusSemantic = SemanticStatus.STARTED,
+                    ),
+                ),
+            ),
+        ) as CommandResult.Rejected
+
+        assertEquals(RejectionReason.IMPORT_STATUS_CONFLICT, result.reason)
+        assertEquals(before, repository.currentWorkspace())
+        assertTrue(journal.entries.isEmpty())
     }
 
     private fun row(

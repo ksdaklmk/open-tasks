@@ -11,7 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -117,7 +117,8 @@ class FoldContinuityInstrumentedTest {
             }
         }
     }
-    private val composeRule = createAndroidComposeRule<MainActivity>()
+    private val composeRule = createEmptyComposeRule()
+    private var activeScenario: ActivityScenario<MainActivity>? = null
 
     // HideWindowsRule runs inside the compose rule so a renderer-driven
     // redraw loop cannot starve the rule's final waitForIdleSync.
@@ -194,16 +195,10 @@ class FoldContinuityInstrumentedTest {
 
     @Test
     fun consumedDigestIntentDoesNotReplayHomeAfterRecreation() {
-        composeRule.activityRule.scenario.close()
         val launchIntent = DailyDigestIntents.homeIntent(
             InstrumentationRegistry.getInstrumentation().targetContext,
         )
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("welcome-screen")
-                    .fetchSemanticsNodes().isNotEmpty()
-            }
-            composeRule.onNodeWithText("Continue offline").performClick()
             ownedVault = awaitCreatedVault()
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 composeRule.onAllNodesWithText("More", useUnmergedTree = true)
@@ -226,17 +221,11 @@ class FoldContinuityInstrumentedTest {
 
     @Test
     fun cancelledQuickAddIntentDoesNotReopenAfterRecreation() {
-        composeRule.activityRule.scenario.close()
         val launchIntent = Intent(
             InstrumentationRegistry.getInstrumentation().targetContext,
             MainActivity::class.java,
         ).setAction(MainActivity.QUICK_ADD_ACTION)
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("welcome-screen")
-                    .fetchSemanticsNodes().isNotEmpty()
-            }
-            composeRule.onNodeWithText("Continue offline").performClick()
             ownedVault = awaitCreatedVault()
             composeRule.waitUntil(timeoutMillis = 10_000) {
                 composeRule.onAllNodesWithTag("quick-add-title")
@@ -287,94 +276,97 @@ class FoldContinuityInstrumentedTest {
             closed != null && opened != null,
         )
 
-        try {
-            shell("cmd device_state state ${checkNotNull(closed)}")
-            awaitDeviceState(checkNotNull(closed))
-            shell("wm dismiss-keyguard")
-            awaitActivityState(Lifecycle.State.RESUMED)
-            // The fold state change recreates the activity, so RESUMED can be
-            // reached before the new composition attaches. Querying then throws
-            // rather than reporting an empty tree, which would abort the wait
-            // instead of retrying it.
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                runCatching {
-                    composeRule.onAllNodesWithTag("welcome-screen")
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val launchIntent = Intent(context, MainActivity::class.java)
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            activeScenario = scenario
+            try {
+                shell("cmd device_state state ${checkNotNull(closed)}")
+                awaitDeviceState(checkNotNull(closed))
+                shell("wm dismiss-keyguard")
+                awaitActivityState(Lifecycle.State.RESUMED)
+                ownedVault = awaitCreatedVault()
+                composeRule.waitUntil(timeoutMillis = 10_000) {
+                    composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
                         .fetchSemanticsNodes()
                         .isNotEmpty()
-                }.getOrDefault(false)
-            }
-            composeRule.onNodeWithText("Continue offline").performClick()
-            ownedVault = awaitCreatedVault()
-            composeRule.waitUntil(timeoutMillis = 10_000) {
-                composeRule.onAllNodesWithText("Quick add", useUnmergedTree = true)
-                    .fetchSemanticsNodes()
-                    .isNotEmpty()
-            }
-
-            repeat(10) { index ->
-                composeRule.onNodeWithText("Quick add", useUnmergedTree = true).performClick()
-                composeRule.onNodeWithTag("quick-add-title")
-                    .performTextReplacement("Fold continuity filler $index")
-                composeRule.onNodeWithTag("quick-add-title").performImeAction()
-                composeRule.waitUntil(timeoutMillis = 5_000) {
-                    composeRule.onAllNodesWithTag("quick-add-title").fetchSemanticsNodes().isEmpty()
                 }
+
+                repeat(10) { index ->
+                    composeRule.onNodeWithText("Quick add", useUnmergedTree = true).performClick()
+                    composeRule.onNodeWithTag("quick-add-title")
+                        .performTextReplacement("Fold continuity filler $index")
+                    composeRule.onNodeWithTag("quick-add-title").performImeAction()
+                    composeRule.waitUntil(timeoutMillis = 5_000) {
+                        composeRule.onAllNodesWithTag("quick-add-title")
+                            .fetchSemanticsNodes().isEmpty()
+                    }
+                }
+
+                composeRule.onNodeWithText("Tasks").performClick()
+                composeRule.waitUntil(timeoutMillis = 5_000) {
+                    composeRule.onAllNodesWithTag("task-list").fetchSemanticsNodes().size == 1
+                }
+                val selectedTitle = "Fold continuity filler 0"
+                val selectedTaskId = activeWorkspaceTaskId(selectedTitle)
+                composeRule.onNodeWithText(selectedTitle).performClick()
+                composeRule.onNode(
+                    selectedTaskMatcher(selectedTitle),
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+                composeRule.onNodeWithTag("task-list").performScrollToIndex(5)
+                val beforeScroll = listScrollPosition()
+                assertTrue(
+                    "Expected a meaningful pre-fold list scroll, was $beforeScroll",
+                    beforeScroll > 0f,
+                )
+
+                composeRule.mainClock.autoAdvance = false
+                composeRule.onNodeWithTag("task-title-field")
+                    .performTextReplacement("Fold continuity draft")
+                composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
+                assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
+                val beforeActivity = currentActivity()
+                val beforeWindow = windowSnapshot(beforeActivity)
+
+                shell("cmd device_state state ${checkNotNull(opened)}")
+                awaitDeviceState(checkNotNull(opened))
+                shell("wm dismiss-keyguard")
+                awaitActivityState(Lifecycle.State.RESUMED)
+                awaitSystemIdle()
+                composeRule.mainClock.advanceTimeByFrame()
+                composeRule.waitForIdle()
+
+                val afterActivity = currentActivity()
+                val afterWindow = windowSnapshot(afterActivity)
+                assertNotSame(
+                    "Fold transition must recreate MainActivity",
+                    beforeActivity,
+                    afterActivity,
+                )
+                assertNotEquals(
+                    "Fold transition must change window configuration",
+                    beforeWindow,
+                    afterWindow,
+                )
+
+                composeRule.onNodeWithTag("task-title-field")
+                    .assertTextContains("Fold continuity draft", substring = true)
+                composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
+                assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
+                val afterScroll = listScrollPosition()
+                assertEquals(
+                    "The meaningful list position must survive the fold transition",
+                    beforeScroll,
+                    afterScroll,
+                    1f,
+                )
+            } finally {
+                activeScenario = null
+                shell("cmd device_state state reset")
+                shell("wm dismiss-keyguard")
+                awaitSystemIdle()
             }
-
-            composeRule.onNodeWithText("Tasks").performClick()
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("task-list").fetchSemanticsNodes().size == 1
-            }
-            val selectedTitle = "Fold continuity filler 0"
-            val selectedTaskId = activeWorkspaceTaskId(selectedTitle)
-            composeRule.onNodeWithText(selectedTitle).performClick()
-            composeRule.onNode(
-                selectedTaskMatcher(selectedTitle),
-                useUnmergedTree = true,
-            ).assertIsDisplayed()
-            composeRule.onNodeWithTag("task-list").performScrollToIndex(5)
-            val beforeScroll = listScrollPosition()
-            assertTrue(
-                "Expected a meaningful pre-fold list scroll, was $beforeScroll",
-                beforeScroll > 0f,
-            )
-
-            composeRule.mainClock.autoAdvance = false
-            composeRule.onNodeWithTag("task-title-field")
-                .performTextReplacement("Fold continuity draft")
-            composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
-            assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
-            val beforeActivity = currentActivity()
-            val beforeWindow = windowSnapshot(beforeActivity)
-
-            shell("cmd device_state state ${checkNotNull(opened)}")
-            awaitDeviceState(checkNotNull(opened))
-            shell("wm dismiss-keyguard")
-            awaitActivityState(Lifecycle.State.RESUMED)
-            awaitSystemIdle()
-            composeRule.mainClock.advanceTimeByFrame()
-            composeRule.waitForIdle()
-
-            val afterActivity = currentActivity()
-            val afterWindow = windowSnapshot(afterActivity)
-            assertNotSame("Fold transition must recreate MainActivity", beforeActivity, afterActivity)
-            assertNotEquals("Fold transition must change window configuration", beforeWindow, afterWindow)
-
-            composeRule.onNodeWithTag("task-title-field")
-                .assertTextContains("Fold continuity draft", substring = true)
-            composeRule.onNode(editingTaskMatcher("Fold continuity draft")).assertIsDisplayed()
-            assertEquals(selectedTitle, repositoryTitle(selectedTaskId))
-            val afterScroll = listScrollPosition()
-            assertEquals(
-                "The meaningful list position must survive the fold transition",
-                beforeScroll,
-                afterScroll,
-                1f,
-            )
-        } finally {
-            shell("cmd device_state state reset")
-            shell("wm dismiss-keyguard")
-            awaitSystemIdle()
         }
     }
 
@@ -386,7 +378,7 @@ class FoldContinuityInstrumentedTest {
 
     private fun currentActivity(): MainActivity {
         var current: MainActivity? = null
-        composeRule.activityRule.scenario.onActivity { current = it }
+        checkNotNull(activeScenario).onActivity { current = it }
         return checkNotNull(current)
     }
 
@@ -468,16 +460,14 @@ class FoldContinuityInstrumentedTest {
     }
 
     private fun awaitActivityState(expected: Lifecycle.State) {
+        val scenario = checkNotNull(activeScenario)
         val deadline = SystemClock.elapsedRealtime() + 10_000
-        while (
-            composeRule.activityRule.scenario.state != expected &&
-            SystemClock.elapsedRealtime() < deadline
-        ) {
+        while (scenario.state != expected && SystemClock.elapsedRealtime() < deadline) {
             SystemClock.sleep(50)
         }
         assertTrue(
-            "Expected MainActivity state $expected, was ${composeRule.activityRule.scenario.state}",
-            composeRule.activityRule.scenario.state == expected,
+            "Expected MainActivity state $expected, was ${scenario.state}",
+            scenario.state == expected,
         )
     }
 

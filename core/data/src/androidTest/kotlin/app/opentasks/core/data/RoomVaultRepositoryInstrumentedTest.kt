@@ -1,6 +1,7 @@
 package app.opentasks.core.data
 
 import android.content.Context
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -2992,14 +2993,28 @@ class RoomVaultRepositoryInstrumentedTest {
                 snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt != null
             }
         }
-        repository!!.execute(DomainCommand.RestoreTask(child.id))
+        val restoreResult = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
         val detached = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt == null && task.parentTaskId == null
+                } == true
             }
         }.tasks.first { it.id == child.id }
         assertNull(detached.deletedAt)
         assertNull(detached.parentTaskId)
+
+        repository!!.execute(requireNotNull(restoreResult.undo))
+        val reBinned = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt != null && task.parentTaskId == parent.id
+                } == true
+            }
+        }.tasks.first { it.id == child.id }
+        assertNotNull(reBinned.deletedAt)
+        assertEquals(parent.id, reBinned.parentTaskId)
     }
 
     @Test
@@ -3056,8 +3071,7 @@ class RoomVaultRepositoryInstrumentedTest {
 
         val movedChildAlone = repository!!.execute(
             DomainCommand.MoveTasksToProject(listOf(aloneChild.id), destination.id),
-        )
-        assertTrue(movedChildAlone is CommandResult.Success)
+        ) as CommandResult.Success
         val afterChildMove = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
                 snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.projectId == destination.id
@@ -3065,6 +3079,56 @@ class RoomVaultRepositoryInstrumentedTest {
         }
         assertNull(afterChildMove.tasks.first { it.id == aloneChild.id }.parentTaskId)
         assertNull(afterChildMove.tasks.first { it.id == aloneParent.id }.projectId)
+
+        repository!!.execute(requireNotNull(movedChildAlone.undo))
+        val afterChildUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == aloneChild.id }?.let { task ->
+                    task.projectId == aloneChild.projectId &&
+                        task.statusId == aloneChild.statusId &&
+                        task.parentTaskId == aloneParent.id
+                } == true
+            }
+        }.tasks.first { it.id == aloneChild.id }
+        assertEquals(aloneChild.projectId, afterChildUndo.projectId)
+        assertEquals(aloneChild.statusId, afterChildUndo.statusId)
+        assertEquals(aloneParent.id, afterChildUndo.parentTaskId)
+    }
+
+    @Test
+    fun movingAChildUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        openRepository(now = { Instant.parse("2026-08-24T05:00:00Z") })
+        val destination = OpenTasksFixtures.taxProject
+        repository!!.execute(DomainCommand.CreateTask("Purged move parent"))
+        repository!!.execute(DomainCommand.CreateTask("Purged move child"))
+        val pair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Purged move parent" } &&
+                    snapshot.tasks.any { it.title == "Purged move child" }
+            }
+        }.tasks.associateBy { it.title }
+        val parent = checkNotNull(pair["Purged move parent"])
+        val child = checkNotNull(pair["Purged move child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        val moved = repository!!.execute(
+            DomainCommand.MoveTasksToProject(listOf(child.id), destination.id),
+        ) as CommandResult.Success
+        repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        repository!!.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+        val beforeUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == parent.id }
+            }
+        }.tasks.first { it.id == child.id }
+
+        val rejected = repository!!.execute(requireNotNull(moved.undo))
+            as CommandResult.Rejected
+
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            beforeUndo,
+            repository!!.currentWorkspace().tasks.first { it.id == child.id },
+        )
     }
 
     @Test
@@ -3113,15 +3177,308 @@ class RoomVaultRepositoryInstrumentedTest {
 
         // Restoring the child must detach it: its parent is live, but no
         // longer in the same project.
-        repository!!.execute(DomainCommand.RestoreTask(child.id))
+        val restoreResult = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
         val restored = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
             repository!!.observeWorkspace().first { snapshot ->
-                snapshot.tasks.firstOrNull { it.id == child.id }?.deletedAt == null
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt == null && task.parentTaskId == null
+                } == true
             }
         }.tasks.first { it.id == child.id }
         assertNull(restored.deletedAt)
         assertNull(restored.parentTaskId)
         assertEquals(project.id, restored.projectId)
+
+        repository!!.execute(requireNotNull(restoreResult.undo))
+        val reBinned = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.firstOrNull { it.id == child.id }?.let { task ->
+                    task.deletedAt != null && task.parentTaskId == parent.id
+                } == true
+            }
+        }.tasks.first { it.id == child.id }
+        assertNotNull(reBinned.deletedAt)
+        assertEquals(parent.id, reBinned.parentTaskId)
+    }
+
+    @Test
+    fun restoreUndoRejectsAfterFormerParentIsPurged() = runBlocking {
+        openRepository(now = { Instant.parse("2026-08-24T05:00:00Z") })
+        repository!!.execute(DomainCommand.CreateTask("Purged restore parent"))
+        repository!!.execute(DomainCommand.CreateTask("Purged restore child"))
+        val pair = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Purged restore parent" } &&
+                    snapshot.tasks.any { it.title == "Purged restore child" }
+            }
+        }.tasks.associateBy { it.title }
+        val parent = checkNotNull(pair["Purged restore parent"])
+        val child = checkNotNull(pair["Purged restore child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        repository!!.execute(DomainCommand.DeleteTask(parent.id))
+        val restored = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
+        repository!!.execute(DomainCommand.PermanentlyDeleteTask(parent.id))
+        val beforeUndo = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.none { it.id == parent.id }
+            }
+        }.tasks.first { it.id == child.id }
+
+        val rejected = repository!!.execute(requireNotNull(restored.undo))
+            as CommandResult.Rejected
+
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            beforeUndo,
+            repository!!.currentWorkspace().tasks.first { it.id == child.id },
+        )
+    }
+
+    @Test
+    fun restoreUndoRepairsAnAlreadyBinnedChildWithoutDuplicateActivity() = runBlocking {
+        val historicalDeletedAt = Instant.parse("2026-08-24T11:00:00Z")
+        val independentDeletedAt = Instant.parse("2026-08-24T12:00:00Z")
+        openRepository(now = { Instant.parse("2026-08-24T10:00:00Z") })
+        repository!!.execute(DomainCommand.CreateTask("Room replay parent"))
+        repository!!.execute(DomainCommand.CreateTask("Room replay child"))
+        val tasks = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Room replay parent" } &&
+                    snapshot.tasks.any { it.title == "Room replay child" }
+            }
+        }.tasks.associateBy(Task::title)
+        val parent = checkNotNull(tasks["Room replay parent"])
+        val child = checkNotNull(tasks["Room replay child"])
+        repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+        repository!!.execute(DomainCommand.DeleteTask(parent.id, historicalDeletedAt))
+        val restored = repository!!.execute(DomainCommand.RestoreTask(child.id))
+            as CommandResult.Success
+        repository!!.execute(DomainCommand.DeleteTask(child.id, independentDeletedAt))
+        val childBefore = checkNotNull(database!!.taskDao().getById(child.id.value))
+        val generationBefore = database!!.backupStateDao().require("vault-primary")
+            .currentGeneration
+        val childActivityBefore = database!!.recoveryImportDao().allActivityEntries()
+            .filter { it.taskId == child.id.value }
+
+        val replayed = repository!!.execute(checkNotNull(restored.undo))
+            as CommandResult.Success
+
+        val repaired = checkNotNull(database!!.taskDao().getById(child.id.value))
+        val generationAfter = database!!.backupStateDao().require("vault-primary")
+            .currentGeneration
+        val childActivityAfter = database!!.recoveryImportDao().allActivityEntries()
+            .filter { it.taskId == child.id.value }
+        val rows = journalRows(generationAfter)
+        assertEquals("Task is already in the Bin", replayed.message)
+        assertNull(replayed.undo)
+        assertEquals(historicalDeletedAt.toEpochMilli(), repaired.deletedAtEpochMillis)
+        assertEquals(parent.id.value, repaired.parentTaskId)
+        assertEquals(childBefore.revisionLogical + 1, repaired.revisionLogical)
+        assertEquals(childActivityBefore.map { it.id }, childActivityAfter.map { it.id })
+        assertEquals(
+            2,
+            childActivityAfter.count { it.kind == ActivityKind.BINNED.name },
+        )
+        assertEquals(generationBefore + 1, generationAfter)
+        assertEquals(listOf(0), rows.map { it.sequence })
+        val mutation = BackupMutationCodec.decode(rows.single().payload)
+        assertEquals(BackupMutationKind.UPSERT, mutation.mutationKind)
+        assertEquals(BackupRecordFamily.TASK, mutation.record?.family)
+        assertEquals(listOf(child.id.value), mutation.record?.identity)
+    }
+
+    @Test
+    fun alreadyBinnedRestoreUndoRejectsAfterFormerParentIsPurgedWithoutMutation() =
+        runBlocking {
+            openRepository(now = { Instant.parse("2026-08-24T10:00:00Z") })
+            repository!!.execute(DomainCommand.CreateTask("Room purged replay parent"))
+            repository!!.execute(DomainCommand.CreateTask("Room purged replay child"))
+            val tasks = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+                repository!!.observeWorkspace().first { snapshot ->
+                    snapshot.tasks.any { it.title == "Room purged replay parent" } &&
+                        snapshot.tasks.any { it.title == "Room purged replay child" }
+                }
+            }.tasks.associateBy(Task::title)
+            val parent = checkNotNull(tasks["Room purged replay parent"])
+            val child = checkNotNull(tasks["Room purged replay child"])
+            repository!!.execute(DomainCommand.SetTaskParent(child.id, parent.id))
+            repository!!.execute(
+                DomainCommand.DeleteTask(
+                    parent.id,
+                    Instant.parse("2026-08-24T11:00:00Z"),
+                ),
+            )
+            val restored = repository!!.execute(DomainCommand.RestoreTask(child.id))
+                as CommandResult.Success
+            repository!!.execute(
+                DomainCommand.DeleteTask(
+                    child.id,
+                    Instant.parse("2026-08-24T12:00:00Z"),
+                ),
+            )
+            repository!!.execute(
+                DomainCommand.PermanentlyDeleteTask(
+                    parent.id,
+                    Instant.parse("2026-08-24T13:00:00Z"),
+                ),
+            )
+            val taskBefore = checkNotNull(database!!.taskDao().getById(child.id.value))
+            val generationBefore = database!!.backupStateDao().require("vault-primary")
+                .currentGeneration
+            val activityIdsBefore = database!!.recoveryImportDao().allActivityEntries()
+                .map { it.id }
+
+            val rejected = repository!!.execute(checkNotNull(restored.undo))
+                as CommandResult.Rejected
+
+            val taskAfter = checkNotNull(database!!.taskDao().getById(child.id.value))
+            val generationAfter = database!!.backupStateDao().require("vault-primary")
+                .currentGeneration
+            assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+            assertEquals(
+                taskBefore.copy(descriptionCiphertext = byteArrayOf()),
+                taskAfter.copy(descriptionCiphertext = byteArrayOf()),
+            )
+            assertArrayEquals(
+                taskBefore.descriptionCiphertext,
+                taskAfter.descriptionCiphertext,
+            )
+            assertEquals(generationBefore, generationAfter)
+            assertEquals(
+                activityIdsBefore,
+                database!!.recoveryImportDao().allActivityEntries().map { it.id },
+            )
+        }
+
+    @Test
+    fun deleteUndoRecheckRejectsAStaleBinnedChildWithoutPartialMutation() = runBlocking {
+        val deletedAt = Instant.parse("2026-08-24T11:00:00Z")
+        openRepository(now = { Instant.parse("2026-08-24T10:00:00Z") })
+        listOf("Delete candidate", "Delete parent", "Delete binned child").forEach { title ->
+            repository!!.execute(DomainCommand.CreateTask(title))
+        }
+        val tasks = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count { it.title.startsWith("Delete ") } == 3
+            }
+        }.tasks.associateBy(Task::title)
+        val candidate = checkNotNull(tasks["Delete candidate"])
+        val parent = checkNotNull(tasks["Delete parent"])
+        val child = checkNotNull(tasks["Delete binned child"])
+        val candidateBefore = checkNotNull(database!!.taskDao().getById(candidate.id.value))
+        val childBefore = checkNotNull(database!!.taskDao().getById(child.id.value))
+        val generationBefore = database!!.backupStateDao().require("vault-primary")
+            .currentGeneration
+        val activityIdsBefore = database!!.recoveryImportDao().allActivityEntries().map { it.id }
+
+        // The outer transaction delays flow invalidation until commit, so the
+        // repository snapshot stays stale while its DAO recheck sees this row.
+        val result = database!!.withTransaction {
+            database!!.taskDao().upsert(
+                childBefore.copy(
+                    parentTaskId = candidate.id.value,
+                    deletedAtEpochMillis = deletedAt.toEpochMilli(),
+                ),
+            )
+            repository!!.execute(
+                DomainCommand.DeleteTask(
+                    taskId = candidate.id,
+                    deletedAt = deletedAt,
+                    restoreParentTaskId = parent.id,
+                ),
+            )
+        }
+
+        val rejected = result as CommandResult.Rejected
+        val candidateAfter = checkNotNull(database!!.taskDao().getById(candidate.id.value))
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            candidateBefore.copy(descriptionCiphertext = byteArrayOf()),
+            candidateAfter.copy(descriptionCiphertext = byteArrayOf()),
+        )
+        assertArrayEquals(
+            candidateBefore.descriptionCiphertext,
+            candidateAfter.descriptionCiphertext,
+        )
+        assertEquals(
+            generationBefore,
+            database!!.backupStateDao().require("vault-primary").currentGeneration,
+        )
+        assertEquals(
+            activityIdsBefore,
+            database!!.recoveryImportDao().allActivityEntries().map { it.id },
+        )
+    }
+
+    @Test
+    fun updateUndoRecheckRejectsAStaleBinnedChildWithoutPartialMutation() = runBlocking {
+        val deletedAt = Instant.parse("2026-08-24T11:00:00Z")
+        openRepository(now = { Instant.parse("2026-08-24T10:00:00Z") })
+        listOf("Update candidate", "Update parent", "Update binned child").forEach { title ->
+            repository!!.execute(DomainCommand.CreateTask(title))
+        }
+        val tasks = withTimeout(DEVICE_TEST_TIMEOUT_MILLIS) {
+            repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.count { it.title.startsWith("Update ") } == 3
+            }
+        }.tasks.associateBy(Task::title)
+        val candidate = checkNotNull(tasks["Update candidate"])
+        val parent = checkNotNull(tasks["Update parent"])
+        val child = checkNotNull(tasks["Update binned child"])
+        val candidateBefore = checkNotNull(database!!.taskDao().getById(candidate.id.value))
+        val childBefore = checkNotNull(database!!.taskDao().getById(child.id.value))
+        val generationBefore = database!!.backupStateDao().require("vault-primary")
+            .currentGeneration
+        val activityIdsBefore = database!!.recoveryImportDao().allActivityEntries().map { it.id }
+
+        // The outer transaction delays flow invalidation until commit, so the
+        // repository snapshot stays stale while its DAO recheck sees this row.
+        val result = database!!.withTransaction {
+            database!!.taskDao().upsert(
+                childBefore.copy(
+                    parentTaskId = candidate.id.value,
+                    deletedAtEpochMillis = deletedAt.toEpochMilli(),
+                ),
+            )
+            repository!!.execute(
+                DomainCommand.UpdateTask(
+                    taskId = candidate.id,
+                    title = candidate.title,
+                    description = candidate.description,
+                    projectId = candidate.projectId,
+                    priority = candidate.priority,
+                    start = candidate.start,
+                    due = candidate.due,
+                    recurrence = candidate.recurrence,
+                    estimate = candidate.estimate,
+                    milestoneId = candidate.milestoneId,
+                    restoreStatusId = candidate.statusId,
+                    restoreParentTaskId = parent.id,
+                ),
+            )
+        }
+
+        val rejected = result as CommandResult.Rejected
+        val candidateAfter = checkNotNull(database!!.taskDao().getById(candidate.id.value))
+        assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
+        assertEquals(
+            candidateBefore.copy(descriptionCiphertext = byteArrayOf()),
+            candidateAfter.copy(descriptionCiphertext = byteArrayOf()),
+        )
+        assertArrayEquals(
+            candidateBefore.descriptionCiphertext,
+            candidateAfter.descriptionCiphertext,
+        )
+        assertEquals(
+            generationBefore,
+            database!!.backupStateDao().require("vault-primary").currentGeneration,
+        )
+        assertEquals(
+            activityIdsBefore,
+            database!!.recoveryImportDao().allActivityEntries().map { it.id },
+        )
     }
 
     @Test

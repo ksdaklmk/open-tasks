@@ -204,6 +204,7 @@ fun BackupRecoveryScreen(
     onDismissCsvImportOutcome: () -> Unit = {},
     onExportMarkdown: (ProjectId) -> Unit = {},
     onDismissMarkdownExportOutcome: () -> Unit = {},
+    onRestoreExistingWorkspace: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -257,6 +258,18 @@ fun BackupRecoveryScreen(
                     )
                 }
                 Spacer(Modifier.height(24.dp))
+                Text(
+                    stringResource(R.string.backup_restore_existing_explanation),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                BackupAction(
+                    R.string.backup_restore_existing_action,
+                    "restore-existing-workspace",
+                    onRestoreExistingWorkspace,
+                )
+                HorizontalDivider(Modifier.padding(vertical = 24.dp))
                 Text(
                     stringResource(R.string.backup_encrypted_heading),
                     style = MaterialTheme.typography.titleLarge,

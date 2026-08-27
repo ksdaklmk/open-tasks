@@ -11,9 +11,8 @@ The repository contains the production offline-first workspace:
 - Five-destination adaptive shell: Home, Tasks, Projects, Schedule, and More.
 - Compact navigation bar, medium/expanded navigation rail, and responsive
   list/detail task workbench.
-- A fresh-vault Welcome surface with equal-reach offline, optional Google
-  backup/recovery, and portable-device restore actions. Provider discovery is
-  explicit and an offline vault starts with no demonstration or user records.
+- Automatic account-free first launch into an encrypted local vault, with
+  generic CSV import and verified Drive/Android recovery available from More.
 - Real date-derived Schedule views: a compact selected-day agenda and an
   expanded Monday–Sunday timeline with reminder context and an open-only
   unscheduled tray.

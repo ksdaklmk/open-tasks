@@ -500,18 +500,12 @@ private fun HomeHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
-                Text(
-                    text = snapshot.today.format(HOME_DATE_FORMAT),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-                Text(
-                    text = "Good afternoon",
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.semantics { heading() },
-                )
-            }
+            Text(
+                text = snapshot.today.format(HOME_DATE_FORMAT),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.semantics { heading() },
+            )
             IconButton(onClick = onOpenSearch, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.Search, contentDescription = "Search workspace")
             }

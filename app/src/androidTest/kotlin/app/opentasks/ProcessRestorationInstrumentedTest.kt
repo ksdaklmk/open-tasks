@@ -28,6 +28,7 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -708,9 +709,18 @@ class MainActivityRecoveryRestorationInstrumentedTest {
 
     @Test
     fun productionRecoveryRouteClearsPassphraseAfterActivityRecreation() {
-        composeRule.onNodeWithTag("welcome-screen").assertIsDisplayed()
-        composeRule.onNodeWithTag("recovery-shell").assertDoesNotExist()
-        composeRule.onNodeWithText("Restore from this device").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("More", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("More", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("open-backup-recovery")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("restore-existing-workspace")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("recovery-portable").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag("recovery-passphrase")
                 .fetchSemanticsNodes().isNotEmpty()

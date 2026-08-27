@@ -25,8 +25,7 @@ def metric(name, key, values, sampled=False):
 
 benchmarks = []
 for name in (
-    "welcomeColdFullyDrawn",
-    "welcomeWarmFullyDrawn",
+    "firstRunColdFullyDrawn",
     "emptyColdFullyDrawn",
     "emptyWarmFullyDrawn",
     "tasks500ColdFullyDrawn",
@@ -56,9 +55,9 @@ benchmarks.extend((
 ))
 
 if mode == "missing":
-    benchmarks[8]["metrics"] = {}
+    benchmarks[7]["metrics"] = {}
 elif mode == "hard":
-    benchmarks[8]["metrics"]["OpenTasks.SearchFirstMs"]["runs"][-1] = 151.0
+    benchmarks[7]["metrics"]["OpenTasks.SearchFirstMs"]["runs"][-1] = 151.0
 
 data = {
     "context": {

@@ -111,4 +111,72 @@ class SubtaskRulesTest {
         // attachableSubtasks must apply its own extra filters on top of the guard.
         assertEquals(listOf(loose), SubtaskRules.attachableSubtasks(tasks, parent))
     }
+
+    @Test
+    fun historicalParentAllowsBinnedCrossProjectHistory() {
+        val base = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+        val child = base.copy(id = TaskId("history-child"), parentTaskId = null)
+        val parent = base.copy(
+            id = TaskId("history-parent"),
+            projectId = OpenTasksFixtures.taxProject.id,
+            deletedAt = Instant.parse("2026-08-24T00:00:00Z"),
+            parentTaskId = null,
+        )
+
+        assertNull(
+            SubtaskRules.historicalParentViolation(
+                listOf(child, parent),
+                child.id,
+                parent.id,
+            ),
+        )
+    }
+
+    @Test
+    fun historicalParentRejectsMissingOrNestedRelationships() {
+        val base = OpenTasksFixtures.tasks.first { it.deletedAt == null }
+        val task = base.copy(id = TaskId("history-task"), parentTaskId = null)
+        val parent = base.copy(id = TaskId("history-parent"), parentTaskId = null)
+        val nestedParent = base.copy(
+            id = TaskId("history-nested-parent"),
+            parentTaskId = TaskId("history-grandparent"),
+        )
+        val child = base.copy(
+            id = TaskId("history-existing-child"),
+            parentTaskId = task.id,
+        )
+
+        assertEquals(
+            SubtaskViolation.SELF,
+            SubtaskRules.historicalParentViolation(
+                listOf(task, parent),
+                task.id,
+                task.id,
+            ),
+        )
+        assertEquals(
+            SubtaskViolation.PARENT_MISSING_OR_BINNED,
+            SubtaskRules.historicalParentViolation(
+                listOf(task, parent),
+                task.id,
+                TaskId("history-missing"),
+            ),
+        )
+        assertEquals(
+            SubtaskViolation.PARENT_IS_A_SUBTASK,
+            SubtaskRules.historicalParentViolation(
+                listOf(task, nestedParent),
+                task.id,
+                nestedParent.id,
+            ),
+        )
+        assertEquals(
+            SubtaskViolation.TASK_HAS_SUBTASKS,
+            SubtaskRules.historicalParentViolation(
+                listOf(task, parent, child),
+                task.id,
+                parent.id,
+            ),
+        )
+    }
 }

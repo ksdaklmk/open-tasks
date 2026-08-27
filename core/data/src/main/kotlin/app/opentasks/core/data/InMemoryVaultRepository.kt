@@ -1842,6 +1842,7 @@ class InMemoryVaultRepository internal constructor(
             }
             inverses += task.toUpdateCommand(
                 current.reminders.firstOrNull { it.taskId == task.id },
+                restoreParentTaskId = if (plan.detach) task.parentTaskId else null,
             )
         }
         if (plans.isNotEmpty()) {
@@ -2306,7 +2307,38 @@ class InMemoryVaultRepository internal constructor(
         val current = mutableWorkspace.value
         val task = current.tasks.firstOrNull { it.id == command.taskId }
             ?: return CommandResult.Rejected(RejectionReason.NOT_FOUND, "Task no longer exists.")
+        if (
+            task.deletedAt != null &&
+            (
+                command.restoreParentTaskId == null ||
+                    task.parentTaskId == command.restoreParentTaskId
+            )
+        ) {
+            return CommandResult.Success("Task is already in the Bin")
+        }
+        command.restoreParentTaskId?.let { parentId ->
+            SubtaskRules.historicalParentViolation(
+                current.tasks,
+                task.id,
+                parentId,
+            )?.let { violation ->
+                return CommandResult.Rejected(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(violation),
+                )
+            }
+        }
         if (task.deletedAt != null) {
+            publish(
+                current.tasks.replace(
+                    task.copy(
+                        deletedAt = command.deletedAt,
+                        parentTaskId = command.restoreParentTaskId,
+                        revision = nextRevision(task, command.deletedAt),
+                    ),
+                ),
+                at = command.deletedAt,
+            )
             return CommandResult.Success("Task is already in the Bin")
         }
         // Sorted by id to match Room's `liveChildren` (`ORDER BY id`), so a
@@ -2317,6 +2349,7 @@ class InMemoryVaultRepository internal constructor(
             .sortedBy { it.id.value }
         val updated = task.copy(
             deletedAt = command.deletedAt,
+            parentTaskId = command.restoreParentTaskId ?: task.parentTaskId,
             revision = nextRevision(task, command.deletedAt),
         )
         val updatedChildren = children.map { child ->
@@ -2407,7 +2440,11 @@ class InMemoryVaultRepository internal constructor(
         )
         return CommandResult.Success(
             message = "Task restored",
-            undo = DomainCommand.DeleteTask(task.id, deletedAt),
+            undo = DomainCommand.DeleteTask(
+                taskId = task.id,
+                deletedAt = deletedAt,
+                restoreParentTaskId = if (detach && parent != null) parentId else null,
+            ),
         )
     }
 
@@ -2553,6 +2590,7 @@ class InMemoryVaultRepository internal constructor(
             val requestedMilestone: Milestone?,
             val recurrenceMetadata: RecurrenceSeriesMetadata?,
             val targetStatus: WorkflowStatus,
+            val targetParentTaskId: TaskId?,
         ) : TaskUpdateValidation
     }
 
@@ -2660,6 +2698,22 @@ class InMemoryVaultRepository internal constructor(
             RejectionReason.INVALID_STATE,
             "The destination workflow has no matching ${task.semanticStatus.readableCategory()} status.",
         )
+        val targetParentTaskId = command.restoreParentTaskId ?: task.parentTaskId
+        command.restoreParentTaskId?.let { parentId ->
+            val projectedTasks = current.tasks.map { candidate ->
+                if (candidate.id == task.id) {
+                    candidate.copy(projectId = command.projectId)
+                } else {
+                    candidate
+                }
+            }
+            SubtaskRules.parentViolation(projectedTasks, task.id, parentId)?.let { violation ->
+                return invalidTaskUpdate(
+                    RejectionReason.SUBTASK_PARENT_INVALID,
+                    subtaskViolationMessage(violation),
+                )
+            }
+        }
         return TaskUpdateValidation.Valid(
             task = task,
             existingReminder = existingReminder,
@@ -2667,6 +2721,7 @@ class InMemoryVaultRepository internal constructor(
             requestedMilestone = requestedMilestone,
             recurrenceMetadata = recurrenceMetadata,
             targetStatus = targetStatus,
+            targetParentTaskId = targetParentTaskId,
         )
     }
 
@@ -2682,6 +2737,7 @@ class InMemoryVaultRepository internal constructor(
         val requestedMilestone = plan.requestedMilestone
         val recurrenceMetadata = plan.recurrenceMetadata
         val targetStatus = plan.targetStatus
+        val targetParentTaskId = plan.targetParentTaskId
         val title = command.title.trim()
         if (
             task.title == title &&
@@ -2697,6 +2753,7 @@ class InMemoryVaultRepository internal constructor(
             task.recurrenceOccurrenceIndex == recurrenceMetadata?.occurrenceIndex &&
             task.estimate == command.estimate &&
             task.milestoneId == command.milestoneId &&
+            task.parentTaskId == targetParentTaskId &&
             existingReminder == requestedReminder
         ) {
             return CommandResult.Success("Changes saved")
@@ -2716,6 +2773,7 @@ class InMemoryVaultRepository internal constructor(
             recurrenceOccurrenceIndex = recurrenceMetadata?.occurrenceIndex,
             estimate = command.estimate,
             milestoneId = command.milestoneId,
+            parentTaskId = targetParentTaskId,
             revision = nextRevision(task),
         )
         publish(
@@ -4348,6 +4406,7 @@ class InMemoryVaultRepository internal constructor(
 
     private fun Task.toUpdateCommand(
         reminder: Reminder? = null,
+        restoreParentTaskId: TaskId? = null,
     ): DomainCommand.UpdateTask = DomainCommand.UpdateTask(
         taskId = id,
         title = title,
@@ -4360,6 +4419,7 @@ class InMemoryVaultRepository internal constructor(
         estimate = estimate,
         milestoneId = milestoneId,
         restoreStatusId = statusId,
+        restoreParentTaskId = restoreParentTaskId,
         reminder = reminder,
         restorePastReminder = true,
         recurrenceMetadata = recurrence?.let {

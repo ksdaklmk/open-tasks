@@ -51,10 +51,10 @@ class RecoveryViewModelTest {
     }
 
     @Test
-    fun welcomeActionsCallOnlyTheirMatchingOperations() {
+    fun recoverySourceActionsCallOnlyTheirMatchingOperations() {
         val driveCalls = AtomicInteger()
         val portableCalls = AtomicInteger()
-        val offlineCalls = AtomicInteger()
+        val localStartCalls = AtomicInteger()
         val viewModel = viewModel(
             discoverDrive = {
                 driveCalls.incrementAndGet()
@@ -64,29 +64,29 @@ class RecoveryViewModelTest {
                 portableCalls.incrementAndGet()
                 emptyList()
             },
-            createNewVault = { offlineCalls.incrementAndGet() },
+            createNewVault = { localStartCalls.incrementAndGet() },
         )
 
         viewModel.discoverDrive()
         assertTrue(waitUntil { driveCalls.get() == 1 })
         assertEquals(0, portableCalls.get())
-        assertEquals(0, offlineCalls.get())
+        assertEquals(0, localStartCalls.get())
 
-        viewModel.returnToWelcome()
+        viewModel.returnToSources()
         viewModel.discoverPortable()
         assertTrue(waitUntil { portableCalls.get() == 1 })
         assertEquals(1, driveCalls.get())
-        assertEquals(0, offlineCalls.get())
+        assertEquals(0, localStartCalls.get())
 
-        viewModel.returnToWelcome()
+        viewModel.returnToSources()
         viewModel.startWithoutRestoring()
-        assertTrue(waitUntil { offlineCalls.get() == 1 })
+        assertTrue(waitUntil { localStartCalls.get() == 1 })
         assertEquals(1, driveCalls.get())
         assertEquals(1, portableCalls.get())
     }
 
     @Test
-    fun emptyDiscoveryKeepsItsSourceAndBackReturnsToWelcome() {
+    fun emptyDiscoveryKeepsItsSourceAndBackReturnsToSources() {
         val viewModel = viewModel()
 
         viewModel.discoverDrive()
@@ -95,7 +95,7 @@ class RecoveryViewModelTest {
                 RecoveryPresentation.NoCandidates(RecoverySource.GOOGLE_DRIVE)
         })
 
-        viewModel.returnToWelcome()
+        viewModel.returnToSources()
         assertEquals(RecoveryPresentation.NoVault, viewModel.presentation.value)
 
         viewModel.discoverPortable()
@@ -313,6 +313,32 @@ class RecoveryViewModelTest {
         assertEquals(0, portableCalls.get())
         release.countDown()
         assertTrue(waitUntil { driveCalls.get() == 1 })
+    }
+
+    @Test
+    fun localStartDropsAConcurrentRequestInsteadOfQueueingIt() {
+        val firstEntered = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+        val secondEntered = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val viewModel = viewModel(
+            createNewVault = {
+                if (calls.incrementAndGet() == 1) {
+                    firstEntered.countDown()
+                    releaseFirst.await(5, TimeUnit.SECONDS)
+                } else {
+                    secondEntered.countDown()
+                }
+            },
+        )
+
+        viewModel.startWithoutRestoring()
+        assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
+        viewModel.startWithoutRestoring()
+        releaseFirst.countDown()
+
+        assertFalse(secondEntered.await(1, TimeUnit.SECONDS))
+        assertEquals(1, calls.get())
     }
 
     private fun viewModel(

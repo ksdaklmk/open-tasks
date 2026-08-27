@@ -126,12 +126,12 @@ class RecoveryViewModel internal constructor(
         }
     }
 
-    fun startWithoutRestoring() = launchOperation {
+    fun startWithoutRestoring() = launchOperation(waitForTurn = false) {
         createNewVault()
         presented.value = RecoveryPresentation.Activating
     }
 
-    fun returnToWelcome() {
+    fun returnToSources() {
         presented.value = RecoveryPresentation.NoVault
     }
 
@@ -180,9 +180,15 @@ class RecoveryViewModel internal constructor(
         }
     }
 
-    private fun launchOperation(block: suspend () -> Unit) {
+    private fun launchOperation(
+        waitForTurn: Boolean = true,
+        block: suspend () -> Unit,
+    ) {
+        if (!waitForTurn && !operation.tryLock()) return
         viewModelScope.launch(Dispatchers.Default) {
-            operation.lock()
+            if (waitForTurn) {
+                operation.lock()
+            }
             try {
                 block()
             } catch (failure: Throwable) {
