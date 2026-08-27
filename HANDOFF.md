@@ -1,16 +1,17 @@
 # Open Tasks Handoff
 
-## Current state — Play Task 6 repository complete, 27 August 2026
+## Current state — Task 6 deployed; browser QA pending — 27 August 2026
 
 This is the authoritative current section for the Google Play submission.
 Older checkpoints remain historical evidence and are superseded where they
 conflict with this record.
 
-Work remains isolated in
-`/Users/kk/projects/open-tasks/.worktrees/google-play-submission` on branch
-`google-play-submission`, which began at approved plan commit
-`7c317506869efebf4d789aa166dfd1f9a703c035`. The separate divergent `main`
-checkout remains untouched and must not be reconciled as part of this work.
+The reviewed branch was integrated under explicit owner approval. Remote
+`origin/main` had a squash commit whose tree exactly matched local pre-Play
+commit `edc157a`; content-empty merge `f0c85cc` records that remote parent
+without replacing the reviewed tree. Local `main` was fast-forwarded and
+pushed, then deployment evidence was appended in `6397448`. The retained
+`google-play-submission` worktree remains available for later programme work.
 
 Tasks 1–5 remain complete and cleanly reviewed. Task 4 connected
 instrumentation and 200% font checks remain PENDING because no disposable
@@ -36,25 +37,43 @@ entries to the actual top-level `permissions` block. The final scoped review
 reported specification PASS, quality PASS, and zero Critical, Important, or
 Minor findings.
 
-Fresh controller checks passed shell syntax, the valid workflow policy, the
-four exact action pins, exact two-file site inventory, forbidden web-behaviour
-scan, required disclosures, public-name-only scan, corrected Task 5 privacy
-facts, 6.89:1 accent-text contrast, semantic structure, exact four-file Task 6
-scope, `git diff --check`, and clean status. The exact
+Pre-integration controller checks passed shell syntax, the workflow policy,
+the four exact action pins, exact two-file site inventory, forbidden
+web-behaviour scan, required disclosures, public-name-only scan, corrected
+Task 5 privacy facts, 6.89:1 accent-text contrast, semantic structure, exact
+four-file Task 6 scope, `git diff --check`, and clean status. The exact
 permissions-versus-`env` adversarial mutation now fails with exit 1, and the
 approved workflow passes again after byte-exact restoration.
 
-GitHub Pages is not enabled or deployed by this checkpoint. Public HTTP,
-normal/private browser, narrow/wide layout, keyboard, workflow-run, and exact
-deployed-name evidence all remain PENDING. No merge, push, PR, Pages action,
-Play/Cloud Console action, key, device, real AAB, tag, release, or publication
-action occurred.
+The post-integration full gate passed on local `main`: `testDebugUnitTest`,
+`lintDebug`, and `:app:assembleDebug` reported `BUILD SUCCESSFUL in 27s` with
+553 actionable tasks. GitHub Pages is enabled with the GitHub Actions source,
+public access, and HTTPS enforcement. The first Pages attempt raced enablement
+and failed at `configure-pages`; attempt 2 of Pages workflow run
+`33090904000` deployed exact commit
+`f0c85cc04b3c68dc6c60849aa450ca74f065e2b0` successfully at
+`2026-08-27T16:01:54Z`.
 
-To resume: obtain explicit execution-time approval to integrate and push this
-branch, enable GitHub Actions as the Pages source if needed, deploy and verify
-both public URLs, then record Task 6 deployment evidence separately. Do not
-start Task 7 owner verification, package registration, Play signing, or any
-other external action without its required owner input and approval.
+Both fixed public URLs return HTTP 200 with `text/html; charset=utf-8`. Their
+fetched bytes match the two committed HTML files exactly, the privacy page has
+the exact public developer display name, the support route and warning match,
+and the deployed forbidden-content scan is clean. Anonymous retrieval required
+no authentication.
+
+Rendered normal/private-browser, narrow/wide-layout, and keyboard-tab evidence
+remains PENDING because no controllable browser was connected. No Play or
+Cloud Console, key, device, real AAB, tag, Play release, or Task 7 action
+occurred.
+Security passed. Android verification, release, and benchmark jobs passed, but
+the Android workflow failed because both instrumented matrix jobs failed: API
+37 lost the emulator package service, while API 36 reported app, core-data,
+and migration instrumented failures and timeouts. Those failures were not
+diagnosed or changed as part of this Pages deployment task.
+
+To resume: connect a controllable browser and complete the remaining Task 6
+rendered-layout and keyboard acceptance, then append that result. Do not start
+Task 7 owner verification, package registration, Play signing, or another
+external action without its required owner input and approval.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
