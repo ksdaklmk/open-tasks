@@ -131,7 +131,7 @@ class RecoveryViewModel internal constructor(
         presented.value = RecoveryPresentation.Activating
     }
 
-    fun returnToWelcome() {
+    fun returnToSources() {
         presented.value = RecoveryPresentation.NoVault
     }
 

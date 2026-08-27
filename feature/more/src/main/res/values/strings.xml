@@ -203,12 +203,7 @@
     <string name="backup_cancel_action">Cancel</string>
     <string name="backup_submit_action">Prepare package</string>
 
-    <string name="welcome_title">Welcome to Open Tasks</string>
-    <string name="welcome_body">Plan projects and focused work in a private workspace on this device.</string>
-    <string name="welcome_google">Continue with Google</string>
-    <string name="welcome_google_disclosure">Optional — Google Drive is used only for encrypted backup and recovery.</string>
-    <string name="welcome_offline">Continue offline</string>
-    <string name="welcome_restore_device">Restore from this device</string>
+    <string name="recovery_start_local">Start with a local workspace</string>
     <string name="recovery_title">Restore Open Tasks</string>
     <string name="recovery_drive">Find Google Drive backups</string>
     <string name="recovery_portable">Use Android backup package</string>

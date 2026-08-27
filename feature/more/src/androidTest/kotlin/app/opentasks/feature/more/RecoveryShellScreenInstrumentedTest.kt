@@ -63,7 +63,7 @@ class RecoveryShellScreenInstrumentedTest {
         composeRule.onNodeWithText("Back").performClick()
         assertEquals(1, back.get())
         assertEquals(0, offline.get())
-        composeRule.onNodeWithText("Continue offline").performClick()
+        composeRule.onNodeWithText("Start with a local workspace").performClick()
         assertEquals(1, back.get())
         assertEquals(1, offline.get())
     }
@@ -77,7 +77,7 @@ class RecoveryShellScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithText("No encrypted backup found").assertIsDisplayed()
-        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
+        composeRule.onNodeWithText("Start with a local workspace").assertDoesNotExist()
     }
 
     @Test
@@ -90,7 +90,7 @@ class RecoveryShellScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("recovery-drive").assertIsDisplayed()
         composeRule.onNodeWithTag("recovery-portable").assertIsDisplayed()
-        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
+        composeRule.onNodeWithText("Start with a local workspace").assertDoesNotExist()
     }
 
     @Test
@@ -203,6 +203,6 @@ class RecoveryShellScreenInstrumentedTest {
             .performScrollTo()
             .assertIsDisplayed()
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
-        composeRule.onNodeWithText("Continue offline").assertDoesNotExist()
+        composeRule.onNodeWithText("Start with a local workspace").assertDoesNotExist()
     }
 }

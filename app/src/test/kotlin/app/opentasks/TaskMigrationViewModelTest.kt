@@ -193,40 +193,6 @@ class TaskMigrationViewModelTest {
     }
 
     @Test
-    fun confirmedWelcomeRowsAreTakenExactlyOnce() {
-        val subject = viewModel()
-        load(subject, "Title\r\nOne\r\n")
-
-        assertTrue(subject.confirmForWelcome(emptyTaskCsvTarget()))
-        assertEquals("One", subject.takeWelcomeRows()!!.single().title)
-        assertNull(subject.takeWelcomeRows())
-    }
-
-    @Test
-    fun abandoningWelcomeHandoffDropsRowsAndReview() {
-        val subject = viewModel()
-        load(subject, "Title\r\nOne\r\n")
-        subject.confirmForWelcome(emptyTaskCsvTarget())
-
-        assertTrue(subject.abandonWelcomeHandoff())
-        assertNull(subject.takeWelcomeRows())
-        assertNull(subject.state.value)
-    }
-
-    @Test
-    fun rejectedWelcomeDispatchKeepsReviewReadyForActiveRetry() {
-        val subject = viewModel()
-        load(subject, "Title\r\nOne\r\n")
-        subject.confirmForWelcome(emptyTaskCsvTarget())
-        assertNotNull(subject.takeWelcomeRows())
-
-        subject.onCommitFinished(success = false)
-
-        assertFalse(review(subject).isCommitting)
-        assertNotNull(subject.confirm(emptyTaskCsvTarget()))
-    }
-
-    @Test
     fun cancelDropsTheDocumentAndReview() {
         val subject = viewModel()
         load(subject, "Title\r\nOne\r\n")
