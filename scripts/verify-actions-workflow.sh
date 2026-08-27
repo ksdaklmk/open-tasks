@@ -49,11 +49,13 @@ grep -q 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "$pages_work
 grep -q 'actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b' "$pages_workflow"
 grep -q 'actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b' "$pages_workflow"
 grep -q 'actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e' "$pages_workflow"
-test "$(grep -Ec '^permissions:$' "$pages_workflow")" -eq 1
-grep -q '^  contents: read$' "$pages_workflow"
-grep -q '^  pages: write$' "$pages_workflow"
-grep -q '^  id-token: write$' "$pages_workflow"
-test "$(awk '/^permissions:$/ { block=1; next } block && /^[^[:space:]#]/ { block=0 } block && /^  [[:alnum:]-]+:/ { entries++ } END { print entries + 0 }' "$pages_workflow")" -eq 3
+pages_permissions="$(awk '
+  /^permissions:$/ { if (seen++) exit 1; block=1; next }
+  block && /^[^[:space:]#]/ { block=0 }
+  block && /^  [[:alnum:]-]+:/ { sub(/^  /, ""); print }
+  END { if (seen != 1) exit 1 }
+' "$pages_workflow")"
+test "$pages_permissions" = $'contents: read\npages: write\nid-token: write'
 grep -q '^      name: github-pages$' "$pages_workflow"
 grep -q '^          path: site$' "$pages_workflow"
 grep -Eq 'permissions: write-all|(^|[^[:alnum:]_])(secrets\.|github\.token|ACTIONS_RUNTIME_TOKEN)' "$pages_workflow" && exit 1
