@@ -162,3 +162,17 @@ Console answers. It does not rewrite the prior repository evidence.
 - **Task 6 and release actions:** PENDING — owner resume required. Task 6
   has not started; no Pages/site workflow, deployment, Console, Cloud, key,
   real AAB, device, or external-account action occurred.
+
+## Entry — 2026-08-27T11:00:00Z — worker — Task 5 fix round 1
+
+This dated correction supersedes the Task 5 review-pause FAIL for the six
+document defects only. It preserves every earlier entry, including the pause,
+and does not create final-AAB, runtime, Console, owner, account, deployment or
+publication evidence.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Data Safety source matrix | PASS — corrected repository evidence | Adds the explicit, confirmed calendar-provider/app handoff for task titles, project names and schedules/dates, with recipient, `ACTION_INSERT` transport, purpose, destination-controlled deletion and classification uncertainty. It corrects Drive disconnect retention, attachment-package scope and remote-deletion residuals. PENDING — final AAB audit. PENDING — current Console wording. |
+| Off-device behavior separation | PASS — corrected repository evidence | Separates Drive/`.otvault` encrypted attachment file bytes from Android portable encrypted attachment record/metadata, and records attachment-content/history-deletion residuals. The Android package has reprepare/clear-app-data and platform controls; `withdraw` is not a user deletion path. PENDING — final AAB audit. |
+| Final-binary status wording | PASS — corrected repository evidence | Current Task 5 final-AAB/merged-manifest/transitive-binary uncertainties use the exact separate status `PENDING — final AAB audit`; owner, runtime and Console gates remain separately pending. Historical wording above is retained as append-only evidence. |
+| Fixed-fact and safety checks | PASS — corrected repository evidence | Focused RED→GREEN declaration check, literal listing limits, fixed-fact/prohibited-claim scans, `git diff --check`, exact two-file scope and sensitive-value scan ran without final AAB, Console or runtime claims. |
