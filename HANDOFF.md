@@ -1,63 +1,58 @@
 # Open Tasks Handoff
 
-## Current state — Google Play submission paused, 27 August 2026
+## Current state — Play Task 5 complete; Task 6 awaiting identity, 27 August 2026
 
 This is the authoritative current section for the Google Play submission.
 Older checkpoints remain historical evidence and are superseded where they
-conflict with this pause record.
+conflict with this record.
 
-Work is stopped in the isolated
-`/Users/kk/projects/open-tasks/.worktrees/google-play-submission` worktree on
-branch `google-play-submission`. Task 5's last implementation/draft commit is
-`4fa949b6d648d18511df791cfa9d208b66252652`; the initial documentation-only
-pause commit is `6e5ee8995c010dd4422dcf199746b173908d458c`. The current safe
-resume point is this branch-tip documentation correction commit,
-`docs: clarify Play pause head`, directly following `6e5ee89`; confirm its
-exact hash with `git rev-parse HEAD`, because a commit cannot embed its own
-hash. The branch began at plan commit
-`7c317506869efebf4d789aa166dfd1f9a703c035`. The separate main checkout is
-clean at that plan commit and remains
-`main...origin/main [ahead 44, behind 1]`; do not reconcile it. `origin/main`
-is
-`047e144035808d1633d7d4e18cd32d0340e571a0`.
+Work remains isolated in
+`/Users/kk/projects/open-tasks/.worktrees/google-play-submission` on branch
+`google-play-submission`, which began at approved plan commit
+`7c317506869efebf4d789aa166dfd1f9a703c035`. The separate divergent `main`
+checkout remains untouched and must not be reconciled as part of this work.
 
-Tasks 1–4 are complete and cleanly reviewed: `b1cee33`, `7da25d9`,
-`8501705`/`33c9f14`/`10c919c`, and `9a8fc31` respectively. Task 4 connected
+Tasks 1–4 remain complete and cleanly reviewed at `b1cee33`, `7da25d9`,
+`8501705`/`33c9f14`/`10c919c`, and `9a8fc31`. Task 4 connected
 instrumentation and 200% font checks remain PENDING because no disposable
 device was approved.
 
-Task 5 is not accepted: its independent review is specification FAIL and
-quality FAIL, with four Important, two Minor, and zero Critical findings.
-No Task 5 fix has started; the owner explicitly paused work. Do not use
-`docs/google-play/store-listing.md` as a Play Console source of truth until
-all six findings are corrected and a fresh review is clean. The review is at
-`.superpowers/sdd/2026-08-27-google-play-submission-plan/task-5-review.md`:
+Task 5 is complete. Draft commit `4fa949b` received four Important and two
+Minor findings. Fix-round commits `146bd1a` and `d50f9bf` corrected all six:
 
-- calendar-provider handoff is absent from Data Safety/off-device evidence;
-- Drive disconnect incorrectly says local configuration/account digest clear;
-- Android portable metadata is conflated with attachment file bytes;
-- remote-deletion residual attachment/history/terminal records are omitted;
-- `withdraw package` is not an exposed deletion path; and
-- some final-binary pending labels do not exactly read
-  `PENDING — final AAB audit`.
+- the calendar handoff now distinguishes task title, project name and times
+  and states that task bodies are not sent;
+- Drive disconnect retains dormant configuration/account-binding state for
+  same-account reconnection;
+- Android portable attachment metadata is separated from attachment bytes;
+- attachment/history deletion residuals and the terminal marker are recorded;
+- the unsupported `withdraw package` user path is removed; and
+- current final-binary uncertainty uses the exact
+  `PENDING — final AAB audit` status.
 
-Task 6 has not started: no `site/` or Pages workflow was created or deployed.
-The exact Play developer display name is unknown and must not be invented.
-Tasks 7–14 remain unstarted; all owner, security, external, and time gates
-remain binding. No merge, push, PR, tag, release, deployment, Console, Cloud,
-browser, key, real AAB, device, or external-account action occurred.
+The first scoped re-review closed five findings and exposed one title/body
+overstatement. The second scoped re-review found that correction addressed,
+with specification PASS, quality PASS, and zero Critical, Important, or Minor
+findings. Fresh controller checks passed the literal listing limits, all six
+correction assertions, fixed/prohibited claims, sensitive-value scan, exact
+two-file fix scope, `git diff --check`, and clean status. The source-level
+declaration draft is accepted, but final AAB, runtime, current Console, owner,
+deployment, and publication evidence remain PENDING.
 
-To resume: (1) read this handoff, the approved plan, the Task 5 report, and
-the Task 5 review; (2) confirm the worktree is clean, `HEAD` has subject
-`docs: clarify Play pause head`, its parent is
-`6e5ee8995c010dd4422dcf199746b173908d458c`, and
-`git diff --name-only 4fa949b..HEAD` contains only `HANDOFF.md` and
-`docs/qualification/release-1.5.0-play.md`; do not touch divergent main;
-(3) resume Task 5 only, correct all six findings test/evidence-first, append
-a ledger correction, and commit only the two Task 5 docs; (4) dispatch a
-fresh scoped reviewer—Task 5 completes only with specification and quality
-PASS and zero Critical/Important findings; and (5) do not start Task 6 or any
-external release action until the owner resumes.
+Task 6 has not started: no `site/` files or Pages workflow exist. Its mandatory
+first input is the exact public developer display name from the verified Play
+account. That value is absent from repository evidence and must not be guessed
+from the GitHub username, a legal identity, or a private email address. No
+browser, Play/Cloud Console, key, device, real AAB, merge, push, PR, tag,
+release, deployment, or publication action occurred.
+
+To resume: (1) confirm this worktree is clean and Task 5 head `d50f9bf` is in
+history immediately before this documentation checkpoint; (2) obtain the exact
+public developer display name from the verified Play account and provide that
+literal value for Task 6; (3) execute Task 6 repository work test-first; and
+(4) stop again before merge, push, Pages deployment, Console, Cloud, key,
+device, or other external action unless it receives explicit execution-time
+approval.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
