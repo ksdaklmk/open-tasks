@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — Task 6 deployed; browser QA pending — 27 August 2026
+## Current state — Task 6 browser QA partly complete — 28 August 2026
 
 This is the authoritative current section for the Google Play submission.
 Older checkpoints remain historical evidence and are superseded where they
@@ -60,20 +60,33 @@ the exact public developer display name, the support route and warning match,
 and the deployed forbidden-content scan is clean. Anonymous retrieval required
 no authentication.
 
-Rendered normal/private-browser, narrow/wide-layout, and keyboard-tab evidence
-remains PENDING because no controllable browser was connected. No Play or
-Cloud Console, key, device, real AAB, tag, Play release, or Task 7 action
-occurred.
-Security passed. Android verification, release, and benchmark jobs passed, but
-the Android workflow failed because both instrumented matrix jobs failed: API
-37 lost the emulator package service, while API 36 reported app, core-data,
-and migration instrumented failures and timeouts. Those failures were not
+Normal Chrome browser QA now passes both deployed URLs at a wide 1425×802
+viewport and a narrow 360×800 viewport. Both pages rendered without clipping,
+collision, or horizontal overflow. Privacy-page Tab order reached Open Tasks
+support; Support-page order reached GitHub Issues, then Privacy policy. Every
+focused link showed the
+expected solid 3 px ember outline with a 3 px offset, and Enter activated both
+internal page transitions. The temporary viewport override was reset. An
+actual Chrome Incognito-window run remains PENDING because the connected
+browser control cannot create a private window and the owner paused before
+opening one.
+
+The deployed commit's Security workflow passed. The later docs-only push at
+`e657815` exposed a repeatable CodeQL workflow defect: Gradle restored every
+Kotlin compilation task from cache, so CodeQL finalisation found no compiled
+source. No workflow fix was attempted. Android verification, release, and
+benchmark jobs passed, but both instrumented matrix jobs failed: API 37 lost
+the emulator package service, while API 36 reported app, core-data, and
+migration instrumented failures and timeouts. Those failures were not
 diagnosed or changed as part of this Pages deployment task.
 
-To resume: connect a controllable browser and complete the remaining Task 6
-rendered-layout and keyboard acceptance, then append that result. Do not start
-Task 7 owner verification, package registration, Play signing, or another
-external action without its required owner input and approval.
+No Play or Cloud Console, key, device, real AAB, tag, Play release, or Task 7
+action occurred. To resume Task 6: open Chrome Incognito at the privacy URL,
+ensure the ChatGPT extension is allowed there, and verify both pages at wide
+and narrow widths with Tab/Enter. Append that result before calling the
+browser gate complete. Do not start Task 7 owner verification, package
+registration, Play signing, or another external action without its required
+owner input and approval.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 

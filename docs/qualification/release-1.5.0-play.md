@@ -197,3 +197,18 @@ run was retried. Attempt 2 is the result promoted below.
 | Support page public HTTP/content | PASS — anonymous public evidence | `https://ksdaklmk.github.io/open-tasks/support/` returned HTTP 200 and `text/html; charset=utf-8`. The fetched bytes equal `site/support/index.html` and contain the fixed GitHub Issues route plus the public-data warning. |
 | Deployed static-safety scan | PASS — fetched-content evidence | Both fetched pages contain no script, form, tracker, third-party font, insecure `http:` reference, or mixed-content path. Anonymous retrieval required no authentication. |
 | Normal/private browser, narrow/wide layout, and keyboard focus | PENDING — browser evidence not produced | No controllable browser was connected. No rendered layout, private-window, or keyboard-tab result is claimed from the HTTP/content checks. |
+
+## Entry — 2026-08-27T23:28:53Z — worker — Task 6 normal-browser QA
+
+This entry supersedes only the normal-browser portions of the combined browser
+PENDING row above. An actual private-window run remains PENDING. It creates no
+Play Console, Cloud Console, signing, final-AAB, device, testing, or publication
+evidence.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Wide normal-Chrome layout | PASS — rendered browser evidence | Both deployed URLs rendered at 1425×802 without clipping, collision, or horizontal overflow; each document's scroll width equalled the viewport width. The semantic headings, public developer name, support warning, and links were visible in the expected order. |
+| Narrow normal-Chrome layout | PASS — rendered browser evidence | Both deployed URLs rendered at 360×800 without clipping, collision, or horizontal overflow; every heading and link remained within the 360 px viewport. The temporary viewport override was reset after the checks. |
+| Normal-Chrome keyboard focus and activation | PASS — rendered browser evidence | Privacy Tab order reached `Open Tasks support`. Support Tab order reached `GitHub Issues` then `Privacy policy`. Every focused link showed a solid 3 px `rgb(198, 78, 43)` outline with a 3 px offset. Enter activated both internal page transitions, including the narrow support-to-privacy transition. |
+| Normal-Chrome browser warnings | PASS — observed browser evidence | The privacy page produced no browser console warning or error; its only DOM resource reference was the HTTPS support link. The earlier fetched-content scan remains the authoritative two-page mixed-content/static-safety evidence. |
+| Private/Incognito browser | PENDING — owner action required | The connected Chrome control cannot create an Incognito window. The owner paused before opening and exposing one to the extension, so no private-window layout, authentication, or keyboard result is claimed. |
