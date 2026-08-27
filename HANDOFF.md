@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — Play Task 5 complete; Task 6 awaiting identity, 27 August 2026
+## Current state — Play Task 6 repository complete, 27 August 2026
 
 This is the authoritative current section for the Google Play submission.
 Older checkpoints remain historical evidence and are superseded where they
@@ -12,47 +12,49 @@ Work remains isolated in
 `7c317506869efebf4d789aa166dfd1f9a703c035`. The separate divergent `main`
 checkout remains untouched and must not be reconciled as part of this work.
 
-Tasks 1–4 remain complete and cleanly reviewed at `b1cee33`, `7da25d9`,
-`8501705`/`33c9f14`/`10c919c`, and `9a8fc31`. Task 4 connected
+Tasks 1–5 remain complete and cleanly reviewed. Task 4 connected
 instrumentation and 200% font checks remain PENDING because no disposable
-device was approved.
+device was approved. Task 5 source-level declarations remain accepted, while
+final AAB, runtime, current Console, owner, deployment, and publication
+evidence remain PENDING.
 
-Task 5 is complete. Draft commit `4fa949b` received four Important and two
-Minor findings. Fix-round commits `146bd1a` and `d50f9bf` corrected all six:
+Task 6 repository work is complete. The owner supplied the exact verified
+public Play developer display name `Kritsada K.`; only that public value is
+in the privacy page. No reference screenshot or other account detail was
+retained, cited, or committed. Commit `37b8b75` added the two self-contained
+static pages, the exact pinned Pages workflow, and its repository policy
+checks. It publishes only `site/` and introduces no JavaScript, form, cookie,
+analytics, third-party font, remote stylesheet, build framework, or
+dependency.
 
-- the calendar handoff now distinguishes task title, project name and times
-  and states that task bodies are not sent;
-- Drive disconnect retains dormant configuration/account-binding state for
-  same-account reconnection;
-- Android portable attachment metadata is separated from attachment bytes;
-- attachment/history deletion residuals and the terminal marker are recorded;
-- the unsupported `withdraw package` user path is removed; and
-- current final-binary uncertainty uses the exact
-  `PENDING — final AAB audit` status.
+The first independent review found three Important issues: an inaccurate
+Internet-permission phrase, sub-AA ember text contrast, and incomplete Pages
+policy enforcement. Fix `6ac0fe6` corrected all three. Its scoped re-review
+was clean, but controller adversarial verification then found one remaining
+permission-binding bypass. Fix `0eccd1d` binds the exact three required
+entries to the actual top-level `permissions` block. The final scoped review
+reported specification PASS, quality PASS, and zero Critical, Important, or
+Minor findings.
 
-The first scoped re-review closed five findings and exposed one title/body
-overstatement. The second scoped re-review found that correction addressed,
-with specification PASS, quality PASS, and zero Critical, Important, or Minor
-findings. Fresh controller checks passed the literal listing limits, all six
-correction assertions, fixed/prohibited claims, sensitive-value scan, exact
-two-file fix scope, `git diff --check`, and clean status. The source-level
-declaration draft is accepted, but final AAB, runtime, current Console, owner,
-deployment, and publication evidence remain PENDING.
+Fresh controller checks passed shell syntax, the valid workflow policy, the
+four exact action pins, exact two-file site inventory, forbidden web-behaviour
+scan, required disclosures, public-name-only scan, corrected Task 5 privacy
+facts, 6.89:1 accent-text contrast, semantic structure, exact four-file Task 6
+scope, `git diff --check`, and clean status. The exact
+permissions-versus-`env` adversarial mutation now fails with exit 1, and the
+approved workflow passes again after byte-exact restoration.
 
-Task 6 has not started: no `site/` files or Pages workflow exist. Its mandatory
-first input is the exact public developer display name from the verified Play
-account. That value is absent from repository evidence and must not be guessed
-from the GitHub username, a legal identity, or a private email address. No
-browser, Play/Cloud Console, key, device, real AAB, merge, push, PR, tag,
-release, deployment, or publication action occurred.
+GitHub Pages is not enabled or deployed by this checkpoint. Public HTTP,
+normal/private browser, narrow/wide layout, keyboard, workflow-run, and exact
+deployed-name evidence all remain PENDING. No merge, push, PR, Pages action,
+Play/Cloud Console action, key, device, real AAB, tag, release, or publication
+action occurred.
 
-To resume: (1) confirm this worktree is clean and Task 5 head `d50f9bf` is in
-history immediately before this documentation checkpoint; (2) obtain the exact
-public developer display name from the verified Play account and provide that
-literal value for Task 6; (3) execute Task 6 repository work test-first; and
-(4) stop again before merge, push, Pages deployment, Console, Cloud, key,
-device, or other external action unless it receives explicit execution-time
-approval.
+To resume: obtain explicit execution-time approval to integrate and push this
+branch, enable GitHub Actions as the Pages source if needed, deploy and verify
+both public URLs, then record Task 6 deployment evidence separately. Do not
+start Task 7 owner verification, package registration, Play signing, or any
+other external action without its required owner input and approval.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
