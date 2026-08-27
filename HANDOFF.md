@@ -102,9 +102,10 @@ Fresh controller verification after those fixes completed the gate:
 - `git diff --check`: PASS; `git status --short` contained only the preserved
   unrelated entries listed below.
 
-Task 9 and the generic CSV migration slice are complete. The plan's ignored
-SDD workspace is closed; implementation and review should not be repeated
-unless the code changes.
+Task 9 and the generic CSV migration slice are complete. The plan's 804 KiB
+ignored SDD workspace is retained pending explicit owner approval to
+permanently delete its task reports and review diffs; implementation and
+review should not be repeated unless the code changes.
 
 Room remains v9 and the authenticated backup and `.otvault` archive formats
 remain v1. No version, signing, artifact copy, tag, push, publication, or Play
