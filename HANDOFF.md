@@ -8,8 +8,13 @@ conflict with this pause record.
 
 Work is stopped in the isolated
 `/Users/kk/projects/open-tasks/.worktrees/google-play-submission` worktree on
-branch `google-play-submission`, at Task 5 implementation commit
-`4fa949b6d648d18511df791cfa9d208b66252652`. The branch began at plan commit
+branch `google-play-submission`. Task 5's last implementation/draft commit is
+`4fa949b6d648d18511df791cfa9d208b66252652`; the initial documentation-only
+pause commit is `6e5ee8995c010dd4422dcf199746b173908d458c`. The current safe
+resume point is this branch-tip documentation correction commit,
+`docs: clarify Play pause head`, directly following `6e5ee89`; confirm its
+exact hash with `git rev-parse HEAD`, because a commit cannot embed its own
+hash. The branch began at plan commit
 `7c317506869efebf4d789aa166dfd1f9a703c035`. The separate main checkout is
 clean at that plan commit and remains
 `main...origin/main [ahead 44, behind 1]`; do not reconcile it. `origin/main`
@@ -43,13 +48,16 @@ remain binding. No merge, push, PR, tag, release, deployment, Console, Cloud,
 browser, key, real AAB, device, or external-account action occurred.
 
 To resume: (1) read this handoff, the approved plan, the Task 5 report, and
-the Task 5 review; (2) confirm this worktree, branch, HEAD, and clean status
-without touching divergent main; (3) resume Task 5 only, correct all six
-findings test/evidence-first, append a ledger correction, and commit only the
-two Task 5 docs; (4) dispatch a fresh scoped reviewer—Task 5 completes only
-with specification and quality PASS and zero Critical/Important findings;
-and (5) do not start Task 6 or any external release action until the owner
-resumes.
+the Task 5 review; (2) confirm the worktree is clean, `HEAD` has subject
+`docs: clarify Play pause head`, its parent is
+`6e5ee8995c010dd4422dcf199746b173908d458c`, and
+`git diff --name-only 4fa949b..HEAD` contains only `HANDOFF.md` and
+`docs/qualification/release-1.5.0-play.md`; do not touch divergent main;
+(3) resume Task 5 only, correct all six findings test/evidence-first, append
+a ledger correction, and commit only the two Task 5 docs; (4) dispatch a
+fresh scoped reviewer—Task 5 completes only with specification and quality
+PASS and zero Critical/Important findings; and (5) do not start Task 6 or any
+external release action until the owner resumes.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
