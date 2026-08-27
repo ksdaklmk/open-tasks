@@ -138,3 +138,27 @@ publication gate.
 | App Content draft | PASS — draft repository evidence produced; PENDING — current Console wording/owner submission | Evidence matrix covers ads, app access, audience, content rating, excluded app categories, account deletion, optional Drive authorization, permissions/components/backup and reviewer navigation. Console-only questions remain explicitly PENDING. |
 | Store assets | PENDING — captured from final release UI | Manifest contracts exact names, dimensions, content and alt text for the icon, feature graphic, four phone screenshots and four large-screen screenshots; no asset was produced or approved in Task 5. |
 | Exact candidate artifacts and declarations | PENDING — evidence not yet produced | Task 5 did not build, inspect, sign or upload an AAB/APK, access Play/Cloud Console, verify public deployment, submit declarations or create tester/account evidence. |
+
+## Entry — 2026-08-27T10:41:58Z — worker — Task 5 review pause
+
+This entry supersedes the 2026-08-27T10:24:56Z Task 5 draft PASS claims for
+promotion purposes. The draft is not accepted and must not be used for Play
+Console answers. It does not rewrite the prior repository evidence.
+
+### Superseding status
+
+- **Task 5 listing and declarations:** FAIL — review findings unresolved.
+  Independent review of `4fa949b6d648d18511df791cfa9d208b66252652` found
+  specification FAIL and quality FAIL: 4 Important, 2 Minor, 0 Critical. No
+  fix has started; the owner paused work. See
+  `.superpowers/sdd/2026-08-27-google-play-submission-plan/task-5-review.md`.
+- **Data Safety/off-device evidence:** FAIL — calendar-provider handoff is
+  absent; Drive disconnect retention is misstated; Android portable attachment
+  metadata is conflated with file bytes; and remote-deletion residual records
+  are omitted.
+- **Deletion and final-binary status wording:** FAIL — `withdraw package` is
+  not an exposed deletion path, and some final-binary labels do not use the
+  exact `PENDING — final AAB audit` status.
+- **Task 6 and release actions:** PENDING — owner resume required. Task 6
+  has not started; no Pages/site workflow, deployment, Console, Cloud, key,
+  real AAB, device, or external-account action occurred.

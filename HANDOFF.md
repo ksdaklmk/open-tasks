@@ -1,5 +1,56 @@
 # Open Tasks Handoff
 
+## Current state — Google Play submission paused, 27 August 2026
+
+This is the authoritative current section for the Google Play submission.
+Older checkpoints remain historical evidence and are superseded where they
+conflict with this pause record.
+
+Work is stopped in the isolated
+`/Users/kk/projects/open-tasks/.worktrees/google-play-submission` worktree on
+branch `google-play-submission`, at Task 5 implementation commit
+`4fa949b6d648d18511df791cfa9d208b66252652`. The branch began at plan commit
+`7c317506869efebf4d789aa166dfd1f9a703c035`. The separate main checkout is
+clean at that plan commit and remains
+`main...origin/main [ahead 44, behind 1]`; do not reconcile it. `origin/main`
+is
+`047e144035808d1633d7d4e18cd32d0340e571a0`.
+
+Tasks 1–4 are complete and cleanly reviewed: `b1cee33`, `7da25d9`,
+`8501705`/`33c9f14`/`10c919c`, and `9a8fc31` respectively. Task 4 connected
+instrumentation and 200% font checks remain PENDING because no disposable
+device was approved.
+
+Task 5 is not accepted: its independent review is specification FAIL and
+quality FAIL, with four Important, two Minor, and zero Critical findings.
+No Task 5 fix has started; the owner explicitly paused work. Do not use
+`docs/google-play/store-listing.md` as a Play Console source of truth until
+all six findings are corrected and a fresh review is clean. The review is at
+`.superpowers/sdd/2026-08-27-google-play-submission-plan/task-5-review.md`:
+
+- calendar-provider handoff is absent from Data Safety/off-device evidence;
+- Drive disconnect incorrectly says local configuration/account digest clear;
+- Android portable metadata is conflated with attachment file bytes;
+- remote-deletion residual attachment/history/terminal records are omitted;
+- `withdraw package` is not an exposed deletion path; and
+- some final-binary pending labels do not exactly read
+  `PENDING — final AAB audit`.
+
+Task 6 has not started: no `site/` or Pages workflow was created or deployed.
+The exact Play developer display name is unknown and must not be invented.
+Tasks 7–14 remain unstarted; all owner, security, external, and time gates
+remain binding. No merge, push, PR, tag, release, deployment, Console, Cloud,
+browser, key, real AAB, device, or external-account action occurred.
+
+To resume: (1) read this handoff, the approved plan, the Task 5 report, and
+the Task 5 review; (2) confirm this worktree, branch, HEAD, and clean status
+without touching divergent main; (3) resume Task 5 only, correct all six
+findings test/evidence-first, append a ledger correction, and commit only the
+two Task 5 docs; (4) dispatch a fresh scoped reviewer—Task 5 completes only
+with specification and quality PASS and zero Critical/Important findings;
+and (5) do not start Task 6 or any external release action until the owner
+resumes.
+
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
 This section is authoritative. Older checkpoints below remain historical
