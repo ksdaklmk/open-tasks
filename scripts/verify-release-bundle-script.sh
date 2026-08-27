@@ -127,6 +127,7 @@ case "$command" in
                     || printf '<meta-data android:resource="@xml/backup_rules" />\n'
                 case "$(field main_activity)" in
                     missing) ;;
+                    alias) printf '<activity-alias android:name="app.opentasks.MainActivity" android:exported="true" />\n' ;;
                     unexported) printf '<activity android:name="app.opentasks.MainActivity" android:exported="false" />\n' ;;
                     *) printf '<activity android:name="app.opentasks.MainActivity" android:exported="true" />\n' ;;
                 esac
@@ -429,6 +430,40 @@ android {
 EOF
 expect_status_without_leak 1 "version assignments outside defaultConfig" \
     run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
+cat > "$parser_repo/app/build.gradle.kts" <<'EOF'
+android {
+    /*
+    defaultConfig {
+        versionCode = 7
+        versionName = "1.5.0"
+    }
+    */
+}
+EOF
+expect_status_without_leak 1 "block-commented defaultConfig" \
+    run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
+cat > "$parser_repo/app/build.gradle.kts" <<'EOF'
+android {
+    defaultConfig {
+        versionCode = 7
+        versionCode = 7 + 0
+        versionName = "1.5.0"
+    }
+}
+EOF
+expect_status_without_leak 1 "literal plus non-literal versionCode" \
+    run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
+cat > "$parser_repo/app/build.gradle.kts" <<'EOF'
+android {
+    defaultConfig {
+        versionCode = 7
+        versionName = "1.5.0"
+        versionName = providers.gradleProperty("versionName").get()
+    }
+}
+EOF
+expect_status_without_leak 1 "literal plus non-literal versionName" \
+    run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
 
 write_fixture; set_field validation failed
 expect_rejected "failed bundletool validation" "$aab"
@@ -467,6 +502,8 @@ write_fixture; set_field permissions risky_large
 expect_rejected "denied permission in large manifest" "$aab"
 write_fixture; set_field main_activity missing
 expect_rejected "missing MainActivity" "$aab"
+write_fixture; set_field main_activity alias
+expect_rejected "MainActivity activity-alias false positive" "$aab"
 write_fixture; set_field main_activity unexported
 expect_rejected "unexported MainActivity" "$aab"
 write_fixture; set_field file_provider missing

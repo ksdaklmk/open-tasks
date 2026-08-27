@@ -83,7 +83,20 @@ esac
 [ "$actual_cert" = "$expected_cert" ] || fail "AAB signer mismatch"
 
 gradle_versions="$("$awk_tool" '
-    BEGIN { blocks = 0; in_default = 0; closed = 0; codes = 0; names = 0 }
+    BEGIN {
+        blocks = 0
+        in_default = 0
+        closed = 0
+        code_assignments = 0
+        name_assignments = 0
+        codes = 0
+        names = 0
+    }
+    {
+        syntax = $0
+        gsub(/"[^"]*"/, "", syntax)
+        if (syntax ~ /\/\*|\*\//) bad = 1
+    }
     /^[[:space:]]*defaultConfig[[:space:]]*\{[[:space:]]*$/ {
         if (in_default || blocks != 0) bad = 1
         blocks++
@@ -97,6 +110,8 @@ gradle_versions="$("$awk_tool" '
     }
     in_default {
         if ($0 ~ /[{}]/) bad = 1
+        if ($0 ~ /^[[:space:]]*versionCode[[:space:]]*=/) code_assignments++
+        if ($0 ~ /^[[:space:]]*versionName[[:space:]]*=/) name_assignments++
         if ($0 ~ /^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*$/) {
             code = $0
             sub(/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*/, "", code)
@@ -111,7 +126,9 @@ gradle_versions="$("$awk_tool" '
         }
     }
     END {
-        if (bad || blocks != 1 || in_default || !closed || codes != 1 || names != 1) exit 1
+        if (bad || blocks != 1 || in_default || !closed ||
+            code_assignments != 1 || name_assignments != 1 ||
+            codes != 1 || names != 1) exit 1
         printf "%s\t%s\n", code, name
     }
 ' "$repo_root/app/build.gradle.kts")" || fail "failed to read literal defaultConfig version"
@@ -178,7 +195,7 @@ done
 find_component() {
     local tag="$1" name="$2"
     printf '%s\n' "$manifest_flat" \
-        | grep -o "<$tag[^>]*>" \
+        | grep -o "<$tag[[:space:]][^>]*>" \
         | grep -F "android:name=\"$name\"" || true
 }
 
