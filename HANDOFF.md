@@ -68,10 +68,10 @@ The exact focused commands were:
   --console=plain
 ```
 
-Task 9's final gates were consolidated here before its ignored SDD workspace
-was closed. The first host gate exposed Task 7's ignored Scaffold-padding lint
-error; the scoped `c0b195e` fix and review closed it. Fresh post-fix
-verification then reported:
+Task 9's final gates were consolidated here in preparation for closing its
+ignored SDD workspace. The first host gate exposed Task 7's ignored
+Scaffold-padding lint error; the scoped `c0b195e` fix and review closed it.
+Fresh post-fix verification then reported:
 
 - `./scripts/check-schema-drift.sh`: PASS; no schema drift; 38/38 Gradle tasks
   executed;
