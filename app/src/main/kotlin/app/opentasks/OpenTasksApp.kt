@@ -1850,6 +1850,7 @@ fun OpenTasksApp(
                                     onPrepareBackup = backupViewModel::prepare,
                                     onRetryBackup = backupViewModel::retry,
                                     onOpenSystemSettings = ::openSystemSettings,
+                                    onRestoreExistingWorkspace = onOpenRecovery,
                                     onConnectRemoteBackup = encryptedBackupViewModel::connect,
                                     onBackUpNow = encryptedBackupViewModel::backUpNow,
                                     onRestoreRemoteBackup =

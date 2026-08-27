@@ -121,6 +121,8 @@
 
     <string name="backup_recovery_title">Backup &amp; recovery</string>
     <string name="backup_recovery_back">Back</string>
+    <string name="backup_restore_existing_action">Restore existing workspace</string>
+    <string name="backup_restore_existing_explanation">Choose Google Drive or an Android backup package. Your current workspace stays unchanged until a verified restore is confirmed.</string>
     <string name="backup_android_package_heading">Android backup package</string>
     <string name="backup_encrypted_heading">Encrypted backup</string>
     <string name="backup_remote_off">Off</string>

@@ -188,6 +188,7 @@ class BackupRecoveryScreenInstrumentedTest {
         }
 
         listOf(
+            "restore-existing-workspace",
             "encrypted-backup-takeover",
             "encrypted-backup-preserve",
             "encrypted-backup-change-passphrase",
@@ -204,6 +205,37 @@ class BackupRecoveryScreenInstrumentedTest {
             "Older Drive backups, Android packages, and copied exports may still work with " +
                 "the old passphrase.",
         ).assertExists()
+    }
+
+    @Test
+    fun restoreExistingWorkspaceIsReachableAndForwardedOnce() {
+        val restores = AtomicInteger()
+        composeRule.setContent {
+            OpenTasksTheme {
+                MoreScreen(
+                    tasks = emptyList(),
+                    projects = emptyList(),
+                    onRestoreExistingWorkspace = { restores.incrementAndGet() },
+                    onRestoreProject = {},
+                    onRestoreTask = {},
+                    onPermanentlyDeleteTask = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("open-backup-recovery")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithText(
+            "Your current workspace stays unchanged until a verified restore is confirmed.",
+            substring = true,
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("restore-existing-workspace")
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+
+        assertEquals(1, restores.get())
     }
 
     @Test
