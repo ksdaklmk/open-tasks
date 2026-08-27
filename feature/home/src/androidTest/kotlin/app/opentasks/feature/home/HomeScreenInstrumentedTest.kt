@@ -4,8 +4,12 @@ import android.view.ViewConfiguration
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -78,6 +82,37 @@ class HomeScreenInstrumentedTest {
     // redraw loop cannot starve the rule's final waitForIdleSync.
     @get:Rule
     val testRules: RuleChain = RuleChain.outerRule(composeRule).around(HideWindowsRule())
+
+    @Test
+    fun headerUsesTheDateWithoutATimeOfDayGreeting() {
+        val snapshot = OpenTasksFixtures.snapshot.home
+        composeRule.setContent {
+            OpenTasksTheme {
+                HomeScreen(
+                    snapshot = snapshot,
+                    projectNames = emptyMap(),
+                    onOpenSearch = {},
+                    onPlanToday = {},
+                    onOpenTask = {},
+                    onCompleteTask = {},
+                    onOpenProject = {},
+                    insightsSummary = OpenTasksFixtures.insightsSummary,
+                    onOpenInsights = {},
+                    onToggleTimer = {},
+                    onRemoveFromMyDay = {},
+                    onMoveMyDayEntry = { _, _ -> },
+                    suggestions = emptyList(),
+                    onAddToMyDay = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Good afternoon").assertDoesNotExist()
+        composeRule.onNodeWithText("Sunday, 26 July")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Search workspace").assertIsDisplayed()
+    }
 
     @Test
     fun activeTimerTicksLocallyWithoutReplacingItsSnapshot() {
