@@ -1,10 +1,13 @@
-# Releasing Open Tasks (signed sideload)
+# Releasing Open Tasks
 
-Distribution is signed sideload only. There is no AAB or Play-distributed
-release in this process, and no CI signing; CI builds the release unsigned.
-Release assembly produces arm64-v8a and x86_64 APKs plus one 64-bit universal
-fallback. An owner-reported certificate-fingerprint registration in Play
-Console is an external identity record, not a change to this distribution.
+Open Tasks supports direct signed APKs and Google Play AABs. CI builds release
+artifacts unsigned; an owner signs locally and performs every upload manually.
+Do not add CI signing or automated Play upload for the first Play launch.
+
+## Direct APK release
+
+Direct release assembly produces arm64-v8a and x86_64 APKs plus one 64-bit
+universal fallback.
 
 The programme-level record at
 `docs/qualification/onboarding-dashboard-nfr-acceptance.md` is implementation
@@ -20,7 +23,7 @@ observations and does not waive these gates for later releases. The rebuilt
 the independent owner certificate record; the certificate value was not
 recorded.
 
-## One-time setup
+### One-time setup
 
 1. Generate the release keystore OUTSIDE the repository:
 
@@ -56,7 +59,7 @@ recorded.
 4. Never commit either file. `.gitignore` already covers them; do not
    override it.
 
-## Per-release process
+### Per-release process
 
 1. Bump `versionCode` by exactly 1 and set `versionName` by semver
    judgment in `app/build.gradle.kts`.
@@ -133,7 +136,7 @@ recorded.
 
        adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
 
-## Supply-chain qualification
+### Supply-chain qualification
 
 `gradle/verification-metadata.xml` is the reviewed SHA-256 allow-list for
 resolved build inputs. Regenerate it only with the complete gate command,
@@ -154,7 +157,7 @@ High or Critical advisories on pull requests. If the repository is private
 and lacks the required GitHub Code Security entitlement, that is an external
 release blocker; do not waive either job.
 
-## Performance qualification (per release, disposable physical device only)
+### Performance qualification (per release, disposable physical device only)
 
 This suite clears and replaces the installed Open Tasks benchmark package.
 Run it only with fresh owner approval and exactly one audited, disposable API
@@ -186,7 +189,7 @@ Record the build SHA, device model, API/ABI, dataset, iteration count, p50,
 p95, checker result, and raw JSON path in the release qualification. Preserve
 the raw artifact with that record. Any failure blocks the release.
 
-## Smoke checklist (per release, disposable AVD only)
+### Smoke checklist (per release, disposable AVD only)
 
 Boot the emulator as the sole ADB target with `-read-only
 -no-snapshot-load -no-snapshot-save`. Never install a release build on
@@ -199,7 +202,8 @@ session, uninstall the inherited debug build first (overlay-only):
 
 Then, by hand:
 
-1. Fresh launch → choose `Start without restoring` to create the local workspace.
+1. Fresh launch → the local workspace opens automatically. Open More → Backup
+   & recovery only when exercising restore or import.
 2. Add a project, a task with a checklist item, and a tag.
 3. Force-stop and relaunch → everything from step 2 persists.
 4. Export `.otvault`, then import it back → counts match.
@@ -210,7 +214,7 @@ Then, by hand:
 Every step must pass before tagging. A failure stops the release; triage
 the defect before any tag is created.
 
-## Owner-present Google Drive gate (per release, physical device only)
+### Owner-present Google Drive gate (per release, physical device only)
 
 This gate is separate from the disposable-AVD smoke. It uses the exact signed
 release APK, the owner-controlled Google account, and that account's hidden
@@ -252,7 +256,7 @@ Record bounded PASS/FAIL results in the release qualification. A Cloud gate
 failure, silent result, account mismatch, or Drive authorization failure blocks
 the tag.
 
-## Installing on a device
+### Installing on a device
 
 The phone must run Android 16 or newer (`minSdk` 36); installation
 fails on anything older. `adb` is not on PATH on this machine — use
@@ -278,7 +282,8 @@ first so adb has exactly one target.
 
        adb install app/build/outputs/apk/release/app-arm64-v8a-release.apk
 
-   Expect `Success`. On first launch, choose `Start without restoring` to create the local workspace.
+   Expect `Success`. On first launch, the local workspace is created
+   automatically; restore and import remain under More → Backup & recovery.
 
 Troubleshooting:
 
@@ -298,3 +303,144 @@ Use `app-x86_64-release.apk` for an x86_64 target, or
 straight over the top with `adb install -r` — no
 uninstall or data clearing, data preserved — because every release is signed
 with the same keystore. That is why the keystore must never be lost.
+
+## Google Play AAB release
+
+Google Play receives one upload-signed Android App Bundle and derives APKs for
+devices. Keep the existing release key as the Play app-signing key so direct
+1.4.0 installs can update to Play builds. Use a separate upload key only to
+authenticate AAB uploads; it must never sign delivered APKs or be registered
+with OAuth.
+
+### Signing responsibilities and recovery
+
+- The owner retains the existing app-signing keystore, its passwords, public
+  fingerprints, and offline backups. During first-release enrolment, choose
+  **Change app signing key** and transfer that key through Play's current PEPK
+  flow; do not accept a newly generated delivery key.
+- Google Play App Signing safeguards the delivery copy and signs generated
+  APKs. The owner must verify its delivery certificate against the existing
+  direct-release signer before any tester installs.
+- The owner generates, backs up, and controls a separate upload keystore and
+  registers only its public certificate. If it is lost or compromised, use
+  Play Console's verified upload-key reset procedure and register a new upload
+  certificate; this must not change the app-signing key or installed-user
+  identity.
+- App-signing-key loss is not solved by changing the upload key. Retain the
+  owner backup and use only Play's verified app-signing recovery or upgrade
+  procedure where available. Never substitute a key that breaks updates.
+
+Keep `/Users/kk/Keys/opentasks-play-upload.properties`, both keystores, and
+all passwords outside the repository. The external Gradle property is
+`openTasksKeystoreProperties`.
+
+### Pinned bundletool setup
+
+Download only Google's bundletool 1.18.3 release asset to
+`/Users/kk/Tools/bundletool-all-1.18.3.jar`:
+
+    curl --fail --location \
+      --output /Users/kk/Tools/bundletool-all-1.18.3.jar \
+      https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+    printf '%s  %s\n' \
+      a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29 \
+      /Users/kk/Tools/bundletool-all-1.18.3.jar \
+      | shasum -a 256 -c -
+
+Never execute the JAR when this exact SHA-256 check fails.
+
+### Build and verify the AAB
+
+Run the same CI, workflow-policy, SBOM, dependency-checksum, size-script,
+physical-device performance, disposable-AVD, backup, and owner-present Drive
+gates required by the direct APK release. Build and authenticate the direct
+APK set first so the existing installed-user signer remains independently
+proven. Then build the Play artifact once with the upload key:
+
+    ./gradlew :app:bundleRelease \
+      -PopenTasksKeystoreProperties=/Users/kk/Keys/opentasks-play-upload.properties \
+      --stacktrace
+
+The sole output is
+`app/build/outputs/bundle/release/app-release.aab`. Once accepted as a
+candidate, do not rebuild it in place.
+
+Load the expected upload-certificate SHA-256 from its independent owner record
+without putting it on the command line or in release evidence:
+
+    read -s OPEN_TASKS_UPLOAD_CERT_SHA256
+    printf '\n'
+    export OPEN_TASKS_UPLOAD_CERT_SHA256
+    export OPEN_TASKS_BUNDLETOOL_JAR=/Users/kk/Tools/bundletool-all-1.18.3.jar
+    export OPEN_TASKS_LLVM_OBJDUMP=\
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-objdump
+    bash scripts/verify-release-bundle.sh \
+      app/build/outputs/bundle/release/app-release.aab
+    unset OPEN_TASKS_UPLOAD_CERT_SHA256
+
+Record the verifier's complete non-sensitive permission/export audit and the
+AAB SHA-256 in the release qualification.
+
+### Derive and test a Play-like universal APK
+
+Use the existing app-signing key, not the upload key, to simulate Play's
+delivered signer. Let bundletool prompt for passwords; never add password
+arguments to the command line:
+
+    java -jar /Users/kk/Tools/bundletool-all-1.18.3.jar build-apks \
+      --bundle=app/build/outputs/bundle/release/app-release.aab \
+      --output=app/build/outputs/bundle/release/app-release.apks \
+      --mode=universal \
+      --ks=/Users/kk/Keys/opentasks-release.jks \
+      --ks-key-alias=opentasks \
+      --overwrite
+    unzip -p app/build/outputs/bundle/release/app-release.apks universal.apk \
+      > app/build/outputs/bundle/release/play-universal.apk
+    play_build_tools="$(find /Users/kk/Library/Android/sdk/build-tools \
+      -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+    "$play_build_tools/zipalign" -c -P 16 -v 4 \
+      app/build/outputs/bundle/release/play-universal.apk
+    "$play_build_tools/apksigner" verify --print-certs \
+      app/build/outputs/bundle/release/play-universal.apk
+
+The `zipalign` check must pass and the APK signer must equal the independent
+existing app-signing fingerprint, never the upload fingerprint.
+
+On a sole disposable Android 16+ AVD, prove a fresh install:
+
+    adb uninstall app.opentasks
+    adb install app/build/outputs/bundle/release/play-universal.apk
+
+The automatic local-first workspace must open and the direct-release smoke
+checklist must pass. Never uninstall from a physical device containing data.
+
+Separately build and authenticate the exact tagged 1.4.0 universal APK, then
+prove the direct-to-Play upgrade on a fresh disposable AVD:
+
+    adb install /private/tmp/open-tasks-v1.4.0.apk
+    adb install -r app/build/outputs/bundle/release/play-universal.apk
+
+Confirm the 1.4.0 workspace survives, opens automatically after the update,
+and reaches recovery through More → Backup & recovery. Run the owner-present
+Google Drive gate on the physical device without uninstalling, clearing data,
+or running connected tests.
+
+### Track progression and version codes
+
+Promote the exact immutable AAB through **internal → closed →
+production-access → production**. Before each promotion, compare the retained
+AAB hash, source commit, version, App Bundle Explorer identity, permissions,
+ABIs, 16 KB status, and Play delivery signer with the release qualification.
+Re-run fresh-install and direct-1.4.0 upgrade checks against Play-delivered
+artifacts.
+
+Every AAB uploaded to Play consumes its version code, even when rollout never
+starts. A changed or rejected replacement must use a higher `versionCode`,
+repeat every affected gate, and receive a new immutable hash. Never reuse an
+uploaded code or rebuild an accepted artifact in place.
+
+For the first production release, a critical defect requires emergency
+unpublish plus a fixed AAB with a higher version code. There is no previous
+Play release to halt back to. Record the unpublish decision, affected code,
+fix code, artifact hash, regression gates, and owner approval before the fixed
+rollout.
