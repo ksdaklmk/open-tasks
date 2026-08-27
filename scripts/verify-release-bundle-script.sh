@@ -22,8 +22,8 @@ matching_keytool="$(printf '%s' "$matching_input" | sed 's/../&:/g; s/:$//')"
 mismatching_actual="$(printf 'b%.0s' {1..64})"
 short_input="$(printf 'A%.0s' {1..63})"
 non_hex_input="${short_input}G"
-version_code="$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$repo_root/app/build.gradle.kts")"
-version_name="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$repo_root/app/build.gradle.kts")"
+version_code=7
+version_name=1.5.0
 
 cat > "$fake_bin/shasum" <<'EOF'
 #!/usr/bin/env bash
@@ -73,23 +73,58 @@ case "$command" in
             /manifest/application/@android:debuggable)
                 [ "$(field debuggable)" = absent ] || field debuggable
                 ;;
+            /manifest/application/@android:dataExtractionRules)
+                case "$(field manifest_resources)" in
+                    data_missing|data_misplaced) ;;
+                    *) printf '@xml/data_extraction_rules\n' ;;
+                esac
+                ;;
+            /manifest/application/@android:fullBackupContent)
+                case "$(field manifest_resources)" in
+                    backup_missing|backup_misplaced) ;;
+                    *) printf '@xml/backup_rules\n' ;;
+                esac
+                ;;
+            "/manifest/application/provider[@android:name='androidx.core.content.FileProvider']/meta-data[@android:name='android.support.FILE_PROVIDER_PATHS']/@android:resource")
+                case "$(field file_provider)" in
+                    paths_missing|paths_misplaced) ;;
+                    *) printf '@xml/file_paths\n' ;;
+                esac
+                ;;
             "")
                 printf '<manifest package="%s">\n' "$(field package)"
                 case "$(field permissions)" in
-                    missing) permissions='INTERNET POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED SCHEDULE_EXACT_ALARM' ;;
+                    missing|misplaced) permissions='INTERNET POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED SCHEDULE_EXACT_ALARM' ;;
                     *) permissions='INTERNET POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED SCHEDULE_EXACT_ALARM USE_BIOMETRIC' ;;
                 esac
                 for permission in $permissions; do
                     printf '<uses-permission android:name="android.permission.%s" />\n' "$permission"
                 done
-                [ "$(field permissions)" != risky ] \
-                    || printf '<uses-permission android:name="android.permission.CAMERA" />\n'
+                printf '<uses-permission android:name="app.opentasks.permission.FIXTURE" />\n'
+                [ "$(field permissions)" != misplaced ] \
+                    || printf '<meta-data android:name="android.permission.USE_BIOMETRIC" />\n'
+                case "$(field permissions)" in
+                    risky|risky_large)
+                        printf '<uses-permission android:name="android.permission.CAMERA" />\n'
+                        ;;
+                esac
+                if [ "$(field permissions)" = risky_large ]; then
+                    filler=0
+                    while [ "$filler" -lt 5000 ]; do
+                        printf '<uses-permission android:name="android.permission.FILLER_%s" />\n' "$filler"
+                        filler=$((filler + 1))
+                    done
+                fi
                 printf '<application'
-                [ "$(field manifest_resources)" = data_missing ] \
+                case "$(field manifest_resources)" in data_missing|data_misplaced) true ;; *) false ;; esac \
                     || printf ' android:dataExtractionRules="@xml/data_extraction_rules"'
-                [ "$(field manifest_resources)" = backup_missing ] \
+                case "$(field manifest_resources)" in backup_missing|backup_misplaced) true ;; *) false ;; esac \
                     || printf ' android:fullBackupContent="@xml/backup_rules"'
                 printf '>\n'
+                [ "$(field manifest_resources)" != data_misplaced ] \
+                    || printf '<meta-data android:resource="@xml/data_extraction_rules" />\n'
+                [ "$(field manifest_resources)" != backup_misplaced ] \
+                    || printf '<meta-data android:resource="@xml/backup_rules" />\n'
                 case "$(field main_activity)" in
                     missing) ;;
                     unexported) printf '<activity android:name="app.opentasks.MainActivity" android:exported="false" />\n' ;;
@@ -99,6 +134,7 @@ case "$command" in
                     missing) ;;
                     exported) printf '<provider android:name="androidx.core.content.FileProvider" android:exported="true"><meta-data android:resource="@xml/file_paths" /></provider>\n' ;;
                     paths_missing) printf '<provider android:name="androidx.core.content.FileProvider" android:exported="false" />\n' ;;
+                    paths_misplaced) printf '<provider android:name="androidx.core.content.FileProvider" android:exported="false" /><receiver android:name="app.opentasks.Other"><meta-data android:resource="@xml/file_paths" /></receiver>\n' ;;
                     *) printf '<provider android:name="androidx.core.content.FileProvider" android:exported="false"><meta-data android:resource="@xml/file_paths" /></provider>\n' ;;
                 esac
                 case "$(field tile_service)" in
@@ -126,6 +162,7 @@ set -euo pipefail
 case "$(sed -n 's/^signature=//p' "$4")" in
     valid) printf 'jar verified.\n' ;;
     unsigned) printf 'jar is unsigned.\n' ;;
+    invalid) printf 'jar verified.\n'; exit 1 ;;
     *) exit 1 ;;
 esac
 EOF
@@ -166,6 +203,36 @@ case "$1" in
                 printf 'base/lib/x86_64/libsqlcipher.so\n'
                 printf 'base/lib/armeabi-v7a/libsqlcipher.so\n'
                 ;;
+            extra_large)
+                printf 'base/lib/armeabi-v7a/libunexpected.so\n'
+                filler=0
+                while [ "$filler" -lt 2000 ]; do
+                    printf 'base/lib/arm64-v8a/libfiller_%s.so\n' "$filler"
+                    printf 'base/lib/x86_64/libfiller_%s.so\n' "$filler"
+                    filler=$((filler + 1))
+                done
+                ;;
+            additional_matching)
+                printf 'base/lib/arm64-v8a/libextra.so\n'
+                printf 'base/lib/arm64-v8a/libsqlcipher.so\n'
+                printf 'base/lib/x86_64/libextra.so\n'
+                printf 'base/lib/x86_64/libsqlcipher.so\n'
+                ;;
+            mismatched_set)
+                printf 'base/lib/arm64-v8a/libextra.so\n'
+                printf 'base/lib/arm64-v8a/libsqlcipher.so\n'
+                printf 'base/lib/x86_64/libsqlcipher.so\n'
+                ;;
+            duplicate)
+                printf 'base/lib/arm64-v8a/libsqlcipher.so\n'
+                printf 'base/lib/arm64-v8a/libsqlcipher.so\n'
+                printf 'base/lib/x86_64/libsqlcipher.so\n'
+                printf 'base/lib/x86_64/libsqlcipher.so\n'
+                ;;
+            metacharacter)
+                printf 'base/lib/arm64-v8a/lib[fixture].so\n'
+                printf 'base/lib/x86_64/lib[fixture].so\n'
+                ;;
             library_missing)
                 printf 'base/lib/arm64-v8a/libsqlcipher.so\n'
                 printf 'base/lib/x86_64/README\n'
@@ -191,6 +258,7 @@ case "$1" in
                 ;;
             base/lib/arm64-v8a/*.so) printf 'alignment=%s\n' "$(field alignment_arm64)" ;;
             base/lib/x86_64/*.so) printf 'alignment=%s\n' "$(field alignment_x86)" ;;
+            base/lib/armeabi-v7a/*.so) printf 'alignment=14\n' ;;
             *) exit 1 ;;
         esac
         ;;
@@ -244,7 +312,9 @@ set_field() {
     rm "$aab.bak"
 }
 
-run_verify() (
+run_verify_script() (
+    verifier="$1"
+    shift
     export OPEN_TASKS_UPLOAD_CERT_SHA256="$1"
     export OPEN_TASKS_BUNDLETOOL_JAR="$2"
     export OPEN_TASKS_LLVM_OBJDUMP="$fake_bin/llvm-objdump"
@@ -254,8 +324,10 @@ run_verify() (
     export PATH="$fake_bin:$PATH"
     shift 2
     cd "$repo_root"
-    bash "$verify" "$@"
+    bash "$verifier" "$@"
 )
+
+run_verify() { run_verify_script "$verify" "$@"; }
 
 run_without_cert() (
     unset OPEN_TASKS_UPLOAD_CERT_SHA256
@@ -281,6 +353,12 @@ expect_status_without_leak() {
         printf 'FAIL: %s expected status %s, got %s\n%s\n' \
             "$label" "$expected" "$status" "$output" >&2
         exit 1
+    fi
+    if [ -n "${EXPECT_OUTPUT:-}" ]; then
+        case "$output" in
+            *"$EXPECT_OUTPUT"*) ;;
+            *) printf 'FAIL: %s missing expected audit output\n' "$label" >&2; exit 1 ;;
+        esac
     fi
     normalized_output="$(printf '%s' "$output" \
         | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
@@ -323,10 +401,41 @@ write_bundletool valid
 expect_rejected "wrong argument count" "$aab" "$aab"
 expect_rejected "missing AAB" "$missing_aab"
 
+parser_repo="$test_root/parser-repo"
+parser_verify="$parser_repo/scripts/verify-release-bundle.sh"
+mkdir -p "$parser_repo/scripts" "$parser_repo/app"
+cp "$verify" "$parser_verify"
+cat > "$parser_repo/app/build.gradle.kts" <<'EOF'
+android {
+    defaultConfig {
+        versionCode = 7 + 0
+        versionName = providers.gradleProperty("versionName").get()
+    }
+}
+// versionName = "1.5.0"
+EOF
+expect_status_without_leak 1 "non-literal defaultConfig version" \
+    run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
+cat > "$parser_repo/app/build.gradle.kts" <<'EOF'
+android {
+    defaultConfig {
+        applicationId = "app.opentasks"
+    }
+    releaseMetadata {
+        versionCode = 7
+        versionName = "1.5.0"
+    }
+}
+EOF
+expect_status_without_leak 1 "version assignments outside defaultConfig" \
+    run_verify_script "$parser_verify" "$matching_input" "$bundletool" "$aab"
+
 write_fixture; set_field validation failed
 expect_rejected "failed bundletool validation" "$aab"
-write_fixture; set_field signature unsigned
+write_fixture; set_field signature invalid
 expect_rejected "invalid JAR signature" "$aab"
+write_fixture; set_field signature unsigned
+expect_rejected "unsigned JAR with successful verifier status" "$aab"
 write_fixture; set_field signer absent
 expect_rejected "absent AAB signer" "$aab"
 write_fixture; set_field signer ambiguous
@@ -350,8 +459,12 @@ write_fixture; set_field debug_activity present
 expect_rejected "debug qualification component" "$aab"
 write_fixture; set_field permissions missing
 expect_rejected "missing required permission" "$aab"
+write_fixture; set_field permissions misplaced
+expect_rejected "permission-looking metadata is not a declaration" "$aab"
 write_fixture; set_field permissions risky
 expect_rejected "denied high-risk permission" "$aab"
+write_fixture; set_field permissions risky_large
+expect_rejected "denied permission in large manifest" "$aab"
 write_fixture; set_field main_activity missing
 expect_rejected "missing MainActivity" "$aab"
 write_fixture; set_field main_activity unexported
@@ -368,10 +481,16 @@ write_fixture; set_field tile_service unprotected
 expect_rejected "unprotected QuickAddTileService" "$aab"
 write_fixture; set_field manifest_resources data_missing
 expect_rejected "missing data extraction rules link" "$aab"
+write_fixture; set_field manifest_resources data_misplaced
+expect_rejected "misplaced data extraction rules link" "$aab"
 write_fixture; set_field manifest_resources backup_missing
 expect_rejected "missing backup rules link" "$aab"
+write_fixture; set_field manifest_resources backup_misplaced
+expect_rejected "misplaced backup rules link" "$aab"
 write_fixture; set_field file_provider paths_missing
 expect_rejected "missing FileProvider paths link" "$aab"
+write_fixture; set_field file_provider paths_misplaced
+expect_rejected "FileProvider paths link on unrelated component" "$aab"
 write_fixture; set_field resources missing
 expect_rejected "missing linked XML resource" "$aab"
 
@@ -383,6 +502,17 @@ write_fixture; set_field abis missing
 expect_rejected "missing native ABI" "$aab"
 write_fixture; set_field abis extra
 expect_rejected "extra native ABI" "$aab"
+write_fixture; set_field abis extra_large
+expect_rejected "extra native ABI in large inventory" "$aab"
+write_fixture; set_field abis additional_matching
+expect_status_without_leak 0 "matching additional native library" \
+    run_verify "$matching_input" "$bundletool" "$aab"
+write_fixture; set_field abis mismatched_set
+expect_rejected "mismatched native library sets" "$aab"
+write_fixture; set_field abis duplicate
+expect_rejected "duplicate native archive entries" "$aab"
+write_fixture; set_field abis metacharacter
+expect_rejected "native archive glob metacharacter" "$aab"
 write_fixture; set_field abis library_missing
 expect_rejected "missing native library" "$aab"
 write_fixture; set_field alignment_x86 13
@@ -391,7 +521,7 @@ write_fixture; set_field alignment_arm64 14,13
 expect_rejected "second ELF LOAD alignment below 2**14" "$aab"
 
 write_fixture
-expect_status_without_leak 0 "valid bundle" \
+EXPECT_OUTPUT='app.opentasks.permission.FIXTURE' expect_status_without_leak 0 "valid bundle" \
     run_verify "$matching_input" "$bundletool" "$aab"
 
 echo "verify-release-bundle-script: all checks passed"

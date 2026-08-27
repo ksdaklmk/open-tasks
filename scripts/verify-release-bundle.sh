@@ -43,6 +43,7 @@ java_tool="$(require_tool java)"
 jarsigner_tool="$(require_tool jarsigner)"
 keytool_tool="$(require_tool keytool)"
 unzip_tool="$(require_tool unzip)"
+awk_tool="$(require_tool awk)"
 objdump_tool="${OPEN_TASKS_LLVM_OBJDUMP:-\
 /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-objdump}"
 [ -x "$objdump_tool" ] || fail "llvm-objdump not found or not executable"
@@ -81,10 +82,41 @@ esac
     || fail "AAB signer fingerprint absent or ambiguous"
 [ "$actual_cert" = "$expected_cert" ] || fail "AAB signer mismatch"
 
-want_name="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$repo_root/app/build.gradle.kts")"
-want_code="$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$repo_root/app/build.gradle.kts")"
-case "$want_name" in ""|*$'\n'*) fail "failed to read release versionName" ;; esac
-case "$want_code" in ""|*$'\n'*) fail "failed to read release versionCode" ;; esac
+gradle_versions="$("$awk_tool" '
+    BEGIN { blocks = 0; in_default = 0; closed = 0; codes = 0; names = 0 }
+    /^[[:space:]]*defaultConfig[[:space:]]*\{[[:space:]]*$/ {
+        if (in_default || blocks != 0) bad = 1
+        blocks++
+        in_default = 1
+        next
+    }
+    in_default && /^[[:space:]]*\}[[:space:]]*$/ {
+        in_default = 0
+        closed = 1
+        next
+    }
+    in_default {
+        if ($0 ~ /[{}]/) bad = 1
+        if ($0 ~ /^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*$/) {
+            code = $0
+            sub(/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*/, "", code)
+            sub(/[[:space:]]*$/, "", code)
+            codes++
+        }
+        if ($0 ~ /^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"[^"]+"[[:space:]]*$/) {
+            name = $0
+            sub(/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"/, "", name)
+            sub(/"[[:space:]]*$/, "", name)
+            names++
+        }
+    }
+    END {
+        if (bad || blocks != 1 || in_default || !closed || codes != 1 || names != 1) exit 1
+        printf "%s\t%s\n", code, name
+    }
+' "$repo_root/app/build.gradle.kts")" || fail "failed to read literal defaultConfig version"
+want_code="${gradle_versions%%$'\t'*}"
+want_name="${gradle_versions#*$'\t'}"
 
 manifest_value() {
     local xpath="$1" output
@@ -115,11 +147,20 @@ manifest="$work_dir/manifest.xml"
 grep -Fq 'DriveCreateOnlyQualificationActivity' "$manifest" \
     && fail "debug qualification component present"
 
-permissions="$(grep -o 'android:name="android.permission.[A-Z_]*"' "$manifest" \
-    | sed 's/.*android.permission\.//; s/"$//' | sort -u)" || true
+manifest_flat="$(tr '\n' ' ' < "$manifest" | tr -s '[:space:]' ' ')"
+permission_tags="$(printf '%s\n' "$manifest_flat" \
+    | grep -Eo '<uses-permission[[:space:]][^>]*>')" || true
+[ -n "$permission_tags" ] || fail "release permission declarations missing"
+permissions="$(printf '%s\n' "$permission_tags" \
+    | sed -n 's/.*android:name="\([^"]*\)".*/\1/p' | sort -u)"
+permission_tag_count="$(printf '%s\n' "$permission_tags" | grep -c . || true)"
+permission_name_count="$(printf '%s\n' "$permission_tags" \
+    | sed -n 's/.*android:name="[^"]*".*/name/p' | grep -c . || true)"
+[ "$permission_name_count" -eq "$permission_tag_count" ] \
+    || fail "release permission declaration malformed"
 for permission in INTERNET POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED \
     SCHEDULE_EXACT_ALARM USE_BIOMETRIC; do
-    printf '%s\n' "$permissions" | grep -Fqx "$permission" \
+    grep -Fqx "android.permission.$permission" <<< "$permissions" \
         || fail "required release permission missing"
 done
 for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_STORAGE \
@@ -130,11 +171,10 @@ for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_S
     ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACCESS_BACKGROUND_LOCATION CAMERA \
     RECORD_AUDIO AUTHENTICATE_ACCOUNTS MANAGE_ACCOUNTS USE_CREDENTIALS \
     READ_SYNC_SETTINGS WRITE_SYNC_SETTINGS QUERY_ALL_PACKAGES; do
-    printf '%s\n' "$permissions" | grep -Fqx "$permission" \
+    grep -Fqx "android.permission.$permission" <<< "$permissions" \
         && fail "denied high-risk permission present"
 done
 
-manifest_flat="$(tr '\n' ' ' < "$manifest" | tr -s '[:space:]' ' ')"
 find_component() {
     local tag="$1" name="$2"
     printf '%s\n' "$manifest_flat" \
@@ -160,11 +200,14 @@ printf '%s\n' "$tile_service" \
     | grep -Fq 'android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"' \
     || fail "QuickAddTileService permission protection missing"
 
-grep -Fq 'android:dataExtractionRules="@xml/data_extraction_rules"' "$manifest" \
+[ "$(manifest_value '/manifest/application/@android:dataExtractionRules')" \
+    = @xml/data_extraction_rules ] \
     || fail "data extraction rules manifest link missing"
-grep -Fq 'android:fullBackupContent="@xml/backup_rules"' "$manifest" \
+[ "$(manifest_value '/manifest/application/@android:fullBackupContent')" \
+    = @xml/backup_rules ] \
     || fail "backup rules manifest link missing"
-grep -Fq 'android:resource="@xml/file_paths"' "$manifest" \
+[ "$(manifest_value "/manifest/application/provider[@android:name='androidx.core.content.FileProvider']/meta-data[@android:name='android.support.FILE_PROVIDER_PATHS']/@android:resource")" \
+    = @xml/file_paths ] \
     || fail "FileProvider paths manifest link missing"
 
 entries="$work_dir/entries.txt"
@@ -177,14 +220,26 @@ done
 
 native_entries="$(sed -n '/^base\/lib\//p' "$entries")"
 [ -n "$native_entries" ] || fail "native libraries missing from AAB"
-printf '%s\n' "$native_entries" \
-    | grep -Ev '^base/lib/(arm64-v8a|x86_64)/[^/]+\.so$' \
-    | grep -q . && fail "unexpected native ABI or library entry"
-for abi in arm64-v8a x86_64; do
-    printf '%s\n' "$native_entries" \
-        | grep -Eq "^base/lib/$abi/[^/]+\.so$" \
-        || fail "required native ABI or library missing"
-done
+unexpected_native="$(grep -Ev '^base/lib/(arm64-v8a|x86_64)/[^/]+\.so$' \
+    <<< "$native_entries")" || true
+[ -z "$unexpected_native" ] || fail "unexpected native ABI or library entry"
+duplicate_native="$(sort <<< "$native_entries" | uniq -d)"
+[ -z "$duplicate_native" ] || fail "duplicate native archive entry"
+while IFS= read -r entry; do
+    for metacharacter in '*' '?' '[' ']' '\'; do
+        case "$entry" in
+            *"$metacharacter"*) fail "native archive name contains glob metacharacter" ;;
+        esac
+    done
+done <<< "$native_entries"
+arm64_libraries="$(sed -n 's#^base/lib/arm64-v8a/\([^/]*\.so\)$#\1#p' \
+    <<< "$native_entries" | sort)"
+x86_libraries="$(sed -n 's#^base/lib/x86_64/\([^/]*\.so\)$#\1#p' \
+    <<< "$native_entries" | sort)"
+[ -n "$arm64_libraries" ] && [ -n "$x86_libraries" ] \
+    || fail "required native ABI or library missing"
+[ "$arm64_libraries" = "$x86_libraries" ] \
+    || fail "native library sets differ between ABIs"
 
 "$unzip_tool" -p "$aab" 'base/dex/classes*.dex' >/dev/null 2>&1 \
     || fail "failed to stream release dex"
@@ -219,4 +274,6 @@ exported_components="$(printf '%s\n' "$manifest_flat" \
     || fail "failed to record exported component audit"
 printf '%s\n' "$exported_components" \
     | sed 's/^/verify-release-bundle audit: component=/'
+printf '%s\n' "$native_entries" \
+    | sort | sed 's/^/verify-release-bundle audit: native=/'
 echo "verify-release-bundle: all checks passed"
