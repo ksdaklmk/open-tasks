@@ -200,6 +200,7 @@ fun MoreScreen(
     onTitlePrivacyChange: (Boolean) -> Unit = {},
     screenshotBlockingEnabled: Boolean = false,
     onScreenshotBlockingChange: (Boolean) -> Unit = {},
+    onOpenPrivacyPolicy: () -> Unit = {},
     dailyDigestEnabled: Boolean = false,
     dailyDigestMinuteOfDay: Int = 8 * 60,
     dailyDigestNotificationsEnabled: Boolean = true,
@@ -455,6 +456,13 @@ fun MoreScreen(
                 },
                 onClick = { destination = MoreDestination.PRIVACY_LOCK },
                 modifier = Modifier.testTag("open-privacy-lock"),
+            )
+            DestinationRow(
+                icon = Icons.Rounded.Description,
+                title = stringResource(R.string.privacy_policy_title),
+                supportingText = stringResource(R.string.privacy_policy_supporting),
+                onClick = onOpenPrivacyPolicy,
+                modifier = Modifier.testTag("open-privacy-policy"),
             )
             DestinationRow(
                 Icons.Rounded.Lock,

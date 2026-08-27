@@ -247,6 +247,8 @@ private data class CalendarPreviewState(
 )
 
 internal const val UNDO_SNACKBAR_TIMEOUT_MILLIS = 8_000L
+private const val PRIVACY_POLICY_URL =
+    "https://ksdaklmk.github.io/open-tasks/privacy/"
 
 /**
  * Task 2's date-only convention: a bare date resolves to 17:00 local time.
@@ -878,6 +880,18 @@ fun OpenTasksApp(
 
         fun openSystemSettings() {
             activity.startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+
+        fun openPrivacyPolicy() {
+            try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW, PRIVACY_POLICY_URL.toUri()))
+            } catch (_: ActivityNotFoundException) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        activity.getString(R.string.privacy_policy_no_browser),
+                    )
+                }
+            }
         }
 
         fun enableNotifications() {
@@ -1907,6 +1921,7 @@ fun OpenTasksApp(
                                     onScreenshotBlockingChange = { value ->
                                         appLockSettings.screenshotBlocking = value
                                     },
+                                    onOpenPrivacyPolicy = ::openPrivacyPolicy,
                                     dailyDigestEnabled = dailyDigestSettings.enabled,
                                     dailyDigestMinuteOfDay =
                                         dailyDigestSettings.minuteOfDay,
