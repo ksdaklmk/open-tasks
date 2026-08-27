@@ -16,8 +16,8 @@ android {
         applicationId = "app.opentasks"
         minSdk = 36
         targetSdk = 37
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -29,7 +29,14 @@ android {
         buildConfig = true
     }
 
-    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val requestedKeystoreProperties =
+        providers.gradleProperty("openTasksKeystoreProperties").orNull
+    val keystorePropertiesFile = requestedKeystoreProperties
+        ?.let(rootProject::file)
+        ?: rootProject.file("keystore.properties")
+    require(requestedKeystoreProperties == null || keystorePropertiesFile.isFile) {
+        "openTasksKeystoreProperties does not name a readable file"
+    }
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
             create("release") {
