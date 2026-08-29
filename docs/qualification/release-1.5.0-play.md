@@ -212,3 +212,18 @@ evidence.
 | Normal-Chrome keyboard focus and activation | PASS — rendered browser evidence | Privacy Tab order reached `Open Tasks support`. Support Tab order reached `GitHub Issues` then `Privacy policy`. Every focused link showed a solid 3 px `rgb(198, 78, 43)` outline with a 3 px offset. Enter activated both internal page transitions, including the narrow support-to-privacy transition. |
 | Normal-Chrome browser warnings | PASS — observed browser evidence | The privacy page produced no browser console warning or error; its only DOM resource reference was the HTTPS support link. The earlier fetched-content scan remains the authoritative two-page mixed-content/static-safety evidence. |
 | Private/Incognito browser | PENDING — owner action required | The connected Chrome control cannot create an Incognito window. The owner paused before opening and exposing one to the extension, so no private-window layout, authentication, or keyboard result is claimed. |
+
+## Entry — 2026-08-29T03:24:40Z — worker — Task 6 Incognito-browser QA
+
+This entry supersedes the private/Incognito PENDING row above and closes the
+Task 6 browser gate. It creates no Play Console, Cloud Console, signing,
+final-AAB, device, testing, or publication evidence.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Incognito public access | PASS — rendered private-window evidence | The owner opened a real Chrome Incognito window and allowed the ChatGPT extension there. Both fixed HTTPS URLs loaded directly with their expected titles and content, without an authentication prompt or redirect. |
+| Wide Incognito layout | PASS — rendered browser evidence | At 1425×802, both pages had document scroll width exactly equal to the 1,425 px client width, no horizontal overflow, and no clipped content. The privacy headings and public developer name, plus the support warning and links, rendered in the expected order. |
+| Narrow Incognito layout | PASS — rendered browser evidence | At 360×800, both pages had document scroll width exactly equal to the 360 px client width. Element-boundary inspection found no content outside the viewport, and visual inspection found no clipping, collision, or unreadable layout. |
+| Incognito keyboard focus and activation | PASS — rendered browser evidence | Privacy Tab order reached `Open Tasks support`. Support Tab order reached `GitHub Issues` then `Privacy policy`. Every focused link showed a solid 3 px `rgb(198, 78, 43)` outline with a 3 px offset and remained within the viewport. Enter activated both internal page transitions at wide and narrow widths. |
+| Incognito warnings and resource boundary | PASS — observed browser evidence | Browser warning/error logs were empty on both pages at both widths. Neither page exposed a script, external stylesheet, image, or iframe resource; the expected HTTPS links were the only navigation targets. |
+| Viewport cleanup | PASS — browser state restored | The temporary responsive override was reset. Chrome returned to its normal 1425×780 page viewport with the privacy URL open and no horizontal overflow. |

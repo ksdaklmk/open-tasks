@@ -1,6 +1,6 @@
 # Open Tasks Handoff
 
-## Current state — Task 6 browser QA partly complete — 28 August 2026
+## Current state — Task 6 complete — 29 August 2026
 
 This is the authoritative current section for the Google Play submission.
 Older checkpoints remain historical evidence and are superseded where they
@@ -60,16 +60,15 @@ the exact public developer display name, the support route and warning match,
 and the deployed forbidden-content scan is clean. Anonymous retrieval required
 no authentication.
 
-Normal Chrome browser QA now passes both deployed URLs at a wide 1425×802
-viewport and a narrow 360×800 viewport. Both pages rendered without clipping,
-collision, or horizontal overflow. Privacy-page Tab order reached Open Tasks
-support; Support-page order reached GitHub Issues, then Privacy policy. Every
-focused link showed the
-expected solid 3 px ember outline with a 3 px offset, and Enter activated both
-internal page transitions. The temporary viewport override was reset. An
-actual Chrome Incognito-window run remains PENDING because the connected
-browser control cannot create a private window and the owner paused before
-opening one.
+Normal and Incognito Chrome browser QA now pass both deployed URLs at a wide
+1425×802 viewport and a narrow 360×800 viewport. Both pages rendered without
+clipping, collision, or horizontal overflow. Privacy-page Tab order reached
+Open Tasks support; Support-page order reached GitHub Issues, then Privacy
+policy. Every focused link showed the expected solid 3 px ember outline with a
+3 px offset, and Enter activated both internal page transitions. The Incognito
+run loaded both URLs directly without an authentication prompt or redirect,
+reported no browser warning or error, and exposed no external page resource.
+The temporary viewport override was reset.
 
 The deployed commit's Security workflow passed. The later docs-only push at
 `e657815` exposed a repeatable CodeQL workflow defect: Gradle restored every
@@ -81,12 +80,10 @@ migration instrumented failures and timeouts. Those failures were not
 diagnosed or changed as part of this Pages deployment task.
 
 No Play or Cloud Console, key, device, real AAB, tag, Play release, or Task 7
-action occurred. To resume Task 6: open Chrome Incognito at the privacy URL,
-ensure the ChatGPT extension is allowed there, and verify both pages at wide
-and narrow widths with Tab/Enter. Append that result before calling the
-browser gate complete. Do not start Task 7 owner verification, package
-registration, Play signing, or another external action without its required
-owner input and approval.
+action occurred. Task 6 is complete. The next numbered plan item is Task 7,
+owner verification, package registration, and Play signing. Do not start it or
+another external action without its required owner input and explicit
+execution-time approval.
 
 ## Current state — local-first launch and compact Home complete, 27 August 2026
 
