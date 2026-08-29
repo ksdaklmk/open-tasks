@@ -252,3 +252,29 @@ evidence.
 Private owner storage retains account evidence, key backups, passwords,
 recovery instructions, and Play Console evidence. Git contains only the public
 certificate metadata and non-sensitive completion states above.
+
+## Entry — 2026-08-29T11:34:54Z — worker — Task 8 OAuth domain-verification pause
+
+This entry supersedes the earlier owner-Cloud-configuration PENDING state but
+does not close Task 8. It records configuration and root-cause evidence only;
+no private account/contact value, OAuth client ID, token, secret, final
+candidate, Play upload, track, tester or publication evidence is created.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Source authorization boundary | PASS — source and history evidence | Production and debug use Google Play Services authorization and request only `https://www.googleapis.com/auth/drive.appdata`. Production embeds no client secret or server client ID. Current, debug, released 1.4.0 and repository history contain no active use of the 17 removed broad scopes. |
+| Task 8 linked-worktree baseline | PASS — non-device build evidence | With the known Android SDK environment, `testDebugUnitTest`, `lintDebug` and `:app:assembleDebug` reported `BUILD SUCCESSFUL in 35s`; 553 actionable tasks, 30 executed, 30 from cache and 493 up-to-date. The first attempt failed before tasks only because ignored `local.properties` is absent from linked worktrees. |
+| Audience and publication | PASS — current Cloud configuration | Google Auth Platform reports user type `External` and publishing status `In production`. The former Testing-user-only restriction is removed at configuration level. |
+| Scope configuration | PASS — current Cloud configuration | Exactly one non-sensitive scope persists: `https://www.googleapis.com/auth/drive.appdata`. All 17 source-proven stale scopes were removed. The Verification centre states that data-access verification is not required because no sensitive or restricted scope remains. |
+| Branding fields | PARTIAL PASS — saved Cloud configuration | App name `Open Tasks`, the current public privacy/support URLs and authorised domain are saved. Existing private support/developer contacts were retained without recording them. No logo was uploaded. Branding is not yet shown to users. |
+| Android OAuth clients | PASS — current Cloud and signing evidence | Two existing Android clients for `app.opentasks` remain. The Play delivery client matches the authenticated release certificate; the older direct/debug client remains unchanged. The upload certificate is absent from both delivery clients. No client ID is recorded. |
+| Public Search Console verification | PASS — URL-prefix ownership only | Public file `site/googlebfb12df764b54328.html` was committed to `main` as `22fa396ecfcd63034c51192ebecb8b852f17a3c8`, deployed by successful Pages run `33248701409`, and returned its exact one-line token anonymously. Search Console verified `https://ksdaklmk.github.io/open-tasks/` by that file and auto-verified the exact support-homepage child property. |
+| OAuth brand verification | BLOCKED — DNS Domain property required | Two reverification attempts still reported the homepage as not registered. Current official Google guidance requires a Search Console Domain property verified at DNS level by a Cloud project owner/editor and explicitly rejects URL-prefix verification for this gate. The shared `github.io` DNS zone is controlled by GitHub, so the current Pages subdomain cannot satisfy the proof. No third review was submitted. |
+| Required plan amendment | PENDING — owner domain and approval required | The owner must supply a custom domain/subdomain with DNS control. Before execution, amend Task 8 because the migration changes `OpenTasksApp.kt`'s hard-coded privacy URL, both static-page cross-links, public deployment evidence, listing/qualification evidence and OAuth branding values. Keep the current URLs and verification file live during transition. |
+| Outside-allowlist consent flow | PENDING — owner account evidence | After branding passes, an ordinary Google account outside the former Testing allowlist must reach consent without recording the account. Full credentialed backup/restore remains Tasks 9 and 11. |
+| Candidate and release state | PENDING — Task 9 not started | No immutable candidate, AAB, APK set, APK, mapping, symbols, SBOM, Play upload, release, track, tester, review submission, production-access request, tag or publication was created. |
+
+Resume only from the new authoritative section at the top of `HANDOFF.md`.
+Do not broaden scope, register the upload certificate as OAuth delivery,
+remove the public verification file, submit another brand review, or start Task
+9 until the custom-domain plan amendment is approved and Task 8 closes.

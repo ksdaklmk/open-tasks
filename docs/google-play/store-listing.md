@@ -16,10 +16,29 @@ with the current question wording and the exact final AAB before submission.
 | Default language | English (United Kingdom) | Fixed |
 | Target audience | 13 and older; not directed to children or Families | Fixed |
 | Availability | Every Play-supported country and region | Fixed |
-| Privacy policy | `https://ksdaklmk.github.io/open-tasks/privacy/` | URL fixed; public deployment remains PENDING |
-| Support | `https://ksdaklmk.github.io/open-tasks/support/` | URL fixed; public deployment remains PENDING |
+| Privacy policy | `https://ksdaklmk.github.io/open-tasks/privacy/` | Current public URL PASS; DNS-verifiable custom-domain replacement PENDING before submission |
+| Support | `https://ksdaklmk.github.io/open-tasks/support/` | Current public URL PASS; DNS-verifiable custom-domain replacement PENDING before submission |
 | Open Tasks account | None; the local workspace requires no account | Fixed from shipped flow |
-| Developer legal/display identity | Not present in repository evidence | PENDING — owner/Console evidence |
+| Developer public display identity | Kritsada K. | PASS — verified public Play identity; private legal/contact evidence remains owner-only |
+
+## Task 8 OAuth pause checkpoint
+
+| Surface | Current evidence | Status |
+|---|---|---|
+| Audience and publishing | External; In production | PASS — current Google Auth Platform state |
+| Requested scope | `https://www.googleapis.com/auth/drive.appdata` only; 17 stale scopes removed after current/released/history source audit | PASS — current source and Cloud configuration; PENDING — final AAB audit |
+| Android OAuth delivery identity | Two existing clients for `app.opentasks` are preserved: one Play-delivery/release client and one older direct/debug client; upload certificate excluded | PASS — current Cloud and signing evidence; no client ID recorded |
+| Branding fields | Open Tasks, current public privacy/support URLs, and existing private contacts are saved; no logo was added | PARTIAL PASS — branding is not yet shown to users |
+| Search Console | Parent project URL and exact support homepage URL-prefix properties are verified through the deployed public HTML file | PASS — URL-prefix ownership only; insufficient for OAuth brand verification |
+| OAuth brand verification | Current guidance requires a DNS-verified Search Console Domain property; `github.io` DNS is not owner-controlled | BLOCKED — owner must supply and approve a custom domain/subdomain with DNS control |
+| Outside-allowlist consent | No ordinary Google account outside the former Testing allowlist was used | PENDING — configuration-only consent-flow evidence |
+
+The custom-domain migration is not Console-only. Before resuming, amend and
+approve Task 8 to update the hard-coded in-app privacy URL, both static-page
+cross-links, public deployment checks, this listing, the qualification ledger,
+and the OAuth homepage/privacy/authorised-domain values together. Keep the
+current Pages URLs and `site/googlebfb12df764b54328.html` available until the
+replacement domain and OAuth branding are both verified.
 
 ## Exact en-GB listing copy
 
@@ -106,7 +125,7 @@ artifact.
 |---|---|---|
 | Embedded SDKs | Release runtime contains AndroidX, Kotlin, Room/SQLCipher, Tink/Bouncy Castle, Hilt and `com.google.android.gms:play-services-auth:21.6.0`; no Firebase, analytics, telemetry, advertising, billing or crash-reporting SDK match | PASS — repository dependency audit; PENDING — final AAB audit |
 | Network | Production application origins found are Google Drive (`https://www.googleapis.com`) and the fixed privacy URL opened in an external browser; no developer-operated application backend was found | PASS — repository source audit; PENDING — final AAB audit |
-| OAuth scope | Production authorization requests one scope: `https://www.googleapis.com/auth/drive.appdata` | PASS — repository source audit; PENDING — final AAB audit; PENDING — owner Cloud configuration |
+| OAuth scope | Production authorization requests one scope: `https://www.googleapis.com/auth/drive.appdata` | PASS — repository source audit and current Cloud configuration; PENDING — final AAB audit |
 | Broad source-scan matches | `Authorization` is the Drive flow; `toGoogleSignInAccount()` is a Play Services result conversion; `crash` occurrences describe crash-safe code/tests, not a reporting SDK; HTTP XML namespace literals and test/example URLs are non-network matches | Reconciled |
 | Advertising ID | No `AD_ID`, `AdvertisingId`, advertising-ID API or ads dependency found | PASS — repository source/dependency audit; PENDING — final AAB audit |
 | Backup | `allowBackup=true`; Android 12+ extraction rules include only the encrypted portable package and require cloud encryption capability; legacy rules exclude all domains | PASS — repository manifest/rules audit; PENDING — final AAB audit; PENDING — runtime restore qualification |
@@ -128,7 +147,7 @@ the draft. It does not represent a submitted or accepted Console answer.
 | Government/news/health/dating/gambling/VPN | None | Task/project productivity behavior and audited dependencies/manifests | PASS — repository evidence; each current Console question PENDING |
 | Social/collaboration | None; no live sync, collaboration, multi-user sharing or social graph | Local vault plus personal backup/export paths | PASS — repository evidence; Console wording PENDING |
 | App accounts and deletion | Open Tasks creates no app account, so there is no Open Tasks account-deletion flow; optional Google authorization must not be represented as an Open Tasks account | Local fresh-launch flow; Drive authorization manager | PASS — repository evidence; current account-deletion question PENDING |
-| Optional Google authorization | Used only for encrypted backup/recovery in private Drive app-data; core app remains available without it | Drive authorization manager, lifecycle coordinator and More backup UI | PASS — repository evidence; owner OAuth/Console configuration PENDING |
+| Optional Google authorization | Used only for encrypted backup/recovery in private Drive app-data; core app remains available without it | Drive authorization manager, lifecycle coordinator and More backup UI | PASS — source, audience and scope configuration; branding custom-domain verification PENDING |
 | Exact alarms | Supports precise task reminders, focus phase boundaries and app-lock expiry; code falls back to inexact alarms when unavailable | `ReminderSystem.kt`, `FocusAlarms.kt`, `AppLockExpiry.kt` | PASS — repository evidence; restricted-permission declaration PENDING |
 | Notifications | Delivers user-configured reminders, focus events and daily digest locally | Reminder/focus/digest notification code and runtime permission check | PASS — repository evidence; Console wording PENDING |
 | Boot completed | Reschedules/reconciles local reminders after boot, package replacement, time or time-zone changes | Non-exported `ReminderSystemEventReceiver` | PASS — repository evidence |
@@ -137,7 +156,7 @@ the draft. It does not represent a submitted or accepted Console answer.
 | FileProvider | Non-exported provider grants selected apps temporary access to cached attachments/reports | Manifest, `file_paths.xml`, attachment/report share code | PASS — repository evidence |
 | Exported activity/service | Main activity handles launcher, quick add and user-directed incoming text; tile service exposes quick add only to the system under `BIND_QUICK_SETTINGS_TILE` | Manifest intent filters and permission | PASS — repository evidence; PENDING — final AAB audit; PENDING — runtime qualification |
 | Android backup | Allows only the prepared encrypted portable package on Android 12+ cloud backup/device transfer; legacy rules exclude all domains | Manifest and both backup-rule XML files | PASS — repository evidence; PENDING — final AAB audit; PENDING — device qualification |
-| Privacy policy | Fixed in-app and listing URL | More → Privacy policy opens `https://ksdaklmk.github.io/open-tasks/privacy/` | Repository link PASS; public deployment and Console entry PENDING |
+| Privacy policy | Current in-app and listing URL; custom-domain replacement required before submission | More → Privacy policy opens `https://ksdaklmk.github.io/open-tasks/privacy/` | Current repository link and public deployment PASS; replacement URL, OAuth branding and final AAB audit PENDING |
 
 ### Reviewer path
 
