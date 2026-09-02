@@ -166,10 +166,11 @@ class RoomImportTasksInstrumentedTest {
                 ),
             ) as CommandResult.Success
 
-            val task = repository!!.currentWorkspace().tasks.single {
-                it.title == "Imported task"
+            val afterImport = repository!!.observeWorkspace().first { snapshot ->
+                snapshot.tasks.any { it.title == "Imported task" }
             }
-            assertEquals("Doing", repository!!.currentWorkspace().workflowStatuses.single {
+            val task = afterImport.tasks.single { it.title == "Imported task" }
+            assertEquals("Doing", afterImport.workflowStatuses.single {
                 it.id == task.statusId
             }.name)
             repository!!.execute(requireNotNull(imported.undo))

@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -22,7 +23,6 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -43,6 +43,7 @@ import app.opentasks.core.model.TaskCsvWarningReason
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -82,15 +83,14 @@ class TaskMigrationScreenInstrumentedTest {
     fun reviewShowsSourceSamplesIgnoredColumnsAndCreateOnlyDisclosure() {
         setScreen(reviewState())
 
-        composeRule.onNodeWithText("tasks.csv • 2 rows • 2 columns").assertIsDisplayed()
-        composeRule.onNodeWithText("Samples: One").assertIsDisplayed()
-        composeRule.onNodeWithText("Ignored columns").assertIsDisplayed()
-        composeRule.onNodeWithTag("migration-ignored-columns").assertIsDisplayed()
-        composeRule.onNodeWithText(
+        scrolledNodeWithText("tasks.csv • 2 rows • 2 columns").assertIsDisplayed()
+        scrolledNodeWithText("Samples: One").assertIsDisplayed()
+        scrolledNodeWithText("Ignored columns").assertIsDisplayed()
+        scrolledNodeWithTag("migration-ignored-columns").assertIsDisplayed()
+        scrolledNodeWithText(
             "This creates new tasks. Importing the same file again creates duplicates.",
         ).assertIsDisplayed()
-        composeRule.onNodeWithText("Dates without an offset use Asia/Bangkok.")
-            .assertIsDisplayed()
+        scrolledNodeWithText("Dates without an offset use Asia/Bangkok.").assertIsDisplayed()
     }
 
     @Test
@@ -195,10 +195,10 @@ class TaskMigrationScreenInstrumentedTest {
             onPriorityChoice = { value, choice -> priority.set(value to choice) },
         )
 
-        composeRule.onNodeWithText("Ignore (use Backlog)").assertIsDisplayed()
-        composeRule.onNodeWithText("Ignore (use None)").assertIsDisplayed()
-        composeRule.onNodeWithTag("migration-status-0-done").performClick()
-        composeRule.onNodeWithTag("migration-priority-0-urgent").performClick()
+        scrolledNodeWithText("Ignore (use Backlog)").assertIsDisplayed()
+        scrolledNodeWithText("Ignore (use None)").assertIsDisplayed()
+        scrolledNodeWithTag("migration-status-0-done").performClick()
+        scrolledNodeWithTag("migration-priority-0-urgent").performClick()
         assertEquals("3" to TaskCsvStatusChoice.DONE, status.get())
         assertEquals("2" to TaskCsvPriorityChoice.URGENT, priority.get())
     }
@@ -219,9 +219,9 @@ class TaskMigrationScreenInstrumentedTest {
                 )
             }
         }
-        composeRule.onNodeWithTag("migration-date-order").assertDoesNotExist()
-        composeRule.onNodeWithTag("migration-estimate-unit").assertDoesNotExist()
-        composeRule.onNodeWithTag("migration-tag-mode").assertDoesNotExist()
+        assertScreenLacks("migration-date-order")
+        assertScreenLacks("migration-estimate-unit")
+        assertScreenLacks("migration-tag-mode")
 
         composeRule.runOnIdle {
             state = reviewState(
@@ -231,14 +231,13 @@ class TaskMigrationScreenInstrumentedTest {
                 tagSamples = listOf("work", "urgent"),
             )
         }
-        composeRule.onNodeWithTag("migration-date-order").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("migration-estimate-unit").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("migration-tag-mode").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Resulting tags: work, urgent")
-            .performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("migration-date-order-dmy").performClick()
-        composeRule.onNodeWithTag("migration-estimate-hours").performClick()
-        composeRule.onNodeWithTag("migration-tag-pipe").performClick()
+        scrolledNodeWithTag("migration-date-order").assertIsDisplayed()
+        scrolledNodeWithTag("migration-estimate-unit").assertIsDisplayed()
+        scrolledNodeWithTag("migration-tag-mode").assertIsDisplayed()
+        scrolledNodeWithText("Resulting tags: work, urgent").assertIsDisplayed()
+        scrolledNodeWithTag("migration-date-order-dmy").performClick()
+        scrolledNodeWithTag("migration-estimate-hours").performClick()
+        scrolledNodeWithTag("migration-tag-pipe").performClick()
         assertEquals(TaskCsvDateOrder.DAY_MONTH_YEAR, dateOrder.get())
         assertEquals(TaskCsvEstimateUnit.HOURS, estimateUnit.get())
         assertEquals(TaskCsvTagMode.PIPE, tagMode.get())
@@ -258,13 +257,10 @@ class TaskMigrationScreenInstrumentedTest {
             ),
         )
 
-        composeRule.onNodeWithTag("migration-warning-0")
-            .performScrollTo()
+        scrolledNodeWithTag("migration-warning-0")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error))
-        composeRule.onNodeWithText("Row 2 • Due • Invalid value omitted")
-            .performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Import 2 tasks anyway")
-            .performScrollTo().assertIsDisplayed()
+        scrolledNodeWithText("Row 2 • Due • Invalid value omitted").assertIsDisplayed()
+        scrolledNodeWithText("Import 2 tasks anyway").assertIsDisplayed()
     }
 
     @Test
@@ -286,11 +282,11 @@ class TaskMigrationScreenInstrumentedTest {
             ),
         )
 
-        composeRule.onNodeWithText("Row 2 • Completion • No time supplied; 17:00 will be used")
-            .performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(
+        scrolledNodeWithText("Row 2 • Completion • No time supplied; 17:00 will be used")
+            .assertIsDisplayed()
+        scrolledNodeWithText(
             "Row 3 • Completion • No completion time supplied; confirmation time will be used",
-        ).performScrollTo().assertIsDisplayed()
+        ).assertIsDisplayed()
     }
 
     @Test
@@ -313,7 +309,7 @@ class TaskMigrationScreenInstrumentedTest {
                 )
             }
         }
-        composeRule.onNodeWithTag("migration-import").performScrollTo().assertIsNotEnabled()
+        scrolledNodeWithTag("migration-import").assertIsNotEnabled()
 
         composeRule.runOnIdle {
             state = reviewState(
@@ -322,7 +318,7 @@ class TaskMigrationScreenInstrumentedTest {
                 isCommitting = true,
             )
         }
-        composeRule.onNodeWithTag("migration-import").performScrollTo().assertIsNotEnabled()
+        scrolledNodeWithTag("migration-import").assertIsNotEnabled()
         listOf(
             "migration-field-title",
             "migration-status-0-done",
@@ -331,9 +327,8 @@ class TaskMigrationScreenInstrumentedTest {
             scrollScreenTo(tag)
             composeRule.onNodeWithTag(tag).assertIsNotEnabled()
         }
-        composeRule.onNodeWithTag("migration-choose-another")
-            .performScrollTo().assertIsNotEnabled()
-        composeRule.onNodeWithTag("migration-cancel").performScrollTo().assertIsNotEnabled()
+        scrolledNodeWithTag("migration-choose-another").assertIsNotEnabled()
+        scrolledNodeWithTag("migration-cancel").assertIsNotEnabled()
         assertEquals(0, mapped.get())
         assertEquals(0, status.get())
         assertEquals(0, priority.get())
@@ -356,6 +351,7 @@ class TaskMigrationScreenInstrumentedTest {
         assertEquals(1, cancel.get())
 
         composeRule.runOnIdle { state = reviewState(isCommitting = true) }
+        composeRule.waitForIdle()
         composeRule.runOnUiThread(dispatcher::onBackPressed)
         assertEquals(1, cancel.get())
         composeRule.onNodeWithTag("task-migration-screen").assertIsDisplayed()
@@ -373,7 +369,7 @@ class TaskMigrationScreenInstrumentedTest {
             ),
         )
 
-        composeRule.onNodeWithTag("migration-field-title").performClick()
+        scrolledNodeWithTag("migration-field-title").performClick()
         composeRule.onNodeWithTag("migration-field-title-option-0")
             .assertHeightIsAtLeast(48.dp)
         listOf(
@@ -383,7 +379,7 @@ class TaskMigrationScreenInstrumentedTest {
             "migration-estimate-hours",
             "migration-tag-pipe",
         ).forEach { tag ->
-            composeRule.onNodeWithTag(tag).performScrollTo().assertHeightIsAtLeast(48.dp)
+            scrolledNodeWithTag(tag).assertHeightIsAtLeast(48.dp)
         }
     }
 
@@ -401,7 +397,7 @@ class TaskMigrationScreenInstrumentedTest {
 
         listOf("migration-field-title", "migration-import", "migration-choose-another", "migration-cancel")
             .forEach { tag ->
-                composeRule.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
+                scrolledNodeWithTag(tag).assertIsDisplayed()
             }
     }
 
@@ -418,8 +414,7 @@ class TaskMigrationScreenInstrumentedTest {
         listOf(320.dp to 520.dp, 1_000.dp to 700.dp).forEach { next ->
             composeRule.runOnIdle { size = next }
             composeRule.onNodeWithTag("task-migration-screen").assertIsDisplayed()
-            composeRule.onNodeWithTag("migration-import")
-                .performScrollTo().assertIsDisplayed()
+            scrolledNodeWithTag("migration-import").assertIsDisplayed()
         }
     }
 
@@ -460,8 +455,7 @@ class TaskMigrationScreenInstrumentedTest {
             "migration-choose-another",
             "migration-cancel",
         ).forEach { tag ->
-            composeRule.onNodeWithTag(tag)
-                .performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            scrolledNodeWithTag(tag).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
         }
     }
 
@@ -531,6 +525,23 @@ class TaskMigrationScreenInstrumentedTest {
     private fun scrollScreenTo(tag: String) {
         composeRule.onNodeWithTag("task-migration-screen")
             .performScrollToNode(hasTestTag(tag))
+    }
+
+    // The review page is a LazyColumn: off-screen items are not composed, so
+    // every lookup scrolls the list to the item first.
+    private fun scrolledNodeWithTag(tag: String): SemanticsNodeInteraction {
+        scrollScreenTo(tag)
+        return composeRule.onNodeWithTag(tag)
+    }
+
+    private fun scrolledNodeWithText(text: String): SemanticsNodeInteraction {
+        composeRule.onNodeWithTag("task-migration-screen")
+            .performScrollToNode(hasText(text))
+        return composeRule.onNodeWithText(text)
+    }
+
+    private fun assertScreenLacks(tag: String) {
+        assertThrows(AssertionError::class.java) { scrollScreenTo(tag) }
     }
 
     @androidx.compose.runtime.Composable

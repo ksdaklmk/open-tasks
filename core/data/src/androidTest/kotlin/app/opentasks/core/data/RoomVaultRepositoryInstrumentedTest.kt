@@ -2355,7 +2355,9 @@ class RoomVaultRepositoryInstrumentedTest {
             ) is CommandResult.Success,
         )
         repository!!.execute(DomainCommand.StopTimer)
-        val deletedAt = Instant.parse("2026-07-26T10:05:00Z")
+        // A fixed past instant ages out of the 30-day Bin retention and is
+        // purged when the repository reopens below; anchor to the real clock.
+        val deletedAt = Instant.ofEpochMilli(System.currentTimeMillis())
 
         val deleted = repository!!.execute(DomainCommand.DeleteTask(task.id, deletedAt))
         assertTrue(deleted is CommandResult.Success)
@@ -3338,8 +3340,8 @@ class RoomVaultRepositoryInstrumentedTest {
                 .currentGeneration
             assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
             assertEquals(
-                taskBefore.copy(descriptionCiphertext = byteArrayOf()),
-                taskAfter.copy(descriptionCiphertext = byteArrayOf()),
+                taskBefore.copy(descriptionCiphertext = NO_CIPHERTEXT),
+                taskAfter.copy(descriptionCiphertext = NO_CIPHERTEXT),
             )
             assertArrayEquals(
                 taskBefore.descriptionCiphertext,
@@ -3395,8 +3397,8 @@ class RoomVaultRepositoryInstrumentedTest {
         val candidateAfter = checkNotNull(database!!.taskDao().getById(candidate.id.value))
         assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
         assertEquals(
-            candidateBefore.copy(descriptionCiphertext = byteArrayOf()),
-            candidateAfter.copy(descriptionCiphertext = byteArrayOf()),
+            candidateBefore.copy(descriptionCiphertext = NO_CIPHERTEXT),
+            candidateAfter.copy(descriptionCiphertext = NO_CIPHERTEXT),
         )
         assertArrayEquals(
             candidateBefore.descriptionCiphertext,
@@ -3464,8 +3466,8 @@ class RoomVaultRepositoryInstrumentedTest {
         val candidateAfter = checkNotNull(database!!.taskDao().getById(candidate.id.value))
         assertEquals(RejectionReason.SUBTASK_PARENT_INVALID, rejected.reason)
         assertEquals(
-            candidateBefore.copy(descriptionCiphertext = byteArrayOf()),
-            candidateAfter.copy(descriptionCiphertext = byteArrayOf()),
+            candidateBefore.copy(descriptionCiphertext = NO_CIPHERTEXT),
+            candidateAfter.copy(descriptionCiphertext = NO_CIPHERTEXT),
         )
         assertArrayEquals(
             candidateBefore.descriptionCiphertext,
@@ -5228,3 +5230,7 @@ class RoomVaultRepositoryInstrumentedTest {
         const val PERSISTED_DUE_TITLE = "create-task-persists-due"
     }
 }
+
+// Kotlin data classes compare array properties by reference, so both sides of
+// an entity comparison must share this one instance.
+private val NO_CIPHERTEXT = byteArrayOf()

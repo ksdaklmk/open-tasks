@@ -79,15 +79,15 @@ fun TaskMigrationScreen(
         modifier = modifier
             .fillMaxSize()
             .safeDrawingPadding()
-            .imePadding()
-            .testTag("task-migration-screen"),
+            .imePadding(),
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
                 .widthIn(max = 720.dp)
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .testTag("task-migration-screen"),
             contentPadding = PaddingValues(16.dp, 24.dp, 16.dp, 64.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
