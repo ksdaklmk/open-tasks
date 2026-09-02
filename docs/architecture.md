@@ -762,6 +762,117 @@ and release records live in `docs/qualification/stage8-planning-surfaces.md`
 and `docs/qualification/release-1.2.0-sideload.md`; remote CI and the release
 tag are recorded there as pending.
 
+## Stage 9 board flow and automation (implemented)
+
+Stage 9 adds board flow to the existing destinations: soft WIP limits on
+Board columns, one-level subtasks, a manually ordered My Day list on Home,
+and a fixed-menu automation engine edited from More. The additive v9→v10
+migration is the stage's one durable change: it creates `automation_rules`
+and `my_day_entries`, adds a nullable `wipLimit` column to
+`workflow_statuses`, and stamps the vault row's `schemaVersion` to 10, so
+`VAULT_DATABASE_VERSION` and `RECOVERED_SCHEMA_VERSION` are 10 and an older
+reader refuses a v10 archive at the `normalizeForRecovery` gate. The manifest
+and version catalog are unchanged. The application version is 1.3.0,
+`versionCode` 4.
+
+The authenticated backup object format remains v1 and gains two
+content-fingerprinted families: `AUTOMATION_RULE`, identified by rule ID over
+the flat rule columns, and `MY_DAY`, identified by task ID over `taskId` and
+`rank`. Capture fails closed on a rule without a workspace or a My Day row
+without a task. `WORKFLOW_STATUS` is dual-arity inside format v1: the encoder
+always emits the ten-field shape with `wipLimit`, the schema's
+`optionalTrailing` accepts exactly nine or ten fields, an absent limit imports
+as null, and eleven fields fail closed. Import, recovery, and the fixture
+generator carry both families.
+
+`SetWorkflowStatusWipLimit` sets or clears a per-column limit in `1..200`,
+rejects archived and completed-semantic columns, and returns
+`RestoreWorkflowStatuses` as Undo. Both engines enforce inside
+`ChangeTaskStatus`: when the destination has a limit, is not
+completed-semantic, differs from the task's column, and already holds `limit`
+open non-binned tasks, the move is rejected with `WIP_LIMIT_CONFIRM_REQUIRED`
+unless `acknowledgeWipLimit` is set. Completion, bulk remaps, and rule outputs
+never take that path, so a limit confirms and never blocks. Workbench status
+changes route through `WorkspaceViewModel.changeTaskStatus`, which holds the
+rejection as a pending confirm and re-dispatches acknowledged.
+
+Subtasks are exactly one level deep. `SubtaskRules.parentViolation` in
+`core:domain` is the shared guard: self-reference, a missing or binned parent,
+a cross-project pair, a parent that is itself a subtask, and a task that
+already has children each reject with `SUBTASK_PARENT_INVALID`.
+`SetTaskParent` attaches or detaches with the prior link as Undo; `CreateTask`
+takes an optional `parentTaskId` and the child inherits the parent's project.
+Completing a parent with open children rejects with
+`OPEN_SUBTASKS_CONFIRM_REQUIRED` until `acknowledgeOpenSubtasks` is set on
+`ChangeTaskStatus`, `CompleteTask`, or `CompleteTasks`, where bulk counts only
+children outside the set; children are never auto-completed. `DeleteTask` and
+`DeleteTasks` bin live children with their parent in one transaction and
+return a parent-first `UndoBatch`; `MoveTasksToProject` carries live children
+and detaches a child moved alone; restoring a child whose parent is binned,
+purged, or now elsewhere detaches it in the same write. `arrangeTasks` nests
+each child under its parent within the parent's group and `indentedTaskIds`
+clamps rendering to one level, so a child whose parent is filtered out
+renders flat. Board cards carry a done/total `SubtaskRollup` chip.
+
+My Day is the roadmap's only manual rank. `MAX_MY_DAY_ENTRIES` and
+`MAX_MY_DAY_RANK_LENGTH` are both 200 in `core:domain`. `AddTaskToMyDay`
+appends with `rankAfter`, rejects binned tasks and the cap with
+`MY_DAY_LIMIT_REACHED`, treats a duplicate as a no-op, and returns
+`RemoveTaskFromMyDay` as Undo. `MoveMyDayEntry` places a member after another
+or at the top through the pure `myDayRankBetween` midpoint, or re-ranks the
+whole list in one transaction when no midpoint fits. Remove, move, and the
+idempotent `SweepMyDay` return the repository-only `RestoreMyDayEntries` as
+Undo, and purging a task deletes its row in the same transaction in both
+engines. Home renders My Day as its primary list through the shared
+`TaskRow`, dimmed when completed, with `rootLongPressDragSource` reorder
+layered over a 48 dp overflow menu offering move up, move down, and remove;
+Plan opens `MyDayPlanSheet`, and `myDaySuggestions` supplies up to ten
+overdue and today picks as one-tap adds. The Today widget and daily digest
+keep consuming `computeTodayProjection` unchanged.
+
+Automation rules are five `AutomationRuleType` values, `ON_ENTER_ADD_TAG`,
+`ON_ENTER_ADD_TO_MY_DAY`, `ON_ENTER_SET_DUE`, `MY_DAY_AUTO_REMOVE`, and
+`STALE_BADGE`, stored as flat rows with optional project, status, and tag
+references, `dueInDays` in `0..365`, and `thresholdDays` in `1..365`.
+`automationRuleConfigRejection` in `core:domain` is the per-type field matrix
+shared by both engines and mirrored by the backup codec; rules belong to the
+primary workspace, `MAX_AUTOMATION_RULES` is 20, and create and update reject
+a missing reference. The three rule commands return each other as Undo. A
+persisted row whose `type` no longer decodes is omitted from the snapshot and
+evaluation, left untouched by update and delete, and refused by the snapshot
+codec, so a baseline capture containing it fails rather than dropping it.
+
+The engine is the pure `evaluateAutomationRules` in `core:domain`, shared by
+both repositories and run only inside an external `execute` call between the
+dispatch and the journal append, so the trigger and every output share one
+transaction and one journal generation. `automationTransitionedTaskIds`
+whitelists `ChangeTaskStatus`, `CompleteTask`, and `CompleteTasks` and reads
+the repository's own `RestoreTaskStatus` undo as proof a task changed column,
+so undo replay, recurrence spawns, imports, and project-move remaps never fire
+a rule. Matching rules apply in ascending rule-ID order and emit ordinary
+commands: `SetTaskTag`, `AddTaskToMyDay`, or a `SetTaskSchedule` due today
+plus N at 17:00 in the device zone, keeping the reminder via
+`restorePastReminder`. Outputs go through the internal `dispatch`, which never
+re-evaluates, so single-pass is structural; an idempotent no-op or any
+repository rejection skips silently and the user's move still succeeds. The
+trigger's undo is flattened with the outputs' inverses into one `UndoBatch`,
+so one Undo reverts the move and everything the rules did.
+
+`MY_DAY_AUTO_REMOVE` and `STALE_BADGE` never enter the engine. `MyDaySweeper`
+dispatches `SweepMyDay` from `MainActivity.onStart` beside the digest
+reconcile, only while that rule is enabled, silently and tolerant of no active
+vault, removing members completed before the start of today in the device
+zone. `staleTaskIds` is a pure projection over open, non-binned tasks whose
+latest revision or activity is older than the threshold, project-scoped rules
+beating global, rendered as a `TaskRow` badge on the Tasks list, workbench,
+and board cards. The Automations section in More lists rules in application
+order and labels a rule broken when a set reference no longer resolves.
+
+Device qualification, the manual acceptance matrix, and the signed sideload
+record live in `docs/qualification/stage9-board-flow-automation.md` and
+`docs/qualification/release-1.3.0-sideload.md`; the `v1.3.0` tag was pushed
+with the remote compact lane green.
+
 ## Implemented onboarding, dashboard, and NFR boundary
 
 The implementation follows
