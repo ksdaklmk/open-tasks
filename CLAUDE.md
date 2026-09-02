@@ -252,8 +252,8 @@ race KSP while release Hilt sources are generated.
   `keystore.properties` (the app-signing key). CI release builds stay unsigned.
 - GitHub Actions `uses:` references stay SHA-pinned;
   `scripts/verify-actions-workflow.sh` enforces this, the seven-module
-  connected matrix, and the exact Pages workflow. CI does not run it; run it
-  by hand before pushing any workflow change.
+  connected matrix, and the exact Pages workflow. The CI `verify` job runs it
+  first; run it by hand before pushing any workflow change.
 
 ## Release and Play
 
