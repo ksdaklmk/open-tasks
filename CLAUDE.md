@@ -252,6 +252,11 @@ race KSP while release Hilt sources are generated.
   `Pixel6_Scratch` AVD reproduces the CI compact lane; uninstall
   `app.opentasks` before `FoldContinuityInstrumentedTest`.
 - Compose tests use `androidx.compose.ui.test.junit4.v2.createComposeRule` (note `.v2`) and drive debounce with `mainClock.autoAdvance = false`. Feature UI tests instantiate the stateless screen inside `OpenTasksTheme { }` with `OpenTasksFixtures` data — no ViewModel, no Hilt.
+- The `.v2` rules run composition on a `StandardTestDispatcher`: a
+  `LaunchedEffect` only executes when the rule advances its scheduler
+  (`waitUntil`, `waitForIdle`, any action or assertion). Never wait on app or
+  repository state with a bare `SystemClock`/`Thread.sleep` loop — the effect
+  stays queued forever; wait through `composeRule.waitUntil` instead.
 
 ## Repo
 

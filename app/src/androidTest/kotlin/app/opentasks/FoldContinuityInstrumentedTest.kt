@@ -408,20 +408,16 @@ class FoldContinuityInstrumentedTest {
         (application().vaultRuntimeManager.state.value as VaultRuntimeState.Active).runtime
 
     private fun awaitCreatedVault(): OwnedVault {
-        // Under this harness the automatic creation has never been observed
-        // to finish, even with a 60 s budget, while a manual fresh launch is
-        // Active within 12 s (HANDOFF.md, 2 September 2026). Fail with a
-        // message instead of the ClassCastException a bare cast produces.
-        val deadline = SystemClock.elapsedRealtime() + ACTIVE_VAULT_TIMEOUT_MILLIS
-        while (
-            application().vaultRuntimeManager.state.value !is VaultRuntimeState.Active &&
-            SystemClock.elapsedRealtime() < deadline
+        // The production new-vault flow starts from a LaunchedEffect in
+        // RecoverySurface. The v2 compose rule runs composition on a
+        // StandardTestDispatcher, so that effect only executes when the rule
+        // advances its scheduler: wait through the rule, never with a bare
+        // SystemClock loop that leaves the effect queued forever.
+        composeRule.waitUntil(
+            conditionDescription = "the production new-vault flow reaches Active",
+            timeoutMillis = ACTIVE_VAULT_TIMEOUT_MILLIS,
         ) {
-            SystemClock.sleep(50)
-        }
-        check(application().vaultRuntimeManager.state.value is VaultRuntimeState.Active) {
-            "The production new-vault flow did not reach Active within " +
-                "$ACTIVE_VAULT_TIMEOUT_MILLIS ms"
+            application().vaultRuntimeManager.state.value is VaultRuntimeState.Active
         }
         val runtime = activeRuntime()
         check(runtime.slot == VaultSlot.LEGACY) {
