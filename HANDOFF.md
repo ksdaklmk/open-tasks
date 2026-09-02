@@ -1,5 +1,95 @@
 # Open Tasks Handoff
 
+## Current state — CI health repair paused at the Fold wait fix, 2 September 2026
+
+This section is authoritative for repository and CI health. The Google Play
+Task 8 section below it remains authoritative for the Play programme, which
+still waits on the owner's DNS-verifiable custom domain.
+
+Landed on `main` and pushed today, in order: `7d9a79e` refreshed CLAUDE.md
+(13 modules, the real recurrence test name, the seven-module connected list,
+Room v10, the keystore selector, and a Release and Play section); `96903e1`
+replaced the stale Welcome and "Room remains v9" statements in
+`docs/architecture.md`, `docs/threat-model.md`, and this file; `4bbe4b2`
+merged `google-play-submission` (the worktree is retained for Task 8);
+`a031b42` made the CI `verify` job run `scripts/verify-actions-workflow.sh`
+first (proven on Android run `33610674489`); `aaab73f` added the Stage 9
+section to `docs/architecture.md`; `7e46f43` made the CodeQL build pass
+`--no-build-cache`, which fixed the "no source code seen" failure on
+docs-only pushes (proven on Security run `33616819085`); and `8cede6f`
+fixed the device-only test failures described below. User-scope tooling
+gained the `skill-creator`, `context7`, and `kotlin-lsp` plugins (the LSP
+binary is Homebrew `JetBrains/utils/kotlin-lsp` 262.9593.0), the Codex
+config import kept `node_repl`, and the unusable `cua_repl` server was
+removed.
+
+The compact API 36 lane had been red since `047e144` because that squash
+merged tests that had never run on a device. Every failure was reproduced on
+the disposable `Pixel6_Scratch` AVD (pixel_6, API 37 arm64 Play image,
+booted headless with `-no-window -read-only -no-snapshot-load
+-no-snapshot-save -gpu host` as the sole ADB target) and traced to four
+independent causes:
+
+1. `RoomImportTasksInstrumentedTest` read `currentWorkspace()` straight after
+   `execute`; Room refreshes the snapshot asynchronously, so the read saw the
+   pre-import snapshot. Fixed by awaiting `observeWorkspace()`.
+2. Three `RoomVaultRepositoryInstrumentedTest` undo-recheck tests compared
+   entities copied with two separate `byteArrayOf()` instances; Kotlin data
+   classes compare arrays by reference while printing them with
+   `Arrays.toString`, hence identical-looking "expected/but was" output.
+   Fixed with one shared `NO_CIPHERTEXT` instance.
+3. `trashRestoreAndPermanentDeleteSurviveEncryptedDatabaseRestart` binned a
+   task at the fixed instant 2026-07-26; the 30-day retention purge that runs
+   on every repository open removed it from 25 August, which is exactly when
+   the lane turned red. Fixed by binning at the current clock.
+4. Twelve `TaskMigrationScreenInstrumentedTest` cases scrolled the
+   non-scrollable root `Box` and called `performScrollTo()` on items a
+   `LazyColumn` had not composed; one pressed Back before recomposition.
+   Fixed by moving the `task-migration-screen` tag onto the `LazyColumn`,
+   scrolling through it before every lookup, and waiting for idle.
+
+Those four fixes are `8cede6f`, verified locally: the five core-data cases
+plus the whole `RoomImportTasksInstrumentedTest` class and all 17 migration
+cases pass on the scratch AVD. The Android run for `8cede6f` had not finished at
+this pause.
+
+The fifth cause is the two `FoldContinuityInstrumentedTest` launches
+(`consumedDigestIntentDoesNotReplayHomeAfterRecreation`,
+`cancelledQuickAddIntentDoesNotReopenAfterRecreation`). They wait exactly
+10 s for the automatically created vault to turn `Active`, then cast, so a
+slow creation surfaces as `ClassCastException`. On both CI and the scratch
+AVD creation takes about 10 to 12 s: manual fresh-install launches under the
+plain, digest, and quick-add intents all reached Home or the Quick add sheet
+within 12 s, so the product path is sound. The slowness hypothesis was then
+refuted: with the budget raised to 60 s both tests still failed with "did not
+reach Active within 60000 ms" on the clean scratch AVD, so under the test
+harness the automatic creation never completes at all. Only the explicit
+`check` message survives (commit after `8cede6f`), at the original 10 s.
+The next diagnostic step is to instrument the harness run: log the inputs of
+`shouldCreateInitialVault` and whether `RecoveryViewModel
+.startWithoutRestoring()` and `VaultRuntimeManager.createNewVault()` are
+reached, and compare the fixture's early `initialize()` call and
+`ActivityScenario.launch(intent)` against the manual launch. Do not raise
+the budget again.
+
+Note for that class: any manual `am start` of the app on the scratch AVD
+leaves a vault and Keystore aliases behind, and the fixture then refuses to
+run ("refuses to replace existing legacy database files"); uninstall
+`app.opentasks` first.
+
+Still open on CI: the expanded API 37 lane stays observe-only by ruling; ten
+Dependabot PRs (`#20` to `#26`, `#28` to `#30`) need a green compact lane,
+and every pinned-action bump must update the SHAs in
+`scripts/verify-actions-workflow.sh` in the same commit because the verify
+job now enforces them. `docs/qualification/stage9-board-flow-automation.md`
+still carries its "Task 17, Steps 1-3" title and placeholder intro.
+
+Resume, in order: confirm the Android run for `8cede6f` shows the compact
+lane failing only on the two Fold cases; commit the Fold wait fix if it is
+not already committed and push; confirm the compact lane is green; then work
+the Dependabot queue; then continue the Play programme from the Task 8
+section below once the owner supplies the custom domain.
+
 ## Current state — Google Play Task 8 paused at DNS domain gate — 29 August 2026
 
 This is the authoritative resume point for the Google Play submission. It

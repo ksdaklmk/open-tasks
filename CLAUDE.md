@@ -241,6 +241,16 @@ race KSP while release Hilt sources are generated.
 
 - JUnit 4 with `org.junit.Assert.*`. No mocking library, no Turbine, no Robolectric, no coroutines-test — suspend code uses `runBlocking` + `withTimeout(5_000)` and real flow collection.
 - Test names are camelCase describing behavior (`compactWindowUsesBottomNavigationAndOnePane`). Never backtick-quoted.
+- Room instrumented tests: after `execute`, read through
+  `observeWorkspace().first { … }`, never a bare `currentWorkspace()` (the
+  snapshot refreshes asynchronously). Compare entities through one shared
+  `ByteArray` instance (data classes compare arrays by reference). Never bin
+  with a fixed past instant under the real clock: the 30-day retention purge
+  runs on every repository open.
+- `TaskMigrationScreen` is a `LazyColumn`: scroll through its
+  `task-migration-screen` tag before asserting on an item. The disposable
+  `Pixel6_Scratch` AVD reproduces the CI compact lane; uninstall
+  `app.opentasks` before `FoldContinuityInstrumentedTest`.
 - Compose tests use `androidx.compose.ui.test.junit4.v2.createComposeRule` (note `.v2`) and drive debounce with `mainClock.autoAdvance = false`. Feature UI tests instantiate the stateless screen inside `OpenTasksTheme { }` with `OpenTasksFixtures` data — no ViewModel, no Hilt.
 
 ## Repo
