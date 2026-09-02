@@ -408,12 +408,20 @@ class FoldContinuityInstrumentedTest {
         (application().vaultRuntimeManager.state.value as VaultRuntimeState.Active).runtime
 
     private fun awaitCreatedVault(): OwnedVault {
-        val deadline = SystemClock.elapsedRealtime() + 10_000
+        // Under this harness the automatic creation has never been observed
+        // to finish, even with a 60 s budget, while a manual fresh launch is
+        // Active within 12 s (HANDOFF.md, 2 September 2026). Fail with a
+        // message instead of the ClassCastException a bare cast produces.
+        val deadline = SystemClock.elapsedRealtime() + ACTIVE_VAULT_TIMEOUT_MILLIS
         while (
             application().vaultRuntimeManager.state.value !is VaultRuntimeState.Active &&
             SystemClock.elapsedRealtime() < deadline
         ) {
             SystemClock.sleep(50)
+        }
+        check(application().vaultRuntimeManager.state.value is VaultRuntimeState.Active) {
+            "The production new-vault flow did not reach Active within " +
+                "$ACTIVE_VAULT_TIMEOUT_MILLIS ms"
         }
         val runtime = activeRuntime()
         check(runtime.slot == VaultSlot.LEGACY) {
@@ -615,3 +623,5 @@ class FoldContinuityInstrumentedTest {
                 "e7fb92d32ce629d2d0db1f93337fb4df409b33e878ae731e6032b3922a1164e0"
     }
 }
+
+private const val ACTIVE_VAULT_TIMEOUT_MILLIS = 10_000L
