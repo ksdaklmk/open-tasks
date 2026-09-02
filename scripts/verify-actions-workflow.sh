@@ -24,8 +24,8 @@ test -f "$security_workflow"
 uses_count="$(grep -Ec '^[[:space:]]*- uses:' "$security_workflow")"
 pinned_count="$(grep -Ec '^[[:space:]]*- uses: [^@[:space:]]+@[0-9a-f]{40}([[:space:]]+#.*)?$' "$security_workflow")"
 test "$uses_count" -eq "$pinned_count"
-grep -q 'github/codeql-action/init@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827' "$security_workflow"
-grep -q 'github/codeql-action/analyze@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827' "$security_workflow"
+grep -q 'github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938' "$security_workflow"
+grep -q 'github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938' "$security_workflow"
 grep -q 'actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294' "$security_workflow"
 grep -q 'languages: java-kotlin' "$security_workflow"
 grep -q 'build-mode: manual' "$security_workflow"
@@ -46,9 +46,9 @@ pages_pinned_count="$(grep -Ec '^[[:space:]]*(- )?uses: [^@[:space:]]+@[0-9a-f]{
 test "$pages_uses_count" -eq 4
 test "$pages_uses_count" -eq "$pages_pinned_count"
 grep -q 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "$pages_workflow"
-grep -q 'actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b' "$pages_workflow"
-grep -q 'actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b' "$pages_workflow"
-grep -q 'actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e' "$pages_workflow"
+grep -q 'actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d' "$pages_workflow"
+grep -q 'actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9' "$pages_workflow"
+grep -q 'actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128' "$pages_workflow"
 pages_permissions="$(awk '
   /^permissions:$/ { if (seen++) exit 1; block=1; next }
   block && /^[^[:space:]#]/ { block=0 }
