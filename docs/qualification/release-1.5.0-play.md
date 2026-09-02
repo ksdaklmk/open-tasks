@@ -227,3 +227,54 @@ final-AAB, device, testing, or publication evidence.
 | Incognito keyboard focus and activation | PASS — rendered browser evidence | Privacy Tab order reached `Open Tasks support`. Support Tab order reached `GitHub Issues` then `Privacy policy`. Every focused link showed a solid 3 px `rgb(198, 78, 43)` outline with a 3 px offset and remained within the viewport. Enter activated both internal page transitions at wide and narrow widths. |
 | Incognito warnings and resource boundary | PASS — observed browser evidence | Browser warning/error logs were empty on both pages at both widths. Neither page exposed a script, external stylesheet, image, or iframe resource; the expected HTTPS links were the only navigation targets. |
 | Viewport cleanup | PASS — browser state restored | The temporary responsive override was reset. Chrome returned to its normal 1425×780 page viewport with the privacy URL open and no horizontal overflow. |
+
+## Entry — 2026-08-29T10:13:48Z — worker — Task 7 Play identity and signing setup
+
+This entry supersedes the earlier Task 7 PENDING states for owner verification,
+package registration, Play app creation, and signing-key registration. It does
+not create final-binary, OAuth, testing, release, review, or publication
+evidence.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Current Play signing and registration rules | PASS — official guidance rechecked 2026-08-29 | Current Google Play and Android guidance still permits an account owner to replace the initial Google-managed key with a supplied RSA 2048+ app-signing key before open testing or production, and recommends a distinct RSA 2048+ upload key. The 30 September 2026 package-registration and Thailand enforcement milestone remains current. |
+| Personal developer account and owner verification | PASS — owner/Console evidence 2026-08-29 | The personal developer account is active. The owner confirmed that legal and payment-profile details are correct, two-step verification is active, and Play device verification is complete or not required. Legal/contact/payment values and evidence remain only in private owner storage. |
+| Android developer verification and package ownership | PASS — Play Console evidence | `Open Tasks` / `app.opentasks` is `Registered`, last updated 14 August 2026. Its sole package key is `Verified` and has SHA-256 `A6:1E:11:E1:0E:CA:14:B8:88:CD:68:50:86:2F:9C:EA:61:90:9D:CC:6A:75:C5:A5:1D:F0:C8:F6:4B:B5:1A:97`, matching the independently authenticated existing release certificate. No proof APK was required. |
+| Play app creation | PASS — app created 2026-08-29 | One Play app exists for `Open Tasks`, package `app.opentasks`, English (United Kingdom), App, Free; internal Play app ID `4975932743584513202`. The owner accepted the three required declarations. Automatic protection was turned off before creation to preserve the qualified direct-APK/local-first behavior. |
+| Fixed Console settings | PASS — saved owner-approved settings | Ads `No`; sign-in details `Yes` with credential-free instructions for the optional biometric app lock; target ages 13–15, 16–17, and 18+; category `Productivity`; required public developer email present but omitted here; trusted-partner use of access instructions off. Phone and website remain blank. |
+| Countries and regions | PENDING — deferred to first production availability step | Production availability is locked until the personal-account closed-test and production-access requirements are met, so the planned all-Play-regions selection cannot yet be saved. No region or release state was changed. |
+| Existing app-signing/delivery key | PASS — Play-held certificate independently downloaded and checked | Alias `opentasks`; RSA 4096; `SHA384withRSA`; valid 8 August 2026 through 24 December 2053. Play app-signing SHA-1 is `FC:FE:F1:3C:86:18:79:A6:1E:78:6C:BC:FF:61:C5:35:20:F0:BB:D0`; SHA-256 is `A6:1E:11:E1:0E:CA:14:B8:88:CD:68:50:86:2F:9C:EA:61:90:9D:CC:6A:75:C5:A5:1D:F0:C8:F6:4B:B5:1A:97`. Both exactly match the authenticated existing release JKS and the verified package certificate. |
+| Separate upload key | PASS — generated, backed up, and registered | Alias `opentasks-upload`; RSA 4096; `SHA384withRSA`; valid 29 August 2026 through 14 January 2054. Play upload SHA-1 is `7F:CC:5A:0C:9C:32:AC:53:E8:7A:A7:EF:8B:AB:ED:DF:5D:3D:57:13`; SHA-256 is `54:D6:F8:C3:CF:D1:DA:63:31:52:69:37:CC:03:DB:6D:45:EA:D5:A7:4E:B6:58:5F:EC:B8:72:1D:6B:92:2F:FF`. Play displays the same public fingerprints. The JKS and four-field properties file are mode `0600`; passwords were never displayed or recorded. |
+| Signing-role separation | PASS — required equality and inequality checks | Play app-signing SHA-1/SHA-256 equals the existing release certificate; Play upload SHA-1/SHA-256 equals the new upload certificate; the app-signing and upload fingerprints differ. The owner confirmed primary and offline backup of the upload key, password, public certificate, and recovery record. |
+| Disposable transfer cleanup | PASS — exact temporary files removed | After Play accepted the change and the public certificates were verified, the encrypted PEPK ZIP, exported upload-certificate PEM, private launcher, downloaded encryption public key, downloaded PEPK JAR, and downloaded verification certificate were removed. The persistent release JKS, upload JKS, and upload properties remain present and mode `0600`. |
+| Version-code consumption and release state | PASS — no code consumed by Task 7 | No AAB or APK was uploaded, and no internal, closed, open, or production release was created. Play shows every release entry point as `Get started` and no unpublished changes. Candidate version code 7 remains unused. |
+
+Private owner storage retains account evidence, key backups, passwords,
+recovery instructions, and Play Console evidence. Git contains only the public
+certificate metadata and non-sensitive completion states above.
+
+## Entry — 2026-08-29T11:34:54Z — worker — Task 8 OAuth domain-verification pause
+
+This entry supersedes the earlier owner-Cloud-configuration PENDING state but
+does not close Task 8. It records configuration and root-cause evidence only;
+no private account/contact value, OAuth client ID, token, secret, final
+candidate, Play upload, track, tester or publication evidence is created.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Source authorization boundary | PASS — source and history evidence | Production and debug use Google Play Services authorization and request only `https://www.googleapis.com/auth/drive.appdata`. Production embeds no client secret or server client ID. Current, debug, released 1.4.0 and repository history contain no active use of the 17 removed broad scopes. |
+| Task 8 linked-worktree baseline | PASS — non-device build evidence | With the known Android SDK environment, `testDebugUnitTest`, `lintDebug` and `:app:assembleDebug` reported `BUILD SUCCESSFUL in 35s`; 553 actionable tasks, 30 executed, 30 from cache and 493 up-to-date. The first attempt failed before tasks only because ignored `local.properties` is absent from linked worktrees. |
+| Audience and publication | PASS — current Cloud configuration | Google Auth Platform reports user type `External` and publishing status `In production`. The former Testing-user-only restriction is removed at configuration level. |
+| Scope configuration | PASS — current Cloud configuration | Exactly one non-sensitive scope persists: `https://www.googleapis.com/auth/drive.appdata`. All 17 source-proven stale scopes were removed. The Verification centre states that data-access verification is not required because no sensitive or restricted scope remains. |
+| Branding fields | PARTIAL PASS — saved Cloud configuration | App name `Open Tasks`, the current public privacy/support URLs and authorised domain are saved. Existing private support/developer contacts were retained without recording them. No logo was uploaded. Branding is not yet shown to users. |
+| Android OAuth clients | PASS — current Cloud and signing evidence | Two existing Android clients for `app.opentasks` remain. The Play delivery client matches the authenticated release certificate; the older direct/debug client remains unchanged. The upload certificate is absent from both delivery clients. No client ID is recorded. |
+| Public Search Console verification | PASS — URL-prefix ownership only | Public file `site/googlebfb12df764b54328.html` was committed to `main` as `22fa396ecfcd63034c51192ebecb8b852f17a3c8`, deployed by successful Pages run `33248701409`, and returned its exact one-line token anonymously. Search Console verified `https://ksdaklmk.github.io/open-tasks/` by that file and auto-verified the exact support-homepage child property. |
+| OAuth brand verification | BLOCKED — DNS Domain property required | Two reverification attempts still reported the homepage as not registered. Current official Google guidance requires a Search Console Domain property verified at DNS level by a Cloud project owner/editor and explicitly rejects URL-prefix verification for this gate. The shared `github.io` DNS zone is controlled by GitHub, so the current Pages subdomain cannot satisfy the proof. No third review was submitted. |
+| Required plan amendment | PENDING — owner domain and approval required | The owner must supply a custom domain/subdomain with DNS control. Before execution, amend Task 8 because the migration changes `OpenTasksApp.kt`'s hard-coded privacy URL, both static-page cross-links, public deployment evidence, listing/qualification evidence and OAuth branding values. Keep the current URLs and verification file live during transition. |
+| Outside-allowlist consent flow | PENDING — owner account evidence | After branding passes, an ordinary Google account outside the former Testing allowlist must reach consent without recording the account. Full credentialed backup/restore remains Tasks 9 and 11. |
+| Candidate and release state | PENDING — Task 9 not started | No immutable candidate, AAB, APK set, APK, mapping, symbols, SBOM, Play upload, release, track, tester, review submission, production-access request, tag or publication was created. |
+
+Resume only from the new authoritative section at the top of `HANDOFF.md`.
+Do not broaden scope, register the upload certificate as OAuth delivery,
+remove the public verification file, submit another brand review, or start Task
+9 until the custom-domain plan amendment is approved and Task 8 closes.

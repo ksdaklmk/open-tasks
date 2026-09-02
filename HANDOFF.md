@@ -1,5 +1,88 @@
 # Open Tasks Handoff
 
+## Current state — Google Play Task 8 paused at DNS domain gate — 29 August 2026
+
+This is the authoritative resume point for the Google Play submission. It
+supersedes the older Task 6 Play checkpoint below wherever the two conflict.
+The owner paused execution after the Task 8 domain-verification blocker was
+isolated. Do not resume Console, DNS, build, release, or Task 9 work from the
+older sections.
+
+The retained workspace is
+`/Users/kk/projects/open-tasks/.worktrees/google-play-submission` on branch
+`google-play-submission`. Task 7 is complete at `38f7ac5`: the Play app exists
+for `app.opentasks`, the authenticated existing release certificate is the Play
+delivery identity, the separate upload certificate is registered only for
+uploads, its private material is backed up and mode `0600`, and no version code
+or release was consumed. Countries/regions remains deferred to the first
+production-availability step.
+
+Task 8 has the following completed evidence:
+
+- production and debug source request only
+  `https://www.googleapis.com/auth/drive.appdata` through Google Play Services;
+  no client secret or server client ID is embedded;
+- the focused linked-worktree baseline passed `testDebugUnitTest`, `lintDebug`,
+  and `:app:assembleDebug` with 553 actionable tasks;
+- Google Auth Platform is `External` and `In production`, with app name
+  `Open Tasks`, the existing private support/developer contacts retained, and
+  the current public privacy and support URLs saved;
+- all 17 source-proven stale scopes were removed, leaving exactly the one
+  non-sensitive `drive.appdata` scope; data-access verification is not
+  required;
+- two pre-existing Android OAuth clients for `app.opentasks` remain: the Play
+  delivery client matches the release certificate and the older direct/debug
+  client is unchanged; the upload certificate is not an OAuth delivery
+  identity; and
+- no OAuth client ID, token, secret, account address, or private contact value
+  is stored in repository evidence.
+
+Brand verification remains incomplete. Google reports that the homepage is not
+registered to the project owner, so the configured app name is not yet shown on
+the consent screen. Under explicit owner approval, public verification file
+`site/googlebfb12df764b54328.html` was committed to `main` as `22fa396`, pushed,
+and deployed successfully by Pages run `33248701409`. Anonymous HTTPS retrieval
+returned its exact one-line token. Search Console verified
+`https://ksdaklmk.github.io/open-tasks/` by that HTML file and auto-verified the
+exact `https://ksdaklmk.github.io/open-tasks/support/` child property.
+
+Two OAuth branding reverification attempts still returned the same homepage
+ownership issue. Root-cause review found that Google's current OAuth guidance
+requires a Search Console **Domain property** verified at DNS level by a Cloud
+project owner/editor; it explicitly says a URL-prefix property is insufficient.
+The shared `github.io` DNS zone is controlled by GitHub, so the current Pages
+subdomain cannot satisfy that proof. Do not submit another automated review,
+select “issue is incorrect”, broaden the Drive scope, add a logo, or remove the
+public verification file as a workaround.
+
+Task 8 is therefore **PAUSED**, not complete. Its remaining gates are:
+
+1. The owner must supply the exact custom domain or subdomain and confirm DNS
+   control plus approval to configure it for GitHub Pages and Google.
+2. Amend and approve Task 8 before execution because the domain migration also
+   changes the hard-coded privacy URL in
+   `app/src/main/kotlin/app/opentasks/OpenTasksApp.kt`, the two links in
+   `site/privacy/index.html` and `site/support/index.html`, listing/qualification
+   evidence, and the OAuth homepage/privacy/authorised-domain values.
+3. Configure the Pages custom domain and DNS, keep the current public URLs live
+   during transition, wait for HTTPS, and verify the new privacy/support pages
+   anonymously before changing OAuth.
+4. Using the same Cloud project owner/editor account, verify the custom domain
+   as a Search Console Domain property with Google's DNS record.
+5. Update OAuth branding to the verified custom-domain URLs while preserving
+   `External`, `In production`, `Open Tasks`, existing private contacts, the two
+   Android clients, and `drive.appdata` only; then request branding verification
+   once and require a definitive pass.
+6. Confirm an ordinary Google account outside the former Testing allowlist can
+   reach the consent flow. Do not record that account.
+7. Update the Task 8 listing and append-only qualification evidence, run the
+   prescribed sensitive-value/diff checks, and commit
+   `docs: record production OAuth setup` only after every gate above passes.
+
+Task 9 has not started. No immutable candidate, AAB, APK set, mapping, symbols,
+SBOM, Play upload, track, tester, review submission, production-access request,
+tag, or publication was created. Do not start Task 9 until Task 8 closes.
+
 ## Current state — Task 6 complete — 29 August 2026
 
 This is the authoritative current section for the Google Play submission.
