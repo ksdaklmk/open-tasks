@@ -1,8 +1,10 @@
-# Stage 9 board-flow-automation qualification (Task 17, Steps 1-3)
+# Stage 9 board-flow-automation qualification
 
 ## Status and source identity
 
-**Qualified — Steps 1-3 gates are green at HEAD.** Steps 0-2 (version
+**Qualified and released as 1.3.0 (4) on 19 August 2026.** Steps 1-3
+below are the gate evidence; Step 5 is the owner's accepted manual
+matrix and Step 6 the signed release record. Steps 0-2 (version
 bump, forced-fresh host gates, determinism/scope scans) were clean
 from the first pass. Step 3a's seven-module connected gate on
 `Fold8_Acceptance` originally surfaced 9 failures in
@@ -23,10 +25,8 @@ file's own established await pattern and fixed the
 every assertion. The full `:core:data:connectedDebugAndroidTest`
 module re-ran clean: 212/212, 0 failures.
 
-This document covers Steps 1-3 only (qualification gates and
-evidence). Step 4 (whole-stage review) is the controller's job. Steps
-5-6 (manual acceptance matrix, signed sideload, tag) belong to the
-owner session and are left as placeholders below.
+Step 4 (the whole-stage review) was the controller's job and has no
+section in this record.
 
 - Date: 19 August 2026
 - Audit base (`Audit-base` in the plan's ledger):
