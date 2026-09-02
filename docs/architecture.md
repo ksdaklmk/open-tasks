@@ -15,7 +15,7 @@ updates records and appends ordered backup-journal entries in one transaction.
 The current foundation seeds the sample workspace into SQLCipher once, then
 treats Room as the authority for task, timer/time-entry, Bin, search, and
 backup-journal state.
-Room v9 assigns one local generation to each mutation-bearing accepted
+Room assigns one local generation to each mutation-bearing accepted
 command and appends its ordered `BackupJournal` rows in the same transaction.
 The additive v7→v8 migration adds the first-class `notes` table, the
 finalised attachment metadata shape (dropping the obsolete keep-offline
@@ -48,7 +48,9 @@ transaction. Retired rows are a backed-up `RETIRED_BLOB_SET` record family
 that survives recovery; `MarkRetiredBlobSetCollected` releases a row
 idempotently after remote cleanup; staged-vault verification accepts
 exactly a settle purge's own retired rows as drift and fails closed on any
-other. Any further durable schema change requires a later migration with an
+other. The additive v9→v10 migration (Stage 9) adds the `automation_rules`
+and `my_day_entries` tables plus WIP-limit columns; `VAULT_DATABASE_VERSION`
+is 10. Any further durable schema change requires a later migration with an
 exported schema.
 The journal is a local backup record, not a remote merge log. The additive
 v5→v6 migration preserves every existing outbox row, copies deterministic
@@ -539,17 +541,17 @@ production. The Activity-scoped `TaskMigrationViewModel` owns only transient
 source and review state; it persists no URI permission, file, mapping draft,
 or source cells and performs no network access. `app` owns picker effects,
 current-snapshot revalidation, and dispatch through the existing
-`WorkspaceViewModel.execute` command and snackbar/Undo path. `MainActivity`
-holds confirmed Welcome rows in memory only across the NoVault-to-Active
-transition and clears the one-shot handoff on every terminal path.
+`WorkspaceViewModel.execute` command and snackbar/Undo path. The Welcome
+one-shot handoff was deleted with the Welcome flow; migration starts only from
+More inside an active workspace.
 
 Backup & recovery's strict **Import Open Tasks CSV** remains an exact,
-all-or-nothing 14-column parser. The separate Welcome/More **Import from
-another app** path accepts a bounded generic table, translates only reviewed
+all-or-nothing 14-column parser. The separate More **Import from another
+app** path accepts a bounded generic table, translates only reviewed
 supported fields, and creates new records without matching, merging, or
 deduplication. Both converge only after translation on the existing atomic
 import planner and repository-produced `RemoveImportedRecords` Undo. Room
-stays v9 and authenticated backup and `.otvault` archive formats stay v1.
+stays v10 and authenticated backup and `.otvault` archive formats stay v1.
 
 Google authorisation is explicit and the Drive backup transport requests only
 `drive.appdata`; it lists/reads encrypted lineage objects and creates immutable
@@ -765,17 +767,23 @@ tag are recorded there as pending.
 The implementation follows
 `docs/superpowers/plans/2026-08-21-open-tasks-onboarding-dashboard-nfr-plan.md`.
 
-Vault existence remains the onboarding authority. `VaultRuntimeState.NoVault`
-renders Welcome and performs no discovery. Offline creation continues through
-`VaultRuntimeManager.createNewVault()`, but Room’s production default seed is
-only the vault/member/primary-workspace structure plus
+Vault existence remains the onboarding authority, and there is no Welcome
+screen. When the runtime is `VaultRuntimeState.NoVault`, the recovery
+presentation is its idle `NoVault` state, and no active replacement is in
+progress (`shouldCreateInitialVault` in `MainActivity`), the activity calls
+`RecoveryViewModel.startWithoutRestoring()`, which creates the vault through
+`VaultRuntimeManager.createNewVault()` and proceeds to Home with no discovery,
+Google authorization, picker, or application network call. Room’s production
+default seed is only the vault/member/primary-workspace structure plus
 `WorkflowStatus.defaults(null)`. A production `PRIMARY_WORKSPACE_ID` replaces
 runtime imports of demonstration fixtures; tests may still inject
-`OpenTasksFixtures.snapshot` explicitly. No “welcome seen” preference, account
-table, or identity layer is added.
+`OpenTasksFixtures.snapshot` explicitly. No first-run preference, account
+table, or identity layer exists.
 
 Drive and portable recovery remain in `RecoveryViewModel` and the existing
-staged activation path. Their work begins only after explicit Welcome actions.
+staged activation path. Their work begins only after the explicit **Restore
+existing workspace** action in More > Backup & recovery opens the recovery
+shell; Back from that shell is nondestructive.
 Google authorization remains a capability for encrypted `drive.appdata`
 backup/recovery and conveys no authority over local records. Unreadable and
 active-replacement states keep the protected recovery shell and never
@@ -816,7 +824,7 @@ requires one independent owner certificate input and matches each filename to
 its exact `aapt2 native-code` set: arm64 only, x86_64 only, or both for the
 universal APK. The real owner-only proof passed for the exact current-head
 1.3.1/5 artifacts on 24 August; any rebuilt final release candidate must repeat
-it. Room stays v9 and authenticated backup format stays v1.
+it. Room stays v10 and authenticated backup format stays v1.
 
 `DefaultRemoteBackupRunner` captures the current local generation under the
 existing serialized publication gate and publishes an execution sequence with

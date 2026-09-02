@@ -428,7 +428,7 @@ tag and push.
 
 | ID | Threat | Implemented control | Residual |
 |---|---|---|---|
-| T39 | A fresh install performs provider work or implies Google is required | No-vault composition renders Welcome with no discovery/network side effect; Google and portable discovery begin only on explicit matching actions; offline creates a structural empty vault | Google Play services outside the process may perform platform work, but Open Tasks initiates no request before opt-in |
+| T39 | A fresh install performs provider work or implies Google is required | An idle no-vault launch creates a structural empty vault locally with no discovery/network side effect; Google and portable discovery begin only on the explicit Restore existing workspace action in More | Google Play services outside the process may perform platform work, but Open Tasks initiates no request before opt-in |
 | T40 | Production fixtures disclose or corrupt a new person’s understanding of their data | Runtime code uses a production primary-workspace identity and structural seed only; tests inject fixtures explicitly; fresh-vault content counts are release-gated | Default workflow statuses are structural records required to create the first Inbox task |
 | T41 | Exported dashboard content executes markup/script or loads remote resources | Typed bounded DTO, escaped embedded JSON, CSP, `textContent` rendering, no external URL/network API, hostile-content tests, 10 MiB cap | The file is intentionally plaintext and its recipient/custody is outside the vault after explicit disclosure |
 | T42 | A dashboard leaks excessive workspace detail | Aggregate is default; detail is opt-in and allow-listed; descriptions, notes, activity bodies, attachment names/paths, account/provider data, recovery metadata and keys are always omitted | Project/tag labels and allowed task detail can still be sensitive and are covered by the plaintext disclosure |
@@ -506,9 +506,9 @@ Before production release:
    widget, attachment, and app-lock privacy reviews.
 9. Complete Privacy Policy, OAuth verification, Play Data Safety, signing, and
    store operations outside the repository.
-10. Prove Welcome initiates no provider/network work, offline creation has zero
-    user records, explicit recovery retains rollback/non-overwrite guarantees,
-    and Google remains backup/recovery-only.
+10. Prove the automatic first launch initiates no provider/network work and
+    creates zero user records, explicit recovery retains rollback and
+    non-overwrite guarantees, and Google remains backup/recovery-only.
 11. Exercise hostile aggregate/detail dashboard content offline, verify CSP
     and no external resources, prove the 10 MiB/partial-output boundaries, and
     inspect both SAF and FileProvider custody disclosures.

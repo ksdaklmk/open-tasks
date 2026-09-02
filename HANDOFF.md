@@ -60,6 +60,11 @@ the exact public developer display name, the support route and warning match,
 and the deployed forbidden-content scan is clean. Anonymous retrieval required
 no authentication.
 
+Since `22fa396` on 29 August, `site/` also carries the public Search Console
+verification file `googlebfb12df764b54328.html`, so the deployed inventory is
+three files rather than the two checked above. Search Console rechecks that
+file, so it must stay deployed.
+
 Normal and Incognito Chrome browser QA now pass both deployed URLs at a wide
 1425×802 viewport and a narrow 360×800 viewport. Both pages rendered without
 clipping, collision, or horizontal overflow. Privacy-page Tab order reached
@@ -105,7 +110,7 @@ The implemented local-first launch is now the current product behavior:
 - verified staging, explicit takeover, and nondestructive Back behavior remain
   in the existing recovery implementation.
 
-Room remains v9. The authenticated backup, `.otvault`, and Android portable
+Room remains v10. The authenticated backup, `.otvault`, and Android portable
 package formats, SDK values, permissions, version, signing, publication, and
 release state did not change. No dependency, migration, sample content,
 provider scope, or application-network path was added.
@@ -265,7 +270,7 @@ review diffs were permanently deleted after their rulings and evidence were
 surfaced; only committed history and this durable handoff remain.
 Implementation and review should not be repeated unless the code changes.
 
-Room remains v9 and the authenticated backup and `.otvault` archive formats
+Room remains v10 and the authenticated backup and `.otvault` archive formats
 remain v1. No version, signing, artifact copy, tag, push, publication, or Play
 state changed.
 
