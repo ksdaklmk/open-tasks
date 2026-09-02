@@ -27,7 +27,8 @@ Full suite (matches CI):
   :feature:tasks:connectedDebugAndroidTest \
   :feature:projects:connectedDebugAndroidTest \
   :feature:schedule:connectedDebugAndroidTest \
-  :feature:more:connectedDebugAndroidTest
+  :feature:more:connectedDebugAndroidTest \
+  :feature:home:connectedDebugAndroidTest
 ```
 
 A single class, when `$ARGUMENTS` names one:

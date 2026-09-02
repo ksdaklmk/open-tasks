@@ -2,15 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Open Tasks is an offline-first Android task workspace (Kotlin, Compose, 12 Gradle modules).
+Open Tasks is an offline-first Android task workspace (Kotlin, Compose, 13 Gradle modules).
 Read `@docs/architecture.md` before changing data or command flow, `@DESIGN.md` before changing UI.
-`@HANDOFF.md` is the only live backlog and current state of in-flight work.
+`@HANDOFF.md` is the only live backlog and current state of in-flight work. A
+retained programme worktree under `.worktrees/` (`git worktree list`) may hold
+a newer copy that supersedes `main`'s; check it before trusting "next task".
 
 ## Build and test
 
 ```bash
 ./gradlew testDebugUnitTest lintDebug :app:assembleDebug   # the CI gate; run before calling work done
-./gradlew :core:domain:testDebugUnitTest --tests "*RecurrenceEngineTest.monthEndDoesNotDrift"
+./gradlew :core:domain:testDebugUnitTest --tests "*RecurrenceEngineTest.monthlyRecurrenceUsesOriginalDayInsteadOfDrifting"
 ```
 
 Generic task CSV migration has two focused host/compile gates:
@@ -36,7 +38,8 @@ command locally for device-specific diagnosis:
 ```bash
 ./gradlew :app:connectedDebugAndroidTest :core:data:connectedDebugAndroidTest \
   :feature:tasks:connectedDebugAndroidTest :feature:projects:connectedDebugAndroidTest \
-  :feature:schedule:connectedDebugAndroidTest :feature:more:connectedDebugAndroidTest
+  :feature:schedule:connectedDebugAndroidTest :feature:more:connectedDebugAndroidTest \
+  :feature:home:connectedDebugAndroidTest
 ```
 
 `:app:connectedDebugAndroidTest` uninstalls `app.opentasks`. Run connected
@@ -133,10 +136,9 @@ race KSP while release Hilt sources are generated.
   activity body 500 characters and 500 entries per task or project; 50 search
   results; 100 active attachments per task; 100 MiB per attachment, 4 MiB
   chunks, at most 25 chunks; sessions expire after 24 hours; and cache
-  `min(128 MiB, 5% available storage)`. Room v9 adds the durable
-  `retired_blob_sets` index and its `RETIRED_BLOB_SET` backup family
-  (Stage 5); any further durable schema change requires a later migration
-  and exported schema.
+  `min(128 MiB, 5% available storage)`. `retired_blob_sets` and its
+  `RETIRED_BLOB_SET` backup family arrived in Room v9 (Stage 5); Room is now
+  v10 (`VAULT_DATABASE_VERSION`, exported schema `10.json`).
 - Keep Stage 6 bounds: at most 20 saved views, 200 distinct task IDs per bulk
   command, 5,000 rows and 5 MiB per Tasks CSV import, and 14 days for weekly
   review staleness. Backup & recovery's strict parser accepts only the exact
@@ -176,15 +178,11 @@ race KSP while release Hilt sources are generated.
 - `DuplicateTask` must exclude completion, reminders, recurrence/series state,
   prior activity, time entries, notes, and attachments. Both repositories must
   keep the copy and its repository-produced Undo atomic.
-- The implemented Stage 7 stays on Room v9 and authenticated backup object format v1. Do not
-  add a schema, backup family, exported surface, permission, or network path for
-  its ergonomics state.
-- The implemented Stage 8 stays on Room v9 and authenticated backup object
-  format v1. Its planning surfaces and daily digest add no schema, backup
-  family, fixture, dependency, permission, Drive scope, or route; the sole
-  manifest delta is the non-exported, no-intent-filter
-  `DailyDigestReceiver`. Add none of these for further planning work
-  without an approved plan change.
+- Stage 7 ergonomics state and Stage 8 planning surfaces/daily digest own no
+  schema, backup family, exported surface, permission, Drive scope, route, or
+  network path; Stage 8's sole manifest delta is the non-exported,
+  no-intent-filter `DailyDigestReceiver`. Add none of these for further work
+  there without an approved plan change.
 - The daily digest is opt-in, off by default, and device-local non-vault
   state. Its `daily_digest` preference file holds exactly `enabled`
   (Boolean), `minute_of_day` (Int, `0..1439`), and optional
@@ -215,7 +213,7 @@ race KSP while release Hilt sources are generated.
   object IDs. Exports are snapshot-only baselines. Its Node fixture
   generator must regenerate byte-identically; change the format only with
   a new version, never in place.
-- Room v9 is the remote-backup persistence authority. An active runtime is
+- Encrypted Room is the remote-backup persistence authority. An active runtime is
   bound to one active vault slot and must stop when that slot is replaced,
   ownership is lost, or the lineage terminates.
 - Ownership claims, publications, recovery bases, and the terminal tombstone
@@ -248,10 +246,36 @@ race KSP while release Hilt sources are generated.
 ## Repo
 
 - Commit straight to `main`; no branch or PR ceremony.
-- No secrets or env vars are needed for local development. Local release builds
-  sign only when the gitignored `keystore.properties` and external keystore are
-  present; CI release builds remain unsigned.
+- No secrets or env vars are needed for local development. Release builds sign
+  only when a keystore properties file exists: `-PopenTasksKeystoreProperties=
+  <path>` selects one (the Play upload key), else the gitignored root
+  `keystore.properties` (the app-signing key). CI release builds stay unsigned.
 - GitHub Actions `uses:` references stay SHA-pinned;
-  `scripts/verify-actions-workflow.sh` enforces this and the CI matrix shape.
+  `scripts/verify-actions-workflow.sh` enforces this, the seven-module
+  connected matrix, and the exact Pages workflow. CI does not run it; run it
+  by hand before pushing any workflow change.
+
+## Release and Play
+
+- Read `@RELEASING.md` before any release or Play step. Direct APKs and the
+  Play AAB use different keys: app-signing (`keystore.properties`,
+  `OPEN_TASKS_RELEASE_CERT_SHA256`, `scripts/verify-release-apk.sh`) versus
+  upload (`-PopenTasksKeystoreProperties`, `OPEN_TASKS_UPLOAD_CERT_SHA256`,
+  `OPEN_TASKS_BUNDLETOOL_JAR`, `scripts/verify-release-bundle.sh`). Never
+  register the upload certificate as an OAuth or delivery identity.
+- Certificate fingerprints come from the owner's independent record through
+  `read -s`. Never derive one from a candidate artifact or print one in a
+  command, doc, log, or chat.
+- `docs/qualification/release-*-play.md` is append-only: add a dated entry and
+  never edit prior evidence. A PASS binds to one artifact hash; any rebuild
+  invalidates it.
+- `site/` is the GitHub Pages source and holds exactly `privacy/index.html`,
+  `support/index.html`, and the Search Console token
+  `googlebfb12df764b54328.html` (Google rechecks it; never remove). Static
+  HTML only: no script, form, cookie, analytics, remote font, or stylesheet.
+  The privacy URL is also hard-coded in `OpenTasksApp.kt`; change both
+  together.
+- Linked worktrees under `.worktrees/` have no `local.properties`; copy the
+  root one there before running Gradle.
 
 Module-specific instructions can go in a subdirectory `CLAUDE.md` (e.g. `core/data/CLAUDE.md`); it loads automatically when working there. Ask if you want one.
