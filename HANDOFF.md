@@ -1,64 +1,51 @@
 # Open Tasks Handoff
 
-## Current state — Task 9 qualified on `4a47962`, Step 10 owner gates next, 3 September 2026
+## Current state — Task 9 complete, Task 11 upload next, 3 September 2026
 
 This section is authoritative for the Play programme and for repository and
 CI health, and supersedes every checkpoint below it.
 
-### What happened today
+### Task 9 is complete
 
-Task 8 closed with brand verification deferred (`ce6bfb2`). Task 9 then
-found three defects, all fixed on `main`:
+Build commit `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate 1.5.0/7,
+AAB `019db088…cb885`. Steps 1 to 13 are recorded in
+`docs/qualification/release-1.5.0-play.md` across two entries dated
+2026-09-03T13:01:03Z (build, signing, upgrade proof) and
+2026-09-03T14:39:43Z (Step 10). No version code is consumed and nothing
+has been uploaded.
 
-- `301df82`: the first ever `:app:bundleRelease` failed because ABI splits
-  plus `shrinkResources` cannot be bundled by AGP 9.3.1 (issue 402800800);
-  bundle invocations now drop the splits, the APK set is unchanged, and
-  CLAUDE.md/RELEASING.md record the rule.
-- `b9c53bd`: a class-initialisation cycle in `core:designsystem` left
-  `MaterialTheme` with an all-transparent colour scheme whenever
+Step 10 closed with the owner's Drive gate PASS on their own physical
+device, the disposable-AVD smoke checklist green on all seven steps, and
+these extras green: reminder delivery with a privacy-safe public
+notification, 200% font scale, the FileProvider share chooser, and the
+privacy-policy browser hand-off. **The physical-device performance
+benchmark was waived by the owner for this candidate**, so 1.5.0/7 has no
+startup or frame-timing measurement and the accepted baseline is
+unchanged; the gate itself stays in `RELEASING.md`. Android backup package
+restore and attachment creation stay PENDING because they need physical
+hardware and the owner's Google account respectively.
+
+### Three defects found and fixed today
+
+- `301df82`: `:app:bundleRelease` cannot run with ABI splits plus
+  `shrinkResources` on AGP 9.3.1 (issue 402800800); bundle invocations now
+  drop the splits and the APK set is unchanged.
+- `b9c53bd`: a class-initialisation cycle in `core:designsystem` gave
+  `MaterialTheme` an all-transparent colour scheme whenever
   `OpenTasksColors` initialised before the theme facade, which any cold
-  start with app lock enabled does. The app drew no themed text, icons,
-  or filled surfaces; only elements with explicit colours survived and the
-  Android window background showed through. It has shipped since the app
-  lock landed (1.4.0 reproduces it). `oklch()` now lives in `Oklch.kt`
-  and `OklchTest` guards the order.
-- `c9c51e2` wrongly blamed the Kotlin Gradle plugins 2.4.10 bump on a
-  confounded bisect; `4a47962` re-lands the bump. Dependabot `#23` stays
-  closed as landed.
+  start with app lock enabled does. The app drew no themed text, icons, or
+  filled surfaces. It had shipped since the app lock landed and 1.4.0
+  reproduces it. `oklch()` now lives in `Oklch.kt` with `OklchTest`
+  guarding the order, and CLAUDE.md carries the rule.
+- `c9c51e2` wrongly reverted the Kotlin plugins 2.4.10 bump on a
+  confounded bisect; `4a47962` re-lands it. Dependabot `#23` stays closed.
 
-The lesson is in the ledger and the qualification memory: semantics-only
-instrumented tests cannot see a transparent theme. A pixel check of the
-Home header after a **locked cold start** now belongs in every
-disposable-AVD release gate.
-
-### Task 9 result
-
-Build commit `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate
-1.5.0/7, no version code consumed. Steps 1 to 9, 11, and the
-manifest-bound part of Step 12 are PASS in the ledger entry committed
-with this section; the AAB is
-`app/build/outputs/bundle/release/app-release.aab` (SHA-256
-`019db088…cb885`) with `app-release.apks` and `play-universal.apk`
-beside it, all three signing gates run by the owner on this exact
-candidate. Step 10 is PENDING and owner-present: physical API 36 arm64
-benchmark, physical connected suite, backup-package restore,
-browser/print/share, notification delivery, quick tile, accessibility and
-font scale, and the credentialed Drive gates (which also cover the
-attachment item the AVD cannot seed). Task 11 (upload to internal
-testing) must not start before Step 10 closes; re-hash the AAB
-immediately before upload.
-
-### Environment
-
-`Pixel6_Scratch` was booted headless (`-no-window -read-only
--no-snapshot-load -no-snapshot-save -gpu host`) as the sole ADB target and
-stopped after Step 9; every read-only boot needs `locksettings set-pin`
-again for app lock. The scratch UI driver was `uiautomator dump` plus
-`input tap`, and a header-region colour count on `screencap` output was
-the pixel oracle (1 colour = nothing drawn; theme background is
-(247,247,247), the window background (250,250,250)). bundletool 1.18.3
-sits at `/Users/kk/Tools/`. The `google-play-submission` worktree tip
-`6f22490` remains a stale ancestor of `main`.
+Semantics-only instrumented tests cannot see a transparent theme, so every
+release gate on the disposable AVD must now include a pixel check of the
+Home header after a **locked cold start**. The recipe is in the
+`release-render-check` memory: crop the header region, require more than
+one colour, and require the theme background (247,247,247) rather than the
+Android window background (250,250,250).
 
 ### CI
 
@@ -68,9 +55,14 @@ failure; Security run `33748773080` green. Dependabot queue empty.
 
 ### Resume, in order
 
-1. Step 10 with the owner present and a disposable physical device, per
-   `RELEASING.md` and the plan; append its evidence to the ledger.
-2. Task 11 upload of the exact `app-release.aab` after re-hashing it.
+1. Task 11: upload the exact `app-release.aab` to internal testing after
+   re-hashing it, then work the internal-track evidence. The plan's Task 11
+   steps and `RELEASING.md`'s track progression are authoritative, and
+   every Console action needs owner execution.
+2. Carry the Android backup restore and attachment items into the closed
+   test, where a physical device and the owner's account are present.
+3. If the owner later wants a performance number for this release, run the
+   waived benchmark before production access rather than after.
 
 ## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 

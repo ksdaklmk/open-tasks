@@ -362,3 +362,62 @@ Xcode llvm-objdump, JDK 26 for bundletool/keytool, daemon JDK 21.
 
 No certificate fingerprint, password, account, token, or private contact is
 recorded. The Pixel6_Scratch AVD was stopped after this entry.
+
+## Entry — 2026-09-03T14:39:43Z — worker and owner — Task 9 Step 10 release qualification
+
+Build commit `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate 1.5.0/7,
+AAB `019db0881f5770a35d4d1ab2c3a14574fbcda1994d15ba9a0657cb1e249cb885`.
+No version code was consumed and no Play upload, track, tester, review,
+production-access request, tag, or publication exists.
+
+### Owner-run gates
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Owner-present Google Drive gate | PASS — owner-reported | The owner ran `RELEASING.md`'s owner-present Drive gate on their own physical device against this candidate installed over the existing signed 1.4.0 with the unchanged signing identity, and reported PASS. This is the first real-account exercise of the production OAuth configuration closed in Task 8, and the first run of the `b9c53bd` render fix on physical hardware. No account, token, client ID, fingerprint, or Drive object identifier is recorded. The attachment observation requested alongside it was not separately itemised by the owner and stays unproven. |
+| Physical-device performance qualification | WAIVED — owner decision, 2026-09-03T14:39:43Z | The owner declined the disposable physical API 36 arm64 benchmark for this candidate. No `benchmarkData.json` was produced and `check-benchmark-thresholds.sh` did not run, so no startup or frame-timing claim exists for 1.5.0/7 and the accepted baseline is unchanged. Emulator timing is never threshold evidence. This waiver covers this candidate only; the gate is not removed from `RELEASING.md`. Residual risk accepted by the owner: an unmeasured startup or frame regression. The changes since the last measured release are dependency bumps plus `301df82` (bundle-only ABI-split change), `b9c53bd` (colour-constant file split), and `4a47962` (Kotlin plugin re-land), none of which alter product logic. |
+
+### Disposable-AVD qualification (worker)
+
+Target: sole ADB device `Pixel6_Scratch`, API 37 Google Play arm64-v8a image,
+booted headless `-no-window -read-only -no-snapshot-load -no-snapshot-save
+-gpu host`, animation scales 0, device PIN set for app lock, `play-universal.apk`
+installed after uninstalling the inherited build. The read-only overlay was
+discarded at shutdown.
+
+`RELEASING.md` smoke checklist, all seven steps:
+
+| Step | Status | Evidence |
+|---|---|---|
+| 1 Fresh launch opens the local workspace | PASS | Home reached with no Welcome surface, no Google prompt, and no authorization request. |
+| 2 Project, task with a checklist item, tag | PASS | Project `Smoke Project`; task `Smoke Task` with checklist item (`0/1 complete`) and tag (`1 selected`). |
+| 3 Force-stop and relaunch persists | PASS | Both records and the tag and checklist item present after restart. |
+| 4 `.otvault` export then import, counts match | PASS | Export wrote a 14,534-byte archive and reported 0 attachments. A marker task was added afterwards, then the archive was imported: the preview declared 20 records and 0 attachments, the replacement warning and passphrase note rendered, and after `Replace vault` the workspace held exactly the pre-export project and task with the tag and checklist item, while the post-export marker task was correctly absent. |
+| 5 App lock, background past the delay, unlock | PASS | Lock enabled at `Immediately`; backgrounding then relaunching showed the lock overlay; device-credential unlock returned to Home, which rendered with the theme background. |
+| 6 Today widget renders counts | PASS | Widget placed on the launcher shows `1 · 0` with the accessibility text `1 open today · 0 overdue`, matching the single task then due today. |
+| 7 Quick Add launcher shortcut | PASS | The `app.opentasks.action.QUICK_ADD` shortcut opens the Quick Add sheet. The Quick Settings tile was also added and tapped, and opens the same sheet. |
+
+Additional Step 10 observations available without physical hardware:
+
+| Check | Status | Evidence |
+|---|---|---|
+| Reminder delivery | PASS | A task due today at a time four minutes ahead with reminder `At time` armed exactly one `RTC_WAKEUP` `DELIVER_REMINDER` alarm at that instant and posted a notification when it arrived: channel `task_reminders`, `category=reminder`, two actions, `vis=PRIVATE` with title the task name and text the due timestamp, and a public lock-screen version reading `Task reminder` / `Open Open Tasks to view it`. The `task_reminders` and `daily_digest` channels exist at importance 3. |
+| Accessibility at 200% font scale | PASS | At `font_scale 2.0` Home and Tasks render without loss, and the bottom navigation drops its five text labels while retaining all five content descriptions for screen readers, matching `shouldShowNavigationLabels`. Restoring 1.0 returns the labels. |
+| Share hand-off (FileProvider) | PASS | Insights → Generate executive dashboard → `Share HTML` produced the plaintext disclosure, the include-task-details switch, and a system chooser reading `Sharing 1 file` for a generated `open_tasks_executive_*.html`. Nothing was sent to any recipient. |
+| Browser hand-off for the privacy policy | PASS for the app's behaviour; page render not observed | More → Privacy policy emitted `act=android.intent.action.VIEW dat=https://ksdaklmk.github.io/…` from the app's uid to the device's registered https handler (`com.android.chrome/…IntentDispatcher`); no Open Tasks WebView activity exists. The page itself did not render because this fresh AVD's Chrome shows its own first-run Terms of Service screen, which the worker did not accept on the owner's behalf; the deployed page was already verified anonymously over HTTPS in the Task 6 entries. |
+| Print | NOT APPLICABLE | The repository contains no `PrintManager`, `PrintHelper`, `ACTION_PRINT`, or `PrintAttributes` usage in any main source set; reporting is delivered as the downloadable or shareable HTML dashboard above. |
+| Android backup package restore | PENDING — physical device | The package prepares and reports its generation on the AVD, but this image's Backup Manager is disabled and its transport is the Google transport, so a platform restore cannot be exercised here. |
+| Attachments | PENDING — owner account | Attachment content requires a connected encrypted Drive backup, so no attachment could be created on the AVD. |
+
+One test-harness artifact, not an app defect: two identically titled reminder
+probe tasks exist because a worker automation batch ran twice. The
+application's own counts stayed self-consistent throughout (three open tasks
+across three rows, one overdue after the due time passed, and the project
+workbench correctly reporting no tasks because none was assigned to it).
+
+### Outcome
+
+Step 10 is complete for this candidate under the recorded owner waiver, with
+the Android backup package restore and attachment items carried forward as
+PENDING. No Critical or High defect is open. Task 11 may proceed: re-hash the
+AAB immediately before upload and confirm it still equals the hash above.
