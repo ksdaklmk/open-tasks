@@ -238,7 +238,10 @@ race KSP while release Hilt sources are generated.
 
 ## Style
 
-- Colors are authored as OKLCH via `oklch(...)` in `:core:designsystem`. Never introduce hex color literals. A `PreToolUse` hook blocks `.kt` writes containing `Color(0x` outside `core/designsystem`.
+- Colors are authored as OKLCH via `oklch(...)` in `:core:designsystem`. Never introduce hex color literals.
+  `oklch()` stays in `Oklch.kt`, never in `OpenTasksTheme.kt`:
+  `OpenTasksColors` must not touch the theme facade while initialising, or
+  `LightColorScheme` captures transparent colours (`OklchTest`). A `PreToolUse` hook blocks `.kt` writes containing `Color(0x` outside `core/designsystem`.
 - `OpenTasksTheme` is light-only, even under a dark device configuration. Do
   not add a dark scheme or theme preference.
 - Spacing uses the 4 dp scale (4, 8, 12, 16, 24, 32, 48, 64). Typography uses Material roles only — no ad-hoc sizes in feature code. Dynamic Color is disabled.

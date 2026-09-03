@@ -1,6 +1,78 @@
 # Open Tasks Handoff
 
-## Current state — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
+## Current state — Task 9 qualified on `4a47962`, Step 10 owner gates next, 3 September 2026
+
+This section is authoritative for the Play programme and for repository and
+CI health, and supersedes every checkpoint below it.
+
+### What happened today
+
+Task 8 closed with brand verification deferred (`ce6bfb2`). Task 9 then
+found three defects, all fixed on `main`:
+
+- `301df82`: the first ever `:app:bundleRelease` failed because ABI splits
+  plus `shrinkResources` cannot be bundled by AGP 9.3.1 (issue 402800800);
+  bundle invocations now drop the splits, the APK set is unchanged, and
+  CLAUDE.md/RELEASING.md record the rule.
+- `b9c53bd`: a class-initialisation cycle in `core:designsystem` left
+  `MaterialTheme` with an all-transparent colour scheme whenever
+  `OpenTasksColors` initialised before the theme facade, which any cold
+  start with app lock enabled does. The app drew no themed text, icons,
+  or filled surfaces; only elements with explicit colours survived and the
+  Android window background showed through. It has shipped since the app
+  lock landed (1.4.0 reproduces it). `oklch()` now lives in `Oklch.kt`
+  and `OklchTest` guards the order.
+- `c9c51e2` wrongly blamed the Kotlin Gradle plugins 2.4.10 bump on a
+  confounded bisect; `4a47962` re-lands the bump. Dependabot `#23` stays
+  closed as landed.
+
+The lesson is in the ledger and the qualification memory: semantics-only
+instrumented tests cannot see a transparent theme. A pixel check of the
+Home header after a **locked cold start** now belongs in every
+disposable-AVD release gate.
+
+### Task 9 result
+
+Build commit `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate
+1.5.0/7, no version code consumed. Steps 1 to 9, 11, and the
+manifest-bound part of Step 12 are PASS in the ledger entry committed
+with this section; the AAB is
+`app/build/outputs/bundle/release/app-release.aab` (SHA-256
+`019db088…cb885`) with `app-release.apks` and `play-universal.apk`
+beside it, all three signing gates run by the owner on this exact
+candidate. Step 10 is PENDING and owner-present: physical API 36 arm64
+benchmark, physical connected suite, backup-package restore,
+browser/print/share, notification delivery, quick tile, accessibility and
+font scale, and the credentialed Drive gates (which also cover the
+attachment item the AVD cannot seed). Task 11 (upload to internal
+testing) must not start before Step 10 closes; re-hash the AAB
+immediately before upload.
+
+### Environment
+
+`Pixel6_Scratch` was booted headless (`-no-window -read-only
+-no-snapshot-load -no-snapshot-save -gpu host`) as the sole ADB target and
+stopped after Step 9; every read-only boot needs `locksettings set-pin`
+again for app lock. The scratch UI driver was `uiautomator dump` plus
+`input tap`, and a header-region colour count on `screencap` output was
+the pixel oracle (1 colour = nothing drawn; theme background is
+(247,247,247), the window background (250,250,250)). bundletool 1.18.3
+sits at `/Users/kk/Tools/`. The `google-play-submission` worktree tip
+`6f22490` remains a stale ancestor of `main`.
+
+### CI
+
+`4a47962`: Android run `33748773138` green on `verify`, `release`,
+`benchmark`, and the compact API 36 lane; expanded API 37.0 observe-only
+failure; Security run `33748773080` green. Dependabot queue empty.
+
+### Resume, in order
+
+1. Step 10 with the owner present and a disposable physical device, per
+   `RELEASING.md` and the plan; append its evidence to the ledger.
+2. Task 11 upload of the exact `app-release.aab` after re-hashing it.
+
+## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 
 This section is authoritative for the Play programme and for repository and
 CI health, and supersedes every checkpoint below it.

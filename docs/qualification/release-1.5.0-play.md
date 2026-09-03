@@ -303,3 +303,62 @@ value is recorded.
 Task 8 is closed. Resume from the authoritative section at the top of
 `HANDOFF.md`; Task 9 begins from a clean commit at or after the one that
 carries this entry.
+
+## Entry — 2026-09-03T13:01:03Z — worker — Task 9 candidate qualification
+
+Build commit: `4a47962f961e21869df76cf6545a0530cd5856d5`
+Candidate: `versionName` 1.5.0, `versionCode` 7 (no version code consumed;
+no Play upload, track, tester, review, or publication exists).
+
+Two earlier candidates on the same version code were built and superseded
+today without any upload: `301df82` (first bundle build) and `c9c51e2`
+(a mistaken Kotlin plugin revert). Their artifacts are discarded; every
+PASS below binds to the hashes in this entry only.
+
+Tools: AGP 9.3.1, Gradle 9.7.1, Kotlin Gradle plugins 2.4.10, Compose BOM
+2026.08.00 (Material 3 1.4.0), build-tools 36.0.0 (zipalign, apksigner,
+aapt2), bundletool 1.18.3 (SHA-256 verified against the pinned value),
+Xcode llvm-objdump, JDK 26 for bundletool/keytool, daemon JDK 21.
+
+### Defects found by this task and fixed on `main`
+
+| Commit | Defect | Evidence |
+|---|---|---|
+| `301df82` | `:app:bundleRelease` failed in `buildReleasePreBundle`: ABI splits plus `shrinkResources` emit one shrunk-resources file per split and AGP 9.3.1 rejects the bundle (issue 402800800). Reproduced from a clean build directory. Bundle invocations now drop ABI splits; the APK set is unchanged. | Failure log before, `BUILD SUCCESSFUL` after; APK sizes identical before and after. |
+| `b9c53bd` | Blank UI after any cold start with app lock enabled: `OpenTasksColors` initialised by calling `oklch()` in the theme facade, whose static initialiser built `LightColorScheme` from still-zero fields, so every `MaterialTheme` colour was transparent for the process. Pre-existing: reproduced on 1.4.0/6, in debug and release, on host-GPU and SwiftShader AVDs; a warm relock did not trigger it. `oklch()` moved to `Oklch.kt`; `OklchTest` guards the order. | Home header region after PIN unlock: 1 colour and window background (250,250,250) before; 229+ colours and theme background (247,247,247) after, on 1.4.0→candidate upgrade, fresh candidate, and repeated cold starts. |
+| `4a47962` | Re-lands the Kotlin Gradle plugins 2.4.10 bump that `c9c51e2` had reverted on a confounded bisect (fresh installs versus an upgraded locked install). | The blank reproduced on the 2.3.21 plugins and on 1.4.0. |
+
+### Gates
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Step 1 bundletool | PASS | `bundletool-all-1.18.3.jar` downloaded once with owner approval; `shasum -a 256 -c` OK. |
+| Step 2 freeze | PASS | Clean tree at the build commit; 1.5.0/7. |
+| Step 3 repository and supply-chain gates | PASS | `testDebugUnitTest lintDebug :app:assembleDebug` `BUILD SUCCESSFUL` (553 tasks); `verify-actions-workflow.sh`, `verify-release-size-script.sh`, `verify-release-bundle-script.sh` exit 0; `cyclonedxBom` OK with all 15 modules, Room 2.8.4, SQLCipher 4.18.0, Tink 1.23.0/1.18.0, Bouncy Castle 1.79/1.84, and no local path or credential (only the public repository URL). Android run `33748773138`: `verify`, `release`, `benchmark`, compact API 36 lane green; expanded API 37.0 lane failed before any test (observe-only class). Security run `33748773080` green. |
+| Step 4 direct APK set | PASS | `check-release-size` within baseline deltas; owner ran `verify-release-apk.sh` on all three APKs with the release fingerprint through `read -s`: `all checks passed`. |
+| Step 5 AAB build | PASS | Single `:app:bundleRelease` with the upload properties file; no source diff. |
+| Step 6 AAB authentication | PASS | Owner ran `verify-release-bundle.sh` with the upload fingerprint from the upload keystore: `all checks passed` (bundletool validate, JAR signature, upload signer, manifest, ABI, 16 KB ELF). Manifest audit: permissions ACCESS_NETWORK_STATE, FOREGROUND_SERVICE, INTERNET, POST_NOTIFICATIONS, RECEIVE_BOOT_COMPLETED, SCHEDULE_EXACT_ALARM, USE_BIOMETRIC, WAKE_LOCK, DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION; exported components MainActivity, QuickAddTileService (BIND_QUICK_SETTINGS_TILE), GMS RevocationBoundService, Glance GlanceRemoteViewsService (BIND_REMOTEVIEWS), WorkManager SystemJobService (BIND_JOB_SERVICE) and DiagnosticsReceiver (DUMP), ProfileInstallReceiver (DUMP); native libs sqlcipher and androidx.graphics.path for arm64-v8a and x86_64; `debuggable` false; target 37, min 36. |
+| Step 7 Play-like universal APK | PASS | Owner ran bundletool `build-apks --mode=universal` with the app-signing key (passwords at the prompt only); `zipalign -c -P 16 -v 4` `Verification successful`; signer equals the app-signing key, not the upload key. |
+| Step 8 1.4.0 reproduction | PASS | Rebuilt from tag `v1.4.0` in a detached temporary worktree (removed afterwards); 1.4.0/6; signer matched the release fingerprint on the owner's terminal. |
+| Step 9 offline upgrade and fresh install | PASS on the disposable `Pixel6_Scratch` AVD (API 37 Google Play arm64-v8a image, headless `-gpu host`, device PIN set for app lock) | Seeded on 1.4.0: project with summary and note, task with description, High priority, tag, due date, 1-day reminder, 30-minute estimate, checklist item, running 25/5 focus cycle and timer, app lock (5 minutes), Android backup package, Today widget. `adb install -r` of `play-universal.apk`: `Success`, first-install time retained, FOCUS_PHASE_BOUNDARY and DELIVER_REMINDER alarms retained, widget retained, app-lock prompt then PIN unlock, every seeded value present in the editor, project, and settings; backup package at the current local generation. Pixel checks after unlock, after a force-stop cold start through the lock, and on the editor, project, and privacy screens all render with the theme background. `pm clear` then fresh start: Home immediately (no Welcome, no Google prompt, no lock), renders, and Backup & recovery shows the optional Drive UI. Attachments cannot be seeded without the owner's Google account. |
+| Step 10 release qualification | PENDING — owner-present | Physical API 36 arm64 benchmark, full connected suite on physical hardware, Android backup package restore, browser/print/share, notification delivery, quick tile, accessibility and font scale, and the credentialed Drive backup/list/restore/takeover/delete-history gates are not executed. |
+| Step 11 hashes | PASS | Below; re-hash the AAB immediately before upload. No native debug-symbols archive was generated. |
+| Step 12 declaration reconciliation | PASS for manifest-bound rows | `docs/google-play/store-listing.md` rows that waited on the final AAB audit now cite this entry; runtime and Console-wording rows stay PENDING for Step 10 and Task 11. |
+
+### Candidate hashes (SHA-256)
+
+| Artifact | Bytes | SHA-256 |
+|---|---|---|
+| `app-release.aab` | 12,158,942 | `019db0881f5770a35d4d1ab2c3a14574fbcda1994d15ba9a0657cb1e249cb885` |
+| `app-release.apks` | 8,844,954 | `dc3d94751e15c45c66c95beb6c4e0e6958ac099cce6ed0afc21685ca5266740d` |
+| `play-universal.apk` | 8,844,656 | `7e8fd3cc3671d4b8c1553c90b6f12595642ca3665794c6f66a3703752fb04cc0` |
+| `app-arm64-v8a-release.apk` | 10,020,081 | `c44623aa539ecf362c7efdaac667a77e13d8b4e381c9384852e8ffed9f251b44` |
+| `app-x86_64-release.apk` | 10,151,203 | `d0ecaf0db251a43bf8ecf425ce0ae1510db134c20781be7365ce3680cc9cd866` |
+| `app-universal-release.apk` | 12,281,286 | `58e92e6df83e3493546710c31062b8a0896d7592f1a8245ce063ff8d77f48a90` |
+| `mapping.txt` | 96,202,818 | `84f4bd0e50d8bd3847c9ec09a6100a1b9952d2cd85abbd4a42fe3f38ebda9b61` |
+| `bom.json` | — | `89a93fcb4e6294de226977c25d7780514febbed1f6a5ee7c9a2404d9c48ef76c` |
+| `bom.xml` | — | `86415cc01bbe07d25409b3fe7844c8d51bfdeeed8d47e12cdf514d3ea8c6ccad` |
+| `/private/tmp/open-tasks-v1.4.0.apk` (1.4.0/6) | 12,114,299 | `62191206ec771f790a2050a96b74a18c5b677a3eb8ba13a98517e93f79d2a48b` |
+
+No certificate fingerprint, password, account, token, or private contact is
+recorded. The Pixel6_Scratch AVD was stopped after this entry.
