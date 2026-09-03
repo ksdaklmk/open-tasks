@@ -1,6 +1,118 @@
 # Open Tasks Handoff
 
-## Current state — CI health repair paused at the Fold wait fix, 2 September 2026
+## Current state — Fold cause fixed, Dependabot queue in progress, 2 September 2026
+
+This section is authoritative for repository and CI health and supersedes
+the CI-health checkpoint below it. The Google Play Task 8 section further
+down remains authoritative for the Play programme, which still waits on the
+owner's DNS-verifiable custom domain.
+
+### Fold continuity root cause
+
+The two `FoldContinuityInstrumentedTest` launches never failed because vault
+creation was slow; creation was never started. The project's compose rules
+are the `androidx.compose.ui.test.junit4.v2` variants, and the v2
+environment runs composition on a `StandardTestDispatcher` (confirmed in the
+`ui-test-android` 1.11.4 sources: "The v2 APIs use StandardTestDispatcher
+instead of UnconfinedTestDispatcher"). The production new-vault flow starts
+from `LaunchedEffect { recoveryViewModel.startWithoutRestoring() }` in
+`MainActivity.RecoverySurface`, and under that dispatcher the effect body
+only runs when the rule advances its scheduler (`waitUntil`, `waitForIdle`,
+any action or assertion). `awaitCreatedVault()` polled the runtime manager
+with a bare `SystemClock.sleep` loop, so the effect stayed queued at any
+budget, which is why the 60 s experiment changed nothing. Before `047e144`
+the tests clicked "Continue offline", a click handler that called the view
+model directly, so the harness never needed to drive an effect. The manual
+launches worked because the production `Recomposer` uses the real frame
+clock. The "creation takes 10 to 12 s" reading was therefore wrong.
+
+`ad18ba2` replaces the loop with `composeRule.waitUntil` (v2 `waitUntil`
+runs the scheduler's due tasks first, then advances one frame per
+iteration). On the scratch AVD the class passes 4 of 5 with the expected
+Fold skip; `consumedDigestIntentDoesNotReplayHomeAfterRecreation` reaches
+Active in 2.5 s and `cancelledQuickAddIntentDoesNotReopenAfterRecreation`
+in 3.3 s. CLAUDE.md's Tests section now records the rule. Android run
+`33642147550` on `ad18ba2`: `verify`, `release`, and `benchmark` green; the
+expanded API 37.0 lane failed before any test ran (system server crash,
+split-APK install failures, "Starting 0 tests" in all seven modules), which
+is its known observe-only emulator class; the compact API 36 lane is green:
+all seven connected modules, 539 tests, zero failures, in 23 min 26 s. The
+compact lane had been red since `047e144`; it is now repaired.
+
+### Dependabot queue
+
+Every Dependabot library PR fails `verify` for one reason: Gradle
+dependency verification is on (`gradle/verification-metadata.xml`,
+`verify-metadata=true`, signatures off), and Dependabot cannot add
+checksums. The working procedure, now in `RELEASING.md` and CLAUDE.md, is
+to land each bump on `main` with its metadata: run
+`--write-verification-metadata sha256` twice (`testDebugUnitTest lintDebug`,
+then `:app:assembleRelease cyclonedxBom`, never lint and release together),
+prune the superseded component blocks by hand (the writer only adds), and
+cross-check every added checksum against the source repository's `.sha256`
+sidecars. Dependabot should close its PR once `main` carries the version;
+confirm after pushing and close stragglers by hand. Pinned-action bumps
+must change `scripts/verify-actions-workflow.sh` in the same commit.
+
+Committed on `main` today, after `ad18ba2`:
+
+- `4d0e8fd` retitled `docs/qualification/stage9-board-flow-automation.md`
+  and replaced its stale "Steps 5-6 are placeholders" intro (the last
+  open item from the previous checkpoint).
+- `54cf335` bumps configure-pages 5→6.0.0, upload-pages-artifact 4→5.0.0,
+  deploy-pages 4→5.0.0 (Node 24 releases, no workflow input changes), and
+  codeql-action init and analyze together to v4.37.9. Each SHA was checked
+  against the upstream tag object with `gh api`; Dependabot's CodeQL SHA in
+  `#22` was an older v4 and was not used. `scripts/verify-actions-workflow.sh`
+  carries the same values and passes. Supersedes `#22`, `#28`, `#29`, `#30`.
+- `1ce5509` bumps the Gradle wrapper to 9.7.1 (checksum equals the
+  published `gradle-9.7.1-bin.zip.sha256`) and SQLCipher to 4.18.0 (its
+  three metadata entries equal Maven Central's sidecars; 4.17.0 pruned).
+  Host gate green; `:core:data:connectedDebugAndroidTest` 225/225 on the
+  scratch AVD. Supersedes `#20`, `#24`.
+
+`#25` and `#26` (adaptive 1.3.0 and compose-bom 2026.08.00, which moves
+Compose ui, foundation, runtime, animation, and ui-test from 1.11.4 to
+1.12.0 while Material 3 stays 1.4.0) are prepared as the unpushed local
+head commit `build: bump Compose BOM to 2026.08.00 and adaptive to 1.3.0`:
+catalog changed, both metadata writes done, the 67 superseded 1.11.4,
+adaptive 1.2.0, and bom 2026.06.01 component blocks pruned, the
+release-side write re-added none of them, and the host gate is green. No
+connected run has executed against Compose 1.12.0 yet, so it stays
+unpushed; `git status -sb` shows `main` one ahead of `origin/main`.
+
+Not started: `#23` (Kotlin plugins 2.3.21→2.4.10). Only the compose
+compiler and serialization Gradle plugins use that version; AGP 9.3.1
+already compiles against `kotlin-stdlib` strictly 2.4.0, so 2.4.10 plugins
+are plausible but unproven. It needs the catalog change, both metadata
+writes, the host gate, and a connected run. If the gate rejects it, close
+`#23` with the reason instead of pinning around it.
+
+Still open on CI: the expanded API 37.0 lane stays observe-only by ruling.
+
+### Environment notes
+
+The disposable `Pixel6_Scratch` AVD was booted headless (`-no-window
+-read-only -no-snapshot-load -no-snapshot-save -gpu host`) as the sole ADB
+target for every connected run above and was stopped at this pause. The
+`google-play-submission` worktree tip `6f22490` is now an ancestor of
+`main`; its HANDOFF.md is older than this file.
+
+### Resume, in order
+
+1. Confirm the compact API 36 lane on the pushed head is green (run
+   `33642147550` for `ad18ba2`, then the run for the pushed head); the
+   expected compact result is the whole seven-module matrix with only the
+   established skips.
+2. Run the seven-module connected gate on the scratch AVD against the
+   local Compose head commit (or push it and read the compact lane); keep
+   it only when the UI modules pass, then confirm `#25` and `#26` closed.
+3. Work `#23` as described above, then confirm every superseded Dependabot
+   PR closed.
+4. Continue the Play programme from the Task 8 section below once the
+   owner supplies the custom domain.
+
+## Superseded checkpoint — CI health repair paused at the Fold wait fix, 2 September 2026
 
 This section is authoritative for repository and CI health. The Google Play
 Task 8 section below it remains authoritative for the Play programme, which

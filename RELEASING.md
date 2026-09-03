@@ -139,12 +139,19 @@ recorded.
 ### Supply-chain qualification
 
 `gradle/verification-metadata.xml` is the reviewed SHA-256 allow-list for
-resolved build inputs. Regenerate it only with the complete gate command,
+resolved build inputs. Regenerate it only with the complete gate, split into
+two invocations because `lintDebug` and `:app:assembleRelease` must never
+share one (AGP lint can race KSP while release Hilt sources are generated),
 then review every change rather than accepting a checksum merely because the
 build requested it:
 
+    ./gradlew --write-verification-metadata sha256 testDebugUnitTest lintDebug
     ./gradlew --write-verification-metadata sha256 \
-      testDebugUnitTest lintDebug :app:assembleRelease cyclonedxBom
+      :app:assembleRelease cyclonedxBom
+
+The writer only adds entries: prune the superseded versions by hand, and
+cross-check every added checksum against the `.sha256` sidecar the source
+repository publishes for that artifact.
 
 The aggregate CycloneDX JSON and XML files must contain the application
 modules plus Room, SQLCipher, Tink, and Bouncy Castle. They must not contain

@@ -60,6 +60,12 @@ race KSP while release Hilt sources are generated.
 - **No Kotlin Android Gradle plugin is applied anywhere.** Modules apply only `com.android.application`/`com.android.library` and rely on AGP 9's built-in Kotlin support. There is no `kotlin.android` alias in the catalog — do not "fix" this.
 - Sources live in `src/main/kotlin`, not `src/main/java`.
 - All versions come from `gradle/libs.versions.toml`. Configuration cache is on, so anything added must be config-cache compatible.
+- Dependency verification is on: every version bump must add the new
+  artifacts' SHA-256 entries to `gradle/verification-metadata.xml` (the two
+  `--write-verification-metadata sha256` invocations in `RELEASING.md`),
+  prune the superseded entries, and cross-check the added checksums against
+  the repository's published `.sha256` sidecars. Dependabot PRs cannot merge
+  on their own for this reason; land the bump on `main` and the PR auto-closes.
 - `compileSdk`/`targetSdk` 37, `minSdk` 36, Java 17 source/target, daemon toolchain JDK 21.
 
 ## Architecture rules
