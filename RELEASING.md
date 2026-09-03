@@ -371,6 +371,9 @@ proven. Then build the Play artifact once with the upload key:
 The sole output is
 `app/build/outputs/bundle/release/app-release.aab`. Once accepted as a
 candidate, do not rebuild it in place.
+The bundle invocation disables the ABI splits that the direct APK set uses
+(AGP issue 402800800 rejects per-split shrunk resources in a bundle), so
+keep the APK set and the AAB in separate Gradle invocations.
 
 Load the expected upload-certificate SHA-256 from its independent owner record
 without putting it on the command line or in release evidence:

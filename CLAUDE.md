@@ -59,6 +59,9 @@ race KSP while release Hilt sources are generated.
 
 - **No Kotlin Android Gradle plugin is applied anywhere.** Modules apply only `com.android.application`/`com.android.library` and rely on AGP 9's built-in Kotlin support. There is no `kotlin.android` alias in the catalog — do not "fix" this.
 - Sources live in `src/main/kotlin`, not `src/main/java`.
+- `app/build.gradle.kts` disables ABI splits whenever a requested task name
+  contains `bundle` (AGP issue 402800800). Never request `assemble` and
+  `bundle` tasks in one invocation.
 - All versions come from `gradle/libs.versions.toml`. Configuration cache is on, so anything added must be config-cache compatible.
 - Dependency verification is on: every version bump must add the new
   artifacts' SHA-256 entries to `gradle/verification-metadata.xml` (the two

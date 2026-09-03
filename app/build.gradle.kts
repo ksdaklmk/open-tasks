@@ -69,9 +69,16 @@ android {
         }
     }
 
+    // ponytail: AGP 9.3.1 cannot bundle a variant with ABI splits enabled
+    // (issuetracker.google.com/402800800: minifyReleaseWithR8 emits one
+    // shrunk-resources file per split and buildReleasePreBundle expects one),
+    // so bundle invocations drop the splits; Play splits the AAB itself.
+    val buildingBundle = gradle.startParameter.taskNames.any {
+        it.contains("bundle", ignoreCase = true)
+    }
     splits {
         abi {
-            isEnable = true
+            isEnable = !buildingBundle
             reset()
             include("arm64-v8a", "x86_64")
             isUniversalApk = true
