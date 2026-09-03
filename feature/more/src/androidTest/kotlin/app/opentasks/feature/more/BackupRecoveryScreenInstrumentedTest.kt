@@ -884,8 +884,18 @@ class BackupRecoveryScreenInstrumentedTest {
             .performScrollTo()
             .assertHeightIsAtLeast(48.dp)
             .performClick()
+        // The sheet column uses imePadding(): the submit button moves while
+        // the keyboard animates in, and a click dispatched mid-animation can
+        // miss it (one such miss in a loaded six-module run). Wait for the
+        // IME to settle the way the passphrase-sheet test does.
+        val imeBottom = AtomicInteger(0)
+        val imeAnimationRunning = AtomicBoolean(false)
+        observeDialogIme(imeBottom, imeAnimationRunning)
         composeRule.onNodeWithTag("encrypted-current-passphrase")
             .performTextInput("correct horse battery")
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            imeBottom.get() > 0 && !imeAnimationRunning.get()
+        }
         composeRule.onNodeWithTag("encrypted-secret-submit").performClick()
 
         assertEquals("correct horse battery", deleted.get())
