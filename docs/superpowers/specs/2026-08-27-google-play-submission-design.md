@@ -377,6 +377,15 @@ brand or identity verification before showing the chosen app name and logo.
 Any request from the Console is treated as a gate and resolved with the public
 policy, support, branding, and exact scope evidence.
 
+Amendment, 3 September 2026: Google's brand verification requires the
+homepage to be hosted on a domain the project owner has verified at DNS
+level, which the shared `github.io` zone cannot provide, and it is optional
+for apps that request only non-sensitive scopes. The owner chose to defer
+brand verification rather than adopt a custom domain. The consent screen
+therefore shows Google's unbranded app identity until a custom domain is
+adopted later. Brand verification is not a gate for Tasks 9 to 14, and the
+deployed Pages URLs remain the listing, in-app, and OAuth values.
+
 The credentialed release test authorizes Drive, creates an encrypted backup,
 lists it, restores it through the existing verified takeover path, and confirms
 that core app use still performs no authorization request.

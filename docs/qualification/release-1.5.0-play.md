@@ -278,3 +278,28 @@ Resume only from the new authoritative section at the top of `HANDOFF.md`.
 Do not broaden scope, register the upload certificate as OAuth delivery,
 remove the public verification file, submit another brand review, or start Task
 9 until the custom-domain plan amendment is approved and Task 8 closes.
+
+## Entry — 2026-09-03T08:15:51Z — worker — Task 8 closure with brand verification deferred
+
+This entry closes Task 8 under the owner's decision of 3 September 2026 to
+defer OAuth brand verification instead of adopting a custom domain. It
+supersedes the BLOCKED and PENDING-amendment rows of the 2026-08-29 pause
+entry. No Cloud Console, DNS, Play, key, device, candidate, or publication
+action occurred; no account, client ID, token, secret, or private contact
+value is recorded.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Owner decision | PASS — recorded | The owner chose to keep the deployed `github.io` Pages URLs and defer brand verification. The spec's OAuth section and the plan's Task 8 Steps 4 and 5 carry dated amendments; `docs/google-play/store-listing.md` records the closure. |
+| Google rule | PASS — official guidance read on 3 September 2026 | Google's OAuth verification guidance (`support.google.com/cloud/answer/9110914` and `13464321`) states that an app using only non-sensitive scopes need not complete verification, that brand verification is a lighter optional process required only to display the app name and logo on the consent screen, and that the homepage must be hosted on a verified domain the developer owns. |
+| Source authorization boundary | PASS — re-run at `979a133` | `rg` over `app/src/main` and `app/src/debug` finds `AuthorizationRequest` and `DRIVE_APPDATA_SCOPE` only in `GoogleDriveAuthorizationManager.kt` and the debug-only qualification activity, both requesting exactly `https://www.googleapis.com/auth/drive.appdata`. The only `default_web_client_id`/`client_secret`/`server_client_id` match is the negative assertion in `RemoteBackupBoundaryInstrumentedTest.kt`. |
+| Audience, scope, and Android clients | PASS — carried forward | The 2026-08-29 entry's `External`, `In production`, single-scope, and two-client evidence stands; the Console was neither changed nor re-inspected for this entry. |
+| Branding fields | PARTIAL PASS — carried forward | App name, public URLs, and existing private contacts remain saved; the app name is not shown on the consent screen and no logo exists. |
+| OAuth brand verification | DEFERRED — not a gate | No third review was submitted, no custom domain was adopted, and no workaround was applied. Users see Google's unbranded app identity on the consent screen until a custom domain is adopted under a separately approved change. Google's guidance does not state the exact unbranded rendering. |
+| Public Search Console verification | PASS — retained | `site/googlebfb12df764b54328.html` stays deployed and the URL-prefix properties stay verified. |
+| Outside-allowlist consent flow | PENDING — moved | Proven by the owner-present credentialed Drive gates in Task 9 Step 10 and Task 11 rather than as a Task 8 configuration check. |
+| Candidate and release state | PENDING — Task 9 next | No immutable candidate, AAB, APK set, APK, mapping, symbols, SBOM, Play upload, release, track, tester, review submission, production-access request, tag, or publication exists. Android run `33728285482` on `979a133` is green on `verify`, `release`, `benchmark`, and the compact API 36 lane; the expanded API 37.0 lane failed before any test ran, its known observe-only class. |
+
+Task 8 is closed. Resume from the authoritative section at the top of
+`HANDOFF.md`; Task 9 begins from a clean commit at or after the one that
+carries this entry.

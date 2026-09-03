@@ -1,6 +1,65 @@
 # Open Tasks Handoff
 
-## Current state — compact lane green, Dependabot queue closed, 3 September 2026
+## Current state — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
+
+This section is authoritative for the Play programme and for repository and
+CI health, and supersedes every checkpoint below it.
+
+### What changed
+
+The owner decided on 3 September to defer OAuth brand verification instead
+of adopting a custom domain. Google's guidance, read the same day, says an
+app that requests only non-sensitive scopes need not complete verification,
+that brand verification is optional and only controls whether the app name
+and logo appear on the consent screen, and that the homepage must sit on a
+verified domain the developer owns. Open Tasks requests only `drive.appdata`,
+so the only consequence is an unbranded consent screen; Drive backup and
+Play submission are unaffected.
+
+Task 8 is closed as DEFERRED, not PASS, by the commit `docs: record
+production OAuth setup`. It amends the spec's OAuth section, the plan's
+Task 8 Steps 4 and 5, `docs/google-play/store-listing.md`, and appends a
+closure entry to `docs/qualification/release-1.5.0-play.md`. The deployed
+Pages URLs and `site/googlebfb12df764b54328.html` remain the in-app,
+listing, and OAuth values. No Console, DNS, Play, key, device, or
+publication action occurred. Do not submit another brand review, adopt a
+domain, broaden the Drive scope, or register the upload certificate as a
+delivery identity without a separately approved change.
+
+### CI
+
+Android run `33728285482` on `979a133`: `verify`, `release`, `benchmark`,
+and the compact API 36 lane green; the expanded API 37.0 lane failed before
+any test started, its observe-only class. The Security workflow is green and
+the Dependabot queue is empty.
+
+### Task 9 prerequisites the owner must supply
+
+Task 9 ("Build once and qualify the exact candidate off-Play" in
+`docs/superpowers/plans/2026-08-27-google-play-submission-plan.md`)
+continues on `main`; the `google-play-submission` worktree tip `6f22490`
+is a stale ancestor and holds nothing newer. Steps that need the owner:
+
+- Step 1: approval to download `bundletool-all-1.18.3.jar` from the
+  official GitHub release into `/Users/kk/Tools`, which does not exist
+  yet; the plan pins its SHA-256 and the download is refused on mismatch.
+- Steps 4 and 6: the release and upload certificate fingerprints, typed
+  through `read -s` from the owner's independent record, never derived from
+  an artifact or printed.
+- Step 7: keystore passwords typed at bundletool's own prompts.
+- Steps 9 and 10: the disposable `Pixel6_Scratch` AVD is a Google Play
+  API 37.0 image and can host the offline install and 1.4.0 upgrade proof;
+  the physical API 36 arm64 benchmark and the credentialed Drive gate need
+  an owner-present physical device. Never use `Pixel_10_Pro_Fold`.
+
+### Resume, in order
+
+1. Task 9 Step 2 (freeze the clean build commit) and Step 3 (repository and
+   supply-chain gates) on `main`; record nothing in the ledger until
+   Step 13.
+2. Steps 1 and 4 onward with the owner present for the items above.
+
+## Superseded checkpoint — compact lane green, Dependabot queue closed, 3 September 2026
 
 This section is authoritative for repository and CI health and supersedes
 the 2 September checkpoints below it. The Google Play Task 8 section
@@ -279,7 +338,7 @@ not already committed and push; confirm the compact lane is green; then work
 the Dependabot queue; then continue the Play programme from the Task 8
 section below once the owner supplies the custom domain.
 
-## Current state — Google Play Task 8 paused at DNS domain gate — 29 August 2026
+## Superseded checkpoint — Google Play Task 8 paused at DNS domain gate — 29 August 2026
 
 This is the authoritative resume point for the Google Play submission. It
 supersedes the older Task 6 Play checkpoint below wherever the two conflict.

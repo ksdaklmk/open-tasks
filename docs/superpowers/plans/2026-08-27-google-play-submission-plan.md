@@ -1280,12 +1280,23 @@ or identity verification, satisfy it with the deployed public pages, exact app
 name/logo, verified owner contact, and scope evidence. Do not add broader Drive
 scopes to work around a review.
 
+Amended 3 September 2026: Google's brand verification requires the homepage
+on a domain the owner has verified at DNS level, which `github.io` cannot
+provide, and it is optional for apps that request only non-sensitive
+scopes. The owner deferred brand verification; the deployed Pages URLs stay
+the in-app, listing, and OAuth values, and this step closes as DEFERRED
+rather than PASS. Do not submit another review or adopt a domain without a
+separately approved change.
+
 - [ ] **Step 5: Verify production status and record evidence**
 
 Confirm an ordinary Google account outside any Testing-user allowlist can reach
 the authorization consent flow without the Testing mode's 100-user/seven-day
 limits. Full credentialed backup/restore is executed on the final installed
 candidate in Tasks 9 and 11; this step proves configuration only.
+
+Amended 3 September 2026: the outside-allowlist consent proof moves to the
+credentialed Drive gates in Task 9 Step 10 and Task 11.
 
 Update the listing/declaration rationale and ledger with publishing status,
 URLs, exact scope, package, registered delivery-certificate count, and private
