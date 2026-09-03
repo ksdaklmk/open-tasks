@@ -1,6 +1,83 @@
 # Open Tasks Handoff
 
-## Current state — Fold cause fixed, Dependabot queue in progress, 2 September 2026
+## Current state — compact lane green, Dependabot queue closed, 3 September 2026
+
+This section is authoritative for repository and CI health and supersedes
+the 2 September checkpoints below it. The Google Play Task 8 section
+further down remains authoritative for the Play programme, which still
+waits on the owner's DNS-verifiable custom domain.
+
+### What landed
+
+The compact API 36 lane is green on every head pushed since the Fold fix:
+run `33642147550` (`ad18ba2`, the Fold fix, 539 tests), run `33721919307`
+(`0e8faf4`, the docs and action/wrapper/SQLCipher bumps), and run
+`33723083715` (`d93e86a`, the Compose bump), and run `33725804321`
+(`5f131ad`, the Kotlin plugins bump). On each the `verify`,
+`release`, and `benchmark` jobs were also green, and the only failure was
+the expanded API 37.0 lane, which keeps failing before any test starts
+(system server crash, split-APK install failures, "Starting 0 tests") and
+stays observe-only by ruling.
+
+Commits after `ad18ba2`, in order:
+
+- `4d0e8fd` retitled `docs/qualification/stage9-board-flow-automation.md`.
+- `54cf335` pinned-action bumps (configure-pages 6.0.0,
+  upload-pages-artifact 5.0.0, deploy-pages 5.0.0, codeql-action init and
+  analyze v4.37.9) with `scripts/verify-actions-workflow.sh` in step.
+- `1ce5509` Gradle wrapper 9.7.1 and SQLCipher 4.18.0.
+- `0e8faf4` docs: the Fold root cause, the dependency-verification
+  procedure (RELEASING.md, CLAUDE.md), and the 2 September checkpoint.
+- `de59d94` compose-bom 2026.08.00 (Compose 1.12.0, Material 3 still
+  1.4.0) and adaptive 1.3.0.
+- `d93e86a` hardened
+  `BackupRecoveryScreenInstrumentedTest.cloudAttachmentsBlockShowsCacheUsageAndGuardsContentDeletion`:
+  it missed its submit click once in a loaded six-module local run on
+  Compose 1.12.0 and then passed alone, in its module (96/96), and in its
+  class; the sheet column uses `imePadding()`, so the test now observes the
+  dialog IME and waits for it to settle before clicking, as the
+  passphrase-sheet test already did.
+- `5f131ad` Kotlin Gradle plugins 2.4.10 (evidence below); pushed after
+  the cold replicate passed.
+
+Dependabot closed `#22`, `#28`, `#29`, and `#30` itself once `main`
+carried the action SHAs; `#20`, `#24`, `#25`, and `#26` were closed by hand
+with the superseding commit and run numbers; `#23` was closed the same way
+once run `33725804321` was green. The Dependabot queue is empty.
+
+### Kotlin 2.4.10 evidence
+
+`5f131ad` bumps the compose compiler and serialization plugin ids to
+2.4.10 (the build already compiled against kotlin-stdlib 2.4.0 through AGP
+9.3.1). Host gate green. The first local seven-module connected run under
+it passed six modules (97, 225, 23, 37, 52, 96 tests) but
+`:feature:home:mergeExtDexDebugAndroidTest` failed with `D8:
+java.lang.OutOfMemoryError: Java heap space` in the Gradle daemon
+(`org.gradle.jvmargs=-Xmx4g`, parallel). Kotlin compilation itself runs in
+a separate Kotlin daemon (a 2.8 GB process appeared with the bump), so the
+exhaustion was D8 merging seven test APKs in parallel. A faithful CI-shape
+replicate (`clean`, `--no-build-cache`, all seven modules in one
+invocation, same 4 GB heap) then passed all seven modules (`BUILD
+SUCCESSFUL in 12m 25s`, 539 tests, zero failures), so the exhaustion was a
+transient of the warm parallel run, not a 2.4.10 defect. If CI ever shows
+the same `D8` heap error, raise `org.gradle.jvmargs` rather than pinning
+Kotlin back.
+
+### Environment notes
+
+The disposable `Pixel6_Scratch` AVD was booted headless as the sole ADB
+target for every connected run above and was stopped at this pause. The
+`google-play-submission` worktree tip `6f22490` remains an ancestor of
+`main`.
+
+### Resume, in order
+
+1. Continue the Play programme from the Task 8 section below once the
+   owner supplies the custom domain. Nothing else is open on CI or in the
+   Dependabot queue; the next push only needs the compact lane to stay
+   green.
+
+## Superseded checkpoint — Fold cause fixed, Dependabot queue in progress, 2 September 2026
 
 This section is authoritative for repository and CI health and supersedes
 the CI-health checkpoint below it. The Google Play Task 8 section further
