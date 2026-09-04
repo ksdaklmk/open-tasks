@@ -174,23 +174,35 @@ AAB audit first.
 
 ## Asset manifest contract
 
-Every asset remains `PENDING — captured from final release UI` until Task 10.
+All ten assets are captured and owner-approved (4 September 2026). The eight
+screenshots come from the qualified candidate's release build at build commit
+`d36b44eb64088e2721cd36de9479c7bf55b363d2`, 1.5.0/7, on the disposable
+`Pixel6_Scratch` AVD: phone viewport 1080 × 1920 at 420 dpi, large-screen
+viewport 1920 × 1080 at density 240, which renders the real navigation-rail
+layout rather than a stretched phone image. `icon-512.png` is a byte-exact
+copy of the owner-approved Play icon; `feature-graphic-1024x500.png` is
+composed from that icon's own glyph geometry. Privacy review: synthetic
+workspace content only, Google Drive disconnected, no account chooser, name,
+avatar or address shown, no attachment or imported file, app lock off, title
+privacy off, light theme at 100% font, and SysUI demo mode fixing the clock
+at 09:30 while hiding mobile and notification icons so no device identifier
+or notification preview appears.
 All screenshot workspace content must be synthetic. Exclude account names,
 account/device identifiers, notification previews, real or identifying
 attachment names, recovery passphrases/secrets, debug UI and private data.
 
 | Filename | Required dimensions | Required content | Alt text | Status |
 |---|---:|---|---|---|
-| `icon-512.png` | 512 × 512 | Approved Open Tasks Ember launcher icon; PNG at most 1,024 KiB | Open Tasks launcher icon. | PENDING — captured from final release UI |
-| `feature-graphic-1024x500.png` | 1024 × 500 | Opaque Ember `#C64E2B` field, approved white-card/charcoal task glyph and the words “Open Tasks”; no device/provider/review/price/ranking claim | Open Tasks name and task glyph on an ember background. | PENDING — captured from final release UI |
-| `phone-01-home.png` | 1080 × 1920 | Actual phone Home with today's synthetic plan and search action | Open Tasks Home showing today's synthetic plan and search. | PENDING — captured from final release UI |
-| `phone-02-tasks.png` | 1080 × 1920 | Actual phone Tasks with useful synthetic grouping, checklist and reminder state | Grouped synthetic tasks with a checklist and reminder. | PENDING — captured from final release UI |
-| `phone-03-project.png` | 1080 × 1920 | Actual phone project planning/detail surface with synthetic content | A synthetic project planning and detail screen. | PENDING — captured from final release UI |
-| `phone-04-more-backup.png` | 1080 × 1920 | Actual phone More showing Privacy policy and Backup & recovery without implying Drive is required | More options with Privacy policy and optional Backup and recovery. | PENDING — captured from final release UI |
-| `large-01-home.png` | 1920 × 1080 | Actual expanded/adaptive Home with a synthetic workspace | Open Tasks Home in its expanded layout with synthetic tasks. | PENDING — captured from final release UI |
-| `large-02-project-board.png` | 1920 × 1080 | Actual large-screen project board/planning layout with synthetic content | A synthetic project board in the large-screen planning layout. | PENDING — captured from final release UI |
-| `large-03-schedule.png` | 1920 × 1080 | Actual large-screen Schedule with synthetic dates/tasks | Schedule in the large-screen layout with synthetic planned tasks. | PENDING — captured from final release UI |
-| `large-04-more-backup.png` | 1920 × 1080 | Actual large-screen More/Backup & recovery without account identity or mandatory-Drive implication | More and optional Backup and recovery in the large-screen layout. | PENDING — captured from final release UI |
+| `icon-512.png` | 512 × 512 | Approved Open Tasks Ember launcher icon; PNG at most 1,024 KiB | Open Tasks launcher icon. | PASS — `d760aeda4aa7dc9a216040bed13b268838d925928c56efe8923d1d86f5aeb5f0` |
+| `feature-graphic-1024x500.png` | 1024 × 500 | Opaque Ember `#C64E2B` field, approved white-card/charcoal task glyph and the words “Open Tasks”; no device/provider/review/price/ranking claim | Open Tasks name and task glyph on an ember background. | PASS — `bb49e935195fd596e37258570266e1e5451ee0d3af753d1567feab4ec127e0e5` |
+| `phone-01-home.png` | 1080 × 1920 | Actual phone Home with today's synthetic plan and search action | Open Tasks Home showing today's synthetic plan and search. | PASS — `9ebda0fe811f3f6440f495638e044807e8d62ca39a268246c579be26e4d77374` |
+| `phone-02-tasks.png` | 1080 × 1920 | Actual phone Tasks with useful synthetic grouping, checklist and reminder state | Grouped synthetic tasks with a checklist and reminder. | PASS — `7c89a651c601950db226a90827141410969629e7813a0e068fe891445901b37f` |
+| `phone-03-project.png` | 1080 × 1920 | Actual phone project planning/detail surface with synthetic content | A synthetic project planning and detail screen. | PASS — `a01b614e0f73ad8eafd0712e86957c33924a8e533c3a27393c857f6367740df9` |
+| `phone-04-more-backup.png` | 1080 × 1920 | Actual phone More showing Privacy policy and Backup & recovery without implying Drive is required | More options with Privacy policy and optional Backup and recovery. | PASS — `71c9b960ff2666dbaca49bf0b3071ecdccace0b05cc03c857fb0fa7dd9e72e37` |
+| `large-01-home.png` | 1920 × 1080 | Actual expanded/adaptive Home with a synthetic workspace | Open Tasks Home in its expanded layout with synthetic tasks. | PASS — `a0f397bf3ba9b5601a708bad3fef5c5507ea825a858f702462ee84bb63e6bac1` |
+| `large-02-project-board.png` | 1920 × 1080 | Actual large-screen project board/planning layout with synthetic content | A synthetic project board in the large-screen planning layout. | PASS — `556ee07403f38b685fa1352a4cd3f0babe12fcecf896c6ab0b36a29303176d12` |
+| `large-03-schedule.png` | 1920 × 1080 | Actual large-screen Schedule with synthetic dates/tasks | Schedule in the large-screen layout with synthetic planned tasks. | PASS — `adc834122a72fff2a36f661e5c9b96e85f2b94e1f5ba1747794e70454c070c9b` |
+| `large-04-more-backup.png` | 1920 × 1080 | Actual large-screen More/Backup & recovery without account identity or mandatory-Drive implication | More and optional Backup and recovery in the large-screen layout. | PASS — `8392085867779966d86600a004917bf19d76a7658f48a44408f3736896bbd515` |
 
 No translation, custom store listing, store-listing experiment or video is part
 of the first submission.
