@@ -1,109 +1,141 @@
 # Open Tasks Handoff
 
-## Current state — Tasks 1-10 complete, Task 11 upload is next, 4 September 2026
+## Current state — Tasks 1-10 complete, paused before the Play upload, 4 September 2026
 
 This section is authoritative for the Play programme and for repository and
-CI health, and supersedes every checkpoint below it.
+CI health, and supersedes every checkpoint below it. The owner paused here
+and will resume later. Nothing has ever been uploaded to Play and version
+code 7 is unconsumed, so no deadline or consumed identifier is at risk.
 
-### The candidate, ready to upload
+### The one thing to do next
 
-Build commit `d36b44eb64088e2721cd36de9479c7bf55b363d2`, 1.5.0/7. Upload
-`app/build/outputs/bundle/release/app-release.aab`, SHA-256
-`128301e5a2de071d82c5fbc8b291515e72941645092b794bd5232a3d2be6df8f`,
-12,160,276 bytes, plus `app/build/outputs/mapping/release/mapping.txt`
-(96 MB). No native debug-symbol archive exists, so there is nothing else to
-attach. Re-hash the AAB immediately before upload; release artifacts are not
-byte-reproducible, so any rebuild produces a new hash and invalidates every
-artifact-bound gate.
+Task 11 is entirely owner Console work up to the point where Play reports
+back. Everything the worker can do is done.
 
-The 4 September candidate on `4a47962` (AAB `019db088…cb885`) is superseded
-and must not be uploaded. Nothing has ever been uploaded and version code 7
-is unconsumed.
+### The artifact to upload
 
-All three owner signing gates PASS on this artifact, recorded in the ledger:
-Step 4 `verify-release-apk.sh` over the three APKs, Step 6
-`verify-release-bundle.sh` on the AAB, and Step 7 bundletool
-`build-apks` with zipalign and a signer check confirming the delivered APK
-carries the app-signing key, not the upload key. The pre-upload immutability
-gate also passes: the ledger's build commit is an ancestor of `HEAD` and the
-AAB still hashes to the recorded value.
+Build commit `d36b44eb64088e2721cd36de9479c7bf55b363d2`, 1.5.0/7.
 
-### Tasks 1-10 are complete
+| What | Where | SHA-256 |
+|---|---|---|
+| Bundle to upload | `app/build/outputs/bundle/release/app-release.aab` | `128301e5a2de071d82c5fbc8b291515e72941645092b794bd5232a3d2be6df8f` |
+| Mapping to attach | `app/build/outputs/mapping/release/mapping.txt` | `0fb3190037bcfb4c017f7038056a2d68c7a385175d0e7fe91f3efd4b64abfc8c` |
 
-Task 10 closed in `2633a69`. The ten owner-approved listing assets are
-committed in `5ff8cb5` with the manifest in
-`docs/google-play/store-listing.md` carrying each file's dimensions, SHA-256
-and alt text, all verified against the files on disk.
+No native debug-symbol archive exists, so there is nothing else to attach.
+**Re-hash the AAB immediately before upload.** Release artifacts are not
+byte-reproducible across invocations, so any rebuild produces new hashes and
+invalidates every artifact-bound gate, which would mean asking the owner to
+re-run the three signing gates again. The superseded candidates
+`019db088…cb885` (4a47962) and `25ba67a9…` (3229760) must never be uploaded.
 
-The Home 0/0 defect found during capture is fixed on `main` (`64d2e61`):
-both repositories restate project task counts in the read projection through
-`ProgressRules.withTaskCounts` in `core:domain`, leaving the stored columns
-alone because undo payloads, the import-undo guard and backup records
-compare against what Room's DAO returns. `ProjectsScreen`'s now-redundant
-inline recompute is open cleanup, not a bug.
+If the artifacts have been cleaned from `app/build/` when work resumes,
+rebuild from the same commit and then re-run Task 9 Steps 4, 6 and 7 before
+uploading; the recorded PASSes bind to the hashes above, not to the commit.
 
-### Task 11, the next work
+### Everything that is already proven on this artifact
 
-Step 1 is done. Steps 2 to 5 are owner Console work:
+- Host gate, supply-chain scripts and SBOM green; CI on `d36b44e` and every
+  later docs commit green on `verify`, `release`, `benchmark`, the compact
+  API 36 lane and Security. The expanded API 37.0 lane fails before any test
+  starts, which is its known observe-only class.
+- Owner-run signing gates all PASS: `verify-release-apk.sh` over the three
+  APKs, `verify-release-bundle.sh` on the AAB, and bundletool `build-apks`
+  with zipalign plus a signer check confirming the delivered APK carries the
+  app-signing key rather than the upload key.
+- Pre-upload immutability gate passes: the ledger's build commit is an
+  ancestor of `HEAD` and the AAB still hashes to the recorded value.
+- Upgrade proof on the disposable AVD against this exact artifact: a seeded
+  1.4.0 workspace survived `adb install -r` intact, with the original install
+  time retained, and the fresh start after clearing data opens the local
+  workspace in 5 s. Home renders correctly after a locked cold start.
+- Ten owner-approved listing assets committed in `5ff8cb5`, with the manifest
+  in `docs/google-play/store-listing.md` carrying every file's dimensions,
+  SHA-256 and alt text, each verified against the file on disk.
 
-1. Fill the Console draft from `docs/google-play/store-listing.md`, which
-   holds the exact en-GB app name, short and full description, release
-   notes, the Data Safety evidence table, the App Content answers and the
-   reviewer notes. Category Productivity, free, no ads, all Play-supported
-   countries, 13 and over, not in Families. Privacy and support URLs are the
-   deployed GitHub Pages ones. Use the support email already verified on the
-   account and do not commit it. Any Console question that disagrees with
-   the document is a stop, not a paperwork exception.
-2. Upload the ten committed assets from `docs/google-play/assets/`.
+### Task 11, in order, when the owner resumes
+
+1. Fill the Console draft from `docs/google-play/store-listing.md`, which has
+   the exact en-GB name, short and full description, release notes, Data
+   Safety evidence, App Content answers and reviewer notes. Productivity,
+   free, no ads, all Play-supported countries, 13 and over, not in Families,
+   with the deployed GitHub Pages privacy and support URLs. Use the support
+   email already verified on the account and do not commit it. Any Console
+   question that disagrees with the document is a stop, not a paperwork
+   exception.
+2. Upload the ten assets from `docs/google-play/assets/`.
 3. Create the internal testing release with the exact AAB and its mapping
    file, using the committed release notes.
 4. Before making it available, confirm App integrity shows the existing
    release certificate as the app-signing key and the separate upload
-   certificate as the upload key, then read Console's displayed SHA-256 and
-   compare it with the ledger value above.
-5. Add the owner's account as an internal tester and copy the opt-in link.
+   certificate as the upload key. Read Console's displayed SHA-256 and
+   compare it with the table above; a mismatch is a stop.
+5. Add the owner's account as an internal tester and keep the opt-in link.
 6. Wait for app-bundle validation, policy checks and the pre-launch report,
-   then triage every finding.
+   then triage every finding before promoting.
 
-**Decided, 4 September 2026.** The owner has no second Android device, so
-Task 11 Step 6's Play-delivered update proof is replaced by the sideload
-upgrade proof already completed on the disposable emulator against the final
-artifact, plus the identical-signer evidence from Step 7. Every seeded record,
-alarm, focus cycle, app-lock setting, widget and backup package survived an
-`adb install -r` with the original install time retained, and the fresh start
-after clearing data still opens the local workspace in 5 s. The residual gap
-is stated in the ledger: Play's own delivery, installer attribution and delta
+**Step 6's update proof is already decided.** The owner has no second Android
+device, so the Play-delivered 1.4.0 update proof is replaced by the emulator
+upgrade proof above plus the identical-signer evidence. The residual gap is
+recorded in the ledger: Play's own delivery, installer attribution and delta
 patching are exercised only by the owner's fresh Play install from the
-internal track on their physical device. Do not sign a Google account into the
-disposable emulator to close it.
+internal track on their physical device. Do not sign a Google account into
+the disposable emulator to close it.
 
-Task 9 Step 10's owner-present physical gates stay as recorded: the Drive
-gate PASS and the physical-benchmark waiver were taken against the earlier
-build of the same source lineage, whose only code delta is the
+Task 9 Step 10's owner-present physical gates stand as recorded: the Drive
+gate PASS and the physical-benchmark waiver were taken against an earlier
+build of the same source lineage, whose only code delta since is the
 project-progress projection.
 
-### Earlier defects, unchanged
+### Defects found and fixed during this programme
 
-`301df82` bundle ABI splits; `b9c53bd` the colour-constant
-class-initialisation cycle that blanked the UI after any locked cold start;
-`4a47962` re-landing Kotlin 2.4.10 after a confounded bisect. Every
-disposable-AVD release gate must still include a pixel check of the Home
-header after a locked cold start.
+- `301df82` — the first `:app:bundleRelease` failed because ABI splits plus
+  resource shrinking emit one shrunk-resources file per split, which AGP 9.3.1
+  refuses to bundle. Bundle invocations now drop the splits.
+- `b9c53bd` — a class-initialisation cycle left `MaterialTheme` with an
+  all-transparent colour scheme after any cold start with app lock enabled, so
+  the app drew no themed text or icons. Pre-existing since the app lock
+  shipped. Guarded by `OklchTest` and a CLAUDE.md rule.
+- `4a47962` — re-landed the Kotlin Gradle plugins 2.4.10 bump after a
+  confounded bisect had wrongly reverted it.
+- `64d2e61` — Home showed `0/0` for every project because it passed the raw
+  snapshot into `ProjectProgressRow`, whose counts are stored columns that no
+  command maintains. Both repositories now restate them in the read projection
+  through `ProgressRules.withTaskCounts`, leaving the store untouched so undo
+  payloads, the import-undo guard and backup records keep comparing against
+  what Room's DAO returns.
 
-### Environment and CI
+Two lessons worth keeping: every disposable-AVD release gate must include a
+pixel check of the Home header after a locked cold start, because semantics
+alone cannot see a transparent theme; and when bisecting a render defect,
+hold the install path and lock state constant, since varying both is what
+produced the wrong Kotlin attribution.
 
-`Pixel6_Scratch` may still be running headless with the seeded synthetic
-workspace and the rebuilt release installed; that state dies with the boot.
-Re-seed with the scratch `seed.py` (resumable, `python3 seed.py N`) and add
-by hand the sixth task, the project due date and the milestone. Every
-read-only boot needs `locksettings set-pin 1234` again for app-lock work and
-the three animation scales set to 0. `keystore.properties` in the repo root
-is still mode 644 and holds passwords; `chmod 600` is advised. bundletool
-1.18.3 is at `/Users/kk/Tools/`; the 1.4.0/6 APK at
-`/private/tmp/open-tasks-v1.4.0.apk`. CI on `d36b44e` and `dd1f459`: `verify`,
-`release`, `benchmark`, the compact API 36 lane and Security all green; the
-expanded API 37.0 lane fails before any test starts, its known observe-only
-class.
+### Open cleanup, none of it blocking
+
+- `ProjectsScreen.kt:202-209` still recomputes project task counts inline.
+  That is now redundant with the repository fix and can be deleted.
+- The merged task branch `claude/laughing-robinson-3192fe` and its worktree
+  under `.claude/worktrees/` were left in place because that background
+  session may still have been running. Remove both once it is idle.
+- `.worktrees/google-play-submission` is a stale ancestor of `main` and can
+  go whenever convenient.
+- `keystore.properties` in the repo root is mode 644 and holds passwords;
+  `chmod 600` is advised.
+
+### Environment
+
+`Pixel6_Scratch` was stopped at this pause, so its seeded workspace is gone;
+it is read-only and keeps nothing across boots. To rebuild that state, boot it
+headless with `-no-window -read-only -no-snapshot-load -no-snapshot-save -gpu
+host`, re-set the device PIN with `locksettings set-pin 1234` for app-lock
+work, zero the three animation scales, then run
+`python3 scripts/seed-listing-workspace.py` and add by hand the sixth task,
+the project due date and the milestone. RELEASING.md now carries the full
+listing-capture recipe including viewports and the SysUI demo-mode commands.
+bundletool 1.18.3 is at `/Users/kk/Tools/`; the authenticated 1.4.0/6 APK is
+at `/private/tmp/open-tasks-v1.4.0.apk` and may not survive a host reboot, in
+which case rebuild it from tag `v1.4.0`. Never touch the protected
+`Pixel_10_Pro_Fold`.
 
 ## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 

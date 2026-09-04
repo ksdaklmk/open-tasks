@@ -435,6 +435,41 @@ and reaches recovery through More → Backup & recovery. Run the owner-present
 Google Drive gate on the physical device without uninstalling, clearing data,
 or running connected tests.
 
+### Capturing the store listing assets
+
+The eight listing screenshots must come from the qualified candidate's own
+release build, on a disposable AVD, with synthetic content only. Seed the
+workspace with:
+
+    python3 scripts/seed-listing-workspace.py
+
+It creates four projects and five tasks with tags, priorities, due dates, a
+checklist and a reminder, and resumes with a task number if a step fails. Add
+by hand a sixth task moved to In progress, the project due date, and one
+milestone, so the planning surfaces are not empty.
+
+Capture the four phone images at `adb shell wm size 1080x1920` (the AVD's own
+420 dpi), and the four large-screen images at `adb shell wm size 1920x1080`
+with `adb shell wm density 240`, which is what makes the app lay out its real
+navigation-rail arrangement instead of a stretched phone view. Reset both with
+`wm size reset` and `wm density reset` afterwards.
+
+Clean the status bar through SysUI demo mode so no account, device identifier
+or notification preview appears:
+
+    adb shell settings put global sysui_demo_allowed 1
+    adb shell am broadcast -a com.android.systemui.demo -e command enter
+    adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0930
+    adb shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false
+    adb shell am broadcast -a com.android.systemui.demo -e command network -e mobile hide
+    adb shell am broadcast -a com.android.systemui.demo -e command network -e wifi show -e level 4 -e fully true
+    adb shell am broadcast -a com.android.systemui.demo -e command battery -e level 100 -e plugged false
+
+Send the demo `exit` command and re-enter it if a duplicate icon appears after
+a viewport change. Before committing, check every file's dimensions and record
+its SHA-256 in the asset manifest, and confirm Google Drive is disconnected in
+each shot so the listing never implies an account is required.
+
 ### Track progression and version codes
 
 Promote the exact immutable AAB through **internal → closed →

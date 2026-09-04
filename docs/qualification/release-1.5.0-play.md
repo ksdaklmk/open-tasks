@@ -679,3 +679,34 @@ produced **no ANR in 90 s** and the widget updated normally to `0 · 0`. It is
 therefore recorded as an unreproduced observation on emulator hardware, not a
 release blocker. If it is ever seen on physical hardware, the place to look
 is the widget update path doing vault work on the broadcast thread.
+
+## Entry — 2026-09-04T11:19:01Z — worker — Programme paused before the Play upload
+
+Tasks 1 to 10 are complete. Task 11 has not started: no Play Console draft,
+upload, release, track, tester, review submission, production-access request,
+tag or publication exists, and version code 7 remains unconsumed.
+
+The candidate that is cleared for upload is build commit
+`d36b44eb64088e2721cd36de9479c7bf55b363d2`, 1.5.0/7, AAB
+`128301e5a2de071d82c5fbc8b291515e72941645092b794bd5232a3d2be6df8f` with
+mapping `0fb3190037bcfb4c017f7038056a2d68c7a385175d0e7fe91f3efd4b64abfc8c`.
+Every artifact-bound PASS in this ledger binds to those hashes rather than to
+the commit, because release artifacts are not byte-reproducible; if the build
+outputs are cleaned before work resumes, rebuild from the same commit and
+re-run Steps 4, 6 and 7 before uploading.
+
+CI at this pause: `verify`, `release`, `benchmark`, the compact API 36 lane
+and Security are green on the build commit and on every later
+documentation-only commit. The expanded API 37.0 lane fails before any test
+starts, its established observe-only class.
+
+Repository additions supporting future capture work:
+`scripts/seed-listing-workspace.py` seeds the synthetic listing workspace on
+a disposable AVD, and RELEASING.md gains a "Capturing the store listing
+assets" section recording the two viewports, the SysUI demo-mode commands and
+the pre-commit checks. Neither changes application code, schema, permissions,
+Drive scope or release identity.
+
+The disposable `Pixel6_Scratch` AVD was stopped; being read-only it retains
+nothing. No credential, account, fingerprint or private contact value was
+recorded anywhere in this programme's evidence.
