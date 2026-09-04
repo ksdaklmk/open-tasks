@@ -1,96 +1,116 @@
 # Open Tasks Handoff
 
-## Current state — Task 10 listing assets in progress, paused by the owner, 4 September 2026
+## Current state — Task 10 blocked on a Home defect, 8 of 10 assets done, 4 September 2026
 
 This section is authoritative for the Play programme and for repository and
-CI health, and supersedes every checkpoint below it. The owner asked for a
-safe pause here and will resume later.
+CI health, and supersedes every checkpoint below it.
 
-### Where the programme stands
+### The blocker: Home shows 0/0 for every project
 
-- Task 9 is complete on build commit
-  `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate 1.5.0/7, AAB
-  `019db088…cb885` in `app/build/outputs/bundle/release/`; every gate is in
-  the two 3 September ledger entries, including the owner's Drive gate PASS
-  on physical hardware and the owner's waiver of the physical benchmark.
-  Nothing has been uploaded and no version code is consumed.
-- **Task 10 (store listing assets) is next and is in progress.** The plan
-  orders it before Task 11. `docs/google-play/assets/` holds two finished,
-  validated, **uncommitted** files: `icon-512.png` (byte-exact copy of the
-  owner-approved Play icon) and `feature-graphic-1024x500.png` (worker
-  composition from the approved glyph geometry; needs the owner's eyes).
-  Their hashes are in the 4 September ledger entry. They stay uncommitted
-  until the owner approves the contact sheet, as Task 10 Step 6 requires.
-- The eight screenshots do not exist yet. Capture recipe that works on
-  `Pixel6_Scratch` (headless `-gpu host`, read-only): `adb shell wm size
-  1080x1920` gives exact 1080 × 1920 `screencap` output at 420 dpi and the
-  app lays out normally; for the four large-screen images use `wm size
-  1920x1080` plus a lower `wm density` (about 240) so the window is wide
-  enough for the expanded layout, and confirm the app really rendered the
-  adaptive arrangement before capturing. Bottom navigation at 1080 × 1920
-  sits at y≈1794 (Home 100, Tasks 320, Projects 540, Schedule 760, More 980).
-  Synthetic content to seed on a fresh install: four projects (Plan the
-  week, Quarterly report, Design review, Venue booking) and five tasks with
-  projects, tags, priorities, due dates this week, one two-item checklist,
-  one 1-day reminder, and one estimate. The Material date picker's day
-  labels follow the device locale: on this fresh boot they read
-  "Today, Friday, September 4, 2026" (month first); read the label from the
-  picker rather than assuming a format, and pick the Due date's "Choose
-  date" as the last match, since the Start one scrolls off. At 1080 × 1920
-  the keyboard can cover a sheet's confirm button; dismiss it with BACK
-  before tapping "Create project" or "Add task". Use the session `ui.py`
-  driver pattern (`uiautomator dump` + `input tap` + `wait`).
-- Task 11 (internal testing upload) follows Task 10 and is mostly owner
-  Console work: fill the draft from `docs/google-play/store-listing.md`,
-  upload the exact AAB and `mapping.txt`, confirm App integrity shows the
-  release certificate as app-signing key and the upload certificate as
-  upload key, compare Console's SHA-256 with the ledger, add the owner's
-  account as tester, then wait for Play's checks. The worker re-hashes the
-  AAB and re-runs `verify-release-bundle.sh` first (owner types the upload
-  fingerprint, or uses the keystore-file form recorded on 3 September).
-  **Open decision for the owner:** Task 11 Step 6 wants a device still on
-  1.4.0 updated through Play, but the owner's phone already runs the
-  candidate from the Drive gate; either use a second Android 16 device or
-  accept the emulator upgrade proof plus identical-signer evidence and do
-  only a fresh Play install.
+Found while capturing the listing screenshots on the qualified candidate.
+`HomeScreen.kt:232` passes `snapshot.projects` straight into
+`ProjectProgressRow`, which renders `completedTasks/totalTasks`. Those are
+stored columns on `ProjectEntity`, written `= 0` when a project is created
+in both repositories and never updated by any command, so Home shows
+`0/0` and an empty progress bar for every project a user creates.
 
-### Defects fixed on 3 September (unchanged since)
+**Scope is Home only.** `ProjectsScreen.kt:202-209` already recomputes both
+counts from the task list before rendering, so the Projects list and the
+project workbench are correct. An earlier note in this session claimed both
+surfaces were wrong; that was taken before any tasks existed, where `0/0`
+was the right answer, and it is superseded. A background task was spawned
+with that overbroad description and the owner started it, so whoever picks
+it up should narrow it to Home and must not "fix" `ProjectsScreen`.
 
-`301df82` bundle ABI-split fix; `b9c53bd` the colour-constant
-class-initialisation cycle that blanked the UI after any locked cold start
-(pre-existing since the app lock landed; guarded by `OklchTest` and a
-CLAUDE.md rule); `4a47962` re-landing Kotlin Gradle plugins 2.4.10 after a
-confounded bisect had reverted it. Every disposable-AVD release gate must
-include a pixel check of the Home header after a locked cold start (see the
-`release-render-check` memory: more than one colour, theme background
-(247,247,247) not window background (250,250,250)).
+Device proof on the candidate: project "Design review" with two tasks, one
+completed, showed "1 open • 1 complete • 0 blocked" on the workbench and
+"0/2" on the Projects list, while Home showed "0/0".
 
-### Environment
+Cheapest fix: enrich `home.projects` where the snapshot is assembled in
+`RoomVaultRepository` and `InMemoryVaultRepository`, which fixes it once and
+would let `ProjectsScreen` drop its local recompute. `HomeSnapshot`
+(`Snapshots.kt:16`) carries `projects` but no task list, so fixing it inside
+`HomeScreen` alone needs the counts passed in. Leave the stored columns
+alone; the backup format carries them.
 
-`Pixel6_Scratch` is stopped; every read-only boot needs `locksettings
-set-pin 1234` again for app lock and the animation scales set to 0.
-bundletool 1.18.3 is at `/Users/kk/Tools/`. The 1.4.0/6 rebuilt APK is at
-`/private/tmp/open-tasks-v1.4.0.apk` (may not survive a reboot; rebuild
-from tag `v1.4.0` if needed). The `google-play-submission` worktree tip
-`6f22490` remains a stale ancestor of `main`. `keystore.properties` in the
-repo root is still mode 644 and holds passwords; `chmod 600` is advised.
+### Task 10 state
 
-### CI
+Eight of ten assets are finished, validated, and **uncommitted** in
+`docs/google-play/assets/`: `icon-512.png` (owner-approved copy),
+`feature-graphic-1024x500.png` (owner approved it on 4 September), three
+phone screenshots (tasks, project, more-backup) and three large-screen
+screenshots (project board, schedule month view, more-backup). Dimensions
+and alpha were checked; the 4 September ledger entry lists them.
 
-`4a47962`: Android run `33748773138` green on `verify`, `release`,
-`benchmark`, and the compact API 36 lane; expanded API 37.0 observe-only
-failure; Security green. Later commits are docs-only. Dependabot queue
-empty.
+`phone-01-home.png` and `large-01-home.png` are **deliberately held out** of
+the asset folder because they show the 0/0 defect. The captures sit in the
+session scratch directory as `PENDING-phone-01-home.png` and
+`PENDING-large-01-home.png` for comparison only. Task 10 cannot close until
+those two are re-captured from a build with the fix.
 
-### Resume, in order
+### How to re-capture (the recipe now works end to end)
 
-1. Owner looks at `docs/google-play/assets/feature-graphic-1024x500.png`
-   and says yes or asks for changes.
-2. Worker captures the eight screenshots with the recipe above, builds the
-   contact sheet, and gets the owner's explicit approval; then finishes the
-   asset manifest in `store-listing.md`, the ledger entry, and the
-   `docs: add Play listing assets` commit.
-3. Task 11 as summarised above, starting with the immutability gate.
+The disposable `Pixel6_Scratch` AVD was left running headless (`-gpu host`,
+read-only) with the candidate installed and the synthetic workspace seeded,
+so a fixed build can be `adb install -r`'d over it and only the two Home
+images re-taken. If that boot is gone, re-seed with the scratch script
+`seed.py` (four projects, five tasks, resumable with `python3 seed.py N`),
+then add by hand the sixth task, the project due date, and the milestone.
+Phone viewport `wm size 1080x1920`; large-screen `wm size 1920x1080` plus
+`wm density 240`, which produces the real navigation-rail layout. Clean the
+status bar with SysUI demo mode (`sysui_demo_allowed 1`, then `enter`,
+`clock -e hhmm 0930`, `notifications -e visible false`, `network -e mobile
+hide`, `network -e wifi show -e level 4 -e fully true`, `battery -e level
+100 -e plugged false`); re-`exit` and re-`enter` if a duplicate wifi icon
+appears. Material date-picker labels follow the device locale and read
+"Today, Friday, September 4, 2026"; read the label from the picker rather
+than assuming a format, and take the Due row's "Choose date" as the last
+match. Dismiss the IME before tapping a sheet's confirm button. The
+notification permission dialog must be tapped by its Button class, not by
+matching the word "Allow", which also matches the dialog title.
+
+### The decision the owner faces
+
+Nothing is uploaded and version code 7 is unconsumed, so the fix can rebuild
+at 1.5.0/7 without burning a code. The cost is re-running the three
+artifact-bound gates the owner performs by hand (Task 9 Steps 4, 6 and 7)
+and re-capturing the two Home screenshots. The alternative is to ship with
+Home showing 0/0, which is visible to every user on the app's first screen.
+Recommendation: fix first, then rebuild and finish Task 10.
+
+### Task 9 (unchanged)
+
+Complete on `4a47962`, candidate 1.5.0/7, AAB `019db088…cb885`, with the
+owner's Drive gate PASS on physical hardware and the owner's waiver of the
+physical benchmark. Three defects were fixed on 3 September: `301df82`
+bundle ABI splits, `b9c53bd` the colour-constant class-initialisation cycle
+that blanked the UI after a locked cold start, and `4a47962` re-landing
+Kotlin 2.4.10 after a confounded bisect. Every disposable-AVD release gate
+must still include a pixel check of the Home header after a locked cold
+start.
+
+### Task 11 (after Task 10)
+
+Mostly owner Console work: fill the draft from
+`docs/google-play/store-listing.md`, upload the exact AAB and `mapping.txt`,
+confirm App integrity shows the release certificate as app-signing key and
+the upload certificate as upload key, compare Console's SHA-256 with the
+ledger, add the owner as tester, then wait for Play's checks. **Open
+decision:** Step 6 wants a device still on 1.4.0 updated through Play, but
+the owner's phone already runs the candidate from the Drive gate; either use
+a second Android 16 device or accept the emulator upgrade proof plus
+identical-signer evidence and do only a fresh Play install.
+
+### Environment and CI
+
+`keystore.properties` in the repo root is still mode 644 and holds
+passwords; `chmod 600` is advised. bundletool 1.18.3 is at `/Users/kk/Tools/`.
+The 1.4.0/6 rebuilt APK is at `/private/tmp/open-tasks-v1.4.0.apk`. Every
+read-only AVD boot needs `locksettings set-pin 1234` again for app-lock work
+and the three animation scales set to 0. `4a47962`: Android run
+`33748773138` green on `verify`, `release`, `benchmark`, and the compact API
+36 lane; expanded API 37.0 observe-only failure; Security green. Later
+commits are docs-only. Dependabot queue empty.
 
 ## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 

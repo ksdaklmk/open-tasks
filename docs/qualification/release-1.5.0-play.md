@@ -442,3 +442,59 @@ disposable `Pixel6_Scratch` AVD (read-only overlay, since discarded): a
 the AVD's 420 dpi, and `play-universal.apk` with four synthetic projects and
 one partially seeded task rendered correctly at that viewport. No screenshot
 was taken, so no listing image exists yet. No Play Console action occurred.
+
+## Entry — 2026-09-04T03:38:53Z — worker — Task 10 asset capture and a defect found
+
+Candidate unchanged: build commit `4a47962f961e21869df76cf6545a0530cd5856d5`,
+AAB `019db0881f5770a35d4d1ab2c3a14574fbcda1994d15ba9a0657cb1e249cb885`.
+Screenshots were taken from that candidate's `play-universal.apk` on the
+disposable `Pixel6_Scratch` AVD, phone viewport `wm size 1080x1920` at the
+AVD's 420 dpi and large-screen viewport `wm size 1920x1080` with
+`wm density 240`, which renders the real expanded navigation-rail layout.
+SysUI demo mode fixed the clock at 09:30 and hid mobile/notification icons so
+no account, device identifier, or notification preview appears. Synthetic
+content only: four projects, six tasks, one milestone, tags, priorities, due
+dates, a checklist, a reminder, and an estimate. Drive stayed disconnected,
+app lock off, light theme, 100% font.
+
+### Assets complete and mechanically validated (uncommitted, pending owner approval)
+
+| Asset | Dimensions | Alpha | Bytes |
+|---|---:|---|---:|
+| `icon-512.png` | 512 × 512 | yes | 9,666 |
+| `feature-graphic-1024x500.png` | 1024 × 500 | no | 13,137 |
+| `phone-02-tasks.png` | 1080 × 1920 | yes | 144,230 |
+| `phone-03-project.png` | 1080 × 1920 | yes | 157,556 |
+| `phone-04-more-backup.png` | 1080 × 1920 | yes | 147,035 |
+| `large-02-project-board.png` | 1920 × 1080 | yes | 144,739 |
+| `large-03-schedule.png` | 1920 × 1080 | yes | 116,926 |
+| `large-04-more-backup.png` | 1920 × 1080 | yes | 110,788 |
+
+The owner approved the feature graphic on 4 September. SHA-256 values are
+recorded when the set is complete and committed, because a re-capture of the
+two held images may accompany a rebuild.
+
+### Defect found by this capture — Home project progress always 0/0
+
+`HomeScreen` (`feature/home/.../HomeScreen.kt:232`) passes `snapshot.projects`
+straight to `ProjectProgressRow`, which prints
+`completedTasks/totalTasks`. Those are stored columns on `ProjectEntity`,
+written `= 0` at project creation in both repositories and never updated by
+any command, so Home shows `0/0` and an empty progress bar for every project
+a user creates, permanently. `ProjectsScreen` is unaffected because it
+recomputes both counts from the task list before rendering
+(`ProjectsScreen.kt:202-209`); the project workbench is likewise correct.
+
+Proof on the candidate build: project "Design review" with two tasks, one
+completed, showed "1 open • 1 complete • 0 blocked" on the workbench and
+"0/2" on the Projects list, while Home showed "0/0".
+
+Impact is cosmetic, with no data loss, but it is on the app's primary screen
+and would appear in the listing. `phone-01-home.png` and `large-01-home.png`
+are therefore **held out of `docs/google-play/assets/`** rather than shipped;
+the pending captures are retained in the session scratch directory. Task 10
+cannot close until they are re-captured.
+
+No Play Console action occurred. Version code 7 remains unconsumed, so a fix
+can rebuild at 1.5.0/7 without burning a version code, at the cost of
+re-running the owner's three artifact-bound signing gates.
