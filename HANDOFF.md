@@ -65,12 +65,17 @@ Step 1 is done. Steps 2 to 5 are owner Console work:
 6. Wait for app-bundle validation, policy checks and the pre-launch report,
    then triage every finding.
 
-**Open decision, needed at Step 6 of Task 11.** The plan wants a device
-still on 1.4.0 updated through the Play Store, but the owner's phone already
-runs a candidate from the Drive gate. Either use a second Android 16 device,
-or accept the emulator upgrade proof plus the identical-signer evidence and
-run only a fresh Play install from the internal track. The owner has not yet
-chosen; record whichever is chosen in the ledger before promoting.
+**Decided, 4 September 2026.** The owner has no second Android device, so
+Task 11 Step 6's Play-delivered update proof is replaced by the sideload
+upgrade proof already completed on the disposable emulator against the final
+artifact, plus the identical-signer evidence from Step 7. Every seeded record,
+alarm, focus cycle, app-lock setting, widget and backup package survived an
+`adb install -r` with the original install time retained, and the fresh start
+after clearing data still opens the local workspace in 5 s. The residual gap
+is stated in the ledger: Play's own delivery, installer attribution and delta
+patching are exercised only by the owner's fresh Play install from the
+internal track on their physical device. Do not sign a Google account into the
+disposable emulator to close it.
 
 Task 9 Step 10's owner-present physical gates stay as recorded: the Drive
 gate PASS and the physical-benchmark waiver were taken against the earlier
