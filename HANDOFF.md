@@ -1,132 +1,101 @@
 # Open Tasks Handoff
 
-## Current state — Task 10 blocked on a Home defect, 8 of 10 assets done, 4 September 2026
+## Current state — Home fix landed, candidate rebuilt, Task 10 assets awaiting approval, 4 September 2026
 
 This section is authoritative for the Play programme and for repository and
 CI health, and supersedes every checkpoint below it.
 
-### The blocker: Home shows 0/0 for every project
+### The Home 0/0 defect is fixed and on `main`
 
-Found while capturing the listing screenshots on the qualified candidate.
-`HomeScreen.kt:232` passes `snapshot.projects` straight into
-`ProjectProgressRow`, which renders `completedTasks/totalTasks`. Those are
-stored columns on `ProjectEntity`, written `= 0` when a project is created
-in both repositories and never updated by any command, so Home shows
-`0/0` and an empty progress bar for every project a user creates.
-
-**Scope was Home only.** `ProjectsScreen.kt:202-209` already recomputed both
-counts from the task list before rendering, so the Projects list and the
-project workbench were always correct. An earlier note in this session
-claimed both surfaces were wrong; that reading was taken before any tasks
-existed, where `0/0` was the right answer, and it is superseded.
-
-### Fixed and landed on `main`, 4 September 2026
-
-Both repositories now restate the counts in the **read projection** through
-the shared `ProgressRules.withTaskCounts` in `core:domain`: Room in
-`buildSnapshot`, whose counted list also feeds `HomeSnapshot.projects`, and
-the in-memory twin through a `publishedWorkspace` flow kept separate from its
-store. The stored columns are deliberately left untouched and documented as
-legacy, because the import-undo guard, `RestoreProject` undo payloads, and
-backup records all compare project records by value against what Room's DAO
-returns; deriving into the store diverged the twins and broke import undo.
-Covered by `InMemoryProjectProgressTest` and
+`64d2e61` makes both repositories restate `completedTasks`/`totalTasks` in
+the **read projection** through the shared `ProgressRules.withTaskCounts` in
+`core:domain`: Room in `buildSnapshot`, whose counted list also feeds
+`HomeSnapshot.projects`, and the in-memory twin through a
+`publishedWorkspace` flow kept separate from its store. The stored columns
+stay untouched and are documented as legacy in CLAUDE.md, because the
+import-undo guard, `RestoreProject` undo payloads, and backup records
+compare project records by value against what Room's DAO returns; deriving
+into the store diverged the twins and broke import undo. Covered by
+`InMemoryProjectProgressTest` (4 tests) and
 `RoomProjectProgressInstrumentedTest`.
 
-Landing this moved `main` past the qualified build commit `4a47962`, so the
-candidate is being rebuilt. Nothing was uploaded and version code 7 is
-unconsumed, so the rebuild stays at 1.5.0/7; the old AAB `019db088…cb885` is
-superseded and must not be uploaded.
+Scope was Home only. `ProjectsScreen.kt:202-209` already recomputed the same
+counts inline, so the Projects list and workbench were always right. That
+inline recompute is now redundant and is **open cleanup**, not a bug.
 
-Device proof on the candidate: project "Design review" with two tasks, one
-completed, showed "1 open • 1 complete • 0 blocked" on the workbench and
-"0/2" on the Projects list, while Home showed "0/0".
+Verified on device: the rebuilt release APK over the seeded workspace shows
+Home ratios `0/2, 0/1, 0/2, 0/1`, matching the Projects list and workbench.
+The pre-fix build showed `0/0` for all four.
 
-The fix taken is the one recorded above: enrich the snapshot in both
-repositories, which fixed it once for every consumer. `HomeSnapshot`
-(`Snapshots.kt:16`) carries `projects` but no task list, so fixing it inside
-`HomeScreen` alone would have needed the counts passed in. Still open as
-cleanup: `ProjectsScreen.kt:202-209` can now drop its local recompute, which
-is verified only by instrumented feature tests.
+### Candidate rebuilt — the old artifact is dead
 
-### Task 10 state
+Build commit `d36b44eb64088e2721cd36de9479c7bf55b363d2`, still 1.5.0/7
+because nothing was ever uploaded and version code 7 was never consumed.
+The 4 September AAB `019db088…cb885` is **superseded and must not be
+uploaded**; the new one is `128301e5…6df8f`. Full hashes and the re-run
+gates are in the 4 September ledger entry. Release artifacts are not
+byte-reproducible across invocations, so any further rebuild produces new
+hashes and invalidates artifact-bound evidence.
 
-Eight of ten assets are finished, validated, and **uncommitted** in
-`docs/google-play/assets/`: `icon-512.png` (owner-approved copy),
-`feature-graphic-1024x500.png` (owner approved it on 4 September), three
-phone screenshots (tasks, project, more-backup) and three large-screen
-screenshots (project board, schedule month view, more-backup). Dimensions
-and alpha were checked; the 4 September ledger entry lists them.
+**Owner must re-run three gates on the new artifact** before upload: Task 9
+Step 4 `verify-release-apk.sh` on the three APKs, Step 6
+`verify-release-bundle.sh` on the new AAB, and Step 7 bundletool
+`build-apks` plus the zipalign and signer checks. The command blocks are
+unchanged from 3 September; the upload fingerprint can be read from its
+keystore with `keytool -storepass:file`.
 
-`phone-01-home.png` and `large-01-home.png` are **deliberately held out** of
-the asset folder because they show the 0/0 defect. The captures sit in the
-session scratch directory as `PENDING-phone-01-home.png` and
-`PENDING-large-01-home.png` for comparison only. Task 10 cannot close until
-those two are re-captured from a build with the fix.
+### Task 10 — all ten assets captured, awaiting owner approval
 
-### How to re-capture (the recipe now works end to end)
+`docs/google-play/assets/` holds all ten, mechanically validated and
+**uncommitted**, because Task 10 Step 6 requires the owner's explicit
+approval of the contact sheet before they are committed or uploaded. The
+owner approved the feature graphic on 4 September; the full sheet was sent
+for review. Hashes are in the ledger entry.
 
-The disposable `Pixel6_Scratch` AVD was left running headless (`-gpu host`,
-read-only) with the candidate installed and the synthetic workspace seeded,
-so a fixed build can be `adb install -r`'d over it and only the two Home
-images re-taken. If that boot is gone, re-seed with the scratch script
-`seed.py` (four projects, five tasks, resumable with `python3 seed.py N`),
-then add by hand the sixth task, the project due date, and the milestone.
-Phone viewport `wm size 1080x1920`; large-screen `wm size 1920x1080` plus
-`wm density 240`, which produces the real navigation-rail layout. Clean the
-status bar with SysUI demo mode (`sysui_demo_allowed 1`, then `enter`,
-`clock -e hhmm 0930`, `notifications -e visible false`, `network -e mobile
-hide`, `network -e wifi show -e level 4 -e fully true`, `battery -e level
-100 -e plugged false`); re-`exit` and re-`enter` if a duplicate wifi icon
-appears. Material date-picker labels follow the device locale and read
-"Today, Friday, September 4, 2026"; read the label from the picker rather
-than assuming a format, and take the Due row's "Choose date" as the last
-match. Dismiss the IME before tapping a sheet's confirm button. The
-notification permission dialog must be tapped by its Button class, not by
-matching the word "Allow", which also matches the dialog title.
+All eight screenshots come from the fixed build on `Pixel6_Scratch`: phone
+1080 × 1920 at 420 dpi, large-screen 1920 × 1080 at density 240 for the real
+navigation-rail layout, synthetic content only, Drive disconnected, app lock
+off, SysUI demo mode fixing the clock and hiding mobile and notification
+icons. When approved, finish the asset manifest in `store-listing.md`
+(replace each `PENDING — captured from final release UI` row with
+dimensions, hash and alt text) and commit with
+`docs: add Play listing assets`.
 
-### The decision the owner faces
-
-Nothing is uploaded and version code 7 is unconsumed, so the fix can rebuild
-at 1.5.0/7 without burning a code. The cost is re-running the three
-artifact-bound gates the owner performs by hand (Task 9 Steps 4, 6 and 7)
-and re-capturing the two Home screenshots. The alternative is to ship with
-Home showing 0/0, which is visible to every user on the app's first screen.
-Recommendation: fix first, then rebuild and finish Task 10.
-
-### Task 9 (unchanged)
-
-Complete on `4a47962`, candidate 1.5.0/7, AAB `019db088…cb885`, with the
-owner's Drive gate PASS on physical hardware and the owner's waiver of the
-physical benchmark. Three defects were fixed on 3 September: `301df82`
-bundle ABI splits, `b9c53bd` the colour-constant class-initialisation cycle
-that blanked the UI after a locked cold start, and `4a47962` re-landing
-Kotlin 2.4.10 after a confounded bisect. Every disposable-AVD release gate
-must still include a pixel check of the Home header after a locked cold
-start.
-
-### Task 11 (after Task 10)
+### Then Task 11
 
 Mostly owner Console work: fill the draft from
-`docs/google-play/store-listing.md`, upload the exact AAB and `mapping.txt`,
-confirm App integrity shows the release certificate as app-signing key and
-the upload certificate as upload key, compare Console's SHA-256 with the
-ledger, add the owner as tester, then wait for Play's checks. **Open
-decision:** Step 6 wants a device still on 1.4.0 updated through Play, but
-the owner's phone already runs the candidate from the Drive gate; either use
-a second Android 16 device or accept the emulator upgrade proof plus
-identical-signer evidence and do only a fresh Play install.
+`docs/google-play/store-listing.md`, upload the **new** AAB and its
+`mapping.txt`, confirm App integrity shows the release certificate as
+app-signing key and the upload certificate as upload key, compare Console's
+SHA-256 with the ledger, add the owner as tester, then wait for Play's
+checks. **Open decision:** Step 6 wants a device still on 1.4.0 updated
+through Play, but the owner's phone already runs a candidate from the Drive
+gate; either use a second Android 16 device or accept the emulator upgrade
+proof plus identical-signer evidence and do only a fresh Play install.
+
+### Earlier defects, unchanged
+
+`301df82` bundle ABI splits; `b9c53bd` the colour-constant
+class-initialisation cycle that blanked the UI after any locked cold start;
+`4a47962` re-landing Kotlin 2.4.10 after a confounded bisect. Every
+disposable-AVD release gate must still include a pixel check of the Home
+header after a locked cold start.
 
 ### Environment and CI
 
-`keystore.properties` in the repo root is still mode 644 and holds
-passwords; `chmod 600` is advised. bundletool 1.18.3 is at `/Users/kk/Tools/`.
-The 1.4.0/6 rebuilt APK is at `/private/tmp/open-tasks-v1.4.0.apk`. Every
-read-only AVD boot needs `locksettings set-pin 1234` again for app-lock work
-and the three animation scales set to 0. `4a47962`: Android run
-`33748773138` green on `verify`, `release`, `benchmark`, and the compact API
-36 lane; expanded API 37.0 observe-only failure; Security green. Later
-commits are docs-only. Dependabot queue empty.
+`Pixel6_Scratch` was left running headless (`-gpu host`, read-only) with the
+seeded synthetic workspace and the rebuilt release installed, so screenshots
+can be retaken without re-seeding; that state dies with the boot. Re-seed
+with the scratch `seed.py` (resumable, `python3 seed.py N`) and add by hand
+the sixth task, the project due date and the milestone. Every read-only boot
+needs `locksettings set-pin 1234` again for app-lock work and the three
+animation scales set to 0. `keystore.properties` in the repo root is still
+mode 644 and holds passwords; `chmod 600` is advised. bundletool 1.18.3 is
+at `/Users/kk/Tools/`; the 1.4.0/6 APK at `/private/tmp/open-tasks-v1.4.0.apk`.
+CI for `d36b44e` was in progress at this checkpoint; the previous head
+`4a47962` was green on `verify`, `release`, `benchmark` and the compact API
+36 lane, with the expanded API 37.0 lane failing before any test as its
+known observe-only class.
 
 ## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 

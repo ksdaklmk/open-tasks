@@ -498,3 +498,81 @@ cannot close until they are re-captured.
 No Play Console action occurred. Version code 7 remains unconsumed, so a fix
 can rebuild at 1.5.0/7 without burning a version code, at the cost of
 re-running the owner's three artifact-bound signing gates.
+
+## Entry — 2026-09-04T04:17:23Z — worker — Rebuilt candidate after the Home progress fix
+
+The 4 September candidate on `4a47962` (AAB `019db088…cb885`) is
+**superseded and must not be uploaded**. Nothing was ever uploaded, so
+version code 7 was never consumed and the rebuild keeps 1.5.0/7.
+
+Build commit: `d36b44eb64088e2721cd36de9479c7bf55b363d2`
+Candidate: `versionName` 1.5.0, `versionCode` 7.
+
+### What changed
+
+`64d2e61` fixes the Home 0/0 defect recorded in the previous entry. Both
+repositories now restate `completedTasks`/`totalTasks` in the read
+projection through the shared `ProgressRules.withTaskCounts` in
+`core:domain`: Room in `buildSnapshot`, whose counted list also feeds
+`HomeSnapshot.projects`, and the in-memory twin through a
+`publishedWorkspace` flow held separate from its store. The stored columns
+are deliberately untouched and documented as legacy in CLAUDE.md, because
+the import-undo guard, `RestoreProject` undo payloads, and backup records
+compare project records by value against what Room's DAO returns; deriving
+into the store diverged the twins and broke import undo. Covered by
+`InMemoryProjectProgressTest` (4 tests) and
+`RoomProjectProgressInstrumentedTest`. `d36b44e` is a documentation-only
+repair of the handoff; no compiled file differs between it and the merge.
+
+### Gates re-run on this build commit
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Step 2 freeze | PASS | Clean worktree at `d36b44e`; 1.5.0/7. |
+| Step 3 host gate | PASS | `testDebugUnitTest lintDebug :app:assembleDebug` `BUILD SUCCESSFUL`, 553 actionable tasks. `verify-actions-workflow.sh`, `verify-release-size-script.sh`, `verify-release-bundle-script.sh` all exit 0. `cyclonedxBom` regenerated; SBOM hashes unchanged from the previous candidate, so the dependency graph is identical. |
+| Step 3 new tests | PASS | `:core:data:testDebugUnitTest --tests "*ProjectProgress*"`: 4 tests, 0 failures — `projectReportsCompletedOverTotalTasksThroughTheWorkspaceSnapshot`, `deletedTasksLeaveTheProjectCount`, `storedProjectRecordKeepsTheColumnsTheCreateCommandWrote`, `emptyProjectReportsZeroOfZero`. |
+| Step 4 release APK set | PASS (size gate) | `check-release-size: all checks passed`; all three splits present. Owner signer authentication PENDING — must be re-run on these hashes. |
+| Step 5 AAB build | PASS | Single `:app:bundleRelease` with the upload properties file; no source diff after building. |
+| Behavioural verification of the fix | PASS | The rebuilt `app-universal-release.apk` installed over the seeded workspace on `Pixel6_Scratch` shows Home ratios `0/2, 0/1, 0/2, 0/1`, matching the Projects list and the workbench. The pre-fix build showed `0/0` for all four. |
+| Step 6 AAB authentication | PENDING — owner | Re-run `verify-release-bundle.sh` against the new AAB hash. |
+| Step 7 Play-like universal APK | PENDING — owner | Re-run bundletool `build-apks` from the new AAB. |
+| Step 10 release qualification | Carried forward | The owner's Drive gate PASS and physical-benchmark waiver were recorded against the previous build of the same source lineage; the code delta is the project-progress projection only. |
+
+### Candidate hashes (SHA-256)
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| `app-release.aab` | 12,160,276 | `128301e5a2de071d82c5fbc8b291515e72941645092b794bd5232a3d2be6df8f` |
+| `app-arm64-v8a-release.apk` | 10,020,081 | `ae1e000bdbd46a82f98fe0fa883587cde482824653519b938bf89eef7149d14e` |
+| `app-x86_64-release.apk` | 10,151,203 | `4edde56a7bb4247b99c2a22590f6379de25758f3dadd0238448a8ce247f93ace` |
+| `app-universal-release.apk` | 12,281,286 | `c5e37d20256cdf3fb806d61ccb9976e400ee9c7ddd899f35558773f4b4e826ff` |
+| `mapping.txt` | — | `0fb3190037bcfb4c017f7038056a2d68c7a385175d0e7fe91f3efd4b64abfc8c` |
+
+Release artifacts are not byte-reproducible across invocations (archive
+metadata differs), so these hashes bind to this build. Re-hash the AAB
+immediately before upload.
+
+### Task 10 assets complete
+
+All ten assets are captured, mechanically validated, and awaiting the
+owner's approval of the contact sheet before they are committed. The eight
+screenshots come from the fixed build's release APK on `Pixel6_Scratch` —
+phone viewport 1080 × 1920 at 420 dpi, large-screen 1920 × 1080 at density
+240 which renders the real navigation-rail layout. Synthetic content only,
+Drive disconnected, app lock off, SysUI demo mode fixing the clock at 09:30
+and hiding mobile and notification icons.
+
+| Asset | Dimensions | Alpha | SHA-256 |
+|---|---:|---|---|
+| `icon-512.png` | 512 × 512 | yes | `d760aeda4aa7dc9a216040bed13b268838d925928c56efe8923d1d86f5aeb5f0` |
+| `feature-graphic-1024x500.png` | 1024 × 500 | no | `bb49e935195fd596e37258570266e1e5451ee0d3af753d1567feab4ec127e0e5` |
+| `phone-01-home.png` | 1080 × 1920 | yes | `9ebda0fe811f3f6440f495638e044807e8d62ca39a268246c579be26e4d77374` |
+| `phone-02-tasks.png` | 1080 × 1920 | yes | `7c89a651c601950db226a90827141410969629e7813a0e068fe891445901b37f` |
+| `phone-03-project.png` | 1080 × 1920 | yes | `a01b614e0f73ad8eafd0712e86957c33924a8e533c3a27393c857f6367740df9` |
+| `phone-04-more-backup.png` | 1080 × 1920 | yes | `71c9b960ff2666dbaca49bf0b3071ecdccace0b05cc03c857fb0fa7dd9e72e37` |
+| `large-01-home.png` | 1920 × 1080 | yes | `a0f397bf3ba9b5601a708bad3fef5c5507ea825a858f702462ee84bb63e6bac1` |
+| `large-02-project-board.png` | 1920 × 1080 | yes | `556ee07403f38b685fa1352a4cd3f0babe12fcecf896c6ab0b36a29303176d12` |
+| `large-03-schedule.png` | 1920 × 1080 | yes | `adc834122a72fff2a36f661e5c9b96e85f2b94e1f5ba1747794e70454c070c9b` |
+| `large-04-more-backup.png` | 1920 × 1080 | yes | `8392085867779966d86600a004917bf19d76a7658f48a44408f3736896bbd515` |
+
+No Play Console action occurred.
