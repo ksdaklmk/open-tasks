@@ -611,3 +611,71 @@ hardware stay as previously recorded — the Drive gate PASS and the
 physical-benchmark waiver were taken against the earlier build of the same
 source lineage, whose only code delta is the project-progress projection.
 No Play Console action has occurred and version code 7 is unconsumed.
+
+## Entry — 2026-09-04T07:35:39Z — worker — Emulator upgrade proof on the final artifact; owner decision on the Play-delivered path
+
+Build commit `d36b44eb64088e2721cd36de9479c7bf55b363d2`, candidate 1.5.0/7.
+Artifact under test: `play-universal.apk`
+`c9ecb9c235d6b12730a12a0d70b8b751cb575bcef1411fa767e9830ef5a6e69d`, the
+owner's Step 7 output derived from AAB `128301e5…6df8f` and signed with the
+app-signing key.
+
+### Owner decision, 4 September 2026
+
+The owner has no second Android device, so **Task 11 Step 6's
+Play-delivered 1.4.0 update proof is replaced by this sideload upgrade proof
+on the disposable emulator**, plus the identical-signer evidence from Step 7.
+The residual gap is recorded plainly: this proves the *artifact* upgrades an
+existing 1.4.0 install without data loss, but it does **not** exercise Google
+Play's own delivery, its installer attribution, or its delta patching. Those
+remain covered only by the fresh Play install the owner performs from the
+internal track on their physical device. Signing into a Google account on the
+disposable emulator was deliberately not attempted.
+
+### Upgrade proof — PASS
+
+Disposable `Pixel6_Scratch` (API 37 Google Play image, arm64-v8a, native
+1080 × 2400 at 420 dpi). Authenticated 1.4.0/6 was installed fresh and seeded
+through the release UI: four projects, five tasks with projects, tags,
+priorities and due dates this week, a two-item checklist, a 1-day reminder, a
+25/5 focus cycle left running, app lock on with a 5-minute delay, an Android
+backup package at generation 33, and the Today widget on the launcher.
+
+`adb install -r` of the candidate, with no uninstall and no data clear:
+
+| Check | Result |
+|---|---|
+| Install | `Success`; `versionCode` 7, `versionName` 1.5.0 |
+| No reinstall | `firstInstallTime` 14:04:58 retained across `lastUpdateTime` 14:27:01 |
+| Records | All five tasks and four projects present; counts `5 open • 0 blocked` and `4 projects • 0 at risk` unchanged |
+| Task detail | Tag `design` (1 selected), checklist `0/2 complete` with both items, project, High priority and the running timer all retained |
+| Alarms | `FOCUS_PHASE_BOUNDARY` `origWhen` 1788507878955 and `DELIVER_REMINDER` `origWhen` 1788602400000 retained |
+| Focus and timer | Cycle still counting down across the upgrade; Home still shows Active timer |
+| App lock | Engaged on next launch; device PIN unlocked it |
+| Widget | Provider still bound, still rendering counts |
+| Backup package | `Package ready`, generation 33 retained |
+| Project progress | Home shows real ratios after the fix |
+| Render check | Home after the locked cold start: 221 header colours, dark share 0.1679, theme background (247,247,247) — not the window background |
+
+### Fresh start after clearing data — PASS
+
+`pm clear` then launch: the local workspace opened automatically in 5 s with
+no Welcome page, no Google prompt and no lock screen; Home rendered (221
+header colours, theme background); Backup & recovery still offers Restore and
+Connect Google Drive as optional.
+
+### Observed but non-reproducing ANR — recorded, not classified as a defect
+
+On the first `pm clear`, Android started the app process **for the widget
+broadcast** and the system reported `ANR in app.opentasks`, reason
+`Broadcast of Intent { act=android.appwidget.action.APPWIDGET_UPDATE …
+cmp=app.opentasks/.widget.TodayWidgetReceiver }`, about 62 s after the
+process start. It coincided with an activity launch racing the same
+brand-new-vault creation (Argon2id, 64 MiB, 3 iterations) on an emulator that
+had been driven by automation for hours. The app recovered fully: a
+force-stop and relaunch reached Home in 5 s. A deliberate reproduction —
+`pm clear` with the widget still placed and no competing activity launch —
+produced **no ANR in 90 s** and the widget updated normally to `0 · 0`. It is
+therefore recorded as an unreproduced observation on emulator hardware, not a
+release blocker. If it is ever seen on physical hardware, the place to look
+is the widget update path doing vault work on the broadcast thread.
