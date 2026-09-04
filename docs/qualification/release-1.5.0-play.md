@@ -576,3 +576,38 @@ and hiding mobile and notification icons.
 | `large-04-more-backup.png` | 1920 × 1080 | yes | `8392085867779966d86600a004917bf19d76a7658f48a44408f3736896bbd515` |
 
 No Play Console action occurred.
+
+## Entry — 2026-09-04T06:57:41Z — worker — Owner signing gates PASS on the rebuilt candidate; Task 10 closed
+
+Build commit `d36b44eb64088e2721cd36de9479c7bf55b363d2`, candidate 1.5.0/7.
+The AAB was re-hashed after the gates and still equals
+`128301e5a2de071d82c5fbc8b291515e72941645092b794bd5232a3d2be6df8f`, so all
+three results bind to the artifact recorded in the previous entry.
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Step 4 direct APK set | PASS | Owner ran `verify-release-apk.sh` over the arm64-v8a, x86_64 and universal APKs with the release fingerprint supplied through `read -s` (length 64): `verify-release-apk: all checks passed`. |
+| Step 6 AAB authentication | PASS | Owner ran `verify-release-bundle.sh` with the upload fingerprint read from the upload keystore (length 64): `verify-release-bundle: all checks passed` — bundletool provenance, JAR signature, upload signer, identity, merged manifest, Drive scope, ABIs and 16 KB ELF alignment. |
+| Step 7 Play-like universal APK | PASS | Owner ran bundletool `build-apks --mode=universal` with the app-signing key, passwords entered only at the prompt. `zipalign -c -P 16 -v 4`: `Verification successful`. `apksigner verify --print-certs`: signer equals the existing app-signing key, not the upload key. Package `app.opentasks`, 1.5.0/7. |
+| Native debug symbols | None generated | `find` over `app/build/outputs` returns no `native-debug-symbols` archive; upload the mapping file only. |
+
+### Step 7 artifact hashes (SHA-256)
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| `app-release.apks` | 8,844,954 | `86afb4422b9e42da30542a08d8b99f06661c655fe8545f4cb761f4f291f024f7` |
+| `play-universal.apk` | 8,844,656 | `c9ecb9c235d6b12730a12a0d70b8b751cb575bcef1411fa767e9830ef5a6e69d` |
+
+### Task 10 closed
+
+The owner approved all ten listing assets on 4 September 2026. They are
+committed in `5ff8cb5` with the manifest in
+`docs/google-play/store-listing.md` carrying each file's dimensions,
+SHA-256 and alt text; every manifest hash was verified against the file on
+disk. Task 10 is complete.
+
+Remaining before upload: Task 9 Step 10's owner-present gates on physical
+hardware stay as previously recorded — the Drive gate PASS and the
+physical-benchmark waiver were taken against the earlier build of the same
+source lineage, whose only code delta is the project-progress projection.
+No Play Console action has occurred and version code 7 is unconsumed.
