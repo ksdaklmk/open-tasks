@@ -1,68 +1,96 @@
 # Open Tasks Handoff
 
-## Current state — Task 9 complete, Task 11 upload next, 3 September 2026
+## Current state — Task 10 listing assets in progress, paused by the owner, 4 September 2026
 
 This section is authoritative for the Play programme and for repository and
-CI health, and supersedes every checkpoint below it.
+CI health, and supersedes every checkpoint below it. The owner asked for a
+safe pause here and will resume later.
 
-### Task 9 is complete
+### Where the programme stands
 
-Build commit `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate 1.5.0/7,
-AAB `019db088…cb885`. Steps 1 to 13 are recorded in
-`docs/qualification/release-1.5.0-play.md` across two entries dated
-2026-09-03T13:01:03Z (build, signing, upgrade proof) and
-2026-09-03T14:39:43Z (Step 10). No version code is consumed and nothing
-has been uploaded.
+- Task 9 is complete on build commit
+  `4a47962f961e21869df76cf6545a0530cd5856d5`, candidate 1.5.0/7, AAB
+  `019db088…cb885` in `app/build/outputs/bundle/release/`; every gate is in
+  the two 3 September ledger entries, including the owner's Drive gate PASS
+  on physical hardware and the owner's waiver of the physical benchmark.
+  Nothing has been uploaded and no version code is consumed.
+- **Task 10 (store listing assets) is next and is in progress.** The plan
+  orders it before Task 11. `docs/google-play/assets/` holds two finished,
+  validated, **uncommitted** files: `icon-512.png` (byte-exact copy of the
+  owner-approved Play icon) and `feature-graphic-1024x500.png` (worker
+  composition from the approved glyph geometry; needs the owner's eyes).
+  Their hashes are in the 4 September ledger entry. They stay uncommitted
+  until the owner approves the contact sheet, as Task 10 Step 6 requires.
+- The eight screenshots do not exist yet. Capture recipe that works on
+  `Pixel6_Scratch` (headless `-gpu host`, read-only): `adb shell wm size
+  1080x1920` gives exact 1080 × 1920 `screencap` output at 420 dpi and the
+  app lays out normally; for the four large-screen images use `wm size
+  1920x1080` plus a lower `wm density` (about 240) so the window is wide
+  enough for the expanded layout, and confirm the app really rendered the
+  adaptive arrangement before capturing. Bottom navigation at 1080 × 1920
+  sits at y≈1794 (Home 100, Tasks 320, Projects 540, Schedule 760, More 980).
+  Synthetic content to seed on a fresh install: four projects (Plan the
+  week, Quarterly report, Design review, Venue booking) and five tasks with
+  projects, tags, priorities, due dates this week, one two-item checklist,
+  one 1-day reminder, and one estimate. The Material date picker's day
+  labels follow the device locale: on this fresh boot they read
+  "Today, Friday, September 4, 2026" (month first); read the label from the
+  picker rather than assuming a format, and pick the Due date's "Choose
+  date" as the last match, since the Start one scrolls off. At 1080 × 1920
+  the keyboard can cover a sheet's confirm button; dismiss it with BACK
+  before tapping "Create project" or "Add task". Use the session `ui.py`
+  driver pattern (`uiautomator dump` + `input tap` + `wait`).
+- Task 11 (internal testing upload) follows Task 10 and is mostly owner
+  Console work: fill the draft from `docs/google-play/store-listing.md`,
+  upload the exact AAB and `mapping.txt`, confirm App integrity shows the
+  release certificate as app-signing key and the upload certificate as
+  upload key, compare Console's SHA-256 with the ledger, add the owner's
+  account as tester, then wait for Play's checks. The worker re-hashes the
+  AAB and re-runs `verify-release-bundle.sh` first (owner types the upload
+  fingerprint, or uses the keystore-file form recorded on 3 September).
+  **Open decision for the owner:** Task 11 Step 6 wants a device still on
+  1.4.0 updated through Play, but the owner's phone already runs the
+  candidate from the Drive gate; either use a second Android 16 device or
+  accept the emulator upgrade proof plus identical-signer evidence and do
+  only a fresh Play install.
 
-Step 10 closed with the owner's Drive gate PASS on their own physical
-device, the disposable-AVD smoke checklist green on all seven steps, and
-these extras green: reminder delivery with a privacy-safe public
-notification, 200% font scale, the FileProvider share chooser, and the
-privacy-policy browser hand-off. **The physical-device performance
-benchmark was waived by the owner for this candidate**, so 1.5.0/7 has no
-startup or frame-timing measurement and the accepted baseline is
-unchanged; the gate itself stays in `RELEASING.md`. Android backup package
-restore and attachment creation stay PENDING because they need physical
-hardware and the owner's Google account respectively.
+### Defects fixed on 3 September (unchanged since)
 
-### Three defects found and fixed today
+`301df82` bundle ABI-split fix; `b9c53bd` the colour-constant
+class-initialisation cycle that blanked the UI after any locked cold start
+(pre-existing since the app lock landed; guarded by `OklchTest` and a
+CLAUDE.md rule); `4a47962` re-landing Kotlin Gradle plugins 2.4.10 after a
+confounded bisect had reverted it. Every disposable-AVD release gate must
+include a pixel check of the Home header after a locked cold start (see the
+`release-render-check` memory: more than one colour, theme background
+(247,247,247) not window background (250,250,250)).
 
-- `301df82`: `:app:bundleRelease` cannot run with ABI splits plus
-  `shrinkResources` on AGP 9.3.1 (issue 402800800); bundle invocations now
-  drop the splits and the APK set is unchanged.
-- `b9c53bd`: a class-initialisation cycle in `core:designsystem` gave
-  `MaterialTheme` an all-transparent colour scheme whenever
-  `OpenTasksColors` initialised before the theme facade, which any cold
-  start with app lock enabled does. The app drew no themed text, icons, or
-  filled surfaces. It had shipped since the app lock landed and 1.4.0
-  reproduces it. `oklch()` now lives in `Oklch.kt` with `OklchTest`
-  guarding the order, and CLAUDE.md carries the rule.
-- `c9c51e2` wrongly reverted the Kotlin plugins 2.4.10 bump on a
-  confounded bisect; `4a47962` re-lands it. Dependabot `#23` stays closed.
+### Environment
 
-Semantics-only instrumented tests cannot see a transparent theme, so every
-release gate on the disposable AVD must now include a pixel check of the
-Home header after a **locked cold start**. The recipe is in the
-`release-render-check` memory: crop the header region, require more than
-one colour, and require the theme background (247,247,247) rather than the
-Android window background (250,250,250).
+`Pixel6_Scratch` is stopped; every read-only boot needs `locksettings
+set-pin 1234` again for app lock and the animation scales set to 0.
+bundletool 1.18.3 is at `/Users/kk/Tools/`. The 1.4.0/6 rebuilt APK is at
+`/private/tmp/open-tasks-v1.4.0.apk` (may not survive a reboot; rebuild
+from tag `v1.4.0` if needed). The `google-play-submission` worktree tip
+`6f22490` remains a stale ancestor of `main`. `keystore.properties` in the
+repo root is still mode 644 and holds passwords; `chmod 600` is advised.
 
 ### CI
 
 `4a47962`: Android run `33748773138` green on `verify`, `release`,
 `benchmark`, and the compact API 36 lane; expanded API 37.0 observe-only
-failure; Security run `33748773080` green. Dependabot queue empty.
+failure; Security green. Later commits are docs-only. Dependabot queue
+empty.
 
 ### Resume, in order
 
-1. Task 11: upload the exact `app-release.aab` to internal testing after
-   re-hashing it, then work the internal-track evidence. The plan's Task 11
-   steps and `RELEASING.md`'s track progression are authoritative, and
-   every Console action needs owner execution.
-2. Carry the Android backup restore and attachment items into the closed
-   test, where a physical device and the owner's account are present.
-3. If the owner later wants a performance number for this release, run the
-   waived benchmark before production access rather than after.
+1. Owner looks at `docs/google-play/assets/feature-graphic-1024x500.png`
+   and says yes or asks for changes.
+2. Worker captures the eight screenshots with the recipe above, builds the
+   contact sheet, and gets the owner's explicit approval; then finishes the
+   asset manifest in `store-listing.md`, the ledger entry, and the
+   `docs: add Play listing assets` commit.
+3. Task 11 as summarised above, starting with the immutability gate.
 
 ## Superseded checkpoint — Task 8 closed with brand verification deferred, Task 9 next, 3 September 2026
 

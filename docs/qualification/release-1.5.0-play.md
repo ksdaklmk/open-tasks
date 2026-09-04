@@ -421,3 +421,24 @@ Step 10 is complete for this candidate under the recorded owner waiver, with
 the Android backup package restore and attachment items carried forward as
 PENDING. No Critical or High defect is open. Task 11 may proceed: re-hash the
 AAB immediately before upload and confirm it still equals the hash above.
+
+## Entry — 2026-09-04T00:01:48Z — worker — Task 10 listing assets paused at the owner's request
+
+Candidate unchanged: build commit `4a47962f961e21869df76cf6545a0530cd5856d5`,
+AAB `019db0881f5770a35d4d1ab2c3a14574fbcda1994d15ba9a0657cb1e249cb885`.
+
+Two of the ten assets exist in the working tree, deliberately **uncommitted**
+because the plan requires the owner's visual approval of a contact sheet before
+any asset is committed or uploaded:
+
+| Asset | Dimensions | Alpha | Bytes | SHA-256 | Source |
+|---|---:|---|---:|---|---|
+| `icon-512.png` | 512 × 512 | yes | 9,666 | `d760aeda4aa7dc9a216040bed13b268838d925928c56efe8923d1d86f5aeb5f0` | Byte-exact copy of the owner-approved `ic_launcher-playstore-512.png` from the Ember deliverables; not redrawn or masked. |
+| `feature-graphic-1024x500.png` | 1024 × 500 | no | 13,137 | `bb49e935195fd596e37258570266e1e5451ee0d3af753d1567feab4ec127e0e5` | Composed by the worker: full-bleed `#C64E2B`, the approved white-card/charcoal glyph drawn from the launcher foreground vector's exact path geometry, and the words "Open Tasks" in Helvetica Neue Bold; content spans x 139–885 of 1024, inside the safe area; no device frame, provider mark, badge, price, or claim. Awaiting owner approval. |
+
+The eight screenshots are not captured. Work performed towards them on the
+disposable `Pixel6_Scratch` AVD (read-only overlay, since discarded): a
+`wm size 1080x1920` override produces exact 1080 × 1920 `screencap` output at
+the AVD's 420 dpi, and `play-universal.apk` with four synthetic projects and
+one partially seeded task rendered correctly at that viewport. No screenshot
+was taken, so no listing image exists yet. No Play Console action occurred.
