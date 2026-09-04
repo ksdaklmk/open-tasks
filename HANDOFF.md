@@ -38,18 +38,16 @@ candidate is being rebuilt. Nothing was uploaded and version code 7 is
 unconsumed, so the rebuild stays at 1.5.0/7; the old AAB `019db088…cb885` is
 superseded and must not be uploaded.
 
-### Defects fixed on 3 September (unchanged since)
-
 Device proof on the candidate: project "Design review" with two tasks, one
 completed, showed "1 open • 1 complete • 0 blocked" on the workbench and
 "0/2" on the Projects list, while Home showed "0/0".
 
-Cheapest fix: enrich `home.projects` where the snapshot is assembled in
-`RoomVaultRepository` and `InMemoryVaultRepository`, which fixes it once and
-would let `ProjectsScreen` drop its local recompute. `HomeSnapshot`
+The fix taken is the one recorded above: enrich the snapshot in both
+repositories, which fixed it once for every consumer. `HomeSnapshot`
 (`Snapshots.kt:16`) carries `projects` but no task list, so fixing it inside
-`HomeScreen` alone needs the counts passed in. Leave the stored columns
-alone; the backup format carries them.
+`HomeScreen` alone would have needed the counts passed in. Still open as
+cleanup: `ProjectsScreen.kt:202-209` can now drop its local recompute, which
+is verified only by instrumented feature tests.
 
 ### Task 10 state
 
