@@ -46,6 +46,7 @@ import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.MAX_MY_DAY_ENTRIES
 import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
+import app.opentasks.core.domain.ProgressRules
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.StatusTransitionTrigger
 import app.opentasks.core.domain.evaluateAutomationRules
@@ -4804,7 +4805,7 @@ class RoomVaultRepository(
                 blockedBy = dependencyIds.filterTo(linkedSetOf()) { it in blockingTaskIds },
             )
         }
-        val projects = base.projects.map(ProjectEntity::toModel)
+        val projects = ProgressRules.withTaskCounts(base.projects.map(ProjectEntity::toModel), tasks)
         val projectNames = projects.associateBy(Project::id)
         val currentTime = now()
         val timeEntries = relations.timeEntries.map(TimeEntryEntity::toModel)

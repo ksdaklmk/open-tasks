@@ -54,6 +54,24 @@ safe pause here and will resume later.
   accept the emulator upgrade proof plus identical-signer evidence and do
   only a fresh Play install.
 
+### Product change after the qualified build, 4 September 2026
+
+Project progress showed `0/0` with an empty bar on Home and Projects: the
+`completedTasks`/`totalTasks` columns are written once at creation and no
+command maintains them. Both repositories now restate the counts in the read
+projection through `ProgressRules.withTaskCounts`, leaving the stored columns
+untouched so the import-undo guard, undo payloads, and backup records keep
+reading what Room's DAO returns. Covered by `InMemoryProjectProgressTest` and
+`RoomProjectProgressInstrumentedTest` (three tests green on `Pixel6_Scratch`),
+with the full `testDebugUnitTest lintDebug :app:assembleDebug` gate green.
+
+The work sits on the `claude/laughing-robinson-3192fe` worktree branch and is
+**not on `main`**. Landing it moves `main` past the qualified build commit
+`4a47962`. The Task 9 PASS binds to the AAB `019db088…cb885`, not to a
+branch, so that artifact stays valid and uploadable as it is; shipping this
+fix instead needs a new candidate, a fresh version code, and a new ledger
+entry for the rebuilt artifact. Owner's call which of the two goes to Play.
+
 ### Defects fixed on 3 September (unchanged since)
 
 `301df82` bundle ABI-split fix; `b9c53bd` the colour-constant

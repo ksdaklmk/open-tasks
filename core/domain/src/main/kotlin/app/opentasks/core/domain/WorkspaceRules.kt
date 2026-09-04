@@ -29,6 +29,24 @@ object ProgressRules {
 
     fun forProject(project: Project, tasks: Collection<Task>): ProgressSummary =
         forTasks(tasks.filter { it.projectId == project.id })
+
+    /**
+     * Restates every project's [Project.completedTasks] and [Project.totalTasks]
+     * from [tasks]. The stored columns are legacy: they are written once at
+     * creation, only a backup import ever sets them, and no command maintains
+     * them. Both repositories call this so the workspace snapshot is the single
+     * authority for project progress.
+     */
+    fun withTaskCounts(projects: List<Project>, tasks: Collection<Task>): List<Project> {
+        val byProject = tasks.filter { it.deletedAt == null }.groupBy(Task::projectId)
+        return projects.map { project ->
+            val projectTasks = byProject[project.id].orEmpty()
+            project.copy(
+                completedTasks = projectTasks.count(Task::isCompleted),
+                totalTasks = projectTasks.size,
+            )
+        }
+    }
 }
 
 object TrashPolicy {

@@ -92,6 +92,13 @@ race KSP while release Hilt sources are generated.
   Tasks, workbench, and board ordering; `searchWorkspace` is the shared filter
   and ranking authority for both repositories. Do not recreate either rule in
   `app` or a feature. Schedule and Home retain their separate existing order.
+- `ProgressRules.withTaskCounts` is the authority for project progress. The
+  `completedTasks`/`totalTasks` columns are legacy: written once at creation,
+  set only by a backup import, and maintained by no command. Both repositories
+  restate them in the read projection alone — Room in `buildSnapshot`, the
+  in-memory twin in its published snapshot — never in the store, where the
+  conflict guards, undo payloads, and backup records must keep reading the
+  stored columns. Do not recreate the rule in `app` or a feature.
 - Stage 8 Month and Timeline are pure projections and never write.
   `computeScheduleMonthProjection` is Monday-first over a fixed 42 cells,
   with up to six density dots, a `6+` overflow label, and exact
