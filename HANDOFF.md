@@ -14,13 +14,31 @@ stored columns on `ProjectEntity`, written `= 0` when a project is created
 in both repositories and never updated by any command, so Home shows
 `0/0` and an empty progress bar for every project a user creates.
 
-**Scope is Home only.** `ProjectsScreen.kt:202-209` already recomputes both
+**Scope was Home only.** `ProjectsScreen.kt:202-209` already recomputed both
 counts from the task list before rendering, so the Projects list and the
-project workbench are correct. An earlier note in this session claimed both
-surfaces were wrong; that was taken before any tasks existed, where `0/0`
-was the right answer, and it is superseded. A background task was spawned
-with that overbroad description and the owner started it, so whoever picks
-it up should narrow it to Home and must not "fix" `ProjectsScreen`.
+project workbench were always correct. An earlier note in this session
+claimed both surfaces were wrong; that reading was taken before any tasks
+existed, where `0/0` was the right answer, and it is superseded.
+
+### Fixed and landed on `main`, 4 September 2026
+
+Both repositories now restate the counts in the **read projection** through
+the shared `ProgressRules.withTaskCounts` in `core:domain`: Room in
+`buildSnapshot`, whose counted list also feeds `HomeSnapshot.projects`, and
+the in-memory twin through a `publishedWorkspace` flow kept separate from its
+store. The stored columns are deliberately left untouched and documented as
+legacy, because the import-undo guard, `RestoreProject` undo payloads, and
+backup records all compare project records by value against what Room's DAO
+returns; deriving into the store diverged the twins and broke import undo.
+Covered by `InMemoryProjectProgressTest` and
+`RoomProjectProgressInstrumentedTest`.
+
+Landing this moved `main` past the qualified build commit `4a47962`, so the
+candidate is being rebuilt. Nothing was uploaded and version code 7 is
+unconsumed, so the rebuild stays at 1.5.0/7; the old AAB `019db088…cb885` is
+superseded and must not be uploaded.
+
+### Defects fixed on 3 September (unchanged since)
 
 Device proof on the candidate: project "Design review" with two tasks, one
 completed, showed "1 open • 1 complete • 0 blocked" on the workbench and

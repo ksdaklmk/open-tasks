@@ -1416,7 +1416,10 @@ class InMemoryVaultRepositoryTest {
 
     @Test
     fun projectEditValidatesPersistsAndUndoRestoresEveryField() = runBlocking {
-        val original = OpenTasksFixtures.taxProject
+        // Read the project from the snapshot: its task counts are derived there,
+        // so the fixture constant's decorative counts do not match.
+        val original = repository.observeWorkspace().value.projects
+            .first { it.id == OpenTasksFixtures.taxProject.id }
         val invalid = repository.execute(
             DomainCommand.UpdateProject(
                 projectId = original.id,

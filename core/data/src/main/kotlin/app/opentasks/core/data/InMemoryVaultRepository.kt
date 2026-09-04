@@ -15,6 +15,7 @@ import app.opentasks.core.domain.DependencyRules
 import app.opentasks.core.domain.DomainCommand
 import app.opentasks.core.domain.MAX_MY_DAY_ENTRIES
 import app.opentasks.core.domain.MAX_MY_DAY_RANK_LENGTH
+import app.opentasks.core.domain.ProgressRules
 import app.opentasks.core.domain.RejectionReason
 import app.opentasks.core.domain.StatusTransitionTrigger
 import app.opentasks.core.domain.evaluateAutomationRules
@@ -134,17 +135,27 @@ class InMemoryVaultRepository internal constructor(
             .withReconciledTimeState(now(), includeLegacyActive = true),
     )
 
-    override fun observeHome(): Flow<HomeSnapshot> =
-        mutableWorkspace.map { it.home }.distinctUntilChanged()
+    /**
+     * The read projection handed to observers, mirroring
+     * `RoomVaultRepository.buildSnapshot`: it restates project task counts,
+     * which no command maintains. [mutableWorkspace] stays the store, so
+     * conflict guards, undo payloads, and backup records keep seeing the
+     * stored columns exactly as Room's DAO reads them.
+     */
+    private val publishedWorkspace =
+        MutableStateFlow(mutableWorkspace.value.withProjectTaskCounts())
 
-    override fun observeWorkspace(): StateFlow<WorkspaceSnapshot> = mutableWorkspace
+    override fun observeHome(): Flow<HomeSnapshot> =
+        publishedWorkspace.map { it.home }.distinctUntilChanged()
+
+    override fun observeWorkspace(): StateFlow<WorkspaceSnapshot> = publishedWorkspace
 
     override fun observeTask(id: TaskId): Flow<Task?> =
-        mutableWorkspace
+        publishedWorkspace
             .map { snapshot -> snapshot.tasks.firstOrNull { it.id == id } }
             .distinctUntilChanged()
 
-    override suspend fun currentWorkspace(): WorkspaceSnapshot = mutableWorkspace.value
+    override suspend fun currentWorkspace(): WorkspaceSnapshot = publishedWorkspace.value
 
     override suspend fun execute(command: DomainCommand): CommandResult =
         writeMutex.withLock { executeLocked(command) }
@@ -188,6 +199,8 @@ class InMemoryVaultRepository internal constructor(
             tombstones = beforeTombstones
             taskTags = beforeTaskTags
             throw failure
+        } finally {
+            publishedWorkspace.value = mutableWorkspace.value.withProjectTaskCounts()
         }
     }
 
@@ -4491,6 +4504,15 @@ class InMemoryVaultRepository internal constructor(
         const val MAX_AUTOMATION_RULES = 20
         val CONTENT_HASH_REGEX = Regex("[0-9a-f]{64}")
     }
+}
+
+private fun WorkspaceSnapshot.withProjectTaskCounts(): WorkspaceSnapshot {
+    val counted = ProgressRules.withTaskCounts(projects, tasks)
+    val countedById = counted.associateBy(Project::id)
+    return copy(
+        projects = counted,
+        home = home.copy(projects = home.projects.map { countedById[it.id] ?: it }),
+    )
 }
 
 private fun WorkspaceSnapshot.withResolvedDependencyState(
