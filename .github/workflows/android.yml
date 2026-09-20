@@ -21,7 +21,7 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: gradle
-      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: List available Android 36/37 packages
         run: sdkmanager --list --channel=3 | grep -E "platforms;android-3[67]|system-images;android-37" || true
       - name: Install Android 37 SDK
@@ -121,7 +121,7 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: gradle
-      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Install Android 37 SDK
         run: sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
       - name: Enable KVM access
@@ -193,7 +193,7 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: gradle
-      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: List available Android 36/37 packages
         run: sdkmanager --list --channel=3 | grep -E "platforms;android-3[67]|system-images;android-37" || true
       - name: Install Android 37 SDK
